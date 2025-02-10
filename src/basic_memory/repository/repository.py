@@ -1,6 +1,5 @@
 """Base repository implementation."""
 
-from datetime import datetime
 from typing import Type, Optional, Any, Sequence, TypeVar, List
 
 from loguru import logger
@@ -149,35 +148,6 @@ class Repository[T: Base]:
             logger.debug(f"No {self.Model.__name__} found")
         return entity
 
-    async def find_modified_since(self, since: datetime) -> Sequence[T]:
-        """Find all records modified since the given timestamp.
-
-        This method assumes the model has an updated_at column. Override
-        in subclasses if a different column should be used.
-
-        Args:
-            since: Datetime to search from
-
-        Returns:
-            Sequence of records modified since the timestamp
-        """
-        logger.debug(f"Finding {self.Model.__name__} modified since: {since}")
-
-        if not hasattr(self.Model, "updated_at"):
-            raise AttributeError(f"{self.Model.__name__} does not have updated_at column")
-
-        query = (
-            select(self.Model)
-            .filter(self.Model.updated_at >= since)
-            .options(*self.get_load_options())
-        )
-
-        async with db.scoped_session(self.session_maker) as session:
-            result = await session.execute(query)
-            items = result.scalars().all()
-            logger.debug(f"Found {len(items)} modified {self.Model.__name__} records")
-            return items
-
     async def create(self, data: dict) -> T:
         """Create a new record from a model instance."""
         logger.debug(f"Creating {self.Model.__name__} from entity_data: {data}")
@@ -223,11 +193,11 @@ class Repository[T: Base]:
                     for key, value in entity_data.items():
                         if key in self.valid_columns:
                             setattr(entity, key, value)
-                            
+
                 elif isinstance(entity_data, self.Model):
                     for column in self.Model.__table__.columns.keys():
                         setattr(entity, column, getattr(entity_data, column))
-                        
+
                 await session.flush()  # Make sure changes are flushed
                 await session.refresh(entity)  # Refresh
 

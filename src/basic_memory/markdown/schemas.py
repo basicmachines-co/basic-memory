@@ -38,23 +38,23 @@ class Relation(BaseModel):
 class EntityFrontmatter(BaseModel):
     """Required frontmatter fields for an entity."""
 
-    metadata: Optional[dict] = None
+    metadata: dict = {}
 
     @property
     def tags(self) -> List[str]:
-        return self.metadata.get("tags") if self.metadata else []
+        return self.metadata.get("tags") if self.metadata else [] # pyright: ignore
 
     @property
     def title(self) -> str:
-        return self.metadata.get("title") if self.metadata else None
+        return self.metadata.get("title") if self.metadata else None # pyright: ignore
 
     @property
     def type(self) -> str:
-        return self.metadata.get("type", "note") if self.metadata else "note"
+        return self.metadata.get("type", "note") if self.metadata else "note" # pyright: ignore
 
     @property
     def permalink(self) -> str:
-        return self.metadata.get("permalink") if self.metadata else None
+        return self.metadata.get("permalink") if self.metadata else None # pyright: ignore
 
 
 

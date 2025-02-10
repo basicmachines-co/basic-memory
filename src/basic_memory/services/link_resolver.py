@@ -5,6 +5,7 @@ from typing import Optional, Tuple, List
 from loguru import logger
 
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.services.search_service import SearchService
 from basic_memory.models import Entity
 from basic_memory.schemas.search import SearchQuery, SearchResult, SearchItemType
@@ -85,7 +86,7 @@ class LinkResolver:
 
         return text, alias
 
-    def _select_best_match(self, search_text: str, results: List[SearchResult]) -> Entity:
+    def _select_best_match(self, search_text: str, results: List[SearchIndexRow]) -> Entity:
         """Select best match from search results.
 
         Uses multiple criteria:
@@ -104,7 +105,8 @@ class LinkResolver:
         for result in results:
             # Start with base score (lower is better)
             score = result.score
-
+            assert score is not None
+            
             # Parse path components
             path_parts = result.permalink.lower().split("/")
             last_part = path_parts[-1] if path_parts else ""

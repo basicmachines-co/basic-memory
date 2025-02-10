@@ -64,6 +64,8 @@ def test_observation_result():
     """Test observation result fields."""
     result = SearchResult(
         id=1,
+        permalink="specs/search",
+        file_path="specs/search.md",
         type=SearchItemType.OBSERVATION,
         score=0.5,
         metadata={},
@@ -78,6 +80,8 @@ def test_relation_result():
     """Test relation result fields."""
     result = SearchResult(
         id=1,
+        permalink="specs/search",
+        file_path="specs/search.md",
         type=SearchItemType.RELATION,
         score=0.5,
         metadata={},
@@ -95,12 +99,16 @@ def test_search_response():
     results = [
         SearchResult(
             id=1,
+            permalink="specs/search",
+            file_path="specs/search.md",
             type=SearchItemType.ENTITY,
             score=0.8,
             metadata={}
         ),
         SearchResult(
             id=2,
+            permalink="specs/search",
+            file_path="specs/search.md",
             type=SearchItemType.ENTITY,
             score=0.6,
             metadata={}

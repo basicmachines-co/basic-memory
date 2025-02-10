@@ -103,33 +103,7 @@ class EntityRepository(Repository[Entity]):
         result = await self.execute_query(query, use_query_options=False)
         return list(result.scalars().all())
 
-    async def search(self, query_str: str) -> List[Entity]:
-        """Search for entities.
-
-        Searches across:
-        - Entity names
-        - Entity types
-        - Entity descriptions
-        - Associated Observations content
-        
-        Args:
-            query_str: Search term to match against entity fields
-        """
-        search_term = f"%{query_str}%"
-        query = (
-            self.select()
-            .where(
-                or_(
-                    Entity.title.ilike(search_term),
-                    Entity.entity_type.ilike(search_term),
-                    Entity.summary.ilike(search_term),
-                    Entity.observations.any(Observation.content.ilike(search_term)),
-                )
-            )
-            .options(*self.get_load_options())
-        )
-        result = await self.execute_query(query)
-        return list(result.scalars().all())
+    
 
     async def delete_entities_by_doc_id(self, doc_id: int) -> bool:
         """Delete all entities associated with a document."""

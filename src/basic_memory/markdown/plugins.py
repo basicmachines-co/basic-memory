@@ -84,7 +84,7 @@ def is_explicit_relation(token: Token) -> bool:
     return '[[' in content and ']]' in content
 
 
-def parse_relation(token: Token) -> Dict[str, Any]:
+def parse_relation(token: Token) -> Dict[str, Any] | None:
     """Extract relation parts from token."""
     # Remove bullet point if present
     content = token.content.strip()

@@ -21,6 +21,8 @@ class SearchIndexRow:
 
     id: int
     type: str
+    permalink: str
+    file_path: str 
     metadata: Optional[dict] = None
 
     # date values
@@ -30,13 +32,9 @@ class SearchIndexRow:
     # assigned in result
     score: Optional[float] = None
 
-    # Common fields
-    permalink: Optional[str] = None
-    file_path: Optional[str] = None
-
     # Type-specific fields
-    title: Optional[int] = None  # entity
-    content: Optional[int] = None  # entity, observation
+    title: Optional[str] = None  # entity
+    content: Optional[str] = None  # entity, observation
     entity_id: Optional[int] = None  # observations
     category: Optional[str] = None  # observations
     from_id: Optional[int] = None  # relations
@@ -96,9 +94,9 @@ class SearchRepository:
         permalink: Optional[str] = None,
         permalink_match: Optional[str] = None,
         title: Optional[str] = None,
-        types: List[SearchItemType] = None,
+        types: Optional[List[SearchItemType]] = None,
         after_date: Optional[datetime] = None,
-        entity_types: List[str] = None,
+        entity_types: Optional[List[str]] = None,
         limit: int = 10,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content with fuzzy matching."""

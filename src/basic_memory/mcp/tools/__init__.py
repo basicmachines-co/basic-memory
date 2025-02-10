@@ -9,6 +9,7 @@ all tools with the MCP server.
 from basic_memory.mcp.tools.memory import build_context, recent_activity
 #from basic_memory.mcp.tools.ai_edit import ai_edit
 from basic_memory.mcp.tools.notes import read_note, write_note
+from basic_memory.mcp.tools.search import search
 
 from basic_memory.mcp.tools.knowledge import (
     delete_entities,

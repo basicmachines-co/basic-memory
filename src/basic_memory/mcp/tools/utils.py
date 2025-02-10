@@ -45,7 +45,7 @@ async def call_get(
         return response
     except HTTPStatusError as e:
         logger.error(f"Error calling GET {url}: {e}")
-        raise ToolError(f"Error calling tool: {e}. Response: {response.text}") from e
+        raise ToolError(f"Error calling tool: {e}.") from e
 
 
 async def call_put(

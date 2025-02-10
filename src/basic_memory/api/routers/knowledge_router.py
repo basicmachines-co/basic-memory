@@ -108,7 +108,7 @@ async def get_entities(
     """Open specific entities"""
     logger.info(f"request: get_entities with permalinks={permalink}")
 
-    entities = await entity_service.get_entities_by_permalinks(permalink)
+    entities = await entity_service.get_entities_by_permalinks(permalink) if permalink else []
     result = EntityListResponse(
         entities=[EntityResponse.model_validate(entity) for entity in entities]
     )

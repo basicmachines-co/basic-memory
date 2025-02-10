@@ -77,68 +77,69 @@ class SyncService:
                     entity.id, {"file_path": new_path, "checksum": changes.checksums[new_path]}
                 )
                 # update search index
-                await self.search_service.index_entity(updated)
+                if updated:
+                    await self.search_service.index_entity(updated)
 
         # Handle deletions next
         # remove rows from db for files no longer present
-        for file_path in changes.deleted:
-            await self.handle_entity_deletion(file_path)
+        for path in changes.deleted:
+            await self.handle_entity_deletion(path)
 
         # Parse files that need updating
         parsed_entities: Dict[str, EntityMarkdown] = {}
 
-        for file_path in [*changes.new, *changes.modified]:
-            entity_markdown = await self.entity_parser.parse_file(directory / file_path)
-            parsed_entities[file_path] = entity_markdown
+        for path in [*changes.new, *changes.modified]:
+            entity_markdown = await self.entity_parser.parse_file(directory / path)
+            parsed_entities[path] = entity_markdown
 
         # First pass: Create/update entities
         # entities will have a null checksum to indicate they are not complete
-        for file_path, entity_markdown in parsed_entities.items():
+        for path, entity_markdown in parsed_entities.items():
 
             # Get unique permalink and update markdown if needed
             permalink = await self.entity_service.resolve_permalink(
-                file_path,
+                Path(path),
                 markdown=entity_markdown
             )
 
             if permalink != entity_markdown.frontmatter.permalink:
                 # Add/update permalink in frontmatter
-                logger.info(f"Adding permalink '{permalink}' to file: {file_path}")
+                logger.info(f"Adding permalink '{permalink}' to file: {path}")
 
                 # update markdown
                 entity_markdown.frontmatter.metadata["permalink"] = permalink
                 
                 # update file frontmatter
                 updated_checksum = await file_utils.update_frontmatter(
-                    directory / file_path,
+                    directory / path,
                     {"permalink": permalink}
                 )
 
                 # Update checksum in changes report since file was modified
-                changes.checksums[file_path] = updated_checksum
+                changes.checksums[path] = updated_checksum
             
             # if the file is new, create an entity
-            if file_path in changes.new:
+            if path in changes.new:
                 # Create entity with final permalink
-                logger.debug(f"Creating new entity_markdown: {file_path}")
+                logger.debug(f"Creating new entity_markdown: {path}")
                 await self.entity_service.create_entity_from_markdown(
-                    file_path, entity_markdown
+                    Path(path), entity_markdown
                 )
             # otherwise we need to update the entity and observations
             else:
-                logger.debug(f"Updating entity_markdown: {file_path}")
+                logger.debug(f"Updating entity_markdown: {path}")
                 await self.entity_service.update_entity_and_observations(
-                    file_path, entity_markdown
+                    Path(path), entity_markdown
                 )
 
         # Second pass
-        for file_path, entity_markdown in parsed_entities.items():
-            logger.debug(f"Updating relations for: {file_path}")
+        for path, entity_markdown in parsed_entities.items():
+            logger.debug(f"Updating relations for: {path}")
 
             # Process relations
-            checksum = changes.checksums[file_path]
+            checksum = changes.checksums[path]
             entity = await self.entity_service.update_entity_relations(
-                file_path, entity_markdown
+                Path(path), entity_markdown
             )
 
             # add to search index

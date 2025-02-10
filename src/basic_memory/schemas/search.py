@@ -71,12 +71,11 @@ class SearchResult(BaseModel):
 
     id: int
     type: SearchItemType
-    score: Optional[float] = None
+    score: float 
+    permalink: str
+    file_path: str
+    
     metadata: Optional[dict] = None
-
-    # Common fields
-    permalink: Optional[str] = None
-    file_path: Optional[str] = None
 
     # Type-specific fields
     entity_id: Optional[int] = None  # For observations

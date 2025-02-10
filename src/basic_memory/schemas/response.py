@@ -67,7 +67,7 @@ class RelationResponse(Relation, SQLAlchemyModel):
             "from_id",
         )
     )
-    to_id: Optional[PathId] = Field(
+    to_id: Optional[PathId] = Field( # pyright: ignore
         # use the permalink from the associated Entity
         # or the to_id value
         validation_alias=AliasChoices(

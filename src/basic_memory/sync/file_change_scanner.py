@@ -151,7 +151,7 @@ class FileChangeScanner:
         """
         return {
             r.file_path: FileState(
-                file_path=r.file_path, permalink=r.permalink, checksum=r.checksum
+                file_path=r.file_path, permalink=r.permalink, checksum=r.checksum or ""
             )
             for r in db_records
         }

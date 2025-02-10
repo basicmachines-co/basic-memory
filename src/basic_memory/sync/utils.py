@@ -36,7 +36,7 @@ class FileChange:
         """
         file_path = file_service.path(path)
         content, checksum = await file_service.read_file(file_path) if change_type != Change.deleted else (None, None)
-        return cls(path=file_path, change_type=change_type, checksum=checksum)
+        return cls(path=path, change_type=change_type, checksum=checksum)
 
 
 @dataclass

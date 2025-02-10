@@ -1,5 +1,6 @@
 """Service for search operations."""
 
+from datetime import datetime
 from typing import List, Optional, Set
 
 from fastapi import BackgroundTasks
@@ -8,9 +9,8 @@ from loguru import logger
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
-from basic_memory.schemas.search import SearchQuery, SearchResult, SearchItemType
+from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services import FileService
-from basic_memory.services.exceptions import FileOperationError
 
 
 class SearchService:
@@ -51,9 +51,7 @@ class SearchService:
 
         logger.info("Reindex complete")
 
-    async def search(
-        self, query: SearchQuery, context: Optional[List[str]] = None
-    ) -> List[SearchResult]:
+    async def search(self, query: SearchQuery) -> List[SearchIndexRow]:
         """Search across all indexed content.
 
         Supports three modes:
@@ -67,6 +65,12 @@ class SearchService:
 
         logger.debug(f"Searching with query: {query}")
 
+        after_date = (
+            query.after_date
+            if isinstance(query.after_date, datetime)
+            else datetime.fromisoformat(query.after_date)
+        ) if query.after_date else None
+            
         # permalink search
         results = await self.repository.search(
             search_text=query.text,
@@ -75,12 +79,13 @@ class SearchService:
             title=query.title,
             types=query.types,
             entity_types=query.entity_types,
-            after_date=query.after_date,
+            after_date=after_date,
         )
 
         return results
 
-    def _generate_variants(self, text: str) -> Set[str]:
+    @staticmethod
+    def _generate_variants(text: str) -> Set[str]:
         """Generate text variants for better fuzzy matching.
 
         Creates variations of the text to improve match chances:
@@ -162,8 +167,8 @@ class SearchService:
                 metadata={
                     "entity_type": entity.entity_type,
                 },
-                created_at=entity.created_at.isoformat(),
-                updated_at=entity.updated_at.isoformat(),
+                created_at=entity.created_at,
+                updated_at=entity.updated_at,
             )
         )
 
@@ -183,8 +188,8 @@ class SearchService:
                     metadata={
                         "tags": obs.tags,
                     },
-                    created_at=entity.created_at.isoformat(),
-                    updated_at=entity.updated_at.isoformat(),
+                    created_at=entity.created_at,
+                    updated_at=entity.updated_at,
                 )
             )
 
@@ -201,15 +206,14 @@ class SearchService:
                 SearchIndexRow(
                     id=rel.id,
                     title=relation_title,
-                    content=rel.context or "",
                     permalink=rel.permalink,
                     file_path=entity.file_path,
                     type=SearchItemType.RELATION.value,
                     from_id=rel.from_id,
                     to_id=rel.to_id,
                     relation_type=rel.relation_type,
-                    created_at=entity.created_at.isoformat(),
-                    updated_at=entity.updated_at.isoformat(),
+                    created_at=entity.created_at,
+                    updated_at=entity.updated_at,
                 )
             )
 

@@ -84,7 +84,7 @@ async def build_context(
     """,
 )
 async def recent_activity(
-    type: List[Literal["entity", "observation", "relation"]] = None,
+    type: List[Literal["entity", "observation", "relation"]] = [],
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     max_results: int = 10,

@@ -1,7 +1,7 @@
 """Schemas for memory context."""
 
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Annotated
+from typing import Dict, List, Any, Optional, Annotated, Sequence
 
 import pydantic
 from annotated_types import MinLen, MaxLen
@@ -38,7 +38,7 @@ MemoryUrl = Annotated[
 
 memory_url = TypeAdapter(MemoryUrl) 
 
-def memory_url_path(url: memory_url) -> str:
+def memory_url_path(url: memory_url) -> str: # pyright: ignore
     """
     Returns the uri for a url value by removing the prefix "memory://" from a given MemoryUrl.
 
@@ -101,12 +101,12 @@ class GraphContext(BaseModel):
     """Complete context response."""
 
     # Direct matches
-    primary_results: List[EntitySummary | RelationSummary | ObservationSummary] = Field(
+    primary_results: Sequence[EntitySummary | RelationSummary | ObservationSummary] = Field(
         description="results directly matching URI"
     )
 
     # Related entities
-    related_results: List[EntitySummary | RelationSummary | ObservationSummary] = Field(
+    related_results: Sequence[EntitySummary | RelationSummary | ObservationSummary] = Field(
         description="related results"
     )
 
