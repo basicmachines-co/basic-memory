@@ -84,7 +84,7 @@ class WatchService:
 
     def generate_table(self) -> Table:
         """Generate status display table"""
-        table = Table(title="Basic Memory Sync Status")
+        table = Table()
 
         # Add status row
         table.add_column("Status", style="cyan")

@@ -1,10 +1,15 @@
 """Utility functions for basic-memory."""
 import os
 import re
+import sys
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
+from loguru import logger
 from unidecode import unidecode
+
+from basic_memory.config import config
 
 
 def sanitize_name(name: str) -> str:
@@ -76,3 +81,35 @@ def generate_permalink(file_path: Path | str) -> str:
     clean_segments = [s.strip('-') for s in segments]
 
     return '/'.join(clean_segments)
+
+
+def setup_logging(home_dir: str = config.home, log_file: Optional[str] = None):
+    """
+    Configure logging for the application.    
+    """
+
+    # Remove default handler and any existing handlers
+    logger.remove()
+
+    # Add file handler
+    if log_file:
+        log = f"{home_dir}/{log_file}"
+        logger.add(
+            log,
+            level=config.log_level,  
+            rotation="100 MB",
+            retention="10 days",
+            backtrace=True,
+            diagnose=True,
+            enqueue=True,
+            colorize=False,
+        )
+
+    # Add stderr handler
+    logger.add(
+        sys.stderr,
+        level=config.log_level,
+        backtrace=True,
+        diagnose=True,
+        colorize=True
+    )
