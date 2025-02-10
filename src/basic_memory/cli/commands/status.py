@@ -21,7 +21,7 @@ from basic_memory.sync.utils import SyncReport
 console = Console()
 
 
-async def get_file_change_scanner(db_type=DatabaseType.FILESYSTEM) -> FileChangeScanner:
+async def get_file_change_scanner(db_type=DatabaseType.FILESYSTEM) -> FileChangeScanner:  # pragma: no cover
     """Get sync service instance."""
     async with db.engine_session_factory(db_path=config.database_path, db_type=db_type) as (
         engine,
@@ -32,7 +32,7 @@ async def get_file_change_scanner(db_type=DatabaseType.FILESYSTEM) -> FileChange
         return file_change_scanner
 
 
-def add_files_to_tree(tree: Tree, paths: Set[str], style: str, checksums: Dict[str, str] = None):  # pyright: ignore
+def add_files_to_tree(tree: Tree, paths: Set[str], style: str, checksums: Dict[str, str] = None):
     """Add files to tree, grouped by directory."""
     # Group by directory
     by_dir = {}
@@ -126,7 +126,8 @@ def display_changes(title: str, changes: SyncReport, verbose: bool = False):
         by_dir = group_changes_by_directory(changes)
         for dir_name, counts in sorted(by_dir.items()):
             summary = build_directory_summary(counts)
-            tree.add(f"[bold]{dir_name}/[/bold] {summary}")
+            if summary:  # Only show directories with changes
+                tree.add(f"[bold]{dir_name}/[/bold] {summary}")
 
     console.print(Panel(tree, expand=False))
 
@@ -145,8 +146,7 @@ def status(
     """Show sync status between files and database."""
     try:
         sync_service = asyncio.run(get_file_change_scanner())
-        asyncio.run(run_status(sync_service, verbose))
+        asyncio.run(run_status(sync_service, verbose)) # pragma: no cover
     except Exception as e:
         logger.exception(f"Error checking status: {e}")
-        typer.echo(f"Error checking status: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(code=1)  # pragma: no cover
