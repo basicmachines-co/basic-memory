@@ -2,7 +2,7 @@
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, call_post
-from basic_memory.schemas.base import PathId
+from basic_memory.schemas.base import Permalink
 from basic_memory.schemas.request import (
     GetEntitiesRequest,
 )
@@ -16,7 +16,7 @@ from basic_memory.mcp.async_client import client
 @mcp.tool(
     description="Get complete information about a specific entity including observations and relations",
 )
-async def get_entity(permalink: PathId) -> EntityResponse:
+async def get_entity(permalink: Permalink) -> EntityResponse:
     """Get a specific entity info by its permalink.
 
     Args:

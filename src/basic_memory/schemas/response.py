@@ -15,7 +15,7 @@ from typing import List, Optional, Dict
 
 from pydantic import BaseModel, ConfigDict, Field, AliasPath, AliasChoices
 
-from basic_memory.schemas.base import Relation, PathId, EntityType, ContentType, Observation
+from basic_memory.schemas.base import Relation, Permalink, EntityType, ContentType, Observation
 
 
 class SQLAlchemyModel(BaseModel):
@@ -59,7 +59,7 @@ class RelationResponse(Relation, SQLAlchemyModel):
     }
     """
 
-    from_id: PathId = Field(
+    from_id: Permalink = Field(
         # use the permalink from the associated Entity
         # or the from_id value
         validation_alias=AliasChoices(
@@ -67,7 +67,7 @@ class RelationResponse(Relation, SQLAlchemyModel):
             "from_id",
         )
     )
-    to_id: Optional[PathId] = Field( # pyright: ignore
+    to_id: Optional[Permalink] = Field( # pyright: ignore
         # use the permalink from the associated Entity
         # or the to_id value
         validation_alias=AliasChoices(
@@ -75,7 +75,7 @@ class RelationResponse(Relation, SQLAlchemyModel):
             "to_id",
         ), default=None
     )
-    to_name: Optional[PathId] = Field(
+    to_name: Optional[Permalink] = Field(
         # use the permalink from the associated Entity
         # or the to_id value
         validation_alias=AliasChoices(
@@ -125,7 +125,7 @@ class EntityResponse(SQLAlchemyModel):
     }
     """
 
-    permalink: PathId
+    permalink: Permalink
     title: str
     file_path: str
     entity_type: EntityType

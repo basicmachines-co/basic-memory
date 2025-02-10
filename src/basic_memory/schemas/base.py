@@ -119,7 +119,7 @@ TimeFrame = Annotated[
     BeforeValidator(validate_timeframe)
 ]
 
-PathId = Annotated[str, BeforeValidator(validate_path_format)]
+Permalink = Annotated[str, BeforeValidator(validate_path_format)]
 """Unique identifier in format '{path}/{normalized_name}'."""
 
 
@@ -169,8 +169,8 @@ class Relation(BaseModel):
     or recipient entity.
     """
 
-    from_id: PathId
-    to_id: PathId
+    from_id: Permalink
+    to_id: Permalink
     relation_type: RelationType
     context: Optional[str] = None
 
@@ -205,7 +205,7 @@ class Entity(BaseModel):
         return f"{self.folder}/{self.title}.md" if self.folder else f"{self.title}.md"
     
     @property
-    def permalink(self) -> PathId:
+    def permalink(self) -> Permalink:
         """Get a url friendly path}."""
         return self._permalink or generate_permalink(self.file_path)
 

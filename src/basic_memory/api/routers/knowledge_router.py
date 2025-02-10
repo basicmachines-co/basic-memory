@@ -17,7 +17,7 @@ from basic_memory.schemas import (
     DeleteEntitiesResponse,
     DeleteEntitiesRequest,
 )
-from basic_memory.schemas.base import PathId, Entity
+from basic_memory.schemas.base import Permalink, Entity
 from basic_memory.services.exceptions import EntityNotFoundError
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -47,7 +47,7 @@ async def create_entity(
 
 @router.put("/entities/{permalink:path}", response_model=EntityResponse)
 async def create_or_update_entity(
-        permalink: PathId,
+        permalink: Permalink,
         data: Entity,
         response: Response,
         background_tasks: BackgroundTasks,

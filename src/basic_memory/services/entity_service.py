@@ -14,6 +14,7 @@ from basic_memory.models import Entity as EntityModel, Observation, Relation
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
+from basic_memory.schemas.base import Permalink
 from basic_memory.services.exceptions import EntityNotFoundError, EntityCreationError
 from basic_memory.services import FileService
 from basic_memory.services import BaseService
@@ -43,7 +44,7 @@ class EntityService(BaseService[EntityModel]):
 
     async def resolve_permalink(
             self,
-            file_path: Path,
+            file_path: Permalink | Path,
             markdown: Optional[EntityMarkdown] = None
     ) -> str:
         """Get or generate unique permalink for an entity.

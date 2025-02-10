@@ -9,7 +9,7 @@ from basic_memory.schemas.base import (
     Observation,
     Entity,
     Relation,
-    PathId,
+    Permalink,
     ObservationCategory,
     EntityType,
 )
@@ -58,7 +58,7 @@ class GetEntitiesRequest(BaseModel):
     discovered through search.
     """
 
-    permalinks: Annotated[List[PathId], MinLen(1)]
+    permalinks: Annotated[List[Permalink], MinLen(1)]
 
 
 class CreateRelationsRequest(BaseModel):
