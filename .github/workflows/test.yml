@@ -37,6 +37,10 @@ jobs:
         run: |
           uv pip install -e .[dev]
 
+      - name: Run type checks
+        run: |
+          uv run make type-check
+
       - name: Run tests
         run: |
           uv pip install pytest pytest-cov
