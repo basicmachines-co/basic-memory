@@ -29,11 +29,11 @@ from basic_memory.services.search_service import SearchService
 ## project
 
 
-def get_project_config() -> ProjectConfig:
+def get_project_config() -> ProjectConfig:  # pragma: no cover
     return config
 
 
-ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]
+ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]  # pragma: no cover
 
 
 ## sqlalchemy
@@ -41,7 +41,7 @@ ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]
 
 async def get_engine_factory(
     project_config: ProjectConfigDep,
-) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
     """Get engine and session maker."""
     return await db.get_or_create_db(project_config.database_path)
 
@@ -127,7 +127,6 @@ async def get_file_service(
 
 
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
-
 
 
 async def get_entity_service(

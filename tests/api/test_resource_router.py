@@ -35,6 +35,7 @@ async def test_get_resource_content(client, test_config, entity_repository):
     assert response.text == content
 
 
+@pytest.mark.asyncio
 async def test_get_resource_by_title(client, test_config, entity_repository):
     """Test getting content by permalink."""
     # Create a test file

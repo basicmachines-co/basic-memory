@@ -9,7 +9,7 @@ from basic_memory.models import Base
 from basic_memory.repository.repository import Repository
 
 
-class TestModel(Base):
+class ModelTest(Base):
     """Test model for repository tests."""
 
     __tablename__ = "test_model"
@@ -28,14 +28,14 @@ class TestModel(Base):
 @pytest.fixture
 def repository(session_maker):
     """Create a test repository."""
-    return Repository(session_maker, TestModel)
+    return Repository(session_maker, ModelTest)
 
 
 @pytest.mark.asyncio
 async def test_add(repository):
     """Test bulk creation of entities."""
     # Create test instances
-    instance = TestModel(id="test_add", name="Test Add")
+    instance = ModelTest(id="test_add", name="Test Add")
     await repository.add(instance)
 
     # Verify we can find in db
@@ -48,7 +48,7 @@ async def test_add(repository):
 async def test_add_all(repository):
     """Test bulk creation of entities."""
     # Create test instances
-    instances = [TestModel(id=f"test_{i}", name=f"Test {i}") for i in range(3)]
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(3)]
     await repository.add_all(instances)
 
     # Verify we can find them in db
@@ -61,7 +61,7 @@ async def test_add_all(repository):
 async def test_bulk_create(repository):
     """Test bulk creation of entities."""
     # Create test instances
-    instances = [TestModel(id=f"test_{i}", name=f"Test {i}") for i in range(3)]
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(3)]
 
     # Bulk create
     await repository.create_all([instance.__dict__ for instance in instances])
@@ -76,7 +76,7 @@ async def test_bulk_create(repository):
 async def test_find_by_ids(repository):
     """Test finding multiple entities by IDs."""
     # Create test data
-    instances = [TestModel(id=f"test_{i}", name=f"Test {i}") for i in range(5)]
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(5)]
     await repository.create_all([instance.__dict__ for instance in instances])
 
     # Test finding subset of entities
@@ -104,7 +104,7 @@ async def test_find_by_ids(repository):
 async def test_delete_by_ids(repository):
     """Test finding multiple entities by IDs."""
     # Create test data
-    instances = [TestModel(id=f"test_{i}", name=f"Test {i}") for i in range(5)]
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(5)]
     await repository.create_all([instance.__dict__ for instance in instances])
 
     # Test delete subset of entities
@@ -127,10 +127,10 @@ async def test_delete_by_ids(repository):
 async def test_update(repository):
     """Test finding entities modified since a timestamp."""
     # Create initial test data
-    instance = TestModel(id="test_add", name="Test Add")
+    instance = ModelTest(id="test_add", name="Test Add")
     await repository.add(instance)
 
-    instance = TestModel(id="test_add", name="Updated")
+    instance = ModelTest(id="test_add", name="Updated")
 
     # Find recently modified
     modified = await repository.update(instance.id, {"name": "Updated"})
@@ -142,7 +142,7 @@ async def test_update(repository):
 async def test_update_model(repository):
     """Test finding entities modified since a timestamp."""
     # Create initial test data
-    instance = TestModel(id="test_add", name="Test Add")
+    instance = ModelTest(id="test_add", name="Test Add")
     await repository.add(instance)
 
     instance.name = "Updated"

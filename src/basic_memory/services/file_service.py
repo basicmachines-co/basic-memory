@@ -46,6 +46,7 @@ class FileService:
         """
         return self.base_path / entity.file_path
 
+    # TODO remove this 
     async def write_entity_file(
         self,
         entity: EntityModel,

@@ -46,7 +46,7 @@ class ProjectConfig(BaseSettings):
 
     @field_validator("home")
     @classmethod
-    def ensure_path_exists(cls, v: Path) -> Path:
+    def ensure_path_exists(cls, v: Path) -> Path: # pragma: no cover
         """Ensure project path exists."""
         if not v.exists():
             v.mkdir(parents=True)

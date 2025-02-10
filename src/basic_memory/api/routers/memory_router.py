@@ -49,7 +49,7 @@ async def to_graph_context(context, entity_repository: EntityRepository):
                 assert item.from_id is not None
                 from_entity = await entity_repository.find_by_id(item.from_id)
                 assert from_entity is not None
-                
+
                 to_entity = await entity_repository.find_by_id(item.to_id) if item.to_id else None
 
                 return RelationSummary(
@@ -58,7 +58,7 @@ async def to_graph_context(context, entity_repository: EntityRepository):
                     from_id=from_entity.permalink,
                     to_id=to_entity.permalink if to_entity else None,
                 )
-            case _:
+            case _:  # pragma: no cover
                 raise ValueError(f"Unexpected type: {item.type}")
 
     primary_results = [await to_summary(r) for r in context["primary_results"]]
