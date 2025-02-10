@@ -16,16 +16,14 @@ from basic_memory.cli.commands.sync import (
     ValidationIssue,
     get_sync_service
 )
+from basic_memory.config import config
+from basic_memory.db import DatabaseType
 from basic_memory.sync.utils import SyncReport
 
 # Set up CLI runner
 runner = CliRunner()
 
 
-@pytest_asyncio.fixture
-async def sync_service(session_maker):
-    """Create sync service instance with test database."""
-    return await get_sync_service()
 
 
 def test_group_issues_by_directory():
@@ -93,15 +91,13 @@ def test_display_detailed_sync_results_with_changes():
 
 
 @pytest.mark.asyncio
-async def test_run_sync_basic(sync_service, tmp_path, monkeypatch):
+async def test_run_sync_basic(sync_service, test_config):
     """Test basic sync operation."""
     # Set up test environment
-    monkeypatch.setenv("HOME", str(tmp_path))
-    knowledge_dir = tmp_path / "knowledge"
-    knowledge_dir.mkdir()
+    config.home = test_config.home
     
     # Create test files
-    test_file = knowledge_dir / "test.md"
+    test_file = test_config.home  / "test.md"
     test_file.write_text("""---
 title: Test
 ---
@@ -113,12 +109,10 @@ Some content""")
 
 
 @pytest.mark.asyncio
-async def test_run_sync_watch_mode(sync_service, tmp_path, monkeypatch):
+async def test_run_sync_watch_mode(sync_service, test_config):
     """Test sync with watch mode."""
     # Set up test environment
-    monkeypatch.setenv("HOME", str(tmp_path))
-    knowledge_dir = tmp_path / "knowledge"
-    knowledge_dir.mkdir()
+    config.home = test_config.home
     
     # Start sync in watch mode but cancel after a short time
     with pytest.raises(asyncio.CancelledError):

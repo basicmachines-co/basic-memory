@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from rich import box
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
@@ -146,11 +145,11 @@ class WatchService:
                     recursive=True,
                 ):
                     # Process changes
-                    await self.handle_changes(self.config.home)
+                    await self.handle_changes(self.config.home)   # pragma: no cover
                     # Update display
-                    live.update(self.generate_table())
+                    live.update(self.generate_table()) # pragma: no cover
 
-            except Exception as e:
+            except Exception as e: # pragma: no cover
                 self.state.record_error(str(e))
                 await self.write_status()
                 raise
