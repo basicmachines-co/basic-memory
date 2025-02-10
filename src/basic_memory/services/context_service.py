@@ -132,7 +132,7 @@ class ContextService:
         # Parameters for bindings
         params = {"max_depth": max_depth, "max_results": max_results}
         if since:
-            params["since_date"] = since.isoformat()
+            params["since_date"] = since.isoformat() # pyright: ignore
 
         # Build date filter
         date_filter = "AND base.created_at >= :since_date" if since else ""

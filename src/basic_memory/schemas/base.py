@@ -209,15 +209,13 @@ class Entity(BaseModel):
         """Get a url friendly path}."""
         return self._permalink or generate_permalink(self.file_path)
 
-    @model_validator(mode="after")
-    @classmethod
-    def infer_content_type(cls, entity: "Entity") -> Dict | None:
-        """Infer content_type from file_path if not provided."""
-        if not entity.content_type:
-            path = Path(entity.file_path)
+    @model_validator(mode='after')
+    def infer_content_type(self) -> 'Entity':  # Should be instance method returning self
+        if not self.content_type:
+            path = Path(self.file_path)
             if not path.exists():
-                return None
-            mime_type, _ = mimetypes.guess_type(path.name)
-            entity.content_type = mime_type or "text/plain"
-
-        return entity
+                self.content_type = "text/plain"
+            else:
+                mime_type, _ = mimetypes.guess_type(path.name)
+                self.content_type = mime_type or "text/plain"
+        return self
