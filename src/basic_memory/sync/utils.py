@@ -1,8 +1,11 @@
 """Types and utilities for file sync."""
 
 from dataclasses import dataclass, field
-from typing import Set, Dict, Optional
+from pathlib import Path
+from typing import Set, Dict, Optional, Tuple, Union
+
 from watchfiles import Change
+
 from basic_memory.services.file_service import FileService
 
 
@@ -49,11 +52,12 @@ class SyncReport:
         checksums: Current checksums for files on disk
     """
     total: int = 0
+    # We keep paths as strings in sets/dicts for easier serialization
     new: Set[str] = field(default_factory=set)
     modified: Set[str] = field(default_factory=set)
     deleted: Set[str] = field(default_factory=set)
     moves: Dict[str, str] = field(default_factory=dict)  # old_path -> new_path  
-    checksums: Dict[str, str] = field(default_factory=dict) # path -> checksum
+    checksums: Dict[str, str] = field(default_factory=dict)  # path -> checksum
 
     @property
     def total_changes(self) -> int:
@@ -61,6 +65,6 @@ class SyncReport:
         return len(self.new) + len(self.modified) + len(self.deleted) + len(self.moves)
 
     @property
-    def syned_files(self) -> int:
+    def synced_files(self) -> int:
         """Total number of files synced."""
         return len(self.new) + len(self.modified) + len(self.moves)

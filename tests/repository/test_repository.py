@@ -1,6 +1,6 @@
 """Test repository implementation."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
@@ -157,7 +157,7 @@ async def test_update_model(repository):
 async def test_find_modified_since(repository):
     """Test finding entities modified since a timestamp."""
     # Create initial test data
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     base_instances = [
         TestModel(
             id=f"test_{i}", 
@@ -189,5 +189,5 @@ async def test_find_modified_since_invalid_model():
     repository = Repository(None, InvalidModel)  # type: ignore
     
     with pytest.raises(AttributeError) as exc:
-        await repository.find_modified_since(datetime.utcnow())
+        await repository.find_modified_since(datetime.now(timezone.utc))
     assert "does not have updated_at column" in str(exc.value)

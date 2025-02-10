@@ -1,7 +1,6 @@
-.PHONY: install test lint db-new db-up db-down db-reset
+.PHONY: install test lint clean format type-check
 
 install:
-	brew install dbmate
 	pip install -e ".[dev]"
 
 test:
@@ -11,18 +10,8 @@ lint:
 	black .
 	ruff check .
 
-db-new:
-	dbmate new $(name)
-
-db-up:
-	dbmate up
-
-db-down:
-	dbmate down
-
-db-reset:
-	dbmate drop
-	dbmate up
+type-check:
+	uv run pyright
 
 clean:
 	find . -type f -name '*.pyc' -delete
@@ -30,9 +19,6 @@ clean:
 
 format:
 	uv run ruff format .
-
-format: format-python
-#format: format-python format-prettier
 
 # run inspector tool
 run-dev:

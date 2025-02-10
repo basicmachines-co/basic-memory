@@ -23,8 +23,7 @@ from basic_memory.utils import generate_permalink
 
 
 class Entity(Base):
-    """
-    Core entity in the knowledge graph.
+    """Core entity in the knowledge graph.
 
     Entities represent semantic nodes maintained by the AI layer. Each entity:
     - Has a unique numeric ID (database-generated)
@@ -79,6 +78,7 @@ class Entity(Base):
 
     @property
     def relations(self):
+        """Get all relations (incoming and outgoing) for this entity."""
         return self.incoming_relations + self.outgoing_relations
 
     @validates("permalink")
@@ -106,6 +106,7 @@ class Entity(Base):
 
 
 class ObservationCategory(str, Enum):
+    """Categories for observations about entities."""
     TECH = "tech"
     DESIGN = "design"
     FEATURE = "feature"
@@ -113,10 +114,22 @@ class ObservationCategory(str, Enum):
     ISSUE = "issue"
     TODO = "todo"
 
+    @classmethod
+    def _missing_(cls, value: object) -> Optional["ObservationCategory"]:
+        """Handle unknown category values by returning None."""
+        if value is None:
+            return None
+        # Try case-insensitive match if string
+        if isinstance(value, str):
+            try:
+                return cls[value.upper()]
+            except KeyError:
+                return None
+        return None
+
 
 class Observation(Base):
-    """
-    An observation about an entity.
+    """An observation about an entity.
 
     Observations are atomic facts or notes about an entity.
     """
@@ -136,7 +149,7 @@ class Observation(Base):
         default=ObservationCategory.NOTE.value,
         server_default=ObservationCategory.NOTE.value,
     )
-    context: Mapped[str] = mapped_column(Text, nullable=True)
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tags: Mapped[Optional[list[str]]] = mapped_column(
         JSON, nullable=True, default=list, server_default="[]"
     )
@@ -146,10 +159,10 @@ class Observation(Base):
 
     @property
     def permalink(self) -> str:
-        """
-        Create synthetic permalink for the observation
-            We can construct these because observations are always
-            defined in and owned by a single entity
+        """Create synthetic permalink for the observation.
+        
+        We can construct these because observations are always defined in 
+        and owned by a single entity.
         """
         return generate_permalink(
             f"{self.entity.permalink}/observations/{self.category}/{self.content}"
@@ -160,9 +173,7 @@ class Observation(Base):
 
 
 class Relation(Base):
-    """
-    A directed relation between two entities.
-    """
+    """A directed relation between two entities."""
 
     __tablename__ = "relation"
     __table_args__ = (
@@ -174,12 +185,12 @@ class Relation(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     from_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
-    to_id: Mapped[int] = mapped_column(
+    to_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True
     )
     to_name: Mapped[str] = mapped_column(String)
     relation_type: Mapped[str] = mapped_column(String)
-    context: Mapped[str] = mapped_column(Text, nullable=True)
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
     from_entity = relationship(
@@ -189,15 +200,17 @@ class Relation(Base):
 
     @property
     def permalink(self) -> str:
-        """Create relation permalink showing the semantic connection:
-        source/relation_type/target
-        e.g., "specs/search/implements/features/search-ui"
+        """Create relation permalink showing the semantic connection.
+        
+        Format: source/relation_type/target
+        Example: "specs/search/implements/features/search-ui"
         """
-
+        if self.to_entity:
+            return generate_permalink(
+                f"{self.from_entity.permalink}/{self.relation_type}/{self.to_entity.permalink}"
+            )
         return generate_permalink(
-            f"{self.from_entity.permalink}/{self.relation_type}/{self.to_entity.permalink}"
-            if self.to_entity
-            else f"{self.from_entity.permalink}/{self.relation_type}/{self.to_name}"
+            f"{self.from_entity.permalink}/{self.relation_type}/{self.to_name}"
         )
 
     def __repr__(self) -> str:

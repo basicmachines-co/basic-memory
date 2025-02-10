@@ -50,8 +50,8 @@ class ContextService:
 
     async def build_context(
         self,
-        memory_url: MemoryUrl = None,
-        types: List[SearchItemType] = None,
+        memory_url: Optional[MemoryUrl] = None,
+        types: Optional[List[SearchItemType]] = None,
         depth: int = 1,
         since: Optional[datetime] = None,
         max_results: int = 10,

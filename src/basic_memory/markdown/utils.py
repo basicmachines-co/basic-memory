@@ -1,5 +1,8 @@
+"""Utilities for converting between markdown and entity models."""
+
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, Union
 
 from frontmatter import Post
 
@@ -11,22 +14,14 @@ from basic_memory.utils import generate_permalink
 
 def entity_model_to_markdown(entity: Entity, content: Optional[str] = None) -> EntityMarkdown:
     """
-    Converts an entity model to its Markdown representation, including metadata,
-    observations, relations, and content. Ensures that observations and relations
-    from the provided content are synchronized with the entity model. Removes
-    duplicate or unmatched observations and relations from the content to maintain
-    consistency.
+    Converts an entity model to its Markdown representation.
 
-    :param entity: An instance of the Entity class containing metadata, observations,
-        relations, and other properties of the entity.
-    :type entity: Entity
-    :param content: Optional raw Markdown-formatted content to be parsed for semantic
-        information like observations or relations.
-    :type content: Optional[str]
-    :return: An instance of the EntityMarkdown class containing the entity's
-        frontmatter, observations, relations, and sanitized content formatted
-        in Markdown.
-    :rtype: EntityMarkdown
+    Args:
+        entity: Entity model to convert
+        content: Optional raw Markdown content to parse for semantic info
+
+    Returns:
+        EntityMarkdown representation of the entity
     """
     metadata = entity.entity_metadata or {}
     metadata["type"] = entity.entity_type or "note"
@@ -57,88 +52,120 @@ def entity_model_to_markdown(entity: Entity, content: Optional[str] = None) -> E
     relations = entity_relations
 
     # parse the content to see if it has semantic info (observations/relations)
-    entity_content = parse(content) if content else None
+    if content:
+        entity_content = parse(content)
+        if entity_content:
+            # Remove if they are already in the content
+            observations = [o for o in entity_observations if o not in entity_content.observations]
+            relations = [r for r in entity_relations if r not in entity_content.relations]
 
-    if entity_content:
-        # remove if they are already in the content
-        observations = [o for o in entity_observations if o not in entity_content.observations]
-        relations = [r for r in entity_relations if r not in entity_content.relations]
+            # Remove from the content if not present in the db entity
+            for o in entity_content.observations:
+                if o not in entity_observations and content:
+                    content = content.replace(str(o), "")
 
-        # remove from the content if not present in the db entity
-        for o in entity_content.observations:
-            if o not in entity_observations:
-                content = content.replace(str(o), "")
-
-        for r in entity_content.relations:
-            if r not in entity_relations:
-                content = content.replace(str(r), "")
+            for r in entity_content.relations:
+                if r not in entity_relations and content:
+                    content = content.replace(str(r), "")
 
     return EntityMarkdown(
         frontmatter=EntityFrontmatter(metadata=metadata),
         content=content,
         observations=observations,
         relations=relations,
-        created = entity.created_at,
-        modified = entity.updated_at,
+        created=entity.created_at,
+        modified=entity.updated_at,
     )
 
 
-def entity_model_from_markdown(file_path: Path, markdown: EntityMarkdown, entity: Optional[Entity] = None) -> Entity:
+def entity_model_from_markdown(
+    file_path: Path,
+    markdown: EntityMarkdown,
+    entity: Optional[Entity] = None
+) -> Entity:
     """
-    Convert markdown entity to model.
-    Does not include relations.
+    Convert markdown entity to model. Does not include relations.
 
     Args:
+        file_path: Path to the markdown file
         markdown: Parsed markdown entity
-        include_relations: Whether to include relations. Set False for first sync pass.
-    """
+        entity: Optional existing entity to update
 
-    # Validate/default category
-    def get_valid_category(obs):
+    Returns:
+        Entity model populated from markdown
+
+    Raises:
+        ValueError: If required datetime fields are missing from markdown
+    """
+    def get_valid_category(obs: Observation) -> str:
+        """Get valid observation category, defaulting to NOTE."""
         if not obs.category or obs.category not in [c.value for c in ObservationCategory]:
             return ObservationCategory.NOTE.value
         return obs.category
 
+    if not markdown.created or not markdown.modified:
+        raise ValueError("Both created and modified dates are required in markdown")
+
+    # Generate permalink if not provided
     permalink = markdown.frontmatter.permalink or generate_permalink(file_path)
+    
+    # Create or update entity
     model = entity or Entity()
     
-    model.title=markdown.frontmatter.title
-    model.entity_type=markdown.frontmatter.type
-    model.permalink=permalink
-    model.file_path=str(file_path)
-    model.content_type="text/markdown"
-    model.created_at=markdown.created
-    model.updated_at=markdown.modified
-    model.entity_metadata={k:str(v) for k,v in markdown.frontmatter.metadata.items()}
-    model.observations=[
-            ObservationModel(
-                content=obs.content,
-                category=get_valid_category(obs),
-                context=obs.context,
-                tags=obs.tags,
-            )
-            for obs in markdown.observations
-        ]
+    # Update basic fields
+    model.title = markdown.frontmatter.title
+    model.entity_type = markdown.frontmatter.type
+    model.permalink = permalink
+    model.file_path = str(file_path)
+    model.content_type = "text/markdown"
+    model.created_at = markdown.created
+    model.updated_at = markdown.modified
+    
+    # Handle metadata - ensure all values are strings and filter None
+    metadata = (markdown.frontmatter.metadata or {})
+    model.entity_metadata = {
+        k: str(v) for k, v in metadata.items()
+        if v is not None
+    }
+    
+    # Convert observations
+    model.observations = [
+        ObservationModel(
+            content=obs.content,
+            category=get_valid_category(obs),
+            context=obs.context,
+            tags=obs.tags,
+        )
+        for obs in markdown.observations
+    ]
     
     return model
 
-async def schema_to_markdown(schema):
+
+async def schema_to_markdown(schema: Any) -> Post:
     """
-    Convert schema to markdown.
-    :param schema: the schema to convert 
-    :return: Post 
+    Convert schema to markdown Post object.
+
+    Args:
+        schema: Schema to convert (must have title, entity_type, and permalink attributes)
+
+    Returns:
+        Post object with frontmatter metadata
     """
-    # Create Post object
+    # Extract content and metadata
     content = schema.content or ""
-    frontmatter_metadata = schema.entity_metadata or {}
+    frontmatter_metadata = dict(schema.entity_metadata or {})
     
-    # remove from map so we can define ordering in frontmatter
-    if "type" in frontmatter_metadata:
-        del frontmatter_metadata["type"]
-    if "title" in frontmatter_metadata:
-        del frontmatter_metadata["title"]
-    if "permalink" in frontmatter_metadata:
-        del frontmatter_metadata["permalink"]
+    # Remove special fields for ordered frontmatter
+    for field in ["type", "title", "permalink"]:
+        frontmatter_metadata.pop(field, None)
         
-    post = Post(content, title=schema.title, type=schema.entity_type, permalink=schema.permalink, **frontmatter_metadata)
+    # Create Post with ordered fields
+    post = Post(
+        content,
+        title=schema.title,
+        type=schema.entity_type,
+        permalink=schema.permalink,
+        **frontmatter_metadata
+    )
     return post

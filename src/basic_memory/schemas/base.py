@@ -77,12 +77,16 @@ class ObservationCategory(str, Enum):
     TODO = "todo"
 
     @classmethod
-    def _missing_(cls, value: str) -> "ObservationCategory":
+    def _missing_(cls, value: object) -> Optional["ObservationCategory"]:
         """Handle case-insensitive lookup."""
-        try:
-            return cls(value.lower())
-        except ValueError:
+        if value is None:
             return None
+        if isinstance(value, str):
+            try:
+                return cls(value.lower())
+            except ValueError:
+                return None
+        return None
 
 
 def validate_timeframe(timeframe: str) -> str:

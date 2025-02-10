@@ -4,7 +4,7 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from loguru import logger
 from unidecode import unidecode
@@ -37,7 +37,7 @@ def sanitize_name(name: str) -> str:
     return name
 
 
-def generate_permalink(file_path: Path | str) -> str:
+def generate_permalink(file_path: Union[Path, str]) -> str:
     """Generate a stable permalink from a file path.
 
     Args:
@@ -55,8 +55,11 @@ def generate_permalink(file_path: Path | str) -> str:
         >>> generate_permalink("design/unified_model_refactor.md")
         'design/unified-model-refactor'
     """
+    # Convert Path to string if needed
+    path_str = str(file_path)
+    
     # Remove extension
-    base = os.path.splitext(file_path)[0]
+    base = os.path.splitext(path_str)[0]
 
     # Transliterate unicode to ascii
     ascii_text = unidecode(base)
@@ -83,7 +86,7 @@ def generate_permalink(file_path: Path | str) -> str:
     return '/'.join(clean_segments)
 
 
-def setup_logging(home_dir: str = config.home, log_file: Optional[str] = None):
+def setup_logging(home_dir: Path = config.home, log_file: Optional[str] = None) -> None:
     """
     Configure logging for the application.    
     """
@@ -93,9 +96,9 @@ def setup_logging(home_dir: str = config.home, log_file: Optional[str] = None):
 
     # Add file handler
     if log_file:
-        log = f"{home_dir}/{log_file}"
+        log_path = home_dir / log_file
         logger.add(
-            log,
+            str(log_path),  # loguru expects a string path
             level=config.log_level,  
             rotation="100 MB",
             retention="10 days",

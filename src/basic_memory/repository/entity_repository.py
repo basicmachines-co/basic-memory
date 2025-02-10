@@ -1,6 +1,7 @@
 """Repository for managing entities in the knowledge graph."""
 
-from typing import List, Optional, Sequence
+from pathlib import Path
+from typing import List, Optional, Sequence, Union
 
 from sqlalchemy import select, or_, asc
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -12,25 +13,41 @@ from basic_memory.repository.repository import Repository
 
 
 class EntityRepository(Repository[Entity]):
-    """Repository for Entity model."""
+    """Repository for Entity model.
+    
+    Note: All file paths are stored as strings in the database. Convert Path objects
+    to strings before passing to repository methods.
+    """
 
     def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
         """Initialize with session maker."""
         super().__init__(session_maker, Entity)
 
     async def get_by_permalink(self, permalink: str) -> Optional[Entity]:
-        """Get entity by permalink."""
+        """Get entity by permalink.
+        
+        Args:
+            permalink: Unique identifier for the entity
+        """
         query = self.select().where(Entity.permalink == permalink).options(*self.get_load_options())
         return await self.find_one(query)
 
     async def get_by_title(self, title: str) -> Optional[Entity]:
-        """Get entity by title."""
+        """Get entity by title.
+        
+        Args:
+            title: Title of the entity to find
+        """
         query = self.select().where(Entity.title == title).options(*self.get_load_options())
         return await self.find_one(query)
 
-    async def get_by_file_path(self, file_path: str) -> Optional[Entity]:
-        """Get entity by file_path."""
-        query = self.select().where(Entity.file_path == file_path).options(*self.get_load_options())
+    async def get_by_file_path(self, file_path: Union[Path, str]) -> Optional[Entity]:
+        """Get entity by file_path.
+        
+        Args:
+            file_path: Path to the entity file (will be converted to string internally)
+        """
+        query = self.select().where(Entity.file_path == str(file_path)).options(*self.get_load_options())
         return await self.find_one(query)
 
     async def list_entities(
@@ -39,7 +56,13 @@ class EntityRepository(Repository[Entity]):
         sort_by: Optional[str] = "updated_at",
         include_related: bool = False,
     ) -> Sequence[Entity]:
-        """List all entities, optionally filtered by type and sorted."""
+        """List all entities, optionally filtered by type and sorted.
+        
+        Args:
+            entity_type: Optional type to filter by
+            sort_by: Field to sort results by
+            include_related: Whether to include related entities of the specified type
+        """
         query = self.select()
 
         # Always load base relations
@@ -81,14 +104,16 @@ class EntityRepository(Repository[Entity]):
         return list(result.scalars().all())
 
     async def search(self, query_str: str) -> List[Entity]:
-        """
-        Search for entities.
+        """Search for entities.
 
         Searches across:
         - Entity names
         - Entity types
         - Entity descriptions
         - Associated Observations content
+        
+        Args:
+            query_str: Search term to match against entity fields
         """
         search_term = f"%{query_str}%"
         query = (
@@ -110,11 +135,16 @@ class EntityRepository(Repository[Entity]):
         """Delete all entities associated with a document."""
         return await self.delete_by_fields(doc_id=doc_id)
 
-    async def delete_by_file_path(self, file_path: str) -> bool:
-        """Delete entity with the provided file_path."""
-        return await self.delete_by_fields(file_path=file_path)
+    async def delete_by_file_path(self, file_path: Union[Path, str]) -> bool:
+        """Delete entity with the provided file_path.
+        
+        Args:
+            file_path: Path to the entity file (will be converted to string internally)
+        """
+        return await self.delete_by_fields(file_path=str(file_path))
 
     def get_load_options(self) -> List[LoaderOption]:
+        """Get SQLAlchemy loader options for eager loading relationships."""
         return [
             selectinload(Entity.observations).selectinload(Observation.entity),
             # Load from_relations and both entities for each relation
@@ -126,8 +156,11 @@ class EntityRepository(Repository[Entity]):
         ]
 
     async def find_by_permalinks(self, permalinks: List[str]) -> Sequence[Entity]:
-        """Find multiple entities by their permalink."""
-
+        """Find multiple entities by their permalink.
+        
+        Args:
+            permalinks: List of permalink strings to find
+        """
         # Handle empty input explicitly
         if not permalinks:
             return []
@@ -141,8 +174,14 @@ class EntityRepository(Repository[Entity]):
         return list(result.scalars().all())
 
     async def delete_by_permalinks(self, permalinks: List[str]) -> int:
-        """Delete multiple entities by permalink."""
-
+        """Delete multiple entities by permalink.
+        
+        Args:
+            permalinks: List of permalink strings to delete
+            
+        Returns:
+            Number of entities deleted
+        """
         # Handle empty input explicitly
         if not permalinks:
             return 0

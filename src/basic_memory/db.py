@@ -72,6 +72,8 @@ async def scoped_session(
 
 async def init_db() -> None:
     """Initialize database with required tables."""
+    if _session_maker is None:
+        raise RuntimeError("Database session maker not initialized")
 
     logger.info("Initializing database...")
 
@@ -85,9 +87,14 @@ async def init_db() -> None:
 
         await session.commit()
 
-async def drop_db():
+
+async def drop_db() -> None:
     """Drop all database tables."""
     global _engine, _session_maker
+    
+    if _session_maker is None:
+        logger.warning("No database session maker to drop")
+        return
     
     logger.info("Dropping tables...")
     async with scoped_session(_session_maker) as session:
@@ -116,10 +123,12 @@ async def get_or_create_db(
         # Initialize database
         await init_db()
 
+    assert _engine is not None  # for type checker
+    assert _session_maker is not None  # for type checker
     return _engine, _session_maker
 
 
-async def shutdown_db():
+async def shutdown_db() -> None:
     """Clean up database connections."""
     global _engine, _session_maker
 
@@ -127,7 +136,6 @@ async def shutdown_db():
         await _engine.dispose()
         _engine = None
         _session_maker = None
-
 
 
 @asynccontextmanager
@@ -154,6 +162,11 @@ async def engine_session_factory(
         if init:
             await init_db()
 
+        assert _engine is not None  # for type checker
+        assert _session_maker is not None  # for type checker
         yield _engine, _session_maker
     finally:
-        await _engine.dispose()
+        if _engine:
+            await _engine.dispose()
+            _engine = None
+            _session_maker = None
