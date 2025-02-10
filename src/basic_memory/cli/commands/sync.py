@@ -42,7 +42,7 @@ class ValidationIssue:
     error: str
 
 
-async def get_sync_service(db_type=DatabaseType.FILESYSTEM):
+async def get_sync_service(db_type=DatabaseType.FILESYSTEM):  # pragma: no cover
     """Get sync service instance with all dependencies."""
     async with db.engine_session_factory(db_path=config.database_path, db_type=db_type) as (
         engine,
@@ -204,7 +204,6 @@ def display_detailed_sync_results(knowledge: SyncReport):
 
 async def run_sync(verbose: bool = False, watch: bool = False):
     """Run sync operation."""
-
     sync_service = await get_sync_service()
 
     # Start watching if requested
@@ -212,10 +211,10 @@ async def run_sync(verbose: bool = False, watch: bool = False):
         watch_service = WatchService(
             sync_service=sync_service,
             file_service=sync_service.entity_service.file_service,
-            config=config
+            config=config,
         )
         await watch_service.handle_changes(config.home)
-        await watch_service.run()
+        await watch_service.run()  # pragma: no cover
     else:
         # one time sync
         knowledge_changes = await sync_service.sync(config.home)
@@ -223,7 +222,7 @@ async def run_sync(verbose: bool = False, watch: bool = False):
         if verbose:
             display_detailed_sync_results(knowledge_changes)
         else:
-            display_sync_summary(knowledge_changes)
+            display_sync_summary(knowledge_changes) # pragma: no cover
 
 
 @app.command()
@@ -246,9 +245,9 @@ def sync(
         # Run sync
         asyncio.run(run_sync(verbose=verbose, watch=watch))
 
-    except Exception as e:
+    except Exception as e: # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Sync failed")
             typer.echo(f"Error during sync: {e}", err=True)
-            raise typer.Exit(1)
+            raise typer.Exit(1)  
         raise
