@@ -21,7 +21,7 @@ from typing import List, Optional, Annotated, Dict
 from annotated_types import MinLen, MaxLen
 from dateparser import parse
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator, ValidationError
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from basic_memory.utils import generate_permalink
 
@@ -114,10 +114,7 @@ def validate_timeframe(timeframe: str) -> str:
     return f"{days}d"
 
 
-TimeFrame = Annotated[
-    str,
-    BeforeValidator(validate_timeframe)
-]
+TimeFrame = Annotated[str, BeforeValidator(validate_timeframe)]
 
 Permalink = Annotated[str, BeforeValidator(validate_path_format)]
 """Unique identifier in format '{path}/{normalized_name}'."""
@@ -153,6 +150,7 @@ ObservationStr = Annotated[
     MaxLen(1000),  # Keep reasonable length
 ]
 
+
 class Observation(BaseModel):
     """A single observation with category, content, and optional context."""
 
@@ -160,6 +158,7 @@ class Observation(BaseModel):
     content: ObservationStr
     tags: Optional[List[str]] = Field(default_factory=list)
     context: Optional[str] = None
+
 
 class Relation(BaseModel):
     """Represents a directed edge between entities in the knowledge graph.
@@ -185,7 +184,7 @@ class Entity(BaseModel):
     - Optional relations to other entities
     - Optional description for high-level overview
     """
-    
+
     # private field to override permalink
     _permalink: Optional[str] = None
 
@@ -196,21 +195,22 @@ class Entity(BaseModel):
     entity_metadata: Optional[Dict] = Field(default=None, description="Optional metadata")
     content_type: ContentType = Field(
         description="MIME type of the content (e.g. text/markdown, image/jpeg)",
-        examples=["text/markdown", "image/jpeg"], default="text/markdown"
+        examples=["text/markdown", "image/jpeg"],
+        default="text/markdown",
     )
 
     @property
     def file_path(self):
         """Get the file path for this entity based on its permalink."""
         return f"{self.folder}/{self.title}.md" if self.folder else f"{self.title}.md"
-    
+
     @property
     def permalink(self) -> Permalink:
         """Get a url friendly path}."""
         return self._permalink or generate_permalink(self.file_path)
 
-    @model_validator(mode='after')
-    def infer_content_type(self) -> 'Entity':  # Should be instance method returning self
+    @model_validator(mode="after")
+    def infer_content_type(self) -> "Entity":  # Should be instance method returning self
         if not self.content_type:
             path = Path(self.file_path)
             if not path.exists():

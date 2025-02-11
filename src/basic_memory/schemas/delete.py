@@ -21,7 +21,7 @@ from typing import List, Annotated
 from annotated_types import MinLen
 from pydantic import BaseModel
 
-from basic_memory.schemas.base import Relation, Observation, Permalink
+from basic_memory.schemas.base import Permalink
 
 
 class DeleteEntitiesRequest(BaseModel):
@@ -35,4 +35,3 @@ class DeleteEntitiesRequest(BaseModel):
     """
 
     permalinks: Annotated[List[Permalink], MinLen(1)]
-

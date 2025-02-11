@@ -6,16 +6,11 @@ from annotated_types import MaxLen, MinLen
 from pydantic import BaseModel
 
 from basic_memory.schemas.base import (
-    Observation,
-    Entity,
     Relation,
     Permalink,
     ObservationCategory,
     EntityType,
 )
-
-
-
 
 
 class SearchNodesRequest(BaseModel):
@@ -66,6 +61,7 @@ class CreateRelationsRequest(BaseModel):
 
 
 ## update
+
 
 # TODO remove UpdateEntityRequest
 class UpdateEntityRequest(BaseModel):

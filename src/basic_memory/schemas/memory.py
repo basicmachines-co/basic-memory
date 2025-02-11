@@ -1,11 +1,10 @@
 """Schemas for memory context."""
 
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Annotated, Sequence
+from typing import List, Optional, Annotated, Sequence
 
-import pydantic
 from annotated_types import MinLen, MaxLen
-from pydantic import BaseModel, field_validator, Field, BeforeValidator, TypeAdapter, AnyUrl
+from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter
 
 from basic_memory.schemas.search import SearchItemType
 
@@ -32,19 +31,20 @@ def normalize_memory_url(url: str) -> str:
 MemoryUrl = Annotated[
     str,
     BeforeValidator(str.strip),  # Clean whitespace
-    MinLen(1),       
-    MaxLen(2028),   
+    MinLen(1),
+    MaxLen(2028),
 ]
 
-memory_url = TypeAdapter(MemoryUrl) 
+memory_url = TypeAdapter(MemoryUrl)
 
-def memory_url_path(url: memory_url) -> str: # pyright: ignore
+
+def memory_url_path(url: memory_url) -> str:  # pyright: ignore
     """
     Returns the uri for a url value by removing the prefix "memory://" from a given MemoryUrl.
 
     This function processes a given MemoryUrl by removing the "memory://"
-    prefix and returns the resulting string. If the provided url does not 
-    begin with "memory://", the function will simply return the input url 
+    prefix and returns the resulting string. If the provided url does not
+    begin with "memory://", the function will simply return the input url
     unchanged.
 
     :param url: A MemoryUrl object representing the URL with a "memory://" prefix.
@@ -53,7 +53,6 @@ def memory_url_path(url: memory_url) -> str: # pyright: ignore
     :rtype: str
     """
     return url.removeprefix("memory://")
-
 
 
 class EntitySummary(BaseModel):

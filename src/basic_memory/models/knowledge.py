@@ -1,6 +1,5 @@
 """Knowledge graph models."""
 
-import re
 from datetime import datetime
 from typing import Optional
 
@@ -102,6 +101,7 @@ class Entity(Base):
 
 class ObservationCategory(str, Enum):
     """Categories for observations about entities."""
+
     TECH = "tech"
     DESIGN = "design"
     FEATURE = "feature"
@@ -155,8 +155,8 @@ class Observation(Base):
     @property
     def permalink(self) -> str:
         """Create synthetic permalink for the observation.
-        
-        We can construct these because observations are always defined in 
+
+        We can construct these because observations are always defined in
         and owned by a single entity.
         """
         return generate_permalink(
@@ -196,7 +196,7 @@ class Relation(Base):
     @property
     def permalink(self) -> str:
         """Create relation permalink showing the semantic connection.
-        
+
         Format: source/relation_type/target
         Example: "specs/search/implements/features/search-ui"
         """

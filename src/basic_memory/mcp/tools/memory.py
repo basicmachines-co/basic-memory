@@ -7,9 +7,13 @@ from loguru import logger
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.schemas.memory import GraphContext, MemoryUrl, memory_url, memory_url_path, normalize_memory_url
+from basic_memory.schemas.memory import (
+    GraphContext,
+    MemoryUrl,
+    memory_url_path,
+    normalize_memory_url,
+)
 from basic_memory.schemas.base import TimeFrame
-from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.tool(
@@ -136,7 +140,7 @@ async def recent_activity(
         "timeframe": timeframe,
         "max_results": max_results,
     }
-    if type: 
+    if type:
         params["type"] = type
 
     response = await call_get(

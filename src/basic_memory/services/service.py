@@ -1,12 +1,11 @@
 """Base service class."""
 
-from datetime import datetime
 from typing import TypeVar, Generic, List, Sequence
 
 from basic_memory.models import Base
-from basic_memory.repository.repository import Repository
 
 T = TypeVar("T", bound=Base)
+
 
 class BaseService(Generic[T]):
     """Base service that takes a repository."""

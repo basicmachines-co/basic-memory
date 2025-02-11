@@ -7,18 +7,16 @@ from typing import Optional, Tuple, List
 from alembic.runtime.migration import MigrationContext
 from alembic.autogenerate import compare_metadata
 from loguru import logger
-from sqlalchemy import MetaData
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig
 from basic_memory.models import Base
-from basic_memory.repository.search_repository import SearchRepository
 
 
 async def check_schema_matches_models(session: AsyncSession) -> Tuple[bool, List[str]]:
     """Check if database schema matches SQLAlchemy models.
-    
+
     Returns:
         tuple[bool, list[str]]: (matches, list of differences)
     """
@@ -31,24 +29,24 @@ async def check_schema_matches_models(session: AsyncSession) -> Tuple[bool, List
 
     # Run comparison in sync context
     differences = await conn.run_sync(_compare_schemas)
-    
+
     if not differences:
         return True, []
-        
+
     # Format differences into readable messages
     diff_messages = []
     for diff in differences:
-        if diff[0] == 'add_table':
+        if diff[0] == "add_table":
             diff_messages.append(f"Missing table: {diff[1].name}")
-        elif diff[0] == 'remove_table':
+        elif diff[0] == "remove_table":
             diff_messages.append(f"Extra table: {diff[1].name}")
-        elif diff[0] == 'add_column':
+        elif diff[0] == "add_column":
             diff_messages.append(f"Missing column: {diff[3]} in table {diff[2]}")
-        elif diff[0] == 'remove_column':
+        elif diff[0] == "remove_column":
             diff_messages.append(f"Extra column: {diff[3]} in table {diff[2]}")
-        elif diff[0] == 'modify_type':
+        elif diff[0] == "modify_type":
             diff_messages.append(f"Column type mismatch: {diff[3]} in table {diff[2]}")
-            
+
     return False, diff_messages
 
 
@@ -83,7 +81,7 @@ class DatabaseService:
         try:
             self.db_path.rename(backup_path)
             logger.info(f"Created database backup: {backup_path}")
-            
+
             # make a new empty file
             self.db_path.touch()
             return backup_path
@@ -102,24 +100,18 @@ class DatabaseService:
         await db.drop_db()
 
         # Create tables with current schema
-        await db.get_or_create_db(
-            db_path=self.db_path,
-            db_type=self.db_type
-        )
+        await db.get_or_create_db(db_path=self.db_path, db_type=self.db_type)
 
         logger.info("Database initialized with current schema")
 
     async def check_db(self) -> bool:
         """Check database state and rebuild if schema doesn't match models.
-        
+
         Returns:
             bool: True if DB is ready for use, False if initialization failed
         """
         try:
-            _, session_maker = await db.get_or_create_db(
-                db_path=self.db_path,
-                db_type=self.db_type
-            )
+            _, session_maker = await db.get_or_create_db(db_path=self.db_path, db_type=self.db_type)
             async with db.scoped_session(session_maker) as db_session:
                 # Check actual schema matches
                 matches, differences = await check_schema_matches_models(db_session)
@@ -128,9 +120,9 @@ class DatabaseService:
                     for diff in differences:
                         logger.warning(f"  {diff}")
                     logger.info("Rebuilding database to match current models...")
-                    await self.initialize_db()                    
+                    await self.initialize_db()
                     return True
-                    
+
                 logger.info("Database schema matches models")
                 return True
 

@@ -1,8 +1,7 @@
 """Utilities for converting between markdown and entity models."""
 
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Any
 
 from frontmatter import Post
 
@@ -79,9 +78,7 @@ def entity_model_to_markdown(entity: Entity, content: Optional[str] = None) -> E
 
 
 def entity_model_from_markdown(
-    file_path: Path,
-    markdown: EntityMarkdown,
-    entity: Optional[Entity] = None
+    file_path: Path, markdown: EntityMarkdown, entity: Optional[Entity] = None
 ) -> Entity:
     """
     Convert markdown entity to model. Does not include relations.
@@ -97,6 +94,7 @@ def entity_model_from_markdown(
     Raises:
         ValueError: If required datetime fields are missing from markdown
     """
+
     def get_valid_category(obs: Observation) -> str:
         """Get valid observation category, defaulting to NOTE."""
         if not obs.category or obs.category not in [c.value for c in ObservationCategory]:
@@ -108,10 +106,10 @@ def entity_model_from_markdown(
 
     # Generate permalink if not provided
     permalink = markdown.frontmatter.permalink or generate_permalink(file_path)
-    
+
     # Create or update entity
     model = entity or Entity()
-    
+
     # Update basic fields
     model.title = markdown.frontmatter.title
     model.entity_type = markdown.frontmatter.type
@@ -120,14 +118,11 @@ def entity_model_from_markdown(
     model.content_type = "text/markdown"
     model.created_at = markdown.created
     model.updated_at = markdown.modified
-    
+
     # Handle metadata - ensure all values are strings and filter None
-    metadata = (markdown.frontmatter.metadata or {})
-    model.entity_metadata = {
-        k: str(v) for k, v in metadata.items()
-        if v is not None
-    }
-    
+    metadata = markdown.frontmatter.metadata or {}
+    model.entity_metadata = {k: str(v) for k, v in metadata.items() if v is not None}
+
     # Convert observations
     model.observations = [
         ObservationModel(
@@ -138,7 +133,7 @@ def entity_model_from_markdown(
         )
         for obs in markdown.observations
     ]
-    
+
     return model
 
 
@@ -155,17 +150,17 @@ async def schema_to_markdown(schema: Any) -> Post:
     # Extract content and metadata
     content = schema.content or ""
     frontmatter_metadata = dict(schema.entity_metadata or {})
-    
+
     # Remove special fields for ordered frontmatter
     for field in ["type", "title", "permalink"]:
         frontmatter_metadata.pop(field, None)
-        
+
     # Create Post with ordered fields
     post = Post(
         content,
         title=schema.title,
         type=schema.entity_type,
         permalink=schema.permalink,
-        **frontmatter_metadata
+        **frontmatter_metadata,
     )
     return post

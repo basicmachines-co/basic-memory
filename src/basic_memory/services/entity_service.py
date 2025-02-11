@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Sequence, List, Optional, Tuple, Union
 
 import frontmatter
-from frontmatter import Post
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
@@ -43,9 +42,7 @@ class EntityService(BaseService[EntityModel]):
         self.link_resolver = link_resolver
 
     async def resolve_permalink(
-            self,
-            file_path: Permalink | Path,
-            markdown: Optional[EntityMarkdown] = None
+        self, file_path: Permalink | Path, markdown: Optional[EntityMarkdown] = None
     ) -> str:
         """Get or generate unique permalink for an entity.
 
@@ -84,7 +81,7 @@ class EntityService(BaseService[EntityModel]):
             logger.debug(f"creating unique permalink: {permalink}")
 
         return permalink
-    
+
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:
         """Create new entity or update existing one.
         Returns: (entity, is_new) where is_new is True if a new entity was created
@@ -125,11 +122,9 @@ class EntityService(BaseService[EntityModel]):
 
         # parse entity from file
         entity_markdown = await self.entity_parser.parse_file(file_path)
-        
+
         # create entity
-        created_entity = await self.create_entity_from_markdown(
-            file_path, entity_markdown
-        )
+        created_entity = await self.create_entity_from_markdown(file_path, entity_markdown)
 
         # add relations
         entity = await self.update_entity_relations(file_path, entity_markdown)
@@ -154,9 +149,7 @@ class EntityService(BaseService[EntityModel]):
         entity_markdown = await self.entity_parser.parse_file(file_path)
 
         # update entity in db
-        entity = await self.update_entity_and_observations(
-            file_path, entity_markdown
-        )
+        entity = await self.update_entity_and_observations(file_path, entity_markdown)
 
         # add relations
         await self.update_entity_relations(file_path, entity_markdown)
@@ -232,7 +225,7 @@ class EntityService(BaseService[EntityModel]):
         Creates the entity with null checksum to indicate sync not complete.
         Relations will be added in second pass.
         """
-        logger.debug(f"Creating entity: {markdown.frontmatter.title}")        
+        logger.debug(f"Creating entity: {markdown.frontmatter.title}")
         model = entity_model_from_markdown(file_path, markdown)
 
         # Mark as incomplete sync
@@ -274,7 +267,7 @@ class EntityService(BaseService[EntityModel]):
 
         # checksum value is None == not finished with sync
         db_entity.checksum = None
-        
+
         # update entity
         return await self.repository.update(
             db_entity.id,
