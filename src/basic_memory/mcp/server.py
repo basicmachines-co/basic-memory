@@ -7,7 +7,7 @@ from basic_memory.config import config
 from basic_memory.utils import setup_logging
 
 # mcp console logging
-configure_logging(level='INFO')
+#configure_logging(level='INFO')
 
 
 # start our out file logging

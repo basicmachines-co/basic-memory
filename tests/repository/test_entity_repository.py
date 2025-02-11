@@ -446,20 +446,6 @@ async def test_list_entities_with_related(entity_repository: EntityRepository, s
     assert len(core_service.incoming_relations) > 0  # Has outgoing relation to db
 
 
-@pytest.mark.asyncio
-async def test_create_entity_with_invalid_permalink(entity_repository: EntityRepository):
-    """Test that creating an entity with invalid permalink raises error."""
-    with pytest.raises(ValueError, match="Invalid permalink format"):
-        await entity_repository.create(
-            {
-                "title": "Test",
-                "entity_type": "test",
-                "permalink": "Test/Invalid!!",  # Invalid permalink
-                "file_path": "test/test.md",
-                "content_type": "text/markdown",
-            }
-        )
-
 
 @pytest.mark.asyncio
 async def test_generate_permalink_from_file_path():

@@ -94,11 +94,6 @@ class Entity(Base):
         if not value:
             raise ValueError("Permalink must not be None")
 
-        if not re.match(r"^[a-z0-9][a-z0-9\-/]*[a-z0-9]$", value):
-            raise ValueError(
-                f"Invalid permalink format: {value}. "
-                "Use only lowercase letters, numbers, and hyphens."
-            )
         return value
 
     def __repr__(self) -> str:
