@@ -7,6 +7,7 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter, Relation
+from basic_memory.markdown.entity_parser import parse, parse_tags, EntityParser
 
 
 @pytest.fixture
@@ -141,6 +142,7 @@ async def test_error_handling(test_config, entity_parser):
     with pytest.raises(UnicodeDecodeError):
         await entity_parser.parse_file(test_file)
 
+
 @pytest.mark.asyncio
 async def test_parse_file_without_section_headers(test_config, entity_parser):
     """Test parsing a minimal valid entity file."""
@@ -182,4 +184,56 @@ async def test_parse_file_without_section_headers(test_config, entity_parser):
     assert entity.relations[0].target == "Random Link"
     
     assert entity.relations[1].type == "references"
-    assert entity.relations[1].target == "Other Entity" 
+    assert entity.relations[1].target == "Other Entity"
+
+
+def test_parse_date_formats(entity_parser):
+    """Test date parsing functionality."""
+    # Valid formats
+    assert entity_parser.parse_date("2024-01-15") is not None
+    assert entity_parser.parse_date("Jan 15, 2024") is not None
+    assert entity_parser.parse_date("2024-01-15 10:00 AM") is not None
+    assert entity_parser.parse_date(datetime.now()) is not None
+
+    # Invalid formats
+    assert entity_parser.parse_date(None) is None
+    assert entity_parser.parse_date(123) is None  # Non-string/datetime
+    assert entity_parser.parse_date("not a date") is None  # Unparseable string
+    assert entity_parser.parse_date("") is None  # Empty string
+
+    # Test dateparser error handling
+    assert entity_parser.parse_date("25:00:00") is None  # Invalid time
+
+
+def test_parse_empty_content():
+    """Test parsing empty or minimal content."""
+    result = parse("")
+    assert result.content == ""
+    assert len(result.observations) == 0
+    assert len(result.relations) == 0
+
+    result = parse("# Just a title")
+    assert result.content == "# Just a title"
+    assert len(result.observations) == 0
+    assert len(result.relations) == 0
+
+
+# @pytest.mark.asyncio
+# async def test_parse_file_invalid_yaml(test_config, entity_parser):
+#     """Test parsing file with invalid YAML frontmatter."""
+#     content = dedent("""
+#         ---
+#         invalid: [yaml: ]syntax]
+#         ---
+# 
+#         # Invalid YAML Frontmatter
+#         """)
+# 
+#     test_file = test_config.home / "invalid_yaml.md"
+#     test_file.write_text(content)
+# 
+#     # Should handle invalid YAML gracefully
+#     entity = await entity_parser.parse_file(test_file)
+#     assert entity.frontmatter.title == "invalid_yaml.md"
+#     assert entity.frontmatter.type == "note"
+#     assert entity.content.strip() == "# Invalid YAML Frontmatter"

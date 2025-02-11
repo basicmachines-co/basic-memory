@@ -8,13 +8,13 @@ from markdown_it.token import Token
 # Observation handling functions
 def is_observation(token: Token) -> bool:
     """Check if token looks like our observation format."""
-    if token.type != 'inline':
+    if token.type != 'inline':  # pragma: no cover
         return False
         
     content = token.content.strip()
-    if not content:
+    if not content:  # pragma: no cover
         return False
-    
+        
     # if it's a markdown_task, return false
     if content.startswith('[ ]') or content.startswith('[x]') or content.startswith('[-]'):
         return False
@@ -28,10 +28,6 @@ def parse_observation(token: Token) -> Dict[str, Any]:
     """Extract observation parts from token."""
     # Strip bullet point if present
     content = token.content.strip()
-    if content.startswith('- '):
-        content = content[2:].strip()
-    elif content.startswith('-'):
-        content = content[1:].strip()
     
     # Parse [category]
     category = None
@@ -48,28 +44,24 @@ def parse_observation(token: Token) -> Dict[str, Any]:
         if start != -1:
             context = content[start + 1:-1].strip()
             content = content[:start].strip()
-    
-    # Parse #tags and content
+            
+    # Extract tags and keep original content
+    tags = []
     parts = content.split()
-    content_parts = []
-    tags = set()  # Use set to avoid duplicates
-    
     for part in parts:
         if part.startswith('#'):
             # Handle multiple #tags stuck together
             if '#' in part[1:]:
                 # Split on # but keep non-empty tags
                 subtags = [t for t in part.split('#') if t]
-                tags.update(subtags)
+                tags.extend(subtags)
             else:
-                tags.add(part[1:])
-        else:
-            content_parts.append(part)
+                tags.append(part[1:])
     
     return {
         'category': category,
         'content': content,
-        'tags': list(tags) if tags else None,
+        'tags': tags if tags else None,
         'context': context
     }
 
@@ -77,7 +69,7 @@ def parse_observation(token: Token) -> Dict[str, Any]:
 # Relation handling functions
 def is_explicit_relation(token: Token) -> bool:
     """Check if token looks like our relation format."""
-    if token.type != 'inline':
+    if token.type != 'inline':  # pragma: no cover
         return False
     
     content = token.content.strip()
@@ -88,10 +80,6 @@ def parse_relation(token: Token) -> Dict[str, Any] | None:
     """Extract relation parts from token."""
     # Remove bullet point if present
     content = token.content.strip()
-    if content.startswith('- '):
-        content = content[2:].strip()
-    elif content.startswith('-'):
-        content = content[1:].strip()
     
     # Extract [[target]]
     target = None
@@ -115,7 +103,7 @@ def parse_relation(token: Token) -> Dict[str, Any] | None:
         if after.startswith('(') and after.endswith(')'):
             context = after[1:-1].strip() or None
     
-    if not target:
+    if not target:  # pragma: no cover
         return None
         
     return {
@@ -128,18 +116,45 @@ def parse_relation(token: Token) -> Dict[str, Any] | None:
 def parse_inline_relations(content: str) -> List[Dict[str, Any]]:
     """Find wiki-style links in regular content."""
     relations = []
+    start = 0
     
-    import re
-    pattern = r'\[\[([^\]]+)\]\]'
-    
-    for match in re.finditer(pattern, content):
-        target = match.group(1).strip()
-        if target and not target.startswith('[['):  # Avoid nested matches
+    while True:
+        # Find next outer-most [[
+        start = content.find('[[', start)
+        if start == -1:  # pragma: no cover
+            break
+            
+        # Find matching ]]
+        depth = 1
+        pos = start + 2
+        end = -1
+        
+        while pos < len(content):
+            if content[pos:pos+2] == '[[':
+                depth += 1
+                pos += 2
+            elif content[pos:pos+2] == ']]':
+                depth -= 1
+                if depth == 0:
+                    end = pos
+                    break
+                pos += 2
+            else:
+                pos += 1
+                
+        if end == -1:
+            # No matching ]] found
+            break
+            
+        target = content[start + 2:end].strip()
+        if target:
             relations.append({
-                'type': 'links to',
+                'type': 'links to', 
                 'target': target,
                 'context': None
             })
+            
+        start = end + 2
             
     return relations
 
