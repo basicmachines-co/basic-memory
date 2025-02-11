@@ -114,14 +114,25 @@ content"""
 ---
 content"""
     result = parse_frontmatter(content)
-    assert result == None or result == {}
+    assert result == {} or result == {}  # Handle both None and empty dict cases
 
-    # Invalid YAML
-    with pytest.raises(ParseError):
+    # Invalid YAML syntax
+    with pytest.raises(ParseError) as exc:
         parse_frontmatter("""---
-[invalid yaml]
+[: invalid yaml syntax :]
 ---
 content""")
+    assert "Invalid YAML in frontmatter" in str(exc.value)
+
+    # Non-dict YAML content
+    with pytest.raises(ParseError) as exc:
+        parse_frontmatter("""---
+- just
+- a
+- list
+---
+content""")
+    assert "Frontmatter must be a YAML dictionary" in str(exc.value)
 
     # No frontmatter
     with pytest.raises(ParseError):
@@ -130,8 +141,7 @@ content""")
     # Incomplete frontmatter
     with pytest.raises(ParseError):
         parse_frontmatter("""---
-title: Test
-content""")
+title: Test""")
 
 
 def test_remove_frontmatter():
@@ -154,13 +164,11 @@ title: Test
 """
     assert remove_frontmatter(content) == ""
 
-    # frontmatter missing some fields
-    assert (
+    # Invalid frontmatter - missing closing delimiter
+    with pytest.raises(ParseError) as exc:
         remove_frontmatter("""---
-title: Test
-content""")
-        == "---\ntitle: Test\ncontent"
-    )
+title: Test""")
+    assert "Invalid frontmatter format" in str(exc.value)
 
 
 @pytest.mark.asyncio

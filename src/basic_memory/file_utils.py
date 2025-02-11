@@ -87,16 +87,19 @@ async def write_file_atomic(path: Path, content: str) -> None:
 
 def has_frontmatter(content: str) -> bool:
     """
-    Check if content contains YAML frontmatter.
+    Check if content contains valid YAML frontmatter.
 
     Args:
         content: Content to check
 
     Returns:
-        True if content has frontmatter delimiter (---), False otherwise
+        True if content has valid frontmatter markers (---), False otherwise
     """
     content = content.strip()
-    return content.startswith("---") and "---" in content[3:]
+    if not content.startswith("---"):
+        return False
+        
+    return "---" in content[3:]
 
 
 def parse_frontmatter(content: str) -> Dict[str, Any]:
@@ -113,7 +116,7 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
         ParseError: If frontmatter is invalid or parsing fails
     """
     try:
-        if not has_frontmatter(content):
+        if not content.strip().startswith("---"):
             raise ParseError("Content has no frontmatter")
 
         # Split on first two occurrences of ---
@@ -149,27 +152,23 @@ def remove_frontmatter(content: str) -> str:
         content: Content with frontmatter
 
     Returns:
-        Content with frontmatter removed
+        Content with frontmatter removed, or original content if no frontmatter
 
     Raises:
-        ParseError: If frontmatter format is invalid
+        ParseError: If content starts with frontmatter marker but is malformed
     """
-    try:
-        if not has_frontmatter(content):
-            return content.strip()
+    content = content.strip()
+    
+    # Return as-is if no frontmatter marker
+    if not content.startswith("---"):
+        return content
 
-        # Split on first two occurrences of ---
-        parts = content.split("---", 2)
-        if len(parts) < 3:
-            raise ParseError("Invalid frontmatter format")
+    # Split on first two occurrences of ---
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        raise ParseError("Invalid frontmatter format")
 
-        return parts[2].strip()
-
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, ParseError):
-            logger.error(f"Failed to remove frontmatter: {e}")
-            raise ParseError(f"Failed to remove frontmatter: {e}")
-        raise
+    return parts[2].strip()
 
 
 async def update_frontmatter(path: Path, updates: Dict[str, Any]) -> str:
