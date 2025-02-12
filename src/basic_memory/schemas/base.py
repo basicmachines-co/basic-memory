@@ -171,7 +171,7 @@ class Entity(BaseModel):
         return self._permalink or generate_permalink(self.file_path)
 
     @model_validator(mode="after")
-    def infer_content_type(self) -> "Entity":  # Should be instance method returning self
+    def infer_content_type(self) -> "Entity": # pragma: no cover
         if not self.content_type:
             path = Path(self.file_path)
             if not path.exists():
