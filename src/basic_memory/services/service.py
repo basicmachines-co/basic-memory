@@ -13,4 +13,3 @@ class BaseService(Generic[T]):
     def __init__(self, repository):
         """Initialize service with repository."""
         self.repository = repository
-

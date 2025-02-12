@@ -66,11 +66,15 @@ class SearchService:
         logger.debug(f"Searching with query: {query}")
 
         after_date = (
-            query.after_date
-            if isinstance(query.after_date, datetime)
-            else datetime.fromisoformat(query.after_date)
-        ) if query.after_date else None
-            
+            (
+                query.after_date
+                if isinstance(query.after_date, datetime)
+                else datetime.fromisoformat(query.after_date)
+            )
+            if query.after_date
+            else None
+        )
+
         # permalink search
         results = await self.repository.search(
             search_text=query.text,

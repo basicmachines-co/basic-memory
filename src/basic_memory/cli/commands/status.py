@@ -21,7 +21,9 @@ from basic_memory.sync.utils import SyncReport
 console = Console()
 
 
-async def get_file_change_scanner(db_type=DatabaseType.FILESYSTEM) -> FileChangeScanner:  # pragma: no cover
+async def get_file_change_scanner(
+    db_type=DatabaseType.FILESYSTEM,
+) -> FileChangeScanner:  # pragma: no cover
     """Get sync service instance."""
     async with db.engine_session_factory(db_path=config.database_path, db_type=db_type) as (
         engine,
@@ -32,7 +34,9 @@ async def get_file_change_scanner(db_type=DatabaseType.FILESYSTEM) -> FileChange
         return file_change_scanner
 
 
-def add_files_to_tree(tree: Tree, paths: Set[str], style: str, checksums: Dict[str, str] | None = None):
+def add_files_to_tree(
+    tree: Tree, paths: Set[str], style: str, checksums: Dict[str, str] | None = None
+):
     """Add files to tree, grouped by directory."""
     # Group by directory
     by_dir = {}
@@ -146,7 +150,7 @@ def status(
     """Show sync status between files and database."""
     try:
         sync_service = asyncio.run(get_file_change_scanner())
-        asyncio.run(run_status(sync_service, verbose)) # pragma: no cover
+        asyncio.run(run_status(sync_service, verbose))  # pragma: no cover
     except Exception as e:
         logger.exception(f"Error checking status: {e}")
         raise typer.Exit(code=1)  # pragma: no cover

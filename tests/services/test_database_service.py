@@ -33,16 +33,15 @@ async def engine_factory(
 
         yield engine, session_maker
 
+
 @pytest_asyncio.fixture
 async def database_service(
     test_config: ProjectConfig,
     sync_service: SyncService,
 ) -> DatabaseService:
     """Create DatabaseManagementService instance for testing."""
-    return DatabaseService(
-        config=test_config,
-        db_type = DatabaseType.FILESYSTEM
-    )
+    return DatabaseService(config=test_config, db_type=DatabaseType.FILESYSTEM)
+
 
 @pytest.mark.asyncio
 async def test_check_db_initializes_new_db(
@@ -70,7 +69,8 @@ async def test_check_db_rebuilds_on_schema_mismatch(
     async with db.scoped_session(session_maker) as session:
         conn = await session.connection()
         # Create temp table
-        await conn.execute(text("""
+        await conn.execute(
+            text("""
             CREATE TABLE entity_temp (
                 id INTEGER PRIMARY KEY,
                 title TEXT,
@@ -83,7 +83,8 @@ async def test_check_db_rebuilds_on_schema_mismatch(
                 updated_at TIMESTAMP
                 -- Deliberately omit entity_metadata column
             )
-        """))
+        """)
+        )
         # Drop original table
         await conn.execute(text("DROP TABLE entity"))
         # Rename temp table
@@ -95,12 +96,15 @@ async def test_check_db_rebuilds_on_schema_mismatch(
 
     # Verify entity_metadata column exists now
     async with db.scoped_session(session_maker) as session:
-        result = await session.execute(text("""
+        result = await session.execute(
+            text("""
             SELECT sql FROM sqlite_master 
             WHERE type='table' AND name='entity'
-        """))
+        """)
+        )
         create_sql = result.scalar()
-        assert 'entity_metadata' in create_sql.lower()
+        assert "entity_metadata" in create_sql.lower()
+
 
 @pytest.mark.asyncio
 async def test_backup_creates_timestamped_file(
@@ -116,7 +120,7 @@ async def test_backup_creates_timestamped_file(
 
     # Create backup
     backup_path = await database_service.create_backup()
-    
+
     assert backup_path is not None
     assert backup_path.exists()
     assert backup_path.suffix == ".backup"
@@ -140,7 +144,7 @@ async def test_cleanup_backups_keeps_recent(
         datetime.now() - timedelta(days=i)
         for i in range(7)  # Create 7 backups
     ]
-    
+
     for dt in backup_times:
         timestamp = dt.strftime("%Y%m%d_%H%M%S")
         backup_path = database_service.db_path.with_suffix(f".{timestamp}.backup")

@@ -311,13 +311,6 @@ async def test_find_by_permalinks(entity_repository: EntityRepository, test_enti
     assert len(found) == 0
 
 
-
-
-
-
-
-
-
 @pytest.mark.asyncio
 async def test_generate_permalink_from_file_path():
     """Test permalink generation from different file paths."""

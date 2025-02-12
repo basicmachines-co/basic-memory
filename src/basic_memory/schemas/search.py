@@ -69,10 +69,10 @@ class SearchResult(BaseModel):
 
     id: int
     type: SearchItemType
-    score: float 
+    score: float
     permalink: str
     file_path: str
-    
+
     metadata: Optional[dict] = None
 
     # Type-specific fields

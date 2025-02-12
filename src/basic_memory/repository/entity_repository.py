@@ -14,7 +14,7 @@ from basic_memory.repository.repository import Repository
 
 class EntityRepository(Repository[Entity]):
     """Repository for Entity model.
-    
+
     Note: All file paths are stored as strings in the database. Convert Path objects
     to strings before passing to repository methods.
     """
@@ -25,7 +25,7 @@ class EntityRepository(Repository[Entity]):
 
     async def get_by_permalink(self, permalink: str) -> Optional[Entity]:
         """Get entity by permalink.
-        
+
         Args:
             permalink: Unique identifier for the entity
         """
@@ -34,7 +34,7 @@ class EntityRepository(Repository[Entity]):
 
     async def get_by_title(self, title: str) -> Optional[Entity]:
         """Get entity by title.
-        
+
         Args:
             title: Title of the entity to find
         """
@@ -43,19 +43,20 @@ class EntityRepository(Repository[Entity]):
 
     async def get_by_file_path(self, file_path: Union[Path, str]) -> Optional[Entity]:
         """Get entity by file_path.
-        
+
         Args:
             file_path: Path to the entity file (will be converted to string internally)
         """
-        query = self.select().where(Entity.file_path == str(file_path)).options(*self.get_load_options())
+        query = (
+            self.select()
+            .where(Entity.file_path == str(file_path))
+            .options(*self.get_load_options())
+        )
         return await self.find_one(query)
-
-
-    
 
     async def delete_by_file_path(self, file_path: Union[Path, str]) -> bool:
         """Delete entity with the provided file_path.
-        
+
         Args:
             file_path: Path to the entity file (will be converted to string internally)
         """
@@ -75,7 +76,7 @@ class EntityRepository(Repository[Entity]):
 
     async def find_by_permalinks(self, permalinks: List[str]) -> Sequence[Entity]:
         """Find multiple entities by their permalink.
-        
+
         Args:
             permalinks: List of permalink strings to find
         """
@@ -90,4 +91,3 @@ class EntityRepository(Repository[Entity]):
 
         result = await self.execute_query(query)
         return list(result.scalars().all())
-

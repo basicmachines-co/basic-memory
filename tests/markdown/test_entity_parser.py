@@ -1,4 +1,5 @@
 """Tests for entity markdown parsing."""
+
 import os
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
@@ -77,8 +78,7 @@ async def test_parse_complete_file(test_config, entity_parser, valid_entity_cont
         in entity.relations
     ), "missing [[OAuth Implementation]]"
     assert (
-        Relation(type="uses", target="Redis Cache", context="Token caching")
-        in entity.relations
+        Relation(type="uses", target="Redis Cache", context="Token caching") in entity.relations
     ), "missing [[Redis Cache]]"
     assert (
         Relation(type="specified_by", target="Auth API Spec", context="OpenAPI spec")
@@ -86,9 +86,9 @@ async def test_parse_complete_file(test_config, entity_parser, valid_entity_cont
     ), "missing [[Auth API Spec]]"
 
     # inline links in content
-    assert (
-        Relation(type="links to", target="Random Link", context=None) in entity.relations
-    ), "missing [[Random Link]]"
+    assert Relation(type="links to", target="Random Link", context=None) in entity.relations, (
+        "missing [[Random Link]]"
+    )
     assert (
         Relation(type="links to", target="Random Link with Title|Titled Link", context=None)
         in entity.relations
@@ -122,7 +122,7 @@ async def test_parse_minimal_file(test_config, entity_parser):
     assert entity.frontmatter.permalink is None
     assert len(entity.observations) == 1
     assert len(entity.relations) == 1
-    
+
     assert entity.created is not None
     assert entity.modified is not None
 
@@ -171,18 +171,18 @@ async def test_parse_file_without_section_headers(test_config, entity_parser):
 
     assert entity.frontmatter.type == "component"
     assert entity.frontmatter.permalink == "minimal_entity"
-    
-    assert "some text\nsome [[Random Link]]" in entity.content 
-    
+
+    assert "some text\nsome [[Random Link]]" in entity.content
+
     assert len(entity.observations) == 1
     assert entity.observations[0].category == "note"
     assert entity.observations[0].content == "Basic observation #test"
     assert entity.observations[0].tags == ["test"]
-    
+
     assert len(entity.relations) == 2
     assert entity.relations[0].type == "links to"
     assert entity.relations[0].target == "Random Link"
-    
+
     assert entity.relations[1].type == "references"
     assert entity.relations[1].target == "Other Entity"
 
@@ -225,13 +225,13 @@ def test_parse_empty_content():
 #         ---
 #         invalid: [yaml: ]syntax]
 #         ---
-# 
+#
 #         # Invalid YAML Frontmatter
 #         """)
-# 
+#
 #     test_file = test_config.home / "invalid_yaml.md"
 #     test_file.write_text(content)
-# 
+#
 #     # Should handle invalid YAML gracefully
 #     entity = await entity_parser.parse_file(test_file)
 #     assert entity.frontmatter.title == "invalid_yaml.md"

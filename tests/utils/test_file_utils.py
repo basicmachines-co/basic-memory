@@ -13,7 +13,8 @@ from basic_memory.file_utils import (
     remove_frontmatter,
     FileError,
     FileWriteError,
-    ParseError, update_frontmatter,
+    ParseError,
+    update_frontmatter,
 )
 
 

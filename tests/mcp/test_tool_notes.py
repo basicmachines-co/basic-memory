@@ -7,7 +7,6 @@ from basic_memory.mcp.tools import notes
 from basic_memory.schemas import EntityResponse
 
 
-
 @pytest.mark.asyncio
 async def test_write_note(app):
     """Test creating a new note.
@@ -54,7 +53,8 @@ async def test_write_note_no_tags(app):
 
     # Should be able to read it back
     content = await notes.read_note(permalink)
-    assert """
+    assert (
+        """
 --
 title: Simple Note
 type: note
@@ -62,7 +62,9 @@ permalink: test/simple-note
 ---
 
 Just some text
-""".strip() in content
+""".strip()
+        in content
+    )
 
 
 @pytest.mark.asyncio
@@ -100,7 +102,8 @@ async def test_write_note_update_existing(app):
 
     # Try reading it back
     content = await notes.read_note(permalink)
-    assert """
+    assert (
+        """
 ---
 permalink: test/test-note
 tags:
@@ -112,7 +115,10 @@ type: note
 
 # Test
 This is an updated note
-""".strip() in content
+""".strip()
+        in content
+    )
+
 
 @pytest.mark.asyncio
 async def test_read_note_by_title(app):
@@ -190,6 +196,7 @@ async def test_delete_note_doesnt_exist(app):
     deleted = await notes.delete_note("doesnt-exist")
     assert deleted is False
 
+
 @pytest.mark.asyncio
 async def test_write_note_verbose(app):
     """Test creating a new note.
@@ -220,14 +227,12 @@ async def test_write_note_verbose(app):
     assert entity.file_path == "test/Test Note.md"
     assert entity.entity_type == "note"
     assert entity.permalink == "test/test-note"
-    
+
     assert len(entity.observations) == 1
     assert entity.observations[0].content == "First observation"
-    
+
     assert len(entity.relations) == 1
     assert entity.relations[0].relation_type == "relates to"
     assert entity.relations[0].from_id == "test/test-note"
     assert entity.relations[0].to_id is None
     assert entity.relations[0].to_name == "Knowledge"
-
-

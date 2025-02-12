@@ -91,7 +91,6 @@ def test_no_category():
     assert observation.content == "No category"
 
 
-
 def test_unicode_content():
     """Test handling of Unicode content."""
     md = MarkdownIt().use(observation_plugin)

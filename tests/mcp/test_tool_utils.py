@@ -1,4 +1,5 @@
 """Tests for MCP tool utilities."""
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,17 +12,17 @@ from basic_memory.mcp.tools.utils import call_get, call_post, call_put, call_del
 @pytest.fixture
 def mock_response(monkeypatch):
     """Create a mock response."""
+
     class MockResponse:
         def __init__(self, status_code=200):
             self.status_code = status_code
-            
+
         def raise_for_status(self):
             if self.status_code >= 400:
                 raise HTTPStatusError(
-                    message=f"HTTP Error {self.status_code}",
-                    request=None,
-                    response=self
+                    message=f"HTTP Error {self.status_code}", request=None, response=self
                 )
+
     return MockResponse
 
 
@@ -30,7 +31,7 @@ async def test_call_get_success(mock_response):
     """Test successful GET request."""
     client = AsyncClient()
     client.get = lambda *args, **kwargs: AsyncMock(return_value=mock_response())()
-    
+
     response = await call_get(client, "http://test.com")
     assert response.status_code == 200
 
@@ -40,7 +41,7 @@ async def test_call_get_error(mock_response):
     """Test GET request with error."""
     client = AsyncClient()
     client.get = lambda *args, **kwargs: AsyncMock(return_value=mock_response(404))()
-    
+
     with pytest.raises(ToolError) as exc:
         await call_get(client, "http://test.com")
     assert "Error calling tool" in str(exc.value)
@@ -51,7 +52,7 @@ async def test_call_post_success(mock_response):
     """Test successful POST request."""
     client = AsyncClient()
     client.post = lambda *args, **kwargs: AsyncMock(return_value=mock_response())()
-    
+
     response = await call_post(client, "http://test.com", json={"test": "data"})
     assert response.status_code == 200
 
@@ -61,7 +62,7 @@ async def test_call_post_error(mock_response):
     """Test POST request with error."""
     client = AsyncClient()
     client.post = lambda *args, **kwargs: AsyncMock(return_value=mock_response(500))()
-    
+
     with pytest.raises(ToolError) as exc:
         await call_post(client, "http://test.com", json={"test": "data"})
     assert "Error calling tool" in str(exc.value)
@@ -72,7 +73,7 @@ async def test_call_put_success(mock_response):
     """Test successful PUT request."""
     client = AsyncClient()
     client.put = lambda *args, **kwargs: AsyncMock(return_value=mock_response())()
-    
+
     response = await call_put(client, "http://test.com", json={"test": "data"})
     assert response.status_code == 200
 
@@ -82,7 +83,7 @@ async def test_call_put_error(mock_response):
     """Test PUT request with error."""
     client = AsyncClient()
     client.put = lambda *args, **kwargs: AsyncMock(return_value=mock_response(400))()
-    
+
     with pytest.raises(ToolError) as exc:
         await call_put(client, "http://test.com", json={"test": "data"})
     assert "Error calling tool" in str(exc.value)
@@ -93,7 +94,7 @@ async def test_call_delete_success(mock_response):
     """Test successful DELETE request."""
     client = AsyncClient()
     client.delete = lambda *args, **kwargs: AsyncMock(return_value=mock_response())()
-    
+
     response = await call_delete(client, "http://test.com")
     assert response.status_code == 200
 
@@ -103,7 +104,7 @@ async def test_call_delete_error(mock_response):
     """Test DELETE request with error."""
     client = AsyncClient()
     client.delete = lambda *args, **kwargs: AsyncMock(return_value=mock_response(403))()
-    
+
     with pytest.raises(ToolError) as exc:
         await call_delete(client, "http://test.com")
     assert "Error calling tool" in str(exc.value)
@@ -115,10 +116,10 @@ async def test_call_get_with_params(mock_response):
     client = AsyncClient()
     mock_get = AsyncMock(return_value=mock_response())
     client.get = mock_get
-    
+
     params = {"key": "value", "test": "data"}
     await call_get(client, "http://test.com", params=params)
-    
+
     mock_get.assert_called_once()
     call_kwargs = mock_get.call_args[1]
     assert call_kwargs["params"] == params
@@ -130,10 +131,10 @@ async def test_call_post_with_json(mock_response):
     client = AsyncClient()
     mock_post = AsyncMock(return_value=mock_response())
     client.post = mock_post
-    
+
     json_data = {"key": "value", "nested": {"test": "data"}}
     await call_post(client, "http://test.com", json=json_data)
-    
+
     mock_post.assert_called_once()
     call_kwargs = mock_post.call_args[1]
     assert call_kwargs["json"] == json_data

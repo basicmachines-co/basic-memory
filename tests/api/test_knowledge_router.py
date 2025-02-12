@@ -111,8 +111,12 @@ async def test_get_entity(client: AsyncClient):
 async def test_get_entities(client: AsyncClient):
     """Should open multiple entities by path IDs."""
     # Create a few entities with different names
-    await client.post("/knowledge/entities", json={"title": "AlphaTest", "folder": "", "entity_type": "test"})
-    await client.post("/knowledge/entities", json={"title": "BetaTest", "folder": "", "entity_type": "test"})
+    await client.post(
+        "/knowledge/entities", json={"title": "AlphaTest", "folder": "", "entity_type": "test"}
+    )
+    await client.post(
+        "/knowledge/entities", json={"title": "BetaTest", "folder": "", "entity_type": "test"}
+    )
 
     # Open nodes by path IDs
     response = await client.get(
@@ -397,7 +401,12 @@ async def test_update_entity_type_conversion(client: AsyncClient):
 async def test_update_entity_metadata(client: AsyncClient):
     """Test updating entity metadata."""
     # Create entity
-    data = {"title": "test", "folder": "", "entity_type": "test", "entity_metadata": {"status": "draft"}}
+    data = {
+        "title": "test",
+        "folder": "",
+        "entity_type": "test",
+        "entity_metadata": {"status": "draft"},
+    }
     response = await client.post("/knowledge/entities", json=data)
     entity_response = response.json()
 
@@ -450,7 +459,12 @@ async def test_update_entity_incorrect_permalink(client: AsyncClient):
 async def test_update_entity_search_index(client: AsyncClient):
     """Test search index is updated after entity changes."""
     # Create entity
-    data = {"title": "test", "folder": "", "entity_type": "test", "content": "Initial searchable content"}
+    data = {
+        "title": "test",
+        "folder": "",
+        "entity_type": "test",
+        "content": "Initial searchable content",
+    }
     response = await client.post("/knowledge/entities", json=data)
     entity_response = response.json()
 

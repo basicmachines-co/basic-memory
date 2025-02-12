@@ -13,10 +13,10 @@ from basic_memory.services import DatabaseService
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI): # pragma: no cover
+async def lifespan(app: FastAPI):  # pragma: no cover
     """Lifecycle manager for the FastAPI app."""
     logger.info("Starting Basic Memory API")
-    
+
     # check the db state
     await check_db(app)
     yield
@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI): # pragma: no cover
     await db.shutdown_db()
 
 
-async def check_db(app: FastAPI): # pragma: no cover
+async def check_db(app: FastAPI):  # pragma: no cover
     logger.info("Checking database state")
 
     # Initialize DB management service
@@ -38,7 +38,6 @@ async def check_db(app: FastAPI): # pragma: no cover
 
     # Clean up old backups on shutdown
     await db_service.cleanup_backups()
-
 
 
 # Initialize FastAPI app
@@ -57,7 +56,7 @@ app.include_router(resource.router)
 
 
 @app.exception_handler(Exception)
-async def exception_handler(request, exc): # pragma: no cover
+async def exception_handler(request, exc):  # pragma: no cover
     logger.exception(
         f"An unhandled exception occurred for request '{request.url}', exception: {exc}"
     )

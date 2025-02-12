@@ -66,9 +66,7 @@ class ContextService:
             # Pattern matching - use search
             if "*" in path:
                 logger.debug(f"Pattern search for '{path}'")
-                primary = await self.search_repository.search(
-                    permalink_match=path
-                )
+                primary = await self.search_repository.search(permalink_match=path)
 
             # Direct lookup for exact path
             else:
@@ -120,15 +118,15 @@ class ContextService:
         - Connected entities
         - Their observations
         - Relations that connect them
-        
+
         Note on depth:
-        Each traversal step requires two depth levels - one to find the relation, 
+        Each traversal step requires two depth levels - one to find the relation,
         and another to follow that relation to an entity. So a max_depth of 4 allows
         traversal through two entities (relation->entity->relation->entity), while reaching
         an entity three steps away requires max_depth=6 (relation->entity->relation->entity->relation->entity).
         """
         max_depth = max_depth * 2
-        
+
         if not type_id_pairs:
             return []
 
@@ -140,7 +138,7 @@ class ContextService:
         # Parameters for bindings
         params = {"max_depth": max_depth, "max_results": max_results}
         if since:
-            params["since_date"] = since.isoformat() # pyright: ignore
+            params["since_date"] = since.isoformat()  # pyright: ignore
 
         # Build date filter
         date_filter = "AND base.created_at >= :since_date" if since else ""

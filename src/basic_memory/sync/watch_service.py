@@ -145,11 +145,11 @@ class WatchService:
                     recursive=True,
                 ):
                     # Process changes
-                    await self.handle_changes(self.config.home)   # pragma: no cover
+                    await self.handle_changes(self.config.home)  # pragma: no cover
                     # Update display
-                    live.update(self.generate_table()) # pragma: no cover
+                    live.update(self.generate_table())  # pragma: no cover
 
-            except Exception as e: # pragma: no cover
+            except Exception as e:  # pragma: no cover
                 self.state.record_error(str(e))
                 await self.write_status()
                 raise

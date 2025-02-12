@@ -25,7 +25,7 @@ class ProjectConfig(BaseSettings):
     sync_delay: int = Field(
         default=500, description="Milliseconds to wait after changes before syncing", gt=0
     )
-    
+
     log_level: str = "INFO"
 
     model_config = SettingsConfigDict(
@@ -46,7 +46,7 @@ class ProjectConfig(BaseSettings):
 
     @field_validator("home")
     @classmethod
-    def ensure_path_exists(cls, v: Path) -> Path: # pragma: no cover
+    def ensure_path_exists(cls, v: Path) -> Path:  # pragma: no cover
         """Ensure project path exists."""
         if not v.exists():
             v.mkdir(parents=True)

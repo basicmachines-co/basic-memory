@@ -130,7 +130,7 @@ class FileChangeScanner:
         logger.debug(f"  Moved: {len(report.moves)}")
         logger.debug(f"  Deleted: {len(report.deleted)}")
 
-        if scan_result.errors: # pragma: no cover
+        if scan_result.errors:  # pragma: no cover
             logger.warning("Files skipped due to errors:")
             for file_path, error in scan_result.errors.items():
                 logger.warning(f"  {file_path}: {error}")

@@ -134,8 +134,6 @@ A test concept.
     assert relations[0].to_name == "concept/other"
 
 
-
-
 @pytest.mark.asyncio
 async def test_sync_entity_with_nonexistent_relations(
     sync_service: SyncService, test_config: ProjectConfig
@@ -170,10 +168,9 @@ modified: 2024-01-01
         "concept/depends-on-future"
     )
     assert entity is not None
-    assert len(entity.relations) == 2 
+    assert len(entity.relations) == 2
     assert entity.relations[0].to_name == "concept/not_created_yet"
     assert entity.relations[1].to_name == "concept/also_future"
-
 
 
 @pytest.mark.asyncio
@@ -223,12 +220,8 @@ modified: 2024-01-01
     await sync_service.sync(test_config.home)
 
     # Verify both entities and their relations
-    entity_a = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/entity-a"
-    )
-    entity_b = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/entity-b"
-    )
+    entity_a = await sync_service.entity_service.repository.get_by_permalink("concept/entity-a")
+    entity_b = await sync_service.entity_service.repository.get_by_permalink("concept/entity-b")
 
     # outgoing relations
     assert len(entity_a.outgoing_relations) == 1
@@ -248,7 +241,6 @@ modified: 2024-01-01
 
     b_relation = entity_b.outgoing_relations[0]
     assert b_relation.to_id == entity_a.id
-
 
 
 @pytest.mark.asyncio
@@ -421,15 +413,9 @@ modified: 2024-01-01
     await sync_service.sync(test_config.home)
 
     # Verify all relations are created correctly regardless of order
-    entity_a = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/entity-a"
-    )
-    entity_b = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/entity-b"
-    )
-    entity_c = await sync_service.entity_service.repository.get_by_permalink(
-        "concept/entity-c"
-    )
+    entity_a = await sync_service.entity_service.repository.get_by_permalink("concept/entity-a")
+    entity_b = await sync_service.entity_service.repository.get_by_permalink("concept/entity-b")
+    entity_c = await sync_service.entity_service.repository.get_by_permalink("concept/entity-c")
 
     assert len(entity_a.outgoing_relations) == 2  # Should depend on B and C
     assert len(entity_a.incoming_relations) == 1  # C depends on A
@@ -439,7 +425,6 @@ modified: 2024-01-01
 
     assert len(entity_c.outgoing_relations) == 1  # Should depend on A
     assert len(entity_c.incoming_relations) == 2  # A and B depend on C
-
 
 
 @pytest.mark.asyncio
@@ -527,9 +512,9 @@ Testing permalink generation.
     for filename, expected_permalink in test_files.items():
         # Find entity for this file
         entity = next(e for e in entities if e.file_path == filename)
-        assert (
-            entity.permalink == expected_permalink
-        ), f"File {filename} should have permalink {expected_permalink}"
+        assert entity.permalink == expected_permalink, (
+            f"File {filename} should have permalink {expected_permalink}"
+        )
 
 
 @pytest.mark.asyncio
@@ -541,7 +526,7 @@ async def test_handle_entity_deletion(
     search_service: SearchService,
 ):
     """Test deletion of entity cleans up search index."""
-    
+
     root_entity = test_graph["root"]
     # Delete the entity
     await sync_service.handle_entity_deletion(root_entity.file_path)
@@ -558,6 +543,7 @@ async def test_handle_entity_deletion(
 
     rel_results = await search_service.search(SearchQuery(text="connects_to"))
     assert len(rel_results) == 0
+
 
 @pytest.mark.asyncio
 async def test_sync_preserves_timestamps(
@@ -600,8 +586,12 @@ Testing file timestamps
     # Check file timestamps
     file_entity = await entity_service.get_by_permalink("file-dates")
     file_stats = file_path.stat()
-    assert abs((file_entity.created_at.timestamp() - file_stats.st_ctime)) < 1  # Allow 1s difference
-    assert abs((file_entity.updated_at.timestamp() - file_stats.st_mtime)) < 1  # Allow 1s difference
+    assert (
+        abs((file_entity.created_at.timestamp() - file_stats.st_ctime)) < 1
+    )  # Allow 1s difference
+    assert (
+        abs((file_entity.updated_at.timestamp() - file_stats.st_mtime)) < 1
+    )  # Allow 1s difference
 
 
 @pytest.mark.asyncio
@@ -640,6 +630,7 @@ Content for move test
     results = await search_service.search(SearchQuery(text="Content for move test"))
     assert len(results) == 1
     assert results[0].file_path == str(new_path.relative_to(project_dir))
+
 
 @pytest.mark.asyncio
 async def test_sync_null_checksum_cleanup(
@@ -680,7 +671,6 @@ modified: 2024-01-01
     # Verify entity was properly synced
     updated = await entity_service.get_by_permalink("concept/incomplete")
     assert updated.checksum is not None
-
 
 
 @pytest.mark.asyncio
@@ -759,7 +749,7 @@ async def test_sync_permalink_resolved_on_update(
     # Check permalinks
     file_one_content, _ = await file_service.read_file(one_file)
     assert "permalink: one" in file_one_content
-    
+
     file_two_content, _ = await file_service.read_file(two_file)
     assert "permalink: two" in file_two_content
 
@@ -775,7 +765,7 @@ tags: []
 test content
 """
     two_file.write_text(updated_content)
-    
+
     # Run sync
     await sync_service.sync(test_config.home)
 
@@ -797,21 +787,19 @@ test content
     new_file = project_dir / "new.md"
     await create_test_file(new_file)
 
-    # Run another time 
+    # Run another time
     await sync_service.sync(test_config.home)
 
     # Should still have same permalink
     new_file_content, _ = await file_service.read_file(new_file)
     assert "permalink: new" in new_file_content
 
-    
-
 
 @pytest.mark.asyncio
 async def test_sync_duplicate_observations(
-        sync_service: SyncService,
-        test_config: ProjectConfig,
-        file_service: FileService,
+    sync_service: SyncService,
+    test_config: ProjectConfig,
+    file_service: FileService,
 ):
     """Test that sync resolves permalink conflicts on update."""
     project_dir = test_config.home
@@ -836,7 +824,8 @@ test content
 
     # Check permalinks
     file_one_content, _ = await file_service.read_file(note_file)
-    assert """---
+    assert (
+        """---
 title: a note
 type: note
 tags: []
@@ -846,4 +835,6 @@ permalink: note
 test content
 
 - [note] one observation
-""".strip() == file_one_content
+""".strip()
+        == file_one_content
+    )

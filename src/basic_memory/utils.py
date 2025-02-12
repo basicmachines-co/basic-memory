@@ -1,4 +1,5 @@
 """Utility functions for basic-memory."""
+
 import os
 import re
 import sys
@@ -10,7 +11,6 @@ from loguru import logger
 from unidecode import unidecode
 
 from basic_memory.config import config
-
 
 
 def generate_permalink(file_path: Union[Path, str]) -> str:
@@ -33,7 +33,7 @@ def generate_permalink(file_path: Union[Path, str]) -> str:
     """
     # Convert Path to string if needed
     path_str = str(file_path)
-    
+
     # Remove extension
     base = os.path.splitext(path_str)[0]
 
@@ -47,24 +47,24 @@ def generate_permalink(file_path: Union[Path, str]) -> str:
     lower_text = ascii_text.lower()
 
     # replace underscores with hyphens
-    text_with_hyphens = lower_text.replace('_', '-')
+    text_with_hyphens = lower_text.replace("_", "-")
 
     # Replace remaining invalid chars with hyphens
-    clean_text = re.sub(r'[^a-z0-9/\-]', '-', text_with_hyphens)
+    clean_text = re.sub(r"[^a-z0-9/\-]", "-", text_with_hyphens)
 
     # Collapse multiple hyphens
-    clean_text = re.sub(r'-+', '-', clean_text)
+    clean_text = re.sub(r"-+", "-", clean_text)
 
     # Clean each path segment
-    segments = clean_text.split('/')
-    clean_segments = [s.strip('-') for s in segments]
+    segments = clean_text.split("/")
+    clean_segments = [s.strip("-") for s in segments]
 
-    return '/'.join(clean_segments)
+    return "/".join(clean_segments)
 
 
 def setup_logging(home_dir: Path = config.home, log_file: Optional[str] = None) -> None:
     """
-    Configure logging for the application.    
+    Configure logging for the application.
     """
 
     # Remove default handler and any existing handlers
@@ -75,7 +75,7 @@ def setup_logging(home_dir: Path = config.home, log_file: Optional[str] = None) 
         log_path = home_dir / log_file
         logger.add(
             str(log_path),  # loguru expects a string path
-            level=config.log_level,  
+            level=config.log_level,
             rotation="100 MB",
             retention="10 days",
             backtrace=True,
@@ -85,10 +85,4 @@ def setup_logging(home_dir: Path = config.home, log_file: Optional[str] = None) 
         )
 
     # Add stderr handler
-    logger.add(
-        sys.stderr,
-        level=config.log_level,
-        backtrace=True,
-        diagnose=True,
-        colorize=True
-    )
+    logger.add(sys.stderr, level=config.log_level, backtrace=True, diagnose=True, colorize=True)

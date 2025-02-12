@@ -1,4 +1,5 @@
 """Test permalink formatting during sync."""
+
 import pytest
 from pathlib import Path
 
@@ -18,7 +19,7 @@ async def test_permalink_formatting(
     sync_service: SyncService, test_config: ProjectConfig, entity_service: EntityService
 ):
     """Test that permalinks are properly formatted during sync.
-    
+
     This ensures:
     - Underscores are converted to hyphens
     - Spaces are converted to hyphens
@@ -35,7 +36,10 @@ async def test_permalink_formatting(
         ("MIXED_CASE_NAME.md", "mixed-case-name"),
         ("spaces and_underscores.md", "spaces-and-underscores"),
         ("design/model_refactor.md", "design/model-refactor"),
-        ("test/multiple_word_directory/feature_name.md", "test/multiple-word-directory/feature-name"),
+        (
+            "test/multiple_word_directory/feature_name.md",
+            "test/multiple-word-directory/feature-name",
+        ),
     ]
 
     # Create test files
@@ -58,5 +62,6 @@ Testing permalink generation.
     # Verify permalinks
     for filename, expected_permalink in test_cases:
         entity = await entity_service.repository.get_by_file_path(filename)
-        assert entity.permalink == expected_permalink, \
+        assert entity.permalink == expected_permalink, (
             f"File {filename} should have permalink {expected_permalink}"
+        )

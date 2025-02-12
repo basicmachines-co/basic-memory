@@ -19,9 +19,7 @@ class ModelTest(Base):
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, 
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
 
@@ -71,6 +69,7 @@ async def test_bulk_create(repository):
     assert found is not None
     assert found.name == "Test 0"
 
+
 @pytest.mark.asyncio
 async def test_find_all(repository):
     """Test finding multiple entities by IDs."""
@@ -80,6 +79,7 @@ async def test_find_all(repository):
 
     found = await repository.find_all(limit=3)
     assert len(found) == 3
+
 
 @pytest.mark.asyncio
 async def test_find_by_ids(repository):
@@ -160,6 +160,7 @@ async def test_update_model(repository):
     modified = await repository.update(instance.id, instance)
     assert modified is not None
     assert modified.name == "Updated"
+
 
 @pytest.mark.asyncio
 async def test_update_model_not_found(repository):

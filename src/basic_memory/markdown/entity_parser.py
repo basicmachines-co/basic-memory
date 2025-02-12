@@ -2,6 +2,7 @@
 
 Uses markdown-it with plugins to parse structured data from markdown content.
 """
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from datetime import datetime
@@ -21,11 +22,12 @@ from basic_memory.markdown.schemas import (
 
 md = MarkdownIt().use(observation_plugin).use(relation_plugin)
 
+
 @dataclass
 class EntityContent:
-    content: str 
-    observations: list[Observation] = field(default_factory=list) 
-    relations: list[Relation] = field(default_factory=list) 
+    content: str
+    observations: list[Observation] = field(default_factory=list)
+    relations: list[Relation] = field(default_factory=list)
 
 
 def parse(content: str) -> EntityContent:
@@ -53,11 +55,13 @@ def parse(content: str) -> EntityContent:
         relations=relations,
     )
 
+
 def parse_tags(tags: Any) -> list[str]:
     """Parse tags into list of strings."""
     if isinstance(tags, (list, tuple)):
         return [str(t).strip() for t in tags if str(t).strip()]
     return [t.strip() for t in tags.split(",") if t.strip()]
+
 
 class EntityParser:
     """Parser for markdown files into Entity objects."""
@@ -65,7 +69,6 @@ class EntityParser:
     def __init__(self, base_path: Path):
         """Initialize parser with base path for relative permalink generation."""
         self.base_path = base_path.resolve()
-
 
     def parse_date(self, value: Any) -> Optional[datetime]:
         """Parse date strings using dateparser for maximum flexibility.
@@ -87,11 +90,11 @@ class EntityParser:
 
     async def parse_file(self, file_path: Path) -> EntityMarkdown:
         """Parse markdown file into EntityMarkdown."""
-        
+
         absolute_path = self.base_path / file_path
         # Parse frontmatter and content using python-frontmatter
         post = frontmatter.load(str(absolute_path))
-        
+
         # Extract file stat info
         file_stats = absolute_path.stat()
 
@@ -115,4 +118,3 @@ class EntityParser:
             created=datetime.fromtimestamp(file_stats.st_ctime),
             modified=datetime.fromtimestamp(file_stats.st_mtime),
         )
-

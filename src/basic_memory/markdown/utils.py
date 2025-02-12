@@ -28,7 +28,7 @@ def entity_model_from_markdown(
         ValueError: If required datetime fields are missing from markdown
     """
 
-    if not markdown.created or not markdown.modified: # pragma: no cover
+    if not markdown.created or not markdown.modified:  # pragma: no cover
         raise ValueError("Both created and modified dates are required in markdown")
 
     # Generate permalink if not provided

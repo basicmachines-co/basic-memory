@@ -52,15 +52,11 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
     assert metadata["permalink"] == entity.permalink
     assert metadata["type"] == entity.entity_type
 
+
 @pytest.mark.asyncio
 async def test_create_entity_file_exists(entity_service: EntityService, file_service: FileService):
     """Test successful entity creation."""
-    entity_data = EntitySchema(
-        title="Test Entity",
-        folder="",
-        entity_type="test",
-        content="first"
-    )
+    entity_data = EntitySchema(title="Test Entity", folder="", entity_type="test", content="first")
 
     # Act
     entity = await entity_service.create_entity(entity_data)
@@ -70,21 +66,23 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
     assert await file_service.exists(file_path)
 
     file_content, _ = await file_service.read_file(file_path)
-    assert '---\ntitle: Test Entity\ntype: test\npermalink: test-entity\n---\n\nfirst' == file_content
-
-    entity_data = EntitySchema(
-        title="Test Entity",
-        folder="",
-        entity_type="test",
-        content="second"
+    assert (
+        "---\ntitle: Test Entity\ntype: test\npermalink: test-entity\n---\n\nfirst" == file_content
     )
+
+    entity_data = EntitySchema(title="Test Entity", folder="", entity_type="test", content="second")
 
     with pytest.raises(EntityCreationError):
         await entity_service.create_entity(entity_data)
-    
+
 
 @pytest.mark.asyncio
-async def test_create_entity_unique_permalink(test_config, entity_service: EntityService, file_service: FileService, entity_repository: EntityRepository):
+async def test_create_entity_unique_permalink(
+    test_config,
+    entity_service: EntityService,
+    file_service: FileService,
+    entity_repository: EntityRepository,
+):
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
@@ -93,7 +91,7 @@ async def test_create_entity_unique_permalink(test_config, entity_service: Entit
     )
 
     entity = await entity_service.create_entity(entity_data)
-    
+
     # default permalink
     assert entity.permalink == generate_permalink(entity.file_path)
 
@@ -101,7 +99,7 @@ async def test_create_entity_unique_permalink(test_config, entity_service: Entit
     file_path = file_service.get_entity_path(entity)
     file_path.rename(test_config.home / "new_path.md")
     await entity_repository.update(entity.id, {"file_path": "new_path.md"})
-    
+
     # create again
     entity2 = await entity_service.create_entity(entity_data)
     assert entity2.permalink == f"{entity.permalink}-1"
@@ -113,6 +111,7 @@ async def test_create_entity_unique_permalink(test_config, entity_service: Entit
 
     # Verify frontmatter contents
     assert metadata["permalink"] == entity2.permalink
+
 
 @pytest.mark.asyncio
 async def test_get_by_permalink(entity_service: EntityService):
@@ -267,7 +266,6 @@ async def test_get_entities_some_not_found(entity_service: EntityService):
     assert found[0].title == "Entity1"
 
 
-
 @pytest.mark.asyncio
 async def test_get_entity_path(entity_service: EntityService):
     """Should generate correct filesystem path for entity."""
@@ -284,12 +282,17 @@ async def test_get_entity_path(entity_service: EntityService):
 async def test_update_note_entity_content(entity_service: EntityService, file_service: FileService):
     """Should update note content directly."""
     # Create test entity
-    schema = EntitySchema(title="test", folder="test", entity_type="note", entity_metadata={"status": "draft"}, )
-    
+    schema = EntitySchema(
+        title="test",
+        folder="test",
+        entity_type="note",
+        entity_metadata={"status": "draft"},
+    )
+
     entity = await entity_service.create_entity(schema)
     assert entity.entity_metadata.get("status") == "draft"
 
-    # Update content with a relation 
+    # Update content with a relation
     schema.content = """
 # Updated [[Content]]
 - references [[new content]]
@@ -309,7 +312,6 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
     _, frontmatter, _ = content.split("---", 2)
     metadata = yaml.safe_load(frontmatter)
     assert metadata.get("status") == "draft"
-    
 
 
 @pytest.mark.asyncio
@@ -353,9 +355,7 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
 
 
 @pytest.mark.asyncio
-async def test_create_with_content(
-    entity_service: EntityService, file_service: FileService
-):
+async def test_create_with_content(entity_service: EntityService, file_service: FileService):
     content = """---
 permalink: git-workflow-guide
 ---
@@ -411,21 +411,22 @@ See the [[Git Cheat Sheet]] for reference.
 
     # assert content is in file
     assert content.strip() in file_content
-    
+
     # assert frontmatter
-    assert """
+    assert (
+        """
 ---
 title: Git Workflow Guide
 type: test
 permalink: test/git-workflow-guide
 ---    
-    """.strip() in file_content
+    """.strip()
+        in file_content
+    )
 
 
 @pytest.mark.asyncio
-async def test_update_with_content(
-        entity_service: EntityService, file_service: FileService
-):
+async def test_update_with_content(entity_service: EntityService, file_service: FileService):
     content = """# Git Workflow Guide"""
 
     # Create test entity

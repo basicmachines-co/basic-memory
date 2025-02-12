@@ -222,7 +222,7 @@ async def run_sync(verbose: bool = False, watch: bool = False):
         if verbose:
             display_detailed_sync_results(knowledge_changes)
         else:
-            display_sync_summary(knowledge_changes) # pragma: no cover
+            display_sync_summary(knowledge_changes)  # pragma: no cover
 
 
 @app.command()
@@ -245,9 +245,9 @@ def sync(
         # Run sync
         asyncio.run(run_sync(verbose=verbose, watch=watch))
 
-    except Exception as e: # pragma: no cover
+    except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Sync failed")
             typer.echo(f"Error during sync: {e}", err=True)
-            raise typer.Exit(1)  
+            raise typer.Exit(1)
         raise

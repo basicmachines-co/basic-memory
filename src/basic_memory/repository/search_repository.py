@@ -22,7 +22,7 @@ class SearchIndexRow:
     id: int
     type: str
     permalink: str
-    file_path: str 
+    file_path: str
     metadata: Optional[dict] = None
 
     # date values
@@ -68,7 +68,7 @@ class SearchRepository:
 
     async def init_search_index(self):
         """Create or recreate the search index."""
-        
+
         logger.info("Initializing search index")
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(CREATE_SEARCH_INDEX)
@@ -79,8 +79,8 @@ class SearchRepository:
         For FTS5, special characters and phrases need to be quoted to be treated as a single token.
         """
         # List of special characters that need quoting
-        special_chars = ['/', '*', '-', '.', ' ', '(', ')', '[', ']', '"', "'"]
-        
+        special_chars = ["/", "*", "-", ".", " ", "(", ")", "[", "]", '"', "'"]
+
         # Check if term contains any special characters
         if any(c in term for c in special_chars):
             # If the term already contains quotes, escape them
@@ -103,7 +103,7 @@ class SearchRepository:
         conditions = []
         params = {}
         order_by_clause = ""
-        
+
         # Handle text search for title and content
         if search_text:
             search_text = self._quote_search_term(search_text.lower().strip())
@@ -125,7 +125,7 @@ class SearchRepository:
         if permalink_match:
             params["permalink"] = self._quote_search_term(permalink_match)
             conditions.append("permalink MATCH :permalink")
-            
+
         # Handle type filter
         if types:
             type_list = ", ".join(f"'{t.value}'" for t in types)
@@ -140,13 +140,13 @@ class SearchRepository:
         if after_date:
             params["after_date"] = after_date
             conditions.append("datetime(created_at) > datetime(:after_date)")
-            
+
             # order by most recent first
             order_by_clause = ", updated_at DESC"
 
         # set limit on search query
         params["limit"] = limit
-        
+
         # Build WHERE clause
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -173,7 +173,7 @@ class SearchRepository:
             LIMIT :limit
         """
 
-        #logger.debug(f"Search {sql} params: {params}")
+        # logger.debug(f"Search {sql} params: {params}")
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(text(sql), params)
             rows = result.fetchall()
@@ -199,9 +199,9 @@ class SearchRepository:
             for row in rows
         ]
 
-        #for r in results:
+        # for r in results:
         #    logger.debug(f"Search result: type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}")
-        
+
         return results
 
     async def index_item(
@@ -251,7 +251,7 @@ class SearchRepository:
         params: Dict[str, Any],
     ) -> Result[Any]:
         """Execute a query asynchronously."""
-        #logger.debug(f"Executing query: {query}, params: {params}")
+        # logger.debug(f"Executing query: {query}, params: {params}")
         async with db.scoped_session(self.session_maker) as session:
             start_time = time.perf_counter()
             result = await session.execute(query, params)

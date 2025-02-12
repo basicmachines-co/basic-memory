@@ -39,8 +39,7 @@ def test_path_with_dashes():
     """Test path with dashes and other chars."""
     url = memory_url.validate_python("memory://file-sync-and-note-updates-implementation")
     assert memory_url_path(url) == "file-sync-and-note-updates-implementation"
-    
-        
+
 
 def test_str_representation():
     """Test converting back to string."""

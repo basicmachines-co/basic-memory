@@ -6,5 +6,3 @@ BASE_URL = "http://test"
 
 # Create shared async client
 client = AsyncClient(transport=ASGITransport(app=fastapi_app), base_url=BASE_URL)
-
-

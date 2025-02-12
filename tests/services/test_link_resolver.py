@@ -1,4 +1,5 @@
 """Tests for link resolution service."""
+
 from textwrap import dedent
 
 import pytest
@@ -14,7 +15,7 @@ from basic_memory.services.link_resolver import LinkResolver
 @pytest_asyncio.fixture
 async def test_entities(entity_service, file_service):
     """Create a set of test entities."""
-    
+
     e1, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Core Service",
@@ -44,7 +45,6 @@ async def test_entities(entity_service, file_service):
         )
     )
 
-    
     return [e1, e2, e3, e4]
 
 
@@ -85,6 +85,7 @@ async def test_fuzzy_title_partial_match(link_resolver):
     # Test partial match
     result = await link_resolver.resolve_link("Auth Serv")
     assert result.permalink == "components/auth-service"
+
 
 @pytest.mark.asyncio
 async def test_fuzzy_title_exact_match(link_resolver):

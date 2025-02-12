@@ -23,7 +23,8 @@ from basic_memory.schemas.delete import (
 from basic_memory.schemas.request import (
     SearchNodesRequest,
     GetEntitiesRequest,
-    CreateRelationsRequest, UpdateEntityRequest,
+    CreateRelationsRequest,
+    UpdateEntityRequest,
 )
 
 # Response models
@@ -40,7 +41,8 @@ from basic_memory.schemas.response import (
 # Discovery and analytics models
 from basic_memory.schemas.discovery import (
     EntityTypeList,
-    ObservationCategoryList, TypedEntityList,
+    ObservationCategoryList,
+    TypedEntityList,
 )
 
 # For convenient imports, export all models
@@ -69,5 +71,5 @@ __all__ = [
     # Discovery and Analytics
     "EntityTypeList",
     "ObservationCategoryList",
-    "TypedEntityList"
+    "TypedEntityList",
 ]

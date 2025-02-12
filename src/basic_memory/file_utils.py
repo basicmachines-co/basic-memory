@@ -98,7 +98,7 @@ def has_frontmatter(content: str) -> bool:
     content = content.strip()
     if not content.startswith("---"):
         return False
-        
+
     return "---" in content[3:]
 
 
@@ -158,7 +158,7 @@ def remove_frontmatter(content: str) -> str:
         ParseError: If content starts with frontmatter marker but is malformed
     """
     content = content.strip()
-    
+
     # Return as-is if no frontmatter marker
     if not content.startswith("---"):
         return content

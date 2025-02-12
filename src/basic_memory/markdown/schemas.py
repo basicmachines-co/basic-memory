@@ -13,7 +13,7 @@ class Observation(BaseModel):
     content: str
     tags: Optional[List[str]] = None
     context: Optional[str] = None
-    
+
     def __str__(self) -> str:
         obs_string = f"- [{self.category}] {self.content}"
         if self.context:
@@ -27,7 +27,7 @@ class Relation(BaseModel):
     type: str
     target: str
     context: Optional[str] = None
-    
+
     def __str__(self) -> str:
         rel_string = f"- {self.type} [[{self.target}]]"
         if self.context:
@@ -42,20 +42,19 @@ class EntityFrontmatter(BaseModel):
 
     @property
     def tags(self) -> List[str]:
-        return self.metadata.get("tags") if self.metadata else [] # pyright: ignore
+        return self.metadata.get("tags") if self.metadata else []  # pyright: ignore
 
     @property
     def title(self) -> str:
-        return self.metadata.get("title") if self.metadata else None # pyright: ignore
+        return self.metadata.get("title") if self.metadata else None  # pyright: ignore
 
     @property
     def type(self) -> str:
-        return self.metadata.get("type", "note") if self.metadata else "note" # pyright: ignore
+        return self.metadata.get("type", "note") if self.metadata else "note"  # pyright: ignore
 
     @property
     def permalink(self) -> str:
-        return self.metadata.get("permalink") if self.metadata else None # pyright: ignore
-
+        return self.metadata.get("permalink") if self.metadata else None  # pyright: ignore
 
 
 class EntityMarkdown(BaseModel):

@@ -28,7 +28,7 @@ class SQLAlchemyModel(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    
+
 class ObservationResponse(Observation, SQLAlchemyModel):
     """Schema for observation data returned from the service.
 
@@ -67,13 +67,14 @@ class RelationResponse(Relation, SQLAlchemyModel):
             "from_id",
         )
     )
-    to_id: Optional[Permalink] = Field( # pyright: ignore
+    to_id: Optional[Permalink] = Field(  # pyright: ignore
         # use the permalink from the associated Entity
         # or the to_id value
         validation_alias=AliasChoices(
             AliasPath("to_entity", "permalink"),
             "to_id",
-        ), default=None
+        ),
+        default=None,
     )
     to_name: Optional[Permalink] = Field(
         # use the permalink from the associated Entity
@@ -81,9 +82,9 @@ class RelationResponse(Relation, SQLAlchemyModel):
         validation_alias=AliasChoices(
             AliasPath("to_entity", "title"),
             "to_name",
-        ), default=None
+        ),
+        default=None,
     )
-
 
 
 class EntityResponse(SQLAlchemyModel):

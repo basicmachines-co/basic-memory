@@ -39,10 +39,7 @@ async def test_search_with_type_filter(client):
     )
 
     # Search with type filter
-    query = SearchQuery(
-        text="type",
-        types=[SearchItemType.ENTITY]
-    )
+    query = SearchQuery(text="type", types=[SearchItemType.ENTITY])
     response = await search(query)
 
     # Verify all results are entities
@@ -61,10 +58,7 @@ async def test_search_with_date_filter(client):
 
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
-    query = SearchQuery(
-        text="recent",
-        after_date=one_hour_ago
-    )
+    query = SearchQuery(text="recent", after_date=one_hour_ago)
     response = await search(query)
 
     # Verify we get results within timeframe

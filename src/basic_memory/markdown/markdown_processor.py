@@ -19,7 +19,7 @@ class DirtyFileError(Exception):
 
 class MarkdownProcessor:
     """Process markdown files while preserving content and structure.
-    
+
     used only for import
 
     This class handles the file I/O aspects of our markdown processing. It:
@@ -90,14 +90,14 @@ class MarkdownProcessor:
 
         # Convert frontmatter to dict
         frontmatter_dict = OrderedDict()
-        frontmatter_dict["title"] =  markdown.frontmatter.title
-        frontmatter_dict["type"] =  markdown.frontmatter.type
+        frontmatter_dict["title"] = markdown.frontmatter.title
+        frontmatter_dict["type"] = markdown.frontmatter.type
         frontmatter_dict["permalink"] = markdown.frontmatter.permalink
-        
+
         metadata = markdown.frontmatter.metadata or {}
-        for k,v in metadata.items():
+        for k, v in metadata.items():
             frontmatter_dict[k] = v
-        
+
         # Start with user content (or minimal title for new files)
         content = markdown.content or f"# {markdown.frontmatter.title}\n"
 
@@ -107,7 +107,7 @@ class MarkdownProcessor:
         # add a blank line if we have semantic content
         if markdown.observations or markdown.relations:
             content += "\n"
-            
+
         if markdown.observations:
             content += self.format_observations(markdown.observations)
         if markdown.relations:

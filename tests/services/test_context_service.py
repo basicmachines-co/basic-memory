@@ -17,7 +17,6 @@ async def context_service(search_repository, entity_repository):
     return ContextService(search_repository, entity_repository)
 
 
-
 @pytest.mark.asyncio
 async def test_find_connected_depth_limit(context_service, test_graph):
     """Test depth limiting works.
@@ -31,7 +30,7 @@ async def test_find_connected_depth_limit(context_service, test_graph):
     # With depth=1, we get direct connections
     # shallow_results = await context_service.find_related(type_id_pairs, max_depth=1)
     # shallow_entities = {(r.id, r.type) for r in shallow_results if r.type == "entity"}
-    # 
+    #
     # assert (test_graph["deep"].id, "entity") not in shallow_entities
 
     # search deeper

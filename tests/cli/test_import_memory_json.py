@@ -21,14 +21,14 @@ def sample_entities():
             "type": "entity",
             "name": "test_entity",
             "entityType": "test",
-            "observations": ["Test observation 1", "Test observation 2"]
+            "observations": ["Test observation 1", "Test observation 2"],
         },
         {
             "type": "relation",
             "from": "test_entity",
             "to": "related_entity",
-            "relationType": "test_relation"
-        }
+            "relationType": "test_relation",
+        },
     ]
 
 
@@ -47,16 +47,12 @@ async def test_process_memory_json(tmp_path, sample_json_file):
     """Test importing entities from JSON."""
     entity_parser = EntityParser(tmp_path)
     processor = MarkdownProcessor(entity_parser)
-    
-    results = await import_memory_json.process_memory_json(
-        sample_json_file, 
-        tmp_path,
-        processor
-    )
-    
+
+    results = await import_memory_json.process_memory_json(sample_json_file, tmp_path, processor)
+
     assert results["entities"] == 1
     assert results["relations"] == 1
-    
+
     # Check file was created
     entity_file = tmp_path / "test/test_entity.md"
     assert entity_file.exists()
@@ -86,7 +82,7 @@ def test_import_json_command_success(tmp_path, sample_json_file, monkeypatch):
     """Test successful JSON import via command."""
     # Set up test environment
     monkeypatch.setenv("HOME", str(tmp_path))
-    
+
     # Run import
     result = runner.invoke(app, ["import-json", str(sample_json_file)])
     assert result.exit_code == 0
@@ -100,7 +96,7 @@ def test_import_json_command_invalid_json(tmp_path):
     # Create invalid JSON file
     invalid_file = tmp_path / "invalid.json"
     invalid_file.write_text("not json")
-    
+
     result = runner.invoke(app, ["import-json", str(invalid_file)])
     assert result.exit_code == 1
     assert "Error during import" in result.output
@@ -114,25 +110,25 @@ def test_import_json_command_handle_old_format(tmp_path):
             "type": "entity",
             "name": "test_entity",
             "entityType": "test",
-            "observations": ["Test observation"]
+            "observations": ["Test observation"],
         },
         {
             "type": "relation",
             "from_id": "test_entity",
             "to_id": "other_entity",
-            "relation_type": "test_relation"
-        }
+            "relation_type": "test_relation",
+        },
     ]
-    
+
     json_file = tmp_path / "old_format.json"
     with open(json_file, "w") as f:
         for item in old_format:
             f.write(json.dumps(item) + "\n")
-            
+
     # Set up test environment
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("HOME", str(tmp_path))
-    
+
     # Run import
     result = runner.invoke(app, ["import-json", str(json_file)])
     assert result.exit_code == 0

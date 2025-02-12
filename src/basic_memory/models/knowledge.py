@@ -80,10 +80,8 @@ class Entity(Base):
         """Get all relations (incoming and outgoing) for this entity."""
         return self.incoming_relations + self.outgoing_relations
 
-
     def __repr__(self) -> str:
         return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}'"
-
 
 
 class Observation(Base):
@@ -101,11 +99,7 @@ class Observation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(Text)
-    category: Mapped[str] = mapped_column(
-        String,
-        nullable=False,
-        default="note"
-    )
+    category: Mapped[str] = mapped_column(String, nullable=False, default="note")
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tags: Mapped[Optional[list[str]]] = mapped_column(
         JSON, nullable=True, default=list, server_default="[]"

@@ -5,6 +5,7 @@ from basic_memory.utils import setup_logging  # pragma: no cover
 
 # Register commands
 from basic_memory.cli.commands import status, sync  # pragma: no cover
+
 __all__ = ["status", "sync"]  # pragma: no cover
 
 

@@ -9,6 +9,7 @@ class EntityNotFoundError(Exception):
 
     pass
 
+
 class EntityCreationError(Exception):
     """Raised when an entity cannot be created"""
 

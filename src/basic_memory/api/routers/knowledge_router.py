@@ -27,10 +27,10 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 @router.post("/entities", response_model=EntityResponse)
 async def create_entity(
-        data: Entity,
-        background_tasks: BackgroundTasks,
-        entity_service: EntityServiceDep,
-        search_service: SearchServiceDep,
+    data: Entity,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    search_service: SearchServiceDep,
 ) -> EntityResponse:
     """Create an entity."""
     logger.info(f"request: create_entity with data={data}")
@@ -47,12 +47,12 @@ async def create_entity(
 
 @router.put("/entities/{permalink:path}", response_model=EntityResponse)
 async def create_or_update_entity(
-        permalink: Permalink,
-        data: Entity,
-        response: Response,
-        background_tasks: BackgroundTasks,
-        entity_service: EntityServiceDep,
-        search_service: SearchServiceDep,
+    permalink: Permalink,
+    data: Entity,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    search_service: SearchServiceDep,
 ) -> EntityResponse:
     """Create or update an entity. If entity exists, it will be updated, otherwise created."""
     logger.info(f"request: create_or_update_entity with permalink={permalink}, data={data}")
@@ -69,7 +69,9 @@ async def create_or_update_entity(
     await search_service.index_entity(entity, background_tasks=background_tasks)
     result = EntityResponse.model_validate(entity)
 
-    logger.info(f"response: create_or_update_entity with result={result}, status_code={response.status_code}")
+    logger.info(
+        f"response: create_or_update_entity with result={result}, status_code={response.status_code}"
+    )
     return result
 
 
@@ -78,8 +80,8 @@ async def create_or_update_entity(
 
 @router.get("/entities/{permalink:path}", response_model=EntityResponse)
 async def get_entity(
-        entity_service: EntityServiceDep,
-        permalink: str,
+    entity_service: EntityServiceDep,
+    permalink: str,
 ) -> EntityResponse:
     """Get a specific entity by ID.
 
@@ -102,8 +104,8 @@ async def get_entity(
 
 @router.get("/entities", response_model=EntityListResponse)
 async def get_entities(
-        entity_service: EntityServiceDep,
-        permalink: Annotated[list[str] | None, Query()] = None,
+    entity_service: EntityServiceDep,
+    permalink: Annotated[list[str] | None, Query()] = None,
 ) -> EntityListResponse:
     """Open specific entities"""
     logger.info(f"request: get_entities with permalinks={permalink}")
@@ -122,11 +124,11 @@ async def get_entities(
 
 @router.delete("/entities/{identifier:path}", response_model=DeleteEntitiesResponse)
 async def delete_entity(
-        identifier: str,
-        background_tasks: BackgroundTasks,
-        entity_service: EntityServiceDep,
-        link_resolver: LinkResolverDep,
-        search_service=Depends(get_search_service),
+    identifier: str,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    link_resolver: LinkResolverDep,
+    search_service=Depends(get_search_service),
 ) -> DeleteEntitiesResponse:
     """Delete a single entity and remove from search index."""
     logger.info(f"request: delete_entity with identifier={identifier}")
@@ -149,10 +151,10 @@ async def delete_entity(
 
 @router.post("/entities/delete", response_model=DeleteEntitiesResponse)
 async def delete_entities(
-        data: DeleteEntitiesRequest,
-        background_tasks: BackgroundTasks,
-        entity_service: EntityServiceDep,
-        search_service=Depends(get_search_service),
+    data: DeleteEntitiesRequest,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    search_service=Depends(get_search_service),
 ) -> DeleteEntitiesResponse:
     """Delete entities and remove from search index."""
     logger.info(f"request: delete_entities with data={data}")

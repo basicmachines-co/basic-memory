@@ -22,15 +22,15 @@ def mock_sync_service(mocker):
         modified={"modified.md"},
         deleted={"deleted.md"},
         moves={"old.md": "new.md"},
-        checksums={"test.md": "abcd1234", "modified.md": "efgh5678", "new.md": "ijkl9012"}
+        checksums={"test.md": "abcd1234", "modified.md": "efgh5678", "new.md": "ijkl9012"},
     )
     return service
+
 
 @pytest.fixture
 def mock_file_service(mocker):
     """Create mock file service."""
     return mocker.Mock(spec=FileService)
-
 
 
 @pytest.fixture
@@ -55,13 +55,8 @@ def test_filter_changes(watch_service):
 def test_state_add_event():
     """Test adding events to state."""
     state = WatchServiceState()
-    event = state.add_event(
-        path="test.md",
-        action="new",
-        status="success",
-        checksum="abcd1234"
-    )
-    
+    event = state.add_event(path="test.md", action="new", status="success", checksum="abcd1234")
+
     assert len(state.recent_events) == 1
     assert state.recent_events[0] == event
     assert event.path == "test.md"
@@ -78,7 +73,7 @@ def test_state_record_error():
     """Test error recording in state."""
     state = WatchServiceState()
     state.record_error("test error")
-    
+
     assert state.error_count == 1
     assert state.last_error is not None
     assert len(state.recent_events) == 1
@@ -91,7 +86,7 @@ def test_state_record_error():
 async def test_write_status(watch_service):
     """Test writing status file."""
     await watch_service.write_status()
-    
+
     assert watch_service.status_path.exists()
     data = json.loads(watch_service.status_path.read_text())
     assert data["running"] == False
@@ -104,7 +99,7 @@ def test_generate_table(watch_service):
     watch_service.state.add_event("test.md", "new", "success", "abcd1234")
     watch_service.state.add_event("modified.md", "modified", "success", "efgh5678")
     watch_service.state.record_error("test error")
-    
+
     table = watch_service.generate_table()
     assert table is not None
 
@@ -113,18 +108,17 @@ def test_generate_table(watch_service):
 async def test_handle_changes(watch_service, mock_sync_service):
     """Test handling file changes."""
     await watch_service.handle_changes(watch_service.config.home)
-    
+
     # Check sync service was called
     mock_sync_service.sync.assert_called_once_with(watch_service.config.home)
-    
+
     # Check events were recorded
     events = watch_service.state.recent_events
     assert len(events) == 4  # new, modified, moved, deleted
-    
+
     # Check specific events
     actions = [e.action for e in events]
     assert "new" in actions
     assert "modified" in actions
     assert "moved" in actions
     assert "deleted" in actions
-

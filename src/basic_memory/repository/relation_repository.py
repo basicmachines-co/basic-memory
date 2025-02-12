@@ -40,7 +40,6 @@ class RelationRepository(Repository[Relation]):
         )
         return await self.find_one(query)
 
-
     async def find_by_entities(self, from_id: int, to_id: int) -> Sequence[Relation]:
         """Find all relations between two entities."""
         query = select(Relation).where((Relation.from_id == from_id) & (Relation.to_id == to_id))
@@ -67,7 +66,6 @@ class RelationRepository(Repository[Relation]):
         query = select(Relation).filter(Relation.to_id.is_(None))
         result = await self.execute_query(query)
         return result.scalars().all()
-
 
     def get_load_options(self) -> List[LoaderOption]:
         return [selectinload(Relation.from_entity), selectinload(Relation.to_entity)]

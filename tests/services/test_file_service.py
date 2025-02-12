@@ -165,7 +165,3 @@ async def test_write_unicode_content(tmp_path: Path, file_service: FileService):
     content, _ = await file_service.read_file(test_path)
 
     assert content == test_content
-
-
-
-
