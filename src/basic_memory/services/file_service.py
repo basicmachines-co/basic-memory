@@ -1,16 +1,15 @@
 """Service for file operations with checksum tracking."""
 
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
 from loguru import logger
 
 from basic_memory import file_utils
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
-from basic_memory.markdown.utils import entity_model_to_markdown
 from basic_memory.models import Entity as EntityModel
-from basic_memory.services.exceptions import FileOperationError
 from basic_memory.schemas import Entity as EntitySchema
+from basic_memory.services.exceptions import FileOperationError
 
 
 class FileService:
@@ -37,63 +36,14 @@ class FileService:
 
     def get_entity_path(self, entity: Union[EntityModel, EntitySchema]) -> Path:
         """Generate absolute filesystem path for entity.
-        
+
         Args:
             entity: Entity model or schema with file_path attribute
-            
+
         Returns:
             Absolute Path to the entity file
         """
         return self.base_path / entity.file_path
-
-    # TODO remove this 
-    async def write_entity_file(
-        self,
-        entity: EntityModel,
-        content: Optional[str] = None,
-        expected_checksum: Optional[str] = None,
-    ) -> Tuple[Path, str]:
-        """Write entity to filesystem and return path and checksum.
-
-        Uses read->modify->write pattern:
-        1. Read existing file if it exists
-        2. Update with new content if provided
-        3. Write back atomically
-
-        Args:
-            entity: Entity model to write
-            content: Optional new content (preserves existing if None)
-            expected_checksum: Optional checksum to verify file hasn't changed
-
-        Returns:
-            Tuple of (file path, new checksum)
-
-        Raises:
-            FileOperationError: If write fails
-        """
-        try:
-            path = self.get_entity_path(entity)
-
-            # Read current state if file exists
-            if path.exists():
-                # read the existing file
-                existing_markdown = await self.markdown_processor.read_file(path)
-                # if content is supplied use it or existing content
-                content = content or existing_markdown.content
-            
-            # Create new file structure with provided content
-            markdown = entity_model_to_markdown(entity, content=content)
-
-            # Write back atomically
-            checksum = await self.markdown_processor.write_file(
-                path=path, markdown=markdown, expected_checksum=expected_checksum
-            )
-
-            return path, checksum
-
-        except Exception as e:
-            logger.exception(f"Failed to write entity file: {e}")
-            raise FileOperationError(f"Failed to write entity file: {e}")
 
     async def read_entity_content(self, entity: EntityModel) -> str:
         """Get entity's content without frontmatter or structured sections.
@@ -113,13 +63,12 @@ class FileService:
         markdown = await self.markdown_processor.read_file(file_path)
         return markdown.content or ""
 
-
     async def delete_entity_file(self, entity: EntityModel) -> None:
         """Delete entity file from filesystem.
-        
+
         Args:
             entity: Entity model whose file should be deleted
-            
+
         Raises:
             FileOperationError: If deletion fails
         """
@@ -136,7 +85,7 @@ class FileService:
 
         Returns:
             True if file exists, False otherwise
-            
+
         Raises:
             FileOperationError: If check fails
         """
@@ -168,7 +117,7 @@ class FileService:
         """
         path = Path(path)
         full_path = path if path.is_absolute() else self.base_path / path
-        
+
         try:
             # Ensure parent directory exists
             await file_utils.ensure_directory(full_path.parent)
@@ -202,7 +151,7 @@ class FileService:
         """
         path = Path(path)
         full_path = path if path.is_absolute() else self.base_path / path
-        
+
         try:
             content = path.read_text()
             checksum = await file_utils.compute_checksum(content)
@@ -225,4 +174,3 @@ class FileService:
         path = Path(path)
         full_path = path if path.is_absolute() else self.base_path / path
         full_path.unlink(missing_ok=True)
-

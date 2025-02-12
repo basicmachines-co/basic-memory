@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from basic_memory.schemas.base import (
     Relation,
     Permalink,
-    ObservationCategory,
     EntityType,
 )
 
@@ -42,7 +41,7 @@ class SearchNodesRequest(BaseModel):
     """
 
     query: Annotated[str, MinLen(1), MaxLen(200)]
-    category: Optional[ObservationCategory] = None
+    category: Optional[str] = None
 
 
 class GetEntitiesRequest(BaseModel):

@@ -85,29 +85,6 @@ class Entity(Base):
         return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}'"
 
 
-class ObservationCategory(str, Enum):
-    """Categories for observations about entities."""
-
-    TECH = "tech"
-    DESIGN = "design"
-    FEATURE = "feature"
-    NOTE = "note"
-    ISSUE = "issue"
-    TODO = "todo"
-
-    @classmethod
-    def _missing_(cls, value: object) -> Optional["ObservationCategory"]:
-        """Handle unknown category values by returning None."""
-        if value is None:
-            return None
-        # Try case-insensitive match if string
-        if isinstance(value, str):
-            try:
-                return cls[value.upper()]
-            except KeyError:
-                return None
-        return None
-
 
 class Observation(Base):
     """An observation about an entity.
@@ -127,8 +104,7 @@ class Observation(Base):
     category: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        default=ObservationCategory.NOTE.value,
-        server_default=ObservationCategory.NOTE.value,
+        default="note"
     )
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tags: Mapped[Optional[list[str]]] = mapped_column(

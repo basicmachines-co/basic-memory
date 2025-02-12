@@ -1,61 +1,51 @@
 """Tests for link resolution service."""
+from textwrap import dedent
 
 import pytest
 from datetime import datetime, timezone
 
 import pytest_asyncio
 
+from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.models.knowledge import Entity
 from basic_memory.services.link_resolver import LinkResolver
 
 
 @pytest_asyncio.fixture
-async def test_entities(entity_repository, file_service):
+async def test_entities(entity_service, file_service):
     """Create a set of test entities."""
-    entities = [
-        Entity(
+    
+    e1, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
             title="Core Service",
             entity_type="component",
-            permalink="components/core-service",
-            file_path="components/core-service.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
+            folder="components",
+        )
+    )
+    e2, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
             title="Service Config",
             entity_type="config",
-            permalink="config/service-config",
-            file_path="config/service-config.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
+            folder="config",
+        )
+    )
+    e3, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
             title="Auth Service",
             entity_type="component",
-            permalink="components/auth/service",
-            file_path="components/auth/service.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
+            folder="components",
+        )
+    )
+    e4, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
             title="Core Features",
             entity_type="specs",
-            permalink="specs/features/core",
-            file_path="specs/features/core.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-    ]
-    
-    for entity in entities:
-        await file_service.write_entity_file(entity)
+            folder="specs",
+        )
+    )
 
-    # Add to repository
-    return await entity_repository.add_all(entities)
+    
+    return [e1, e2, e3, e4]
 
 
 @pytest_asyncio.fixture
@@ -94,13 +84,13 @@ async def test_fuzzy_title_match_misspelling(link_resolver):
 async def test_fuzzy_title_partial_match(link_resolver):
     # Test partial match
     result = await link_resolver.resolve_link("Auth Serv")
-    assert result.permalink == "components/auth/service"
+    assert result.permalink == "components/auth-service"
 
 @pytest.mark.asyncio
 async def test_fuzzy_title_exact_match(link_resolver):
     # Test partial match
-    result = await link_resolver.resolve_link("service")
-    assert result.permalink == "components/auth/service"
+    result = await link_resolver.resolve_link("auth-service")
+    assert result.permalink == "components/auth-service"
 
 
 @pytest.mark.asyncio

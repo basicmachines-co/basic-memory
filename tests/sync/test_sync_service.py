@@ -314,10 +314,10 @@ modified: 2024-01-01
 
 
 @pytest.mark.asyncio
-async def test_sync_entity_with_invalid_category(
+async def test_sync_entity_with_random_categories(
     sync_service: SyncService, test_config: ProjectConfig
 ):
-    """Test handling of invalid observation categories."""
+    """Test handling of random observation categories."""
     project_dir = test_config.home
 
     content = """
@@ -330,8 +330,8 @@ modified: 2024-01-01
 # Test Categories
 
 ## Observations
-- [invalid_category] This is fine
-- [not_a_real_category] Should default to note
+- [random category] This is fine
+- [ a space category] Should default to note
 - This one is not an observation, should be ignored
 - [design] This is valid 
 """
@@ -349,8 +349,9 @@ modified: 2024-01-01
     categories = [obs.category for obs in entity.observations]
 
     # Invalid categories should be converted to default
-    assert "note" in categories
+    assert "random category" in categories
     # Valid categories preserved
+    assert "a space category" in categories
     assert "design" in categories
 
 

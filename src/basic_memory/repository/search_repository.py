@@ -251,7 +251,7 @@ class SearchRepository:
         params: Dict[str, Any],
     ) -> Result[Any]:
         """Execute a query asynchronously."""
-        logger.debug(f"Executing query: {query}, params: {params}")
+        #logger.debug(f"Executing query: {query}, params: {params}")
         async with db.scoped_session(self.session_maker) as session:
             start_time = time.perf_counter()
             result = await session.execute(query, params)

@@ -5,7 +5,6 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import notes
 from basic_memory.mcp.tools.knowledge import get_entity
-from basic_memory.schemas.base import Entity, ObservationCategory
 
 
 @pytest.mark.asyncio
@@ -19,7 +18,7 @@ async def test_get_basic_entity(client):
 # Test\nThis is a test note
 - [note] First observation
 """,
-        tags=["test", "documentation"]
+        tags=["test", "documentation"],
     )
 
     assert permalink  # Got a valid permalink
@@ -36,9 +35,7 @@ async def test_get_basic_entity(client):
     assert len(entity.observations) == 1
     obs = entity.observations[0]
     assert obs.content == "First observation"
-    assert obs.category == ObservationCategory.NOTE
-
-
+    assert obs.category == "note"
 
 
 @pytest.mark.asyncio

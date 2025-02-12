@@ -23,7 +23,7 @@ async def test_get_memory_context(client, test_graph):
     assert context.metadata.depth == 1  # default depth
     # assert context.metadata["timeframe"] == "7d"  # default timeframe
     assert isinstance(context.metadata.generated_at, datetime)
-    assert context.metadata.total_results == 2
+    assert context.metadata.total_results == 3
 
 
 @pytest.mark.asyncio

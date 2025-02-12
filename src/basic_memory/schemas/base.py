@@ -48,38 +48,6 @@ def to_snake_case(name: str) -> str:
 
 
 
-class ObservationCategory(str, Enum):
-    """Categories for structuring observations.
-
-    Categories help organize knowledge and make it easier to find later:
-    - tech: Implementation details and technical notes
-    - design: Architecture decisions and patterns
-    - feature: User-facing capabilities
-    - note: General observations (default)
-    - issue: Problems or concerns
-    - todo: Future work items
-
-    Categories are case-insensitive for easier use.
-    """
-
-    TECH = "tech"
-    DESIGN = "design"
-    FEATURE = "feature"
-    NOTE = "note"
-    ISSUE = "issue"
-    TODO = "todo"
-
-    @classmethod
-    def _missing_(cls, value: object) -> Optional["ObservationCategory"]:
-        """Handle case-insensitive lookup."""
-        if value is None:
-            return None
-        if isinstance(value, str):
-            try:
-                return cls(value.lower())
-            except ValueError:
-                return None
-        return None
 
 
 def validate_timeframe(timeframe: str) -> str:
@@ -147,7 +115,7 @@ ObservationStr = Annotated[
 class Observation(BaseModel):
     """A single observation with category, content, and optional context."""
 
-    category: ObservationCategory
+    category: Optional[str] = None
     content: ObservationStr
     tags: Optional[List[str]] = Field(default_factory=list)
     context: Optional[str] = None

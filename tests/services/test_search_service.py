@@ -34,7 +34,7 @@ async def test_search_permalink_relation_wildcard(search_service, test_graph):
     results = await search_service.search(SearchQuery(permalink_match="test/root/connects_to/*"))
     assert len(results) == 1
     permalinks = {r.permalink for r in results}
-    assert "test/root/connects-to/test/connected1" in permalinks
+    assert "test/root/connects-to/test/connected-entity-1" in permalinks
 
 
 @pytest.mark.skip("search prefix see:'https://sqlite.org/fts5.html#FTS5 Prefix Queries'")
@@ -73,7 +73,7 @@ async def test_text_search_features(search_service, test_graph):
     # Partial word match
     results = await search_service.search(SearchQuery(text="Connect"))
     assert len(results) > 0
-    assert any(r.file_path == "test/connected2.md" for r in results)
+    assert any(r.file_path == "test/Connected Entity 2.md" for r in results)
 
     # Multiple terms
     results = await search_service.search(SearchQuery(text="root note"))

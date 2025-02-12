@@ -1,4 +1,5 @@
 """Common test fixtures."""
+
 from textwrap import dedent
 from typing import AsyncGenerator
 from datetime import datetime, timezone
@@ -11,19 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig
-from basic_memory.db import DatabaseType, init_db
+from basic_memory.db import DatabaseType
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Base
-from basic_memory.models.knowledge import Entity, Observation, ObservationCategory, Relation
+from basic_memory.models.knowledge import Entity
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services import (
-EntityService,
-DatabaseService,
+    EntityService,
 )
 from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
@@ -147,7 +147,6 @@ def file_change_scanner(entity_repository) -> FileChangeScanner:
     return FileChangeScanner(entity_repository)
 
 
-
 @pytest_asyncio.fixture
 async def sync_service(
     file_change_scanner: FileChangeScanner,
@@ -227,13 +226,17 @@ async def full_entity(sample_entity, entity_repository, file_service, entity_ser
                 """),
         )
     )
-    #await file_service.write_entity_file(full_entity)
     return entity
 
 
 @pytest_asyncio.fixture
 async def test_graph(
-        entity_repository, relation_repository, observation_repository, search_service, file_service, entity_service
+    entity_repository,
+    relation_repository,
+    observation_repository,
+    search_service,
+    file_service,
+    entity_service,
 ):
     """Create a test knowledge graph with entities, relations and observations."""
 
@@ -308,29 +311,27 @@ async def test_graph(
     for entity in entities:
         await search_service.index_entity(entity)
 
-    search_content = await entity_repository.execute_query(text("select * from search_index"),
-                                                           use_query_options=False)
-    for row in search_content:
-        print(row)
+    # search_content = await entity_repository.execute_query(text("select * from search_index"),
+    #                                                        use_query_options=False)
+    # for row in search_content:
+    #     print(row)
+    # print("relation:")
+    # search_content = await entity_repository.execute_query(text("select * from search_index where type = 'relation'"),
+    #                                                        use_query_options=False)
+    # for row in search_content:
+    #     print(row)
+    #
+    # # In test_graph fixture after creating everything:
+    # print("Entities:")
+    # entities = await entity_repository.find_all()
+    # for e in entities:
+    #     print(f"- {e.title} (id={e.id})")
+    #
+    # print("\nRelations:")
+    # relations = await relation_repository.find_all()
+    # for r in relations:
+    #     print(f"- {r.from_id} -> {r.to_id} ({r.relation_type})")
 
-
-    print("relation:")
-    search_content = await entity_repository.execute_query(text("select * from search_index where type = 'relation'"),
-                                                           use_query_options=False)
-    for row in search_content:
-        print(row)
-
-    # In test_graph fixture after creating everything:
-    print("Entities:")
-    entities = await entity_repository.find_all()
-    for e in entities:
-        print(f"- {e.title} (id={e.id})")
-
-    print("\nRelations:")
-    relations = await relation_repository.find_all()
-    for r in relations:
-        print(f"- {r.from_id} -> {r.to_id} ({r.relation_type})")
-        
     return {
         "root": root,
         "connected1": connected_1,
@@ -340,164 +341,7 @@ async def test_graph(
         "relations": relations,
     }
 
-@pytest_asyncio.fixture
-async def test_graph_old(
-    entity_repository, relation_repository, observation_repository, search_service, file_service, entity_service
-):
-    """Create a test knowledge graph with entities, relations and observations."""
-    # Create some test entities
-    entities = [
-        Entity(
-            title="Root Entity",
-            entity_type="test",
-            permalink="test/root",
-            file_path="test/root.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
-            title="Connected Entity 1",
-            entity_type="test",
-            permalink="test/connected1",
-            file_path="test/connected1.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
-            title="Connected Entity 2",
-            entity_type="test",
-            permalink="test/connected2",
-            file_path="test/connected2.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
-            title="Deep Entity",
-            entity_type="deep",
-            permalink="test/deep",
-            file_path="test/deep.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-        Entity(
-            title="Deeper Entity",
-            entity_type="deeper",
-            permalink="test/deeper",
-            file_path="test/deeper.md",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        ),
-    ]
-    entities = await entity_repository.add_all(entities)
-    root, conn1, conn2, deep, deeper = entities
-
-    # Add some observations
-    root.observations = [
-        Observation(
-            content="Root note 1",
-            category=ObservationCategory.NOTE,
-        ),
-        Observation(
-            content="Root tech note",
-            category=ObservationCategory.TECH,
-        ),
-    ]
-
-    conn1.observations = [
-        Observation(
-            content="Connected 1 note",
-            category=ObservationCategory.NOTE,
-        )
-    ]
-    await observation_repository.add_all(root.observations)
-    await observation_repository.add_all(conn1.observations)
-
-    # Add relations
-    relations = [
-        # Direct connections to root
-        Relation(
-            from_id=root.id,
-            to_id=conn1.id,
-            to_name=conn1.title,
-            relation_type="connects_to",
-        ),
-        Relation(
-            from_id=conn1.id,
-            to_id=conn2.id,
-            to_name=conn2.title,
-            relation_type="connected_to",
-        ),
-        # Deep connection
-        Relation(
-            from_id=conn2.id,
-            to_id=deep.id,
-            to_name=deep.title,
-            relation_type="deep_connection",
-        ),
-        # Deeper connection
-        Relation(
-            from_id=deep.id,
-            to_id=deeper.id,
-            to_name=deeper.title,
-            relation_type="deeper_connection",
-        ),
-    ]
-
-    # Save relations
-    related_entities = await relation_repository.add_all(relations)
-
-    # get latest
-    entities = await entity_repository.find_all()
-
-    # make sure we have files for entities
-    for entity in entities:
-        await file_service.write_entity_file(entity)
-
-    # Index everything for search
-    for entity in entities:
-        await search_service.index_entity(entity)
-        
-    search_content = await entity_repository.execute_query(text("select * from search_index"), use_query_options=False)
-    for row in search_content:
-        print(row)
-
-    print("relation:")
-    search_content = await entity_repository.execute_query(text("select * from search_index where type = 'relation'"),
-                                                           use_query_options=False)
-    for row in search_content:
-        print(row)
-
-
-    # In test_graph fixture after creating everything:
-    print("Entities:")
-    entities = await entity_repository.find_all()
-    for e in entities:
-        print(f"- {e.title} (id={e.id})")
-
-    print("\nRelations:")
-    relations = await relation_repository.find_all()
-    for r in relations:
-        print(f"- {r.from_id} -> {r.to_id} ({r.relation_type})")
-
-    return {
-        "root": entities[0],
-        "connected1": conn1,
-        "connected2": conn2,
-        "deep": deep,
-        "observations": [e.observations for e in entities],
-        "relations": relations,
-    }
-
 
 @pytest_asyncio.fixture
 def watch_service(sync_service, file_service, test_config):
-    return WatchService(
-        sync_service=sync_service,
-        file_service=file_service,
-        config=test_config
-    )
+    return WatchService(sync_service=sync_service, file_service=file_service, config=test_config)
