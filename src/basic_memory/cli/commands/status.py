@@ -32,7 +32,7 @@ async def get_file_change_scanner(db_type=DatabaseType.FILESYSTEM) -> FileChange
         return file_change_scanner
 
 
-def add_files_to_tree(tree: Tree, paths: Set[str], style: str, checksums: Dict[str, str] = None):
+def add_files_to_tree(tree: Tree, paths: Set[str], style: str, checksums: Dict[str, str] | None = None):
     """Add files to tree, grouped by directory."""
     # Group by directory
     by_dir = {}
