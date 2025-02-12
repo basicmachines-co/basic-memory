@@ -106,20 +106,13 @@ class FileService:
 
         Returns:
             Raw content string without metadata sections
-
-        Raises:
-            FileOperationError: If entity file doesn't exist
         """
         logger.debug(f"Reading entity with permalink: {entity.permalink}")
 
-        try:
-            file_path = self.get_entity_path(entity)
-            markdown = await self.markdown_processor.read_file(file_path)
-            return markdown.content or ""
+        file_path = self.get_entity_path(entity)
+        markdown = await self.markdown_processor.read_file(file_path)
+        return markdown.content or ""
 
-        except Exception as e:
-            logger.error(f"Failed to read entity content: {e}")
-            raise FileOperationError(f"Failed to read entity content: {e}")
 
     async def delete_entity_file(self, entity: EntityModel) -> None:
         """Delete entity file from filesystem.
@@ -130,12 +123,8 @@ class FileService:
         Raises:
             FileOperationError: If deletion fails
         """
-        try:
-            path = self.get_entity_path(entity)
-            await self.delete_file(path)
-        except Exception as e:
-            logger.error(f"Failed to delete entity file: {e}")
-            raise FileOperationError(f"Failed to delete entity file: {e}")
+        path = self.get_entity_path(entity)
+        await self.delete_file(path)
 
     async def exists(self, path: Union[Path, str]) -> bool:
         """Check if file exists at the provided path.
@@ -232,36 +221,8 @@ class FileService:
 
         Args:
             path: Path to delete (Path object or string)
-
-        Raises:
-            FileOperationError: If deletion fails
         """
         path = Path(path)
         full_path = path if path.is_absolute() else self.base_path / path
-        try:
-            full_path.unlink(missing_ok=True)
-        except Exception as e:
-            logger.error(f"Failed to delete file {full_path}: {e}")
-            raise FileOperationError(f"Failed to delete file: {e}")
+        full_path.unlink(missing_ok=True)
 
-    def path(self, path_str: str, absolute: bool = False) -> Path:
-        """Convert string path to Path object.
-
-        Args:
-            path_str: String path to convert
-            absolute: Whether to return absolute path
-
-        Returns:
-            Path object, optionally made absolute relative to base_path
-            
-        Raises:
-            ValueError: If path is not relative to base_path when required
-        """
-        try:
-            path = Path(path_str)
-            if absolute:
-                return (self.base_path / path).resolve()
-            else:
-                return path.relative_to(self.base_path)
-        except ValueError as e:
-            raise ValueError(f"Path {path_str} is not relative to {self.base_path}: {e}")

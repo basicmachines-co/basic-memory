@@ -1,5 +1,5 @@
 """Common test fixtures."""
-
+from textwrap import dedent
 from typing import AsyncGenerator
 from datetime import datetime, timezone
 
@@ -20,6 +20,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services import (
 EntityService,
 DatabaseService,
@@ -206,57 +207,142 @@ async def sample_entity(entity_repository: EntityRepository) -> Entity:
 
 
 @pytest_asyncio.fixture
-async def full_entity(sample_entity, entity_repository, file_service) -> Entity:
+async def full_entity(sample_entity, entity_repository, file_service, entity_service) -> Entity:
     """Create a search test entity."""
 
-    search_entity = await entity_repository.create(
-        {
-            "title": "Searchable Entity",
-            "entity_type": "test",
-            "permalink": "test/search-entity",
-            "file_path": "test/search_entity.md",
-            "content_type": "text/markdown",
-            "created_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-        }
+    # Create test entity
+    entity, created = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Search_Entity",
+            folder="test",
+            entity_type="test",
+            content=dedent("""
+                ## Observations
+                - [tech] Tech note
+                - [design] Design note
+                
+                ## Relations
+                - out1 [[Test Entity]]
+                - out2 [[Test Entity]]
+                """),
+        )
     )
-
-    observations = [
-        Observation(
-            content="Tech note",
-            category=ObservationCategory.TECH,
-        ),
-        Observation(
-            content="Design note",
-            category=ObservationCategory.DESIGN,
-        ),
-    ]
-    relations = [
-        Relation(
-            from_id=search_entity.id,
-            to_id=sample_entity.id,
-            to_name=sample_entity.title,
-            relation_type="out1",
-        ),
-        Relation(
-            from_id=search_entity.id,
-            to_id=sample_entity.id,
-            to_name=sample_entity.title,
-            relation_type="out2",
-        ),
-    ]
-    search_entity.observations = observations
-    search_entity.outgoing_relations = relations
-    full_entity = await entity_repository.add(search_entity)
-
-    # write file
-    await file_service.write_entity_file(full_entity)
-    return full_entity
+    #await file_service.write_entity_file(full_entity)
+    return entity
 
 
 @pytest_asyncio.fixture
 async def test_graph(
-    entity_repository, relation_repository, observation_repository, search_service, file_service
+        entity_repository, relation_repository, observation_repository, search_service, file_service, entity_service
+):
+    """Create a test knowledge graph with entities, relations and observations."""
+
+    # Create some test entities in reverse order so they will be linked
+    deeper, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Deeper Entity",
+            entity_type="deeper",
+            folder="test",
+            content=dedent("""
+                # Deeper Entity
+                """),
+        )
+    )
+
+    deep, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Deep Entity",
+            entity_type="deep",
+            folder="test",
+            content=dedent("""
+                # Deep Entity
+                - deeper_connection [[Deeper Entity]]
+                """),
+        )
+    )
+
+    connected_2, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Connected Entity 2",
+            entity_type="test",
+            folder="test",
+            content=dedent("""
+                # Connected Entity 2
+                - deep_connection [[Deep Entity]]
+                """),
+        )
+    )
+
+    connected_1, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Connected Entity 1",
+            entity_type="test",
+            folder="test",
+            content=dedent("""
+                # Connected Entity 1
+                - [note] Connected 1 note
+                - connected_to [[Connected Entity 2]]
+                """),
+        )
+    )
+
+    root, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Root",
+            entity_type="test",
+            folder="test",
+            content=dedent("""
+                # Root Entity
+                - [note] Root note 1
+                - [tech] Root tech note
+                - connects_to [[Connected Entity 1]]
+                """),
+        )
+    )
+
+    # get latest
+    entities = await entity_repository.find_all()
+    relations = await relation_repository.find_all()
+
+    # Index everything for search
+    for entity in entities:
+        await search_service.index_entity(entity)
+
+    search_content = await entity_repository.execute_query(text("select * from search_index"),
+                                                           use_query_options=False)
+    for row in search_content:
+        print(row)
+
+
+    print("relation:")
+    search_content = await entity_repository.execute_query(text("select * from search_index where type = 'relation'"),
+                                                           use_query_options=False)
+    for row in search_content:
+        print(row)
+
+    # In test_graph fixture after creating everything:
+    print("Entities:")
+    entities = await entity_repository.find_all()
+    for e in entities:
+        print(f"- {e.title} (id={e.id})")
+
+    print("\nRelations:")
+    relations = await relation_repository.find_all()
+    for r in relations:
+        print(f"- {r.from_id} -> {r.to_id} ({r.relation_type})")
+        
+    return {
+        "root": root,
+        "connected1": connected_1,
+        "connected2": connected_2,
+        "deep": deep,
+        "observations": [e.observations for e in entities],
+        "relations": relations,
+    }
+
+@pytest_asyncio.fixture
+async def test_graph_old(
+    entity_repository, relation_repository, observation_repository, search_service, file_service, entity_service
 ):
     """Create a test knowledge graph with entities, relations and observations."""
     # Create some test entities
@@ -375,6 +461,28 @@ async def test_graph(
     # Index everything for search
     for entity in entities:
         await search_service.index_entity(entity)
+        
+    search_content = await entity_repository.execute_query(text("select * from search_index"), use_query_options=False)
+    for row in search_content:
+        print(row)
+
+    print("relation:")
+    search_content = await entity_repository.execute_query(text("select * from search_index where type = 'relation'"),
+                                                           use_query_options=False)
+    for row in search_content:
+        print(row)
+
+
+    # In test_graph fixture after creating everything:
+    print("Entities:")
+    entities = await entity_repository.find_all()
+    for e in entities:
+        print(f"- {e.title} (id={e.id})")
+
+    print("\nRelations:")
+    relations = await relation_repository.find_all()
+    for r in relations:
+        print(f"- {r.from_id} -> {r.to_id} ({r.relation_type})")
 
     return {
         "root": entities[0],

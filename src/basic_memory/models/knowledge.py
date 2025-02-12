@@ -80,20 +80,6 @@ class Entity(Base):
         """Get all relations (incoming and outgoing) for this entity."""
         return self.incoming_relations + self.outgoing_relations
 
-    @validates("permalink")
-    def validate_permalink(self, key, value):
-        """Validate permalink format.
-
-        Requirements:
-        1. Must be valid URI path component
-        2. Only lowercase letters, numbers, and hyphens (no underscores)
-        3. Path segments separated by forward slashes
-        4. No leading/trailing hyphens in segments
-        """
-        if not value:
-            raise ValueError("Permalink must not be None")
-
-        return value
 
     def __repr__(self) -> str:
         return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}'"
@@ -163,7 +149,7 @@ class Observation(Base):
             f"{self.entity.permalink}/observations/{self.category}/{self.content}"
         )
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # pragma: no cover
         return f"Observation(id={self.id}, entity_id={self.entity_id}, content='{self.content}')"
 
 

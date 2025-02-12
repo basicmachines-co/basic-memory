@@ -95,9 +95,6 @@ class LinkResolver:
         2. Word matches in path
         3. Overall search score
         """
-        if not results:
-            raise ValueError("Cannot select from empty results")
-
         # Get search terms for matching
         terms = search_text.lower().split()
 

@@ -47,13 +47,6 @@ def to_snake_case(name: str) -> str:
     return s2.lower()
 
 
-def validate_path_format(path: str) -> str:
-    """Validate path has the correct format: not empty."""
-    if not path or not isinstance(path, str):
-        raise ValueError("Path must be a non-empty string")
-
-    return path
-
 
 class ObservationCategory(str, Enum):
     """Categories for structuring observations.
@@ -116,7 +109,7 @@ def validate_timeframe(timeframe: str) -> str:
 
 TimeFrame = Annotated[str, BeforeValidator(validate_timeframe)]
 
-Permalink = Annotated[str, BeforeValidator(validate_path_format)]
+Permalink = Annotated[str, MinLen(1)]
 """Unique identifier in format '{path}/{normalized_name}'."""
 
 

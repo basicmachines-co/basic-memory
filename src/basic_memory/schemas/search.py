@@ -49,8 +49,6 @@ class SearchQuery(BaseModel):
     @classmethod
     def validate_date(cls, v: Optional[Union[datetime, str]]) -> Optional[str]:
         """Convert datetime to ISO format if needed."""
-        if v is None:
-            return None
         if isinstance(v, datetime):
             return v.isoformat()
         return v

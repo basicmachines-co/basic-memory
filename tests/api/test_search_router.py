@@ -11,7 +11,6 @@ from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.search import SearchItemType, SearchResponse
 
 
-
 @pytest_asyncio.fixture
 async def indexed_entity(init_search_index, full_entity, search_service):
     """Create an entity and index it."""
@@ -22,17 +21,17 @@ async def indexed_entity(init_search_index, full_entity, search_service):
 @pytest.mark.asyncio
 async def test_search_basic(client, indexed_entity):
     """Test basic text search."""
-    response = await client.post("/search/", json={"text": "searchable"})
+    response = await client.post("/search/", json={"text": "search"})
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 3
-    
+
     found = False
     for r in search_results.results:
-        if r.type == SearchItemType.ENTITY.value:    
+        if r.type == SearchItemType.ENTITY.value:
             assert r.permalink == indexed_entity.permalink
             found = True
-    
+
     assert found, "Expected to find indexed entity in results"
 
 
@@ -89,6 +88,7 @@ async def test_search_with_date_filter(client, indexed_entity):
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 0
+
 
 @pytest.mark.skip("search scoring is not implemented yet")
 @pytest.mark.asyncio
@@ -152,8 +152,6 @@ async def test_reindex(client, search_service, entity_service, session_maker):
     search_response = await client.post("/search/", json={"text": "test"})
     search_results = SearchResponse.model_validate(search_response.json())
     assert len(search_results.results) == 1
-    
-    
 
 
 @pytest.mark.asyncio

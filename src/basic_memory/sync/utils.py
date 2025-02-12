@@ -5,8 +5,6 @@ from typing import Set, Dict, Optional
 
 from watchfiles import Change
 
-from basic_memory.services.file_service import FileService
-
 
 @dataclass
 class FileChange:
@@ -21,28 +19,6 @@ class FileChange:
     change_type: Change
     path: str
     checksum: Optional[str] = None
-
-    @classmethod
-    async def from_path(
-        cls, path: str, change_type: Change, file_service: FileService
-    ) -> "FileChange":
-        """Create FileChange from a path, computing checksum if file exists.
-
-        Args:
-            path: Path to the file
-            change_type: Type of change detected
-            file_service: Service to read file and compute checksum
-
-        Returns:
-            FileChange with computed checksum for non-deleted files
-        """
-        file_path = file_service.path(path)
-        content, checksum = (
-            await file_service.read_file(file_path)
-            if change_type != Change.deleted
-            else (None, None)
-        )
-        return cls(path=path, change_type=change_type, checksum=checksum)
 
 
 @dataclass
@@ -70,8 +46,3 @@ class SyncReport:
     def total_changes(self) -> int:
         """Total number of changes."""
         return len(self.new) + len(self.modified) + len(self.deleted) + len(self.moves)
-
-    @property
-    def synced_files(self) -> int:
-        """Total number of files synced."""
-        return len(self.new) + len(self.modified) + len(self.moves)

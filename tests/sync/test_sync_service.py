@@ -39,6 +39,7 @@ type: knowledge
 
 ## Relations
 - depends_on [[target-doc]]
+- depends_on [[target-doc]] # duplicate
 """
     await create_test_file(project_dir / "source.md", source_content)
 
@@ -47,7 +48,7 @@ type: knowledge
 
     # Verify forward reference
     source = await entity_service.get_by_permalink("source")
-    assert len(source.relations) == 1
+    assert len(source.relations) == 2
     assert source.relations[0].to_id is None
     assert source.relations[0].to_name == "target-doc"
 
@@ -67,7 +68,7 @@ Target content
     # Verify reference is now resolved
     source = await entity_service.get_by_permalink("source")
     target = await entity_service.get_by_permalink("target-doc")
-    assert len(source.relations) == 1
+    assert len(source.relations) == 2
     assert source.relations[0].to_id == target.id
     assert source.relations[0].to_name == target.title
 
@@ -720,6 +721,7 @@ Content for move test
     content = """
 ---
 type: knowledge
+permalink: old/test-move
 ---
 # Test Move
 Content for move test

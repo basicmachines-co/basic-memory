@@ -71,6 +71,15 @@ async def test_bulk_create(repository):
     assert found is not None
     assert found.name == "Test 0"
 
+@pytest.mark.asyncio
+async def test_find_all(repository):
+    """Test finding multiple entities by IDs."""
+    # Create test data
+    instances = [ModelTest(id=f"test_{i}", name=f"Test {i}") for i in range(5)]
+    await repository.create_all([instance.__dict__ for instance in instances])
+
+    found = await repository.find_all(limit=3)
+    assert len(found) == 3
 
 @pytest.mark.asyncio
 async def test_find_by_ids(repository):
@@ -152,4 +161,24 @@ async def test_update_model(repository):
     assert modified is not None
     assert modified.name == "Updated"
 
+@pytest.mark.asyncio
+async def test_update_model_not_found(repository):
+    """Test finding entities modified since a timestamp."""
+    # Create initial test data
+    instance = ModelTest(id="test_add", name="Test Add")
+    await repository.add(instance)
 
+    modified = await repository.update(0, {})
+    assert modified is None
+
+
+@pytest.mark.asyncio
+async def test_count(repository):
+    """Test bulk creation of entities."""
+    # Create test instances
+    instance = ModelTest(id="test_add", name="Test Add")
+    await repository.add(instance)
+
+    # Verify we can count in db
+    count = await repository.count()
+    assert count == 1

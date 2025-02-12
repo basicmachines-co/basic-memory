@@ -10,7 +10,7 @@ from basic_memory.markdown.entity_parser import parse
 from basic_memory.models import Entity, ObservationCategory, Observation as ObservationModel
 from basic_memory.utils import generate_permalink
 
-
+# TODO remove after file_service.write
 def entity_model_to_markdown(entity: Entity, content: Optional[str] = None) -> EntityMarkdown:
     """
     Converts an entity model to its Markdown representation.

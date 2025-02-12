@@ -159,6 +159,8 @@ def test_permalink_generation():
         ("next week", False),
         ("", False),
         ("0d", True),
+        ("366d", False),
+        (1, False),
     ],
 )
 def test_timeframe_validation(timeframe: str, expected_valid: bool):

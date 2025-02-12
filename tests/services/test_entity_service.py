@@ -10,7 +10,7 @@ from basic_memory.repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService
-from basic_memory.services.exceptions import EntityNotFoundError
+from basic_memory.services.exceptions import EntityNotFoundError, EntityCreationError
 from basic_memory.utils import generate_permalink
 
 
@@ -51,6 +51,37 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
     # Verify frontmatter contents
     assert metadata["permalink"] == entity.permalink
     assert metadata["type"] == entity.entity_type
+
+@pytest.mark.asyncio
+async def test_create_entity_file_exists(entity_service: EntityService, file_service: FileService):
+    """Test successful entity creation."""
+    entity_data = EntitySchema(
+        title="Test Entity",
+        folder="",
+        entity_type="test",
+        content="first"
+    )
+
+    # Act
+    entity = await entity_service.create_entity(entity_data)
+
+    # Verify file was written
+    file_path = file_service.get_entity_path(entity)
+    assert await file_service.exists(file_path)
+
+    file_content, _ = await file_service.read_file(file_path)
+    assert '---\ntitle: Test Entity\ntype: test\npermalink: test-entity\n---\n\nfirst' == file_content
+
+    entity_data = EntitySchema(
+        title="Test Entity",
+        folder="",
+        entity_type="test",
+        content="second"
+    )
+
+    with pytest.raises(EntityCreationError):
+        await entity_service.create_entity(entity_data)
+    
 
 @pytest.mark.asyncio
 async def test_create_entity_unique_permalink(test_config, entity_service: EntityService, file_service: FileService, entity_repository: EntityRepository):
@@ -325,7 +356,10 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
 async def test_create_with_content(
     entity_service: EntityService, file_service: FileService
 ):
-    content = """# Git Workflow Guide
+    content = """---
+permalink: git-workflow-guide
+---
+# Git Workflow Guide
         
 A guide to our [[Git]] workflow. This uses some ideas from [[Trunk Based Development]].
 
@@ -467,6 +501,3 @@ See the [[Git Cheat Sheet]] for reference.
 
     # assert content is in file
     assert update_content.strip() in file_content
-
-
-

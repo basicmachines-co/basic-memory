@@ -97,13 +97,6 @@ class Repository[T: Base]:
             entities = (self.Model,)
         return select(*entities)
 
-    async def refresh(self, instance: T, relationships: list[str] | None = None) -> None:
-        """Refresh instance and optionally specified relationships."""
-        logger.debug(f"Refreshing {self.Model.__name__} instance: {getattr(instance, 'id', None)}")
-        async with db.scoped_session(self.session_maker) as session:
-            await session.refresh(instance, relationships or [])
-            logger.debug(f"Refreshed relationships: {relationships}")
-
     async def find_all(self, skip: int = 0, limit: Optional[int] = 0) -> Sequence[T]:
         """Fetch records from the database with pagination."""
         logger.debug(f"Finding all {self.Model.__name__} (skip={skip}, limit={limit})")

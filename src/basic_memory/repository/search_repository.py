@@ -248,16 +248,13 @@ class SearchRepository:
     async def execute_query(
         self,
         query: Executable,
-        params: Optional[Dict[str, Any]] = None,
+        params: Dict[str, Any],
     ) -> Result[Any]:
         """Execute a query asynchronously."""
-        #logger.debug(f"Executing query: {query}")
+        logger.debug(f"Executing query: {query}, params: {params}")
         async with db.scoped_session(self.session_maker) as session:
             start_time = time.perf_counter()
-            if params:
-                result = await session.execute(query, params)
-            else:
-                result = await session.execute(query)
+            result = await session.execute(query, params)
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
             logger.debug(f"Query executed successfully in {elapsed_time:.2f}s.")

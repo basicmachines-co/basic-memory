@@ -96,6 +96,12 @@ async def test_fuzzy_title_partial_match(link_resolver):
     result = await link_resolver.resolve_link("Auth Serv")
     assert result.permalink == "components/auth/service"
 
+@pytest.mark.asyncio
+async def test_fuzzy_title_exact_match(link_resolver):
+    # Test partial match
+    result = await link_resolver.resolve_link("service")
+    assert result.permalink == "components/auth/service"
+
 
 @pytest.mark.asyncio
 async def test_link_text_normalization(link_resolver):

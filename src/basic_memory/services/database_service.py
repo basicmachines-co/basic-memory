@@ -68,9 +68,6 @@ class DatabaseService:
         Returns:
             Optional[Path]: Path to backup file if created, None if no DB exists
         """
-        if self.db_type == db.DatabaseType.MEMORY:
-            return None  # Skip backups for in-memory DB
-
         if not self.db_path.exists():
             return None
 
@@ -132,8 +129,6 @@ class DatabaseService:
 
     async def cleanup_backups(self, keep_count: int = 5):
         """Clean up old database backups, keeping the N most recent."""
-        if self.db_type == db.DatabaseType.MEMORY:
-            return  # Skip cleanup for in-memory DB
 
         backup_pattern = "*.backup"  # Use relative pattern
         backups = sorted(

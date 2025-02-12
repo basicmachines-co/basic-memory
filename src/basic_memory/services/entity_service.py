@@ -177,10 +177,6 @@ class EntityService(BaseService[EntityModel]):
             logger.info(f"Entity not found: {permalink}")
             return True  # Already deleted
 
-        except Exception as e:
-            logger.error(f"Failed to delete entity: {e}")
-            raise
-
     async def get_by_permalink(self, permalink: str) -> EntityModel:
         """Get entity by type and name combination."""
         logger.debug(f"Getting entity by permalink: {permalink}")
@@ -189,24 +185,6 @@ class EntityService(BaseService[EntityModel]):
             raise EntityNotFoundError(f"Entity not found: {permalink}")
         return db_entity
 
-    async def get_all(self) -> Sequence[EntityModel]:
-        """Get all entities."""
-        return await self.repository.find_all()
-
-    async def get_entity_types(self) -> List[str]:
-        """Get list of all distinct entity types in the system."""
-        logger.debug("Getting all distinct entity types")
-        return await self.repository.get_entity_types()
-
-    async def list_entities(
-        self,
-        entity_type: Optional[str] = None,
-        sort_by: Optional[str] = "updated_at",
-        include_related: bool = False,
-    ) -> Sequence[EntityModel]:
-        """List entities with optional filtering and sorting."""
-        logger.debug(f"Listing entities: type={entity_type} sort={sort_by}")
-        return await self.repository.list_entities(entity_type=entity_type, sort_by=sort_by)
 
     async def get_entities_by_permalinks(self, permalinks: List[str]) -> Sequence[EntityModel]:
         """Get specific nodes and their relationships."""
@@ -228,9 +206,9 @@ class EntityService(BaseService[EntityModel]):
         logger.debug(f"Creating entity: {markdown.frontmatter.title}")
         model = entity_model_from_markdown(file_path, markdown)
 
-        # Mark as incomplete sync
+        # Mark as incomplete because we still need to add relations
         model.checksum = None
-        return await self.add(model)
+        return await self.repository.add(model)
 
     async def update_entity_and_observations(
         self, file_path: Path, markdown: EntityMarkdown
@@ -243,8 +221,6 @@ class EntityService(BaseService[EntityModel]):
         logger.debug(f"Updating entity and observations: {file_path}")
 
         db_entity = await self.repository.get_by_file_path(str(file_path))
-        if not db_entity:
-            raise EntityNotFoundError(f"Entity not found: {file_path}")
 
         # Clear observations for entity
         await self.observation_repository.delete_by_fields(entity_id=db_entity.id)

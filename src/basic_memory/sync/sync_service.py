@@ -59,8 +59,6 @@ class SyncService:
             for permalink in permalinks:
                 await self.search_service.delete_by_permalink(permalink)
 
-        else:
-            logger.debug(f"No entity found to delete: {file_path}")
 
     async def sync(self, directory: Path) -> SyncReport:
         """Sync knowledge files with database."""

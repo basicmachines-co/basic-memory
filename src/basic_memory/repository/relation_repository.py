@@ -40,11 +40,6 @@ class RelationRepository(Repository[Relation]):
         )
         return await self.find_one(query)
 
-    async def find_by_entity(self, from_entity_id: int) -> Sequence[Relation]:
-        """Find all relations from a specific entity."""
-        query = select(Relation).filter(Relation.from_id == from_entity_id)
-        result = await self.execute_query(query)
-        return result.scalars().all()
 
     async def find_by_entities(self, from_id: int, to_id: int) -> Sequence[Relation]:
         """Find all relations between two entities."""

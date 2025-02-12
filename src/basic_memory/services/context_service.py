@@ -124,7 +124,7 @@ class ContextService:
         if not type_id_pairs:
             return []
 
-        logger.debug(f"Finding connected items for {len(type_id_pairs)} with depth {max_depth}")
+        logger.debug(f"Finding connected items for {type_id_pairs} with depth {max_depth}")
 
         # Build the VALUES clause directly since SQLite doesn't handle parameterized IN well
         values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
