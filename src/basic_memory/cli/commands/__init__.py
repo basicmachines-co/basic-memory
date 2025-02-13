@@ -1,5 +1,5 @@
-"""Command module exports."""
+"""CLI commands for basic-memory."""
 
-from . import status, sync, import_memory_json
+from . import status, sync, db, import_memory_json
 
-__all__ = ["status", "sync", "import_memory_json"]
+__all__ = ["status", "sync", "db", "import_memory_json"]
