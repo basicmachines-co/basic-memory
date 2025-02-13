@@ -87,29 +87,10 @@ async def init_db() -> None:
         await session.commit()
 
 
-async def drop_db() -> None:
-    """Drop all database tables."""
-    global _engine, _session_maker
-
-    if _session_maker is None:  # pragma: no cover
-        logger.warning("No database session maker to drop")
-        return
-
-    logger.info("Dropping tables...")
-    async with scoped_session(_session_maker) as session:
-        conn = await session.connection()
-        await conn.run_sync(Base.metadata.drop_all)
-        await session.commit()
-
-    # reset global engine and session_maker
-    _engine = None
-    _session_maker = None
-
-
 async def get_or_create_db(
     db_path: Path,
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
-) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
     """Get or create database engine and session maker."""
     global _engine, _session_maker
 

@@ -8,36 +8,15 @@ from loguru import logger
 
 from basic_memory import db
 from basic_memory.api.routers import knowledge, search, memory, resource
-from basic_memory.config import config
-from basic_memory.services import DatabaseService
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # pragma: no cover
     """Lifecycle manager for the FastAPI app."""
     logger.info("Starting Basic Memory API")
-
-    # check the db state
-    await check_db(app)
     yield
     logger.info("Shutting down Basic Memory API")
     await db.shutdown_db()
-
-
-async def check_db(app: FastAPI):  # pragma: no cover
-    logger.info("Checking database state")
-
-    # Initialize DB management service
-    db_service = DatabaseService(
-        config=config,
-    )
-
-    # Check and initialize DB if needed
-    if not await db_service.check_db():
-        raise RuntimeError("Database initialization failed")
-
-    # Clean up old backups on shutdown
-    await db_service.cleanup_backups()
 
 
 # Initialize FastAPI app
