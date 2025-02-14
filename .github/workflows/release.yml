@@ -44,3 +44,40 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ steps.release.outputs.tag }}
+
+  build-macos:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build macOS installer
+        run: |
+          uv pip install -e ".[dev]"
+          cd installer
+          uv run python setup.py bdist_mac
+
+      - name: Zip macOS installer
+        run: |
+          cd installer/dist
+          zip -r "Basic-Memory-Installer-${{ needs.release.outputs.tag }}.zip" "Basic Memory Installer.app"
+
+      - name: Upload macOS installer
+        uses: softprops/action-gh-release@v1
+        with:
+          files: installer/dist/Basic-Memory-Installer-${{ needs.release.outputs.tag }}.zip
+          tag_name: ${{ needs.release.outputs.tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}
