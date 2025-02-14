@@ -14,15 +14,18 @@ if sys.platform == "win32":
         "include_msvcr": True,  # Include Visual C++ runtime
     })
     target_name = "Basic Memory Installer.exe"
+    icon = None  # We'll add Windows icon later
 else:  # darwin
     base = None  # Don't use GUI base for macOS
     target_name = "Basic Memory Installer"
+    icon = "Basic.icns"
 
 executables = [
     Executable(
         script="installer.py",
         target_name=target_name,
         base=base,
+        icon=icon
     )
 ]
 
@@ -34,6 +37,7 @@ setup(
         "build_exe": build_exe_options,
         "bdist_mac": {
             "bundle_name": "Basic Memory Installer",
+            "iconfile": icon if sys.platform == "darwin" else None
         }
     },
     executables=executables,
