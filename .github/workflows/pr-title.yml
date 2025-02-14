@@ -1,0 +1,41 @@
+name: "Pull Request Title"
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Configure allowed types based on what we want in our changelog
+          types: |
+            feat
+            fix
+            chore
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+          # Require at least one from scope list (optional)
+          scopes: |
+            core
+            cli
+            api
+            mcp
+            sync
+            ui
+            deps
+            installer
+          # Allow breaking changes (needs "!" after type/scope)
+          requireScopeForBreakingChange: true
