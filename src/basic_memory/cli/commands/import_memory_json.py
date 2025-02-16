@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from basic_memory.cli.app import app
+from basic_memory.cli.app import app, import_app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter, Observation, Relation
@@ -98,7 +98,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
     return MarkdownProcessor(entity_parser)
 
 
-@app.command()
+@import_app.command()
 def import_json(
     json_path: Path = typer.Argument(..., help="Path to memory.json file to import"),
 ):
