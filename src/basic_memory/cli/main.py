@@ -4,7 +4,7 @@ from basic_memory.cli.app import app  # pragma: no cover
 from basic_memory.utils import setup_logging  # pragma: no cover
 
 # Register commands
-from basic_memory.cli.commands import (
+from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     status,
     sync,
     db,
@@ -12,7 +12,7 @@ from basic_memory.cli.commands import (
     mcp,
     import_claude_conversations,
     import_claude_projects,
-)  # noqa: F401  # pragma: no cover
+)
 
 
 # Set up logging when module is imported

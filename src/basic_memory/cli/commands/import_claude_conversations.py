@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Annotated, Optional
+from typing import Dict, Any, List, Annotated
 
 import typer
 from loguru import logger
@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from basic_memory.cli.app import app, import_app, claude_app
+from basic_memory.cli.app import claude_app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter
@@ -74,7 +74,7 @@ def format_chat_markdown(
 
 
 def format_chat_content(
-    base_path: str, name: str, messages: List[Dict[str, Any]], created_at: str, modified_at: str
+    base_path: Path, name: str, messages: List[Dict[str, Any]], created_at: str, modified_at: str
 ) -> EntityMarkdown:
     """Convert chat messages to Basic Memory entity format."""
 
@@ -161,8 +161,12 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 @claude_app.command(name="conversations", help="Import chat conversations from Claude.ai.")
 def import_claude(
-    conversations_json: Annotated[Path, typer.Argument(..., help="Path to conversations.json file")] = "conversations.json",
-    folder: Annotated[str, typer.Option(help="The folder to place the files in.")] = "conversations",
+    conversations_json: Annotated[
+        Path, typer.Argument(..., help="Path to conversations.json file")
+    ] = Path("conversations.json"),
+    folder: Annotated[
+        str, typer.Option(help="The folder to place the files in.")
+    ] = "conversations",
 ):
     """Import chat conversations from conversations2.json format.
 
@@ -178,14 +182,16 @@ def import_claude(
         if not conversations_json.exists():
             typer.echo(f"Error: File not found: {conversations_json}", err=True)
             raise typer.Exit(1)
-    
+
         # Get markdown processor
         markdown_processor = asyncio.run(get_markdown_processor())
 
         # Process the file
         base_path = config.home / folder
         console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
-        results = asyncio.run(process_conversations_json(conversations_json, base_path, markdown_processor))
+        results = asyncio.run(
+            process_conversations_json(conversations_json, base_path, markdown_processor)
+        )
 
         # Show results
         console.print(

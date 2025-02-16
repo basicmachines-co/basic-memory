@@ -253,6 +253,77 @@ Basic Memory is built on some key ideas:
 - Simple text patterns can capture rich meaning
 - Local-first doesn't mean feature-poor
 
+## Importing data
+
+Basic memory has cli commands to import data from several formats into Markdown files
+
+### Claude.ai
+
+First, request an export of your data from your Claude account. The data will be emailed to you in several files,
+including
+`conversations.json` and `projects.json`.
+
+Import Claude.ai conversation data
+
+```bash
+ basic-memory import claude conversations conversations.json
+```
+
+The conversations will be turned into Markdown files and placed in the "conversations" folder by default (this can be
+changed with the --folder arg).
+
+Example:
+
+```bash
+Importing chats from conversations.json...writing to .../basic-memory
+  Reading chat data... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+╭────────────────────────────╮
+│ Import complete!           │
+│                            │
+│ Imported 307 conversations │
+│ Containing 7769 messages   │
+╰────────────────────────────╯
+```
+
+Next, you can run the `sync` command to import the data into basic-memory
+
+```bash
+basic-memory sync
+```
+
+You can also import project data from Claude.ai
+
+```bash 
+➜  basic-memory import claude projects
+Importing projects from projects.json...writing to .../basic-memory/projects
+  Reading project data... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+╭────────────────────────────────╮
+│ Import complete!               │
+│                                │
+│ Imported 101 project documents │
+│ Imported 32 prompt templates   │
+╰────────────────────────────────╯
+
+Run 'basic-memory sync' to index the new files.
+```
+
+### Chat Gpt
+
+### Memory json
+
+```bash
+➜  basic-memory import memory-json
+Importing from memory.json...writing to .../basic-memory
+  Reading memory.json... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+  Creating entities...   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+╭──────────────────────╮
+│ Import complete!     │
+│                      │
+│ Created 126 entities │
+│ Added 252 relations  │
+╰──────────────────────╯
+```
+
 ## License
 
 AGPL-3.0

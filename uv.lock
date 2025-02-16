@@ -70,7 +70,7 @@ wheels = [
 
 [[package]]
 name = "basic-memory"
-version = "0.2.21"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

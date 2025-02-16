@@ -3,7 +3,7 @@
 import asyncio
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Annotated
 
 import typer
 from loguru import logger
@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from basic_memory.cli.app import app, import_app
+from basic_memory.cli.app import import_app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter, Observation, Relation
@@ -100,7 +100,9 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 @import_app.command()
 def memory_json(
-    json_path: Path = typer.Argument(..., help="Path to memory.json file to import"),
+    json_path: Annotated[Path, typer.Argument(..., help="Path to memory.json file")] = Path(
+        "memory.json"
+    ),
 ):
     """Import entities and relations from a memory.json file.
 

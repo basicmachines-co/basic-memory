@@ -10,7 +10,7 @@ setup_logging(log_file=".basic-memory/basic-memory-cli.log")  # pragma: no cover
 
 asyncio.run(db.run_migrations(config))
 
-app = typer.Typer()
+app = typer.Typer(name="basic-memory")
 
 import_app = typer.Typer()
 app.add_typer(import_app, name="import")
