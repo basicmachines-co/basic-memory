@@ -159,9 +159,9 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 
 @import_app.command(name="claude", help="Import chat conversations from claude.")
-def import_conversations(
-    conversations_json: Annotated[Optional[Path], typer.Option(..., help="Path to conversations.json file")] = None,
-    conversations_folder: Annotated[str, typer.Option(help="The folder to place the files in.")] = "conversations",
+def import_claude(
+    conversations_json: Annotated[Path, typer.Argument(..., help="Path to conversations.json file")] = "conversations.json",
+    folder: Annotated[str, typer.Option(help="The folder to place the files in.")] = "conversations",
 ):
     """Import chat conversations from conversations2.json format.
 
@@ -174,29 +174,27 @@ def import_conversations(
     """
 
     try:
-        if conversations_json:
+        if not conversations_json.exists():
+            typer.echo(f"Error: File not found: {conversations_json}", err=True)
+            raise typer.Exit(1)
+    
+        # Get markdown processor
+        markdown_processor = asyncio.run(get_markdown_processor())
 
-            if not conversations_json.exists():
-                typer.echo(f"Error: File not found: {conversations_json}", err=True)
-                raise typer.Exit(1)
-        
-            # Get markdown processor
-            markdown_processor = asyncio.run(get_markdown_processor())
-    
-            # Process the file
-            base_path = config.home / conversations_folder
-            console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
-            results = asyncio.run(process_conversations_json(conversations_json, base_path, markdown_processor))
-    
-            # Show results
-            console.print(
-                Panel(
-                    f"[green]Import complete![/green]\n\n"
-                    f"Imported {results['conversations']} conversations\n"
-                    f"Containing {results['messages']} messages",
-                    expand=False,
-                )
+        # Process the file
+        base_path = config.home / folder
+        console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
+        results = asyncio.run(process_conversations_json(conversations_json, base_path, markdown_processor))
+
+        # Show results
+        console.print(
+            Panel(
+                f"[green]Import complete![/green]\n\n"
+                f"Imported {results['conversations']} conversations\n"
+                f"Containing {results['messages']} messages",
+                expand=False,
             )
+        )
 
         console.print("\nRun 'basic-memory sync' to index the new files.")
 
