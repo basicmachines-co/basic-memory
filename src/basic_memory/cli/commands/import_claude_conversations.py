@@ -206,6 +206,6 @@ def import_claude(
         console.print("\nRun 'basic-memory sync' to index the new files.")
 
     except Exception as e:
-        logger.exception("Import failed")
+        logger.error("Import failed")
         typer.echo(f"Error during import: {e}", err=True)
         raise typer.Exit(1)

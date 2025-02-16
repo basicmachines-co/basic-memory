@@ -16,7 +16,6 @@ from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter, Observation, Relation
 
-
 console = Console()
 
 
@@ -140,6 +139,6 @@ def memory_json(
         console.print("\nRun 'basic-memory sync' to index the new files.")
 
     except Exception as e:
-        logger.exception("Import failed")
+        logger.error("Import failed")
         typer.echo(f"Error during import: {e}", err=True)
         raise typer.Exit(1)

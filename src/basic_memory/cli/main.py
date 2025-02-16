@@ -12,6 +12,7 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     mcp,
     import_claude_conversations,
     import_claude_projects,
+    import_chatgpt,
 )
 
 

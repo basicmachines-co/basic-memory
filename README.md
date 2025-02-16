@@ -309,6 +309,21 @@ Run 'basic-memory sync' to index the new files.
 
 ### Chat Gpt
 
+```bash
+ ➜  basic-memory import chatgpt
+Importing chats from conversations.json...writing to .../basic-memory/conversations
+
+  Reading chat data... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+╭────────────────────────────╮
+│ Import complete!           │
+│                            │
+│ Imported 198 conversations │
+│ Containing 11777 messages  │
+╰────────────────────────────╯
+
+
+```
+
 ### Memory json
 
 ```bash
