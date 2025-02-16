@@ -74,14 +74,14 @@ def format_chat_markdown(
 
 
 def format_chat_content(
-    name: str, messages: List[Dict[str, Any]], created_at: str, modified_at: str
+    base_path: str, name: str, messages: List[Dict[str, Any]], created_at: str, modified_at: str
 ) -> EntityMarkdown:
     """Convert chat messages to Basic Memory entity format."""
 
     # Generate permalink
     date_prefix = datetime.fromisoformat(created_at.replace("Z", "+00:00")).strftime("%Y%m%d")
     clean_title = clean_filename(name)
-    permalink = f"conversations/{date_prefix}-{clean_title}"
+    permalink = f"{base_path}/{date_prefix}-{clean_title}"
 
     # Format content
     content = format_chat_markdown(
@@ -135,6 +135,7 @@ async def process_conversations_json(
         for chat in conversations:
             # Convert to entity
             entity = format_chat_content(
+                base_path=base_path,
                 name=chat["name"],
                 messages=chat["chat_messages"],
                 created_at=chat["created_at"],
@@ -142,7 +143,7 @@ async def process_conversations_json(
             )
 
             # Write file
-            file_path = base_path / f"{entity.frontmatter.metadata['permalink']}.md"
+            file_path = Path(f"{entity.frontmatter.metadata['permalink']}.md")
             await markdown_processor.write_file(file_path, entity)
 
             chats_imported += 1
@@ -158,7 +159,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
     return MarkdownProcessor(entity_parser)
 
 
-@claude_app.command(name="conversations", help="Import chat conversations from claude.")
+@claude_app.command(name="conversations", help="Import chat conversations from Claude.ai.")
 def import_claude(
     conversations_json: Annotated[Path, typer.Argument(..., help="Path to conversations.json file")] = "conversations.json",
     folder: Annotated[str, typer.Option(help="The folder to place the files in.")] = "conversations",

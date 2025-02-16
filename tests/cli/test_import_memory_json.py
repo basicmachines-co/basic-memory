@@ -4,7 +4,7 @@ import json
 import pytest
 from typer.testing import CliRunner
 
-from basic_memory.cli.app import app
+from basic_memory.cli.app import import_app
 from basic_memory.cli.commands import import_memory_json
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 
@@ -72,7 +72,7 @@ async def test_get_markdown_processor(tmp_path, monkeypatch):
 def test_import_json_command_file_not_found(tmp_path):
     """Test error handling for nonexistent file."""
     nonexistent = tmp_path / "nonexistent.json"
-    result = runner.invoke(app, ["import-json", str(nonexistent)])
+    result = runner.invoke(import_app, ["memory-json", str(nonexistent)])
     assert result.exit_code == 1
     assert "File not found" in result.output
 
@@ -83,7 +83,7 @@ def test_import_json_command_success(tmp_path, sample_json_file, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
 
     # Run import
-    result = runner.invoke(app, ["import-json", str(sample_json_file)])
+    result = runner.invoke(import_app, ["memory-json", str(sample_json_file)])
     assert result.exit_code == 0
     assert "Import complete" in result.output
     assert "Created 1 entities" in result.output
@@ -96,7 +96,7 @@ def test_import_json_command_invalid_json(tmp_path):
     invalid_file = tmp_path / "invalid.json"
     invalid_file.write_text("not json")
 
-    result = runner.invoke(app, ["import-json", str(invalid_file)])
+    result = runner.invoke(import_app, ["memory-json", str(invalid_file)])
     assert result.exit_code == 1
     assert "Error during import" in result.output
 
@@ -129,6 +129,6 @@ def test_import_json_command_handle_old_format(tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
 
     # Run import
-    result = runner.invoke(app, ["import-json", str(json_file)])
+    result = runner.invoke(import_app, ["memory-json", str(json_file)])
     assert result.exit_code == 0
     assert "Import complete" in result.output

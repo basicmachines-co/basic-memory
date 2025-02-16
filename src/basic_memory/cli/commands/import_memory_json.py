@@ -99,7 +99,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 
 @import_app.command()
-def import_json(
+def memory_json(
     json_path: Path = typer.Argument(..., help="Path to memory.json file to import"),
 ):
     """Import entities and relations from a memory.json file.
