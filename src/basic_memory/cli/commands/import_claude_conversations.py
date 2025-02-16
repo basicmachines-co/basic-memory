@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
-from basic_memory.cli.app import app, import_app
+from basic_memory.cli.app import app, import_app, claude_app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter
@@ -158,7 +158,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
     return MarkdownProcessor(entity_parser)
 
 
-@import_app.command(name="claude", help="Import chat conversations from claude.")
+@claude_app.command(name="conversations", help="Import chat conversations from claude.")
 def import_claude(
     conversations_json: Annotated[Path, typer.Argument(..., help="Path to conversations.json file")] = "conversations.json",
     folder: Annotated[str, typer.Option(help="The folder to place the files in.")] = "conversations",

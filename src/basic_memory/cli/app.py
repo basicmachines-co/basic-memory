@@ -12,6 +12,9 @@ asyncio.run(db.run_migrations(config))
 
 app = typer.Typer()
 
-
 import_app = typer.Typer()
 app.add_typer(import_app, name="import")
+
+
+claude_app = typer.Typer()
+import_app.add_typer(claude_app, name="claude")
