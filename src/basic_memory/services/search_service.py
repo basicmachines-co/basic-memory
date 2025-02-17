@@ -75,7 +75,7 @@ class SearchService:
             else None
         )
 
-        # permalink search
+        # search
         results = await self.repository.search(
             search_text=query.text,
             permalink=query.permalink,

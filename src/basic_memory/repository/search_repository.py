@@ -69,10 +69,14 @@ class SearchRepository:
     async def init_search_index(self):
         """Create or recreate the search index."""
         logger.info("Initializing search index")
-        async with db.scoped_session(self.session_maker) as session:
-            await session.execute(CREATE_SEARCH_INDEX)
-            await session.commit()
-
+        try:
+            async with db.scoped_session(self.session_maker) as session:
+                await session.execute(CREATE_SEARCH_INDEX)
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Error initializing search index: {e}")
+            raise e
+        
     def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a search term for FTS5 query.
         
@@ -147,7 +151,7 @@ class SearchRepository:
             # Clean and prepare permalink for FTS5 pattern match
             permalink_text = self._prepare_search_term(permalink_match.lower().strip(), is_prefix=False)
             params["permalink"] = permalink_text
-            conditions.append("permalink MATCH :permalink")
+            conditions.append("permalink GLOB :permalink")
 
         # Handle type filter
         if types:

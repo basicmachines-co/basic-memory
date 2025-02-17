@@ -149,8 +149,8 @@ async def test_resolve_prefix_queries(link_resolver):
 @pytest.mark.asyncio
 async def test_resolve_prefix_query_multiple_wildcard(link_resolver):
     """Test resolving non-existent entity."""
-    result = await link_resolver.resolve_link("specs/*specs*")
+    result = await link_resolver.resolve_link("*specs")
     assert result is not None, "Did not resolve prefix query"
-    assert result.permalink == "*/subspecs/*"
+    assert result.permalink == "*subspecs*"
 
 

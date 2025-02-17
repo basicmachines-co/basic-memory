@@ -46,7 +46,7 @@ class LinkResolver:
                 query=SearchQuery(permalink_match=clean_text)
             )
             if results:
-                # Get first match based on permalink match
+                # Get first match based on permalink
                 entity = await self.entity_repository.get_by_permalink(results[0].permalink)
                 if entity:
                     logger.debug(f"Found wildcard match: {entity.permalink}")
@@ -58,7 +58,7 @@ class LinkResolver:
             logger.debug(f"Found title match: {entity.title}")
             return entity
 
-        if use_search:
+        if use_search and '*' not in clean_text:
             # 4. Fall back to search for fuzzy matching on title
             results = await self.search_service.search(
                 query=SearchQuery(title=clean_text, types=[SearchItemType.ENTITY]),
