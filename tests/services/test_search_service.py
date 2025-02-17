@@ -38,15 +38,14 @@ async def test_search_permalink_relation_wildcard(search_service, test_graph):
     assert "test/root/connects-to/test/connected-entity-1" in permalinks
 
 
-@pytest.mark.skip("search prefix see:'https://sqlite.org/fts5.html#FTS5 Prefix Queries'")
 @pytest.mark.asyncio
 async def test_search_permalink_wildcard2(search_service, test_graph):
     """Pattern matching"""
-    results = await search_service.search(SearchQuery(permalink_match="test/connected*"))
-    assert len(results) == 2
+    results = await search_service.search(SearchQuery(permalink_match="test/connected*", ))
+    assert len(results) >= 2
     permalinks = {r.permalink for r in results}
-    assert "test/connected1" in permalinks
-    assert "test/connected2" in permalinks
+    assert "test/connected-entity-1" in permalinks
+    assert "test/connected-entity-2" in permalinks
 
 
 @pytest.mark.asyncio

@@ -308,27 +308,6 @@ async def test_graph(
     for entity in entities:
         await search_service.index_entity(entity)
 
-    # search_content = await entity_repository.execute_query(text("select * from search_index"),
-    #                                                        use_query_options=False)
-    # for row in search_content:
-    #     print(row)
-    # print("relation:")
-    # search_content = await entity_repository.execute_query(text("select * from search_index where type = 'relation'"),
-    #                                                        use_query_options=False)
-    # for row in search_content:
-    #     print(row)
-    #
-    # # In test_graph fixture after creating everything:
-    # print("Entities:")
-    # entities = await entity_repository.find_all()
-    # for e in entities:
-    #     print(f"- {e.title} (id={e.id})")
-    #
-    # print("\nRelations:")
-    # relations = await relation_repository.find_all()
-    # for r in relations:
-    #     print(f"- {r.from_id} -> {r.to_id} ({r.relation_type})")
-
     return {
         "root": root,
         "connected1": connected_1,
