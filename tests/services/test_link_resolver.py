@@ -10,7 +10,17 @@ from basic_memory.services.link_resolver import LinkResolver
 
 @pytest_asyncio.fixture
 async def test_entities(entity_service, file_service):
-    """Create a set of test entities."""
+    """Create a set of test entities.
+    
+    ├── components
+    │   ├── Auth Service.md
+    │   └── Core Service.md
+    ├── config
+    │   └── Service Config.md
+    └── specs
+        └── Core Features.md
+
+    """
 
     e1, _ = await entity_service.create_or_update_entity(
         EntitySchema(
@@ -38,6 +48,20 @@ async def test_entities(entity_service, file_service):
             title="Core Features",
             entity_type="specs",
             folder="specs",
+        )
+    )
+    e5, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Sub Features 1",
+            entity_type="specs",
+            folder="specs/subspec",
+        )
+    )
+    e6, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Sub Features 2",
+            entity_type="specs",
+            folder="specs/subspec",
         )
     )
 
@@ -115,30 +139,18 @@ async def test_resolve_none(link_resolver):
     # Basic new entity
     assert await link_resolver.resolve_link("New Feature") is None
 
-
-@pytest.mark.skip("Advanced relevance scoring not yet implemented")
 @pytest.mark.asyncio
-async def test_multiple_matches_resolution(link_resolver):
-    """Test resolution when multiple potential matches exist."""
-    # Add some similar entities
-    test_cases = [
-        {
-            "link": "Service",  # Ambiguous
-            "expected_prefix": "components/",  # Should prefer component directory match
-        },
-        {
-            "link": "Core",  # Ambiguous
-            "expected_prefix": "specs/",  # Should prefer specs directory match
-        },
-        {
-            "link": "Service",
-            "expected": "components/core-service",  # Should pick shortest/highest scored
-        },
-    ]
+async def test_resolve_prefix_queries(link_resolver):
+    """Test resolving non-existent entity."""
+    result = await link_resolver.resolve_link("specs/*")
+    assert result is not None, "Did not resolve prefix query"
+    assert result.permalink == "specs/core-features"
 
-    for case in test_cases:
-        result = await link_resolver.resolve_link(case["link"])
-        if "expected_prefix" in case:
-            assert result.startswith(case["expected_prefix"])
-        else:
-            assert result == case["expected"]
+@pytest.mark.asyncio
+async def test_resolve_prefix_query_multiple_wildcard(link_resolver):
+    """Test resolving non-existent entity."""
+    result = await link_resolver.resolve_link("specs/*specs*")
+    assert result is not None, "Did not resolve prefix query"
+    assert result.permalink == "*/subspecs/*"
+
+

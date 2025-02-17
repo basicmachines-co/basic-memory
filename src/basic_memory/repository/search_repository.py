@@ -68,24 +68,45 @@ class SearchRepository:
 
     async def init_search_index(self):
         """Create or recreate the search index."""
-
         logger.info("Initializing search index")
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(CREATE_SEARCH_INDEX)
             await session.commit()
 
-    def _quote_search_term(self, term: str) -> str:
-        """Add quotes if term contains special characters.
-        For FTS5, special characters and phrases need to be quoted to be treated as a single token.
+    def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
+        """Prepare a search term for FTS5 query.
+        
+        Args:
+            term: The search term to prepare
+            is_prefix: Whether to add prefix search capability (* suffix)
+            
+        For FTS5:
+        - Special characters and phrases need to be quoted
+        - Prefix searches (trailing *) need special handling
+        - Terms with spaces or special chars need quotes
         """
-        # List of special characters that need quoting
-        special_chars = ["/", "*", "-", ".", " ", "(", ")", "[", "]", '"', "'"]
-
+        # List of special characters that need quoting (excluding *)
+        special_chars = ["/", "-", ".", " ", "(", ")", "[", "]", '"', "'"]
+        
+        # Handle trailing wildcard
+        has_trailing_wildcard = term.endswith('*')
+        if has_trailing_wildcard:
+            term = term[:-1]  # Remove trailing * for processing
+            
         # Check if term contains any special characters
-        if any(c in term for c in special_chars):
+        needs_quotes = any(c in term for c in special_chars)
+        
+        if needs_quotes:
             # If the term already contains quotes, escape them
             term = term.replace('"', '""')
-            return f'"{term}"'
+            term = f'"{term}"'
+            
+        # Add prefix search capability
+        if is_prefix and not has_trailing_wildcard:
+            term = f"{term}*"
+        elif has_trailing_wildcard:
+            term = f"{term}*"
+            
         return term
 
     async def search(
@@ -106,14 +127,14 @@ class SearchRepository:
 
         # Handle text search for title and content
         if search_text:
-            search_text = self._quote_search_term(search_text.lower().strip())
-            params["text"] = f"{search_text}*"
+            search_text = self._prepare_search_term(search_text.lower().strip())
+            params["text"] = search_text
             conditions.append("(title MATCH :text OR content MATCH :text)")
 
         # Handle title match search
         if title:
-            title_text = self._quote_search_term(title.lower().strip())
-            params["text"] = f"{title_text}*"
+            title_text = self._prepare_search_term(title.lower().strip())
+            params["text"] = title_text
             conditions.append("title MATCH :text")
 
         # Handle permalink exact search
@@ -123,7 +144,9 @@ class SearchRepository:
 
         # Handle permalink match search, supports *
         if permalink_match:
-            params["permalink"] = self._quote_search_term(permalink_match)
+            # Clean and prepare permalink for FTS5 pattern match
+            permalink_text = self._prepare_search_term(permalink_match.lower().strip(), is_prefix=False)
+            params["permalink"] = permalink_text
             conditions.append("permalink MATCH :permalink")
 
         # Handle type filter
