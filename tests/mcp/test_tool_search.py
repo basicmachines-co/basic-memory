@@ -12,12 +12,13 @@ from basic_memory.schemas.search import SearchQuery, SearchItemType
 async def test_search_basic(client):
     """Test basic search functionality."""
     # Create a test note
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
         tags=["test", "search"],
     )
+    assert result
 
     # Search for it
     query = SearchQuery(text="searchable")
@@ -25,7 +26,7 @@ async def test_search_basic(client):
 
     # Verify results
     assert len(response.results) > 0
-    assert any(r.permalink == permalink for r in response.results)
+    assert any(r.permalink == "test/test-search-note" for r in response.results)
 
 
 @pytest.mark.asyncio

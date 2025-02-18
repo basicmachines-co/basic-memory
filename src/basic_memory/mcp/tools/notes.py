@@ -17,15 +17,14 @@ from basic_memory.schemas.memory import memory_url_path
 
 
 @mcp.tool(
-    description="Create or update a markdown note. Returns the permalink for referencing.",
+    description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
 )
 async def write_note(
     title: str,
     content: str,
     folder: str,
     tags: Optional[List[str]] = None,
-    verbose: bool = False,
-) -> EntityResponse | str:
+) -> str:
     """Write a markdown note to the knowledge base.
 
     The content can include semantic observations and relations using markdown syntax.
@@ -53,14 +52,16 @@ async def write_note(
         content: Markdown content for the note, can include observations and relations
         folder: the folder where the file should be saved
         tags: Optional list of tags to categorize the note
-        verbose: If True, returns full EntityResponse with semantic info
 
     Returns:
-        If verbose=False: Permalink that can be used to reference the note
-        If verbose=True: EntityResponse with full semantic details
+        A markdown formatted summary of the semantic content, including:
+        - Creation/update status
+        - File path and checksum
+        - Observation counts by category
+        - Relation counts (resolved/unresolved)
+        - Tags if present
 
     Examples:
-        # Note with both explicit and inline relations
         write_note(
             title="Search Implementation",
             content="# Search Component\\n\\n"
@@ -72,20 +73,6 @@ async def write_note(
                    "- implements [[Search Spec]]\\n"
                    "- depends_on [[Database Schema]]",
             folder="docs/components"
-        )
-
-        # Note with tags
-        write_note(
-            title="Error Handling Design",
-            content="# Error Handling\\n\\n"
-                   "This design builds on [[Reliability Design]].\\n\\n"
-                   "## Approach\\n"
-                   "- [design] Use error codes #architecture\\n"
-                   "- [tech] Implement retry logic #implementation\\n\\n"
-                   "## Relations\\n"
-                   "- extends [[Base Error Handling]]",
-            folder="docs/design",
-            tags=["architecture", "reliability"]
         )
     """
     logger.info(f"Writing note folder:'{folder}' title: '{title}'")
@@ -101,12 +88,43 @@ async def write_note(
         entity_metadata=metadata,
     )
 
-    # Use existing knowledge tool
+    # Create or update via knowledge API
     logger.info(f"Creating {entity.permalink}")
     url = f"/knowledge/entities/{entity.permalink}"
     response = await call_put(client, url, json=entity.model_dump())
     result = EntityResponse.model_validate(response.json())
-    return result if verbose else result.permalink
+
+    # Format semantic summary based on status code
+    action = "Created" if response.status_code == 201 else "Updated"
+    assert result.checksum is not None
+    summary = [
+        f"# {action} {result.file_path} ({result.checksum[:8]})",
+        f"permalink: {result.permalink}",
+    ]
+
+    if result.observations:
+        categories = {}
+        for obs in result.observations:
+            categories[obs.category] = categories.get(obs.category, 0) + 1
+
+        summary.append("\n## Observations")
+        for category, count in sorted(categories.items()):
+            summary.append(f"- {category}: {count}")
+
+    if result.relations:
+        unresolved = sum(1 for r in result.relations if not r.to_id)
+        resolved = len(result.relations) - unresolved
+
+        summary.append("\n## Relations")
+        summary.append(f"- Resolved: {resolved}")
+        if unresolved:
+            summary.append(f"- Unresolved: {unresolved}")
+            summary.append("\nUnresolved relations will be retried on next sync.")
+
+    if tags:
+        summary.append(f"\n## Tags\n- {', '.join(tags)}")
+
+    return "\n".join(summary)
 
 
 @mcp.tool(description="Read note content by title, permalink, relation, or pattern")

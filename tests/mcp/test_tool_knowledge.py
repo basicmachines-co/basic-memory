@@ -13,7 +13,7 @@ from basic_memory.schemas.delete import DeleteEntitiesRequest
 async def test_get_single_entity(client):
     """Test retrieving a single entity."""
     # First create an entity
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Test Note",
         folder="test",
         content="""
@@ -22,9 +22,10 @@ async def test_get_single_entity(client):
 """,
         tags=["test", "documentation"],
     )
+    assert result
 
     # Get the entity
-    entity = await get_entity(permalink)
+    entity = await get_entity("test/test-note")
 
     # Verify entity details
     assert entity.title == "Test Note"
@@ -36,40 +37,40 @@ async def test_get_single_entity(client):
 async def test_get_multiple_entities(client):
     """Test retrieving multiple entities."""
     # Create two test entities
-    permalink1 = await notes.write_note(
+    await notes.write_note(
         title="Test Note 1",
         folder="test",
         content="# Test 1",
     )
-    permalink2 = await notes.write_note(
+    await notes.write_note(
         title="Test Note 2",
         folder="test",
         content="# Test 2",
     )
 
     # Get both entities
-    request = GetEntitiesRequest(permalinks=[permalink1, permalink2])
+    request = GetEntitiesRequest(permalinks=["test/test-note-1", "test/test-note-2"])
     response = await get_entities(request)
 
     # Verify we got both entities
     assert len(response.entities) == 2
     permalinks = {e.permalink for e in response.entities}
-    assert permalink1 in permalinks
-    assert permalink2 in permalinks
+    assert "test/test-note-1" in permalinks
+    assert "test/test-note-2" in permalinks
 
 
 @pytest.mark.asyncio
 async def test_delete_entities(client):
     """Test deleting entities."""
     # Create a test entity
-    permalink = await notes.write_note(
+    await notes.write_note(
         title="Test Note",
         folder="test",
         content="# Test Note to Delete",
     )
 
     # Delete the entity
-    request = DeleteEntitiesRequest(permalinks=[permalink])
+    request = DeleteEntitiesRequest(permalinks=["test/test-note"])
     response = await delete_entities(request)
 
     # Verify deletion
@@ -77,7 +78,7 @@ async def test_delete_entities(client):
 
     # Verify entity no longer exists
     with pytest.raises(ToolError):
-        await get_entity(permalink)
+        await get_entity("test/test-note")
 
 
 @pytest.mark.asyncio

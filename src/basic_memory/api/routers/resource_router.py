@@ -31,7 +31,7 @@ def get_entity_ids(item: SearchIndexRow) -> list[int]:
             from_entity = item.from_id
             to_entity = item.to_id  # pyright: ignore [reportReturnType]
             return [from_entity, to_entity] if to_entity else [from_entity]  # pyright: ignore [reportReturnType]
-        case _:
+        case _:  # pragma: no cover
             raise ValueError(f"Unexpected type: {item.type}")
 
 

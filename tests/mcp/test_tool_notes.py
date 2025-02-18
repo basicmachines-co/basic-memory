@@ -1,10 +1,11 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+from textwrap import dedent
+
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import notes
-from basic_memory.schemas import EntityResponse
 
 
 @pytest.mark.asyncio
@@ -17,31 +18,41 @@ async def test_write_note(app):
     - Handle tags correctly
     - Return valid permalink
     """
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is a test note",
         tags=["test", "documentation"],
     )
 
-    assert permalink  # Got a valid permalink
+    assert result
+    assert (
+        dedent("""
+        # Created test/Test Note.md (159f2168)
+        permalink: test/test-note
+        
+        ## Tags
+        - test, documentation
+        """).strip()
+        in result
+    )
 
     # Try reading it back via permalink
-    content = await notes.read_note(permalink)
+    content = await notes.read_note("test/test-note")
     assert (
-        """
----
-title: Test Note
-type: note
-permalink: test/test-note
-tags:
-- '#test'
-- '#documentation'
----
-
-# Test
-This is a test note
-""".strip()
+        dedent("""
+        ---
+        title: Test Note
+        type: note
+        permalink: test/test-note
+        tags:
+        - '#test'
+        - '#documentation'
+        ---
+        
+        # Test
+        This is a test note
+        """).strip()
         in content
     )
 
@@ -49,20 +60,28 @@ This is a test note
 @pytest.mark.asyncio
 async def test_write_note_no_tags(app):
     """Test creating a note without tags."""
-    permalink = await notes.write_note(title="Simple Note", folder="test", content="Just some text")
+    result = await notes.write_note(title="Simple Note", folder="test", content="Just some text")
 
-    # Should be able to read it back
-    content = await notes.read_note(permalink)
+    assert result
     assert (
-        """
---
-title: Simple Note
-type: note
-permalink: test/simple-note
----
-
-Just some text
-""".strip()
+        dedent("""
+        # Created test/Simple Note.md (9a1ff079)
+        permalink: test/simple-note
+        """).strip()
+        in result
+    )
+    # Should be able to read it back
+    content = await notes.read_note("test/simple-note")
+    assert (
+        dedent("""
+        --
+        title: Simple Note
+        type: note
+        permalink: test/simple-note
+        ---
+        
+        Just some text
+        """).strip()
         in content
     )
 
@@ -84,24 +103,44 @@ async def test_write_note_update_existing(app):
     - Handle tags correctly
     - Return valid permalink
     """
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is a test note",
         tags=["test", "documentation"],
     )
 
-    assert permalink  # Got a valid permalink
+    assert result  # Got a valid permalink
+    assert (
+        dedent("""
+        # Created test/Test Note.md (159f2168)
+        permalink: test/test-note
+        
+        ## Tags
+        - test, documentation
+        """).strip()
+        in result
+    )
 
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is an updated note",
         tags=["test", "documentation"],
     )
+    assert (
+        dedent("""
+        # Updated test/Test Note.md (131b5662)
+        permalink: test/test-note
+        
+        ## Tags
+        - test, documentation
+        """).strip()
+        in result
+    )
 
     # Try reading it back
-    content = await notes.read_note(permalink)
+    content = await notes.read_note("test/test-note")
     assert (
         """
 ---
@@ -135,10 +174,18 @@ async def test_read_note_by_title(app):
 async def test_note_unicode_content(app):
     """Test handling of unicode content in notes."""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    permalink = await notes.write_note(title="Unicode Test", folder="test", content=content)
+    result = await notes.write_note(title="Unicode Test", folder="test", content=content)
+
+    assert (
+        dedent("""
+        # Created test/Unicode Test.md (272389cd)
+        permalink: test/unicode-test
+        """).strip()
+        in result
+    )
 
     # Read back should preserve unicode
-    result = await notes.read_note(permalink)
+    result = await notes.read_note("test/unicode-test")
     assert content in result
 
 
@@ -147,20 +194,32 @@ async def test_multiple_notes(app):
     """Test creating and managing multiple notes."""
     # Create several notes
     notes_data = [
-        ("Note 1", "test", "Content 1", ["tag1"]),
-        ("Note 2", "test", "Content 2", ["tag1", "tag2"]),
-        ("Note 3", "test", "Content 3", []),
+        ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
+        ("test/note-2", "Note 2", "test", "Content 2", ["tag1", "tag2"]),
+        ("test/note-3", "Note 3", "test", "Content 3", []),
     ]
 
-    permalinks = []
-    for title, folder, content, tags in notes_data:
-        permalink = await notes.write_note(title=title, folder=folder, content=content, tags=tags)
-        permalinks.append(permalink)
+    for _, title, folder, content, tags in notes_data:
+        await notes.write_note(title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
-    for i, permalink in enumerate(permalinks):
-        content = await notes.read_note(permalink)
-        assert f"Content {i + 1}" in content
+    for permalink, title, folder, content, _ in notes_data:
+        note = await notes.read_note(permalink)
+        assert content in note
+
+    # read multiple notes at once
+
+    result = await notes.read_note("test/*")
+
+    # note we can't compare times
+    assert "--- memory://test/note-1" in result
+    assert "Content 1" in result
+
+    assert "--- memory://test/note-2" in result
+    assert "Content 2" in result
+
+    assert "--- memory://test/note-3" in result
+    assert "Content 3" in result
 
 
 @pytest.mark.asyncio
@@ -172,16 +231,16 @@ async def test_delete_note_existing(app):
     - Return valid permalink
     - Delete the note
     """
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is a test note",
         tags=["test", "documentation"],
     )
 
-    assert permalink  # Got a valid permalink
+    assert result
 
-    deleted = await notes.delete_note(permalink)
+    deleted = await notes.delete_note("test/test-note")
     assert deleted is True
 
 
@@ -207,7 +266,7 @@ async def test_write_note_verbose(app):
     - Handle tags correctly
     - Return valid permalink
     """
-    entity = await notes.write_note(
+    result = await notes.write_note(
         title="Test Note",
         folder="test",
         content="""
@@ -218,24 +277,27 @@ async def test_write_note_verbose(app):
 
 """,
         tags=["test", "documentation"],
-        verbose=True,
     )
 
-    assert isinstance(entity, EntityResponse)
-
-    assert entity.title == "Test Note"
-    assert entity.file_path == "test/Test Note.md"
-    assert entity.entity_type == "note"
-    assert entity.permalink == "test/test-note"
-
-    assert len(entity.observations) == 1
-    assert entity.observations[0].content == "First observation"
-
-    assert len(entity.relations) == 1
-    assert entity.relations[0].relation_type == "relates to"
-    assert entity.relations[0].from_id == "test/test-note"
-    assert entity.relations[0].to_id is None
-    assert entity.relations[0].to_name == "Knowledge"
+    assert (
+        dedent("""
+        # Created test/Test Note.md (06873a7a)
+        permalink: test/test-note
+        
+        ## Observations
+        - note: 1
+        
+        ## Relations
+        - Resolved: 0
+        - Unresolved: 1
+        
+        Unresolved relations will be retried on next sync.
+        
+        ## Tags
+        - test, documentation
+        """).strip()
+        in result
+    )
 
 
 @pytest.mark.asyncio
@@ -248,13 +310,14 @@ async def test_read_note_memory_url(app):
     - Return the note content
     """
     # First create a note
-    permalink = await notes.write_note(
+    result = await notes.write_note(
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling",
     )
+    assert result
 
     # Should be able to read it with a memory:// URL
-    memory_url = f"memory://{permalink}"
+    memory_url = "memory://test/memory-url-test"
     content = await notes.read_note(memory_url)
     assert "Testing memory:// URL handling" in content

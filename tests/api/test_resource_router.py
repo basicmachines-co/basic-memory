@@ -158,7 +158,6 @@ async def test_get_resource_entities(client, test_config, entity_repository):
     entity2 = EntityResponse(**entity_response)
 
     assert len(entity2.relations) == 1
-    relation = entity2.relations[0]
 
     # Test getting the content via the relation
     response = await client.get("/resource/test/*")
