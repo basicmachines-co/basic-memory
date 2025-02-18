@@ -104,6 +104,7 @@ async def test_fuzzy_title_match_misspelling(link_resolver):
 async def test_fuzzy_title_partial_match(link_resolver):
     # Test partial match
     result = await link_resolver.resolve_link("Auth Serv")
+    assert result is not None, "Did not find partial match"
     assert result.permalink == "components/auth-service"
 
 
@@ -138,19 +139,4 @@ async def test_resolve_none(link_resolver):
     """Test resolving non-existent entity."""
     # Basic new entity
     assert await link_resolver.resolve_link("New Feature") is None
-
-@pytest.mark.asyncio
-async def test_resolve_prefix_queries(link_resolver):
-    """Test resolving non-existent entity."""
-    result = await link_resolver.resolve_link("specs/*")
-    assert result is not None, "Did not resolve prefix query"
-    assert result.permalink == "specs/core-features"
-
-@pytest.mark.asyncio
-async def test_resolve_prefix_query_multiple_wildcard(link_resolver):
-    """Test resolving non-existent entity."""
-    result = await link_resolver.resolve_link("*specs")
-    assert result is not None, "Did not resolve prefix query"
-    assert result.permalink == "*subspecs*"
-
 

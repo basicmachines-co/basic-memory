@@ -51,16 +51,17 @@ def test_relation_in_validation():
 def test_relation_response():
     """Test RelationResponse validation."""
     data = {
+        "permalink": "test/123/relates_to/test/456",
         "from_id": "test/123",
         "to_id": "test/456",
-        "relation_type": "test",
+        "relation_type": "relates_to",
         "from_entity": {"permalink": "test/123"},
         "to_entity": {"permalink": "test/456"},
     }
     relation = RelationResponse.model_validate(data)
     assert relation.from_id == "test/123"
     assert relation.to_id == "test/456"
-    assert relation.relation_type == "test"
+    assert relation.relation_type == "relates_to"
     assert relation.context is None
 
 
@@ -73,16 +74,19 @@ def test_entity_out_from_attributes():
         "file_path": "test",
         "entity_type": "knowledge",
         "content_type": "text/markdown",
-        "observations": [{"id": 1, "category": "note", "content": "test obs", "context": None}],
+        "observations": [{"id": 1, "permalink": "permalink", "category": "note", "content": "test obs", "context": None}],
         "relations": [
             {
                 "id": 1,
+                "permalink": "test/test/relates_to/test/test",
                 "from_id": "test/test",
                 "to_id": "test/test",
-                "relation_type": "test",
+                "relation_type": "relates_to",
                 "context": None,
             }
         ],
+        "created_at": "2023-01-01T00:00:00",
+        "updated_at": "2023-01-01T00:00:00",
     }
     entity = EntityResponse.model_validate(db_data)
     assert entity.permalink == "test/test"

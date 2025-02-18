@@ -73,7 +73,7 @@ class SearchRepository:
             async with db.scoped_session(self.session_maker) as session:
                 await session.execute(CREATE_SEARCH_INDEX)
                 await session.commit()
-        except Exception as e:
+        except Exception as e: # pragma: no cover
             logger.error(f"Error initializing search index: {e}")
             raise e
         
@@ -86,31 +86,22 @@ class SearchRepository:
             
         For FTS5:
         - Special characters and phrases need to be quoted
-        - Prefix searches (trailing *) need special handling
         - Terms with spaces or special chars need quotes
         """
+        if "*" in term:
+            return term
+        
         # List of special characters that need quoting (excluding *)
         special_chars = ["/", "-", ".", " ", "(", ")", "[", "]", '"', "'"]
-        
-        # Handle trailing wildcard
-        has_trailing_wildcard = term.endswith('*')
-        if has_trailing_wildcard:
-            term = term[:-1]  # Remove trailing * for processing
-            
+                    
         # Check if term contains any special characters
         needs_quotes = any(c in term for c in special_chars)
         
         if needs_quotes:
-            # If the term already contains quotes, escape them
+            # If the term already contains quotes, escape them and add a wildcard
             term = term.replace('"', '""')
-            term = f'"{term}"'
-            
-        # Add prefix search capability
-        if is_prefix and not has_trailing_wildcard:
-            term = f"{term}*"
-        elif has_trailing_wildcard:
-            term = f"{term}*"
-            
+            term = f'"{term}"*'
+                        
         return term
 
     async def search(
@@ -131,13 +122,13 @@ class SearchRepository:
 
         # Handle text search for title and content
         if search_text:
-            search_text = self._prepare_search_term(search_text.lower().strip())
+            search_text = self._prepare_search_term(search_text.strip())
             params["text"] = search_text
             conditions.append("(title MATCH :text OR content MATCH :text)")
 
         # Handle title match search
         if title:
-            title_text = self._prepare_search_term(title.lower().strip())
+            title_text = self._prepare_search_term(title.strip())
             params["text"] = title_text
             conditions.append("title MATCH :text")
 
@@ -148,10 +139,14 @@ class SearchRepository:
 
         # Handle permalink match search, supports *
         if permalink_match:
-            # Clean and prepare permalink for FTS5 pattern match
+            # Clean and prepare permalink for FTS5 GLOB match
             permalink_text = self._prepare_search_term(permalink_match.lower().strip(), is_prefix=False)
             params["permalink"] = permalink_text
-            conditions.append("permalink GLOB :permalink")
+            if "*" in permalink_match:
+                conditions.append("permalink GLOB :permalink")
+            else: 
+                conditions.append("permalink MATCH :permalink")
+
 
         # Handle type filter
         if types:
@@ -200,7 +195,7 @@ class SearchRepository:
             LIMIT :limit
         """
 
-        # logger.debug(f"Search {sql} params: {params}")
+        logger.debug(f"Search {sql} params: {params}")
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(text(sql), params)
             rows = result.fetchall()
@@ -226,8 +221,9 @@ class SearchRepository:
             for row in rows
         ]
 
-        # for r in results:
-        #    logger.debug(f"Search result: type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}")
+        logger.debug(f"Found {len(results)} search results")
+        for r in results:
+            logger.debug(f"Search result: type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}")
 
         return results
 
@@ -260,7 +256,7 @@ class SearchRepository:
                 """),
                 search_index_row.to_insert(),
             )
-            logger.debug(f"indexed permalink {search_index_row.permalink}")
+            logger.debug(f"indexed row {search_index_row}")
             await session.commit()
 
     async def delete_by_permalink(self, permalink: str):

@@ -28,9 +28,29 @@ async def write_note(
 ) -> EntityResponse | str:
     """Write a markdown note to the knowledge base.
 
+    The content can include semantic observations and relations using markdown syntax.
+    Relations can be specified either explicitly or through inline wiki-style links:
+
+    Observations format:
+        `- [category] Observation text #tag1 #tag2 (optional context)`
+
+        Examples:
+        `- [design] Files are the source of truth #architecture (All state comes from files)`
+        `- [tech] Using SQLite for storage #implementation`
+        `- [note] Need to add error handling #todo`
+
+    Relations format:
+        - Explicit: `- relation_type [[Entity]] (optional context)`
+        - Inline: Any `[[Entity]]` reference creates a relation
+
+        Examples:
+        `- depends_on [[Content Parser]] (Need for semantic extraction)`
+        `- implements [[Search Spec]] (Initial implementation)`
+        `- This feature extends [[Base Design]] and uses [[Core Utils]]`
+
     Args:
         title: The title of the note
-        content: Markdown content for the note
+        content: Markdown content for the note, can include observations and relations
         folder: the folder where the file should be saved
         tags: Optional list of tags to categorize the note
         verbose: If True, returns full EntityResponse with semantic info
@@ -40,19 +60,32 @@ async def write_note(
         If verbose=True: EntityResponse with full semantic details
 
     Examples:
-        # Create a simple note
+        # Note with both explicit and inline relations
         write_note(
-            tile="Meeting Notes: Project Planning.md",
-            content="# Key Points\\n\\n- Discussed timeline\\n- Set priorities"
-            folder="notes"
+            title="Search Implementation",
+            content="# Search Component\\n\\n"
+                   "Implementation of the search feature, building on [[Core Search]].\\n\\n"
+                   "## Observations\\n"
+                   "- [tech] Using FTS5 for full-text search #implementation\\n"
+                   "- [design] Need pagination support #todo\\n\\n"
+                   "## Relations\\n"
+                   "- implements [[Search Spec]]\\n"
+                   "- depends_on [[Database Schema]]",
+            folder="docs/components"
         )
 
-        # Create note with tags
+        # Note with tags
         write_note(
-            title="Security Review",
-            content="# Findings\\n\\n1. Updated auth flow\\n2. Added rate limiting",
-            folder="security",
-            tags=["security", "development"]
+            title="Error Handling Design",
+            content="# Error Handling\\n\\n"
+                   "This design builds on [[Reliability Design]].\\n\\n"
+                   "## Approach\\n"
+                   "- [design] Use error codes #architecture\\n"
+                   "- [tech] Implement retry logic #implementation\\n\\n"
+                   "## Relations\\n"
+                   "- extends [[Base Error Handling]]",
+            folder="docs/design",
+            tags=["architecture", "reliability"]
         )
     """
     logger.info(f"Writing note folder:'{folder}' title: '{title}'")
@@ -76,26 +109,58 @@ async def write_note(
     return result if verbose else result.permalink
 
 
-@mcp.tool(description="Read a note's content by its title or permalink")
+@mcp.tool(description="Read note content by title, permalink, relation, or pattern")
 async def read_note(identifier: str) -> str:
-    """Get the markdown content of a note.
-    Uses the resource router to return the actual file content.
+    """Get note content in unified diff format.
+
+    The content is returned in a unified diff inspired format:
+    ```
+    --- memory://docs/example 2025-01-31T19:32:49 7d9f1c8b
+    <document content>
+    ```
+
+    Multiple documents (from relations or pattern matches) are separated by
+    additional headers.
 
     Args:
-        identifier: Note title or permalink
+        identifier: Can be one of:
+            - Note title ("Project Planning")
+            - Note permalink ("docs/example")
+            - Relation path ("docs/example/depends-on/other-doc")
+            - Pattern match ("docs/*-architecture")
 
     Returns:
-        The note's markdown content
+        Document content in unified diff format. For single documents, returns
+        just that document's content. For relations or pattern matches, returns
+        multiple documents separated by unified diff headers.
 
     Examples:
-        # Read by title
-        read_note("Meeting Notes: Project Planning")
+        # Single document
+        content = await read_note("Project Planning")
 
         # Read by permalink
-        read_note("notes/project-planning")
+        content = await read_note("docs/architecture/file-first")
 
-    Raises:
-        ValueError: If the note cannot be found
+        # Follow relation
+        content = await read_note("docs/architecture/depends-on/docs/content-parser")
+
+        # Pattern matching
+        content = await read_note("docs/*-architecture")  # All architecture docs
+        content = await read_note("docs/*/implements/*")  # Find implementations
+
+    Output format:
+        ```
+        --- memory://docs/example 2025-01-31T19:32:49 7d9f1c8b
+        <first document content>
+
+        --- memory://docs/other 2025-01-30T15:45:22 a1b2c3d4
+        <second document content>
+        ```
+
+    The headers include:
+    - Full memory:// URI for the document
+    - Last modified timestamp
+    - Content checksum
     """
     logger.info(f"Reading note {identifier}")
     url = memory_url_path(identifier)

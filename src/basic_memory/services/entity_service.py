@@ -184,7 +184,12 @@ class EntityService(BaseService[EntityModel]):
         if not db_entity:
             raise EntityNotFoundError(f"Entity not found: {permalink}")
         return db_entity
-
+    
+    async def get_entities_by_id(self, ids: List[int]) -> Sequence[EntityModel]:
+        """Get specific entities and their relationships."""
+        logger.debug(f"Getting entities: {ids}")
+        return await self.repository.find_by_ids(ids)
+    
     async def get_entities_by_permalinks(self, permalinks: List[str]) -> Sequence[EntityModel]:
         """Get specific nodes and their relationships."""
         logger.debug(f"Getting entities permalinks: {permalinks}")

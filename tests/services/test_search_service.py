@@ -32,7 +32,7 @@ async def test_search_permalink_observations_wildcard(search_service, test_graph
 @pytest.mark.asyncio
 async def test_search_permalink_relation_wildcard(search_service, test_graph):
     """Pattern matching"""
-    results = await search_service.search(SearchQuery(permalink_match="test/root/connects_to/*"))
+    results = await search_service.search(SearchQuery(permalink_match="test/root/connects-to/*"))
     assert len(results) == 1
     permalinks = {r.permalink for r in results}
     assert "test/root/connects-to/test/connected-entity-1" in permalinks
@@ -67,16 +67,25 @@ async def test_search_title(search_service, test_graph):
 
 
 @pytest.mark.asyncio
-async def test_text_search_features(search_service, test_graph):
+async def test_text_search_case_insensitive(search_service, test_graph):
     """Test text search functionality."""
     # Case insensitive
     results = await search_service.search(SearchQuery(text="ENTITY"))
     assert any("test/root" in r.permalink for r in results)
 
-    # Partial word match
-    results = await search_service.search(SearchQuery(text="Connect"))
+@pytest.mark.asyncio
+async def test_text_search_content_word_match(search_service, test_graph):
+    """Test text search functionality."""
+
+    # content word match
+    results = await search_service.search(SearchQuery(text="Connected"))
     assert len(results) > 0
     assert any(r.file_path == "test/Connected Entity 2.md" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_text_search_multiple_terms(search_service, test_graph):
+    """Test text search functionality."""
 
     # Multiple terms
     results = await search_service.search(SearchQuery(text="root note"))
@@ -87,14 +96,19 @@ async def test_text_search_features(search_service, test_graph):
 async def test_pattern_matching(search_service, test_graph):
     """Test pattern matching with various wildcards."""
     # Test wildcards
-    results = await search_service.search(SearchQuery(permalink="test/*"))
+    results = await search_service.search(SearchQuery(permalink_match="test/*"))
     for r in results:
         assert "test/" in r.permalink
 
     # Test start wildcards
-    results = await search_service.search(SearchQuery(permalink="*/observations"))
+    results = await search_service.search(SearchQuery(permalink_match="*/observations"))
     for r in results:
         assert "/observations" in r.permalink
+
+    # Test permalink partial match
+    results = await search_service.search(SearchQuery(permalink_match="test"))
+    for r in results:
+        assert "test/" in r.permalink
 
 
 @pytest.mark.asyncio
