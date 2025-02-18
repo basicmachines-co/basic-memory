@@ -49,7 +49,14 @@ def update_claude_config():
         config = {"mcpServers": {}}
 
     # Add/update basic-memory config
-    config["mcpServers"]["basic-memory"] = {"command": "uvx", "args": ["basic-memory", "mcp"]}
+    config["mcpServers"]["basic-memory"] = {
+        "command": "uvx",
+        "args": ["basic-memory@latest", "mcp"],
+        "env": {
+            "BASIC_MEMORY_ENV": "user",
+            "LOGFIRE_TOKEN": "n2Fpvn34LjKYq8TdF1ZrXMgdBPXGn4HfXy6tYghZ55dB",
+        },
+    }
 
     # Write back config
     config_path.write_text(json.dumps(config, indent=2))
