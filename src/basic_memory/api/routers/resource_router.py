@@ -21,16 +21,16 @@ from basic_memory.schemas.search import SearchQuery, SearchItemType
 router = APIRouter(prefix="/resource", tags=["resources"])
 
 
-def get_entity_ids(item: SearchIndexRow) -> list[int]: # pyright: ignore [reportReturnType]
+def get_entity_ids(item: SearchIndexRow) -> list[int]:
     match item.type:
         case SearchItemType.ENTITY:
             return [item.id]
         case SearchItemType.OBSERVATION:
-            return [item.entity_id]
+            return [item.entity_id]  # pyright: ignore [reportReturnType]
         case SearchItemType.RELATION:
             from_entity = item.from_id
-            to_entity = item.to_id
-            return [from_entity, to_entity] if to_entity else [from_entity]
+            to_entity = item.to_id  # pyright: ignore [reportReturnType]
+            return [from_entity, to_entity] if to_entity else [from_entity]  # pyright: ignore [reportReturnType]
         case _:
             raise ValueError(f"Unexpected type: {item.type}")
 
@@ -88,6 +88,7 @@ async def get_resource_content(
             content = await file_service.read_entity_content(result)
             memory_url = normalize_memory_url(result.permalink)
             modified_date = result.updated_at.isoformat()
+            assert result.checksum
             checksum = result.checksum[:8]
 
             # Prepare the delimited content
