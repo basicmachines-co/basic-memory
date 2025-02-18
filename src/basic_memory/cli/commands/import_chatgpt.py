@@ -69,7 +69,11 @@ def traverse_messages(
 
 
 def format_chat_markdown(
-    title: str, mapping: Dict[str, Any], root_id: Optional[str], created_at: float, modified_at: float
+    title: str,
+    mapping: Dict[str, Any],
+    root_id: Optional[str],
+    created_at: float,
+    modified_at: float,
 ) -> str:
     """Format chat as clean markdown."""
 

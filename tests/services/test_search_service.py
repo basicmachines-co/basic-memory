@@ -41,7 +41,11 @@ async def test_search_permalink_relation_wildcard(search_service, test_graph):
 @pytest.mark.asyncio
 async def test_search_permalink_wildcard2(search_service, test_graph):
     """Pattern matching"""
-    results = await search_service.search(SearchQuery(permalink_match="test/connected*", ))
+    results = await search_service.search(
+        SearchQuery(
+            permalink_match="test/connected*",
+        )
+    )
     assert len(results) >= 2
     permalinks = {r.permalink for r in results}
     assert "test/connected-entity-1" in permalinks
@@ -72,6 +76,7 @@ async def test_text_search_case_insensitive(search_service, test_graph):
     # Case insensitive
     results = await search_service.search(SearchQuery(text="ENTITY"))
     assert any("test/root" in r.permalink for r in results)
+
 
 @pytest.mark.asyncio
 async def test_text_search_content_word_match(search_service, test_graph):

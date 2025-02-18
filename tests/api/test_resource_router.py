@@ -165,7 +165,7 @@ async def test_get_resource_entities(client, test_config, entity_repository):
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
-            f"""
+        f"""
 --- memory://test/test-entity {entity1.updated_at.isoformat()} {entity1.checksum[:8]}
 
 # Test Content
@@ -176,9 +176,8 @@ async def test_get_resource_entities(client, test_config, entity_repository):
 - links to [[Test Entity]]
 
     """.strip()
-            in response.text
+        in response.text
     )
-
 
 
 @pytest.mark.asyncio

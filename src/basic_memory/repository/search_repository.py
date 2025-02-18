@@ -73,35 +73,35 @@ class SearchRepository:
             async with db.scoped_session(self.session_maker) as session:
                 await session.execute(CREATE_SEARCH_INDEX)
                 await session.commit()
-        except Exception as e: # pragma: no cover
+        except Exception as e:  # pragma: no cover
             logger.error(f"Error initializing search index: {e}")
             raise e
-        
+
     def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a search term for FTS5 query.
-        
+
         Args:
             term: The search term to prepare
             is_prefix: Whether to add prefix search capability (* suffix)
-            
+
         For FTS5:
         - Special characters and phrases need to be quoted
         - Terms with spaces or special chars need quotes
         """
         if "*" in term:
             return term
-        
+
         # List of special characters that need quoting (excluding *)
         special_chars = ["/", "-", ".", " ", "(", ")", "[", "]", '"', "'"]
-                    
+
         # Check if term contains any special characters
         needs_quotes = any(c in term for c in special_chars)
-        
+
         if needs_quotes:
             # If the term already contains quotes, escape them and add a wildcard
             term = term.replace('"', '""')
             term = f'"{term}"*'
-                        
+
         return term
 
     async def search(
@@ -140,13 +140,14 @@ class SearchRepository:
         # Handle permalink match search, supports *
         if permalink_match:
             # Clean and prepare permalink for FTS5 GLOB match
-            permalink_text = self._prepare_search_term(permalink_match.lower().strip(), is_prefix=False)
+            permalink_text = self._prepare_search_term(
+                permalink_match.lower().strip(), is_prefix=False
+            )
             params["permalink"] = permalink_text
             if "*" in permalink_match:
                 conditions.append("permalink GLOB :permalink")
-            else: 
+            else:
                 conditions.append("permalink MATCH :permalink")
-
 
         # Handle type filter
         if types:
@@ -223,7 +224,9 @@ class SearchRepository:
 
         logger.debug(f"Found {len(results)} search results")
         for r in results:
-            logger.debug(f"Search result: type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}")
+            logger.debug(
+                f"Search result: type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
+            )
 
         return results
 

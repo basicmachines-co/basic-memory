@@ -21,7 +21,7 @@ from basic_memory.schemas.search import SearchQuery, SearchItemType
 router = APIRouter(prefix="/resource", tags=["resources"])
 
 
-def get_entity_ids(item: SearchIndexRow) -> list[int]:
+def get_entity_ids(item: SearchIndexRow) -> list[int]: # pyright: ignore [reportReturnType]
     match item.type:
         case SearchItemType.ENTITY:
             return [item.id]
@@ -31,6 +31,8 @@ def get_entity_ids(item: SearchIndexRow) -> list[int]:
             from_entity = item.from_id
             to_entity = item.to_id
             return [from_entity, to_entity] if to_entity else [from_entity]
+        case _:
+            raise ValueError(f"Unexpected type: {item.type}")
 
 
 @router.get("/{identifier:path}")

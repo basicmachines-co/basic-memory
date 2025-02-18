@@ -46,7 +46,7 @@ class LinkResolver:
             logger.debug(f"Found title match: {entity.title}")
             return entity
 
-        if use_search and '*' not in clean_text:
+        if use_search and "*" not in clean_text:
             # 3. Fall back to search for fuzzy matching on title
             results = await self.search_service.search(
                 query=SearchQuery(title=clean_text, types=[SearchItemType.ENTITY]),

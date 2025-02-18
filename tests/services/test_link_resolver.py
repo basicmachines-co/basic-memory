@@ -11,7 +11,7 @@ from basic_memory.services.link_resolver import LinkResolver
 @pytest_asyncio.fixture
 async def test_entities(entity_service, file_service):
     """Create a set of test entities.
-    
+
     ├── components
     │   ├── Auth Service.md
     │   └── Core Service.md
@@ -139,4 +139,3 @@ async def test_resolve_none(link_resolver):
     """Test resolving non-existent entity."""
     # Basic new entity
     assert await link_resolver.resolve_link("New Feature") is None
-

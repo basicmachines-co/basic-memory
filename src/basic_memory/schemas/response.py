@@ -10,6 +10,7 @@ Key Features:
 3. Responses include everything needed for next operations
 4. Bulk operations return all affected items
 """
+
 from datetime import datetime
 from typing import List, Optional, Dict
 
@@ -42,6 +43,7 @@ class ObservationResponse(Observation, SQLAlchemyModel):
         "context": "Initial database design meeting"
     }
     """
+
     permalink: Permalink
 
 
@@ -59,6 +61,7 @@ class RelationResponse(Relation, SQLAlchemyModel):
         "context": "Comprehensive test suite"
     }
     """
+
     permalink: Permalink
 
     from_id: Permalink = Field(
