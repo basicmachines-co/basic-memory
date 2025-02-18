@@ -1,4 +1,5 @@
 """Tests for basic-memory package"""
+
 import sys
 import tomllib
 
@@ -11,13 +12,13 @@ from basic_memory.config import config
 
 def read_toml_version(file_path):
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             if sys.version_info >= (3, 11):
                 data = tomllib.load(f)
             else:
                 data = toml.load(f)
-        if 'project' in data and 'version' in data['project']:
-            return data['project']['version']
+        if "project" in data and "version" in data["project"]:
+            return data["project"]["version"]
         else:
             return None
     except FileNotFoundError:
@@ -25,8 +26,10 @@ def read_toml_version(file_path):
     except (toml.TomlDecodeError, tomllib.TOMLDecodeError):
         return None
 
-file_path = 'pyproject.toml'
+
+file_path = "pyproject.toml"
 version = read_toml_version(file_path)
+
 
 def test_version():
     """Test version is set in project src code and pyproject.toml"""

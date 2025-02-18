@@ -29,6 +29,7 @@ dependencies = [
     "fastapi[standard]>=0.115.8",
     "alembic>=1.14.1",
     "qasync>=0.27.1",
+    "logfire[fastapi,sqlalchemy,sqlite3]>=3.6.0",
 ]
 
 

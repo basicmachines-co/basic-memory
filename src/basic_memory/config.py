@@ -11,6 +11,7 @@ DATA_DIR_NAME = ".basic-memory"
 
 Environment = Literal["test", "dev", "prod"]
 
+
 class ProjectConfig(BaseSettings):
     """Configuration for a specific basic-memory project."""
 
