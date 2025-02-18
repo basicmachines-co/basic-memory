@@ -1,6 +1,7 @@
 """Configuration management for basic-memory."""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,9 +9,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DATABASE_NAME = "memory.db"
 DATA_DIR_NAME = ".basic-memory"
 
+Environment = Literal["test", "dev", "prod"]
 
 class ProjectConfig(BaseSettings):
     """Configuration for a specific basic-memory project."""
+
+    env: Environment = Field(default="dev", description="Environment name")
 
     # Default to ~/basic-memory but allow override with env var: BASIC_MEMORY_HOME
     home: Path = Field(

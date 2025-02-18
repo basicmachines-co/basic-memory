@@ -4,7 +4,7 @@ install:
 	pip install -e ".[dev]"
 
 test:
-	pytest -p pytest_mock -v
+	uv run pytest -p pytest_mock -v
 
 lint:
 	ruff check . --fix

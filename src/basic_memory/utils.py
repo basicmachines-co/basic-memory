@@ -69,11 +69,11 @@ def setup_logging(home_dir: Path = config.home, log_file: Optional[str] = None) 
     # Remove default handler and any existing handlers
     logger.remove()
 
-    # Add file handler
-    if log_file:
+    # Add file handler if we are not running tests
+    if log_file and config.env != "test":        
         log_path = home_dir / log_file
         logger.add(
-            str(log_path),  # loguru expects a string path
+            str(log_path), 
             level=config.log_level,
             rotation="100 MB",
             retention="10 days",
