@@ -160,8 +160,10 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
             file_service=sync_service.entity_service.file_service,
             config=config,
         )
-        await watch_service.handle_changes(config.home)
-        await watch_service.run(console_status=console_status)  # pragma: no cover
+        # full sync
+        await sync_service.sync(config.home)
+        # watch changes
+        await watch_service.run()  # pragma: no cover
     else:
         # one time sync
         knowledge_changes = await sync_service.sync(config.home)
@@ -186,14 +188,11 @@ def sync(
         "-w",
         help="Start watching for changes after sync.",
     ),
-    console_status: bool = typer.Option(
-        False, "--console-status", "-c", help="Show live console status"
-    ),
 ) -> None:
     """Sync knowledge files with the database."""
     try:
         # Run sync
-        asyncio.run(run_sync(verbose=verbose, watch=watch, console_status=console_status))
+        asyncio.run(run_sync(verbose=verbose, watch=watch))
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):

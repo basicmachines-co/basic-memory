@@ -117,3 +117,6 @@ def setup_logging(
     httpx_logger = logging.getLogger("httpx")
     # Set the logging level to WARNING to ignore INFO and DEBUG logs
     httpx_logger.setLevel(logging.WARNING)
+
+    # turn watchfiles to WARNING
+    logging.getLogger('watchfiles.main').setLevel(logging.WARNING)

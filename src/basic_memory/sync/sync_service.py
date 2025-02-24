@@ -135,7 +135,7 @@ class SyncService:
             # if checksums don't match for the same path, its modified
             if local_checksum_for_db_path and db_checksum != local_checksum_for_db_path:
                 report.modified.add(db_path)
-                report.checksums[db_path] = checksum
+                report.checksums[db_path] = local_checksum_for_db_path
 
             # check if it's moved or deleted
             if not local_checksum_for_db_path:
