@@ -137,8 +137,6 @@ def entity_parser(test_config):
     return EntityParser(test_config.home)
 
 
-
-
 @pytest_asyncio.fixture
 async def sync_service(
     entity_service: EntityService,

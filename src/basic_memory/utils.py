@@ -1,4 +1,5 @@
 """Utility functions for basic-memory."""
+
 import logging
 import os
 import re
@@ -64,8 +65,12 @@ def generate_permalink(file_path: Union[Path, str]) -> str:
 
 
 def setup_logging(
-    env: str, home_dir: Path, log_file: Optional[str] = None, log_level: str = "INFO", console: bool = True
-, ) -> None:  # pragma: no cover
+    env: str,
+    home_dir: Path,
+    log_file: Optional[str] = None,
+    log_level: str = "INFO",
+    console: bool = True,
+) -> None:  # pragma: no cover
     """
     Configure logging for the application.
     :param home_dir: the root directory for the application
@@ -119,4 +124,4 @@ def setup_logging(
     httpx_logger.setLevel(logging.WARNING)
 
     # turn watchfiles to WARNING
-    logging.getLogger('watchfiles.main').setLevel(logging.WARNING)
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)

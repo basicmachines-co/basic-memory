@@ -35,7 +35,7 @@ class ProjectConfig(BaseSettings):
         default=500, description="Milliseconds to wait after changes before syncing", gt=0
     )
 
-    log_level: str = "DEBUG" 
+    log_level: str = "DEBUG"
 
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",

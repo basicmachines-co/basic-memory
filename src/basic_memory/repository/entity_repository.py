@@ -1,9 +1,8 @@
 """Repository for managing entities in the knowledge graph."""
 
 from pathlib import Path
-from typing import List, Optional, Sequence, Union, Dict
+from typing import List, Optional, Sequence, Union
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption

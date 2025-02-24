@@ -47,6 +47,7 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
         logger.error(f"Failed to compute checksum: {e}")
         raise FileError(f"Failed to compute checksum: {e}")
 
+
 async def ensure_directory(path: Path) -> None:
     """
     Ensure directory exists, creating if necessary.

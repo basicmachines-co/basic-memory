@@ -21,8 +21,8 @@ class SearchIndexRow:
 
     id: int
     type: str
-    permalink: str
     file_path: str
+    permalink: Optional[str] = None
     metadata: Optional[dict] = None
 
     # date values

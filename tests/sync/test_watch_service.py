@@ -223,7 +223,9 @@ Test content
     assert moved_entity.id == initial_entity.id  # Same entity, new path
 
     # Original path should no longer exist
-    old_entity = await watch_service.sync_service.entity_repository.get_by_file_path("old/test_move.md")
+    old_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
+        "old/test_move.md"
+    )
     assert old_entity is None
 
     # Check event was recorded
@@ -279,7 +281,7 @@ async def test_handle_concurrent_changes(watch_service, test_config):
     events = watch_service.state.recent_events
     actions = [e.action for e in events]
     assert "new" in actions
-    assert "modified" not in actions # only process file once
+    assert "modified" not in actions  # only process file once
 
 
 @pytest.mark.asyncio
@@ -318,17 +320,13 @@ Test content for rapid moves
     await watch_service.handle_changes(project_dir, changes)
 
     # Verify final state
-    final_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "final.md"
-    )
+    final_entity = await watch_service.sync_service.entity_repository.get_by_file_path("final.md")
     assert final_entity is not None
 
     # Intermediate paths should not exist
     original_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
         "original.md"
     )
-    temp_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "temp.md"
-    )
+    temp_entity = await watch_service.sync_service.entity_repository.get_by_file_path("temp.md")
     assert original_entity is None
     assert temp_entity is None

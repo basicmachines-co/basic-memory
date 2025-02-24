@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter
 from basic_memory.schemas.search import SearchItemType
 
 
-def normalize_memory_url(url: str) -> str:
+def normalize_memory_url(url: str | None) -> str:
     """Normalize a MemoryUrl string.
 
     Args:
@@ -24,6 +24,9 @@ def normalize_memory_url(url: str) -> str:
         >>> normalize_memory_url("memory://specs/search")
         'memory://specs/search'
     """
+    if not url:
+        return ""
+
     clean_path = url.removeprefix("memory://")
     return f"memory://{clean_path}"
 

@@ -58,7 +58,8 @@ class LinkResolver:
                 logger.debug(
                     f"Selected best match from {len(results)} results: {best_match.permalink}"
                 )
-                return await self.entity_repository.get_by_permalink(best_match.permalink)
+                if best_match.permalink:
+                    return await self.entity_repository.get_by_permalink(best_match.permalink)
 
         # if we couldn't find anything then return None
         return None
@@ -106,9 +107,12 @@ class LinkResolver:
             score = result.score
             assert score is not None
 
-            # Parse path components
-            path_parts = result.permalink.lower().split("/")
-            last_part = path_parts[-1] if path_parts else ""
+            if result.permalink:
+                # Parse path components
+                path_parts = result.permalink.lower().split("/")
+                last_part = path_parts[-1] if path_parts else ""
+            else:
+                last_part = ""
 
             # Title word match boosts
             term_matches = [term for term in terms if term in last_part]

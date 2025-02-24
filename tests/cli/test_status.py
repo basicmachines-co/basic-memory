@@ -10,10 +10,19 @@ from basic_memory.cli.commands.status import (
     group_changes_by_directory,
     display_changes,
 )
+from basic_memory.config import config
 from basic_memory.sync.sync_service import SyncReport
 
 # Set up CLI runner
 runner = CliRunner()
+
+
+def test_status_command(tmp_path, monkeypatch):
+    """Test CLI status command."""
+    config.home = tmp_path
+    # Should exit with code 0
+    result = runner.invoke(app, ["status", "--verbose"])
+    assert result.exit_code == 0
 
 
 @pytest.mark.asyncio

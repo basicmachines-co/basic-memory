@@ -133,7 +133,7 @@ async def delete_entity(
         return DeleteEntitiesResponse(deleted=False)
 
     # Delete the entity
-    deleted = await entity_service.delete_entity(entity.permalink)
+    deleted = await entity_service.delete_entity(entity.permalink or entity.id)
 
     # Remove from search index
     background_tasks.add_task(search_service.delete_by_permalink, entity.permalink)

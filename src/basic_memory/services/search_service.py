@@ -128,10 +128,9 @@ class SearchService:
         self,
         entity: Entity,
     ) -> None:
-        
         # delete all search index data associated with entity
         await self.repository.delete_by_entity_id(entity_id=entity.id)
-        
+
         # reindex
         await self.index_entity_markdown(
             entity
@@ -147,7 +146,6 @@ class SearchService:
                 id=entity.id,
                 type=SearchItemType.ENTITY.value,
                 title=entity.title,
-                permalink=entity.permalink,
                 file_path=entity.file_path,
                 metadata={
                     "entity_type": entity.entity_type,
@@ -179,6 +177,10 @@ class SearchService:
         Each type gets its own row in the search index with appropriate metadata.
         """
 
+        assert entity.permalink is not None, (
+            "entity.permalink should not be None for markdown entities"
+        )
+
         content_parts = []
         title_variants = self._generate_variants(entity.title)
         content_parts.extend(title_variants)
@@ -192,6 +194,9 @@ class SearchService:
 
         entity_content = "\n".join(p for p in content_parts if p and p.strip())
 
+        assert entity.permalink is not None, (
+            "entity.permalink should not be None for markdown entities"
+        )
         # Index entity
         await self.repository.index_item(
             SearchIndexRow(
@@ -256,6 +261,6 @@ class SearchService:
                 )
             )
 
-    async def delete_by_permalink(self, path_id: str):
+    async def delete_by_permalink(self, permalink: str):
         """Delete an item from the search index."""
-        await self.repository.delete_by_permalink(path_id)
+        await self.repository.delete_by_permalink(permalink)

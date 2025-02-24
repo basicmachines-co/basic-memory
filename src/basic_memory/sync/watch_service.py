@@ -172,11 +172,13 @@ class WatchService:
                                 action="moved",
                                 status="success",
                             )
-                            self.console.print(f"[blue]→[/blue] Moved: {deleted_path} → {added_path}")
+                            self.console.print(
+                                f"[blue]→[/blue] Moved: {deleted_path} → {added_path}"
+                            )
                             processed.add(added_path)
                             processed.add(deleted_path)
                             break
-                    except Exception as e:
+                    except Exception as e:  # pragma: no cover
                         logger.warning(f"Error checking for move: {e}")
 
         # Handle remaining changes

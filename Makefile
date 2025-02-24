@@ -43,3 +43,12 @@ update-deps:
 	uv lock f--upgrade
 
 check: lint  format type-check test
+
+
+# Target for generating Alembic migrations with a message from command line
+migration:
+	@if [ -z "$(m)" ]; then \
+		echo "Usage: make migration m=\"Your migration message\""; \
+		exit 1; \
+	fi; \
+	cd src/basic_memory/alembic && alembic revision --autogenerate -m "$(m)"

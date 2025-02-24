@@ -157,7 +157,7 @@ class FileService:
         full_path = path if path.is_absolute() else self.base_path / path
 
         try:
-            content = path.read_text()
+            content = full_path.read_text()
             checksum = await file_utils.compute_checksum(content)
             logger.debug(f"read file: {full_path}, checksum: {checksum}")
             return content, checksum
@@ -229,7 +229,7 @@ class FileService:
         content_type = mime_type or "text/plain"
         return content_type
 
-    def is_markdown(self, path: Union[Path, str]) -> stat_result:
+    def is_markdown(self, path: Union[Path, str]) -> bool:
         """
         Return content_type for a given path.
         :param path:

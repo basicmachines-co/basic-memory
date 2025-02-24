@@ -24,7 +24,7 @@ def test_files(test_config) -> dict[str, Path]:
     # Source files relative to tests directory
     source_files = {
         "pdf": Path("tests/Non-MarkdownFileSupport.pdf"),
-        "image": Path("tests/Screenshot.png")
+        "image": Path("tests/Screenshot.png"),
     }
 
     # Create copies in temp project directory
@@ -42,6 +42,7 @@ def test_files(test_config) -> dict[str, Path]:
         project_files[name] = dest_path
 
     return project_files
+
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
     """Create a test file with given content."""
@@ -498,8 +499,8 @@ modified: 2024-01-01
     # Verify final state
     doc = await sync_service.entity_service.repository.get_by_permalink("changing")
     assert doc is not None
-    
-    # if we failed in the middle of a sync, the next one should fix it. 
+
+    # if we failed in the middle of a sync, the next one should fix it.
     if doc.checksum is None:
         await sync_service.sync(test_config.home)
         doc = await sync_service.entity_service.repository.get_by_permalink("changing")
@@ -883,9 +884,7 @@ async def test_sync_non_markdown_files(sync_service, test_config, test_files):
     assert test_files["image"].name in [f for f in report.new]
 
     # Verify entities were created
-    pdf_entity = await sync_service.entity_repository.get_by_file_path(
-        str(test_files["pdf"].name)
-    )
+    pdf_entity = await sync_service.entity_repository.get_by_file_path(str(test_files["pdf"].name))
     assert pdf_entity is not None, "PDF entity should have been created"
     assert pdf_entity.content_type == "application/pdf"
 
@@ -893,13 +892,14 @@ async def test_sync_non_markdown_files(sync_service, test_config, test_files):
         str(test_files["image"].name)
     )
     assert image_entity.content_type == "image/png"
-    
+
+
 @pytest.mark.asyncio
 async def test_sync_non_markdown_files_move(sync_service, test_config, test_files):
     """Test syncing non-markdown files updates permalink"""
     report = await sync_service.sync(test_config.home)
     assert report.total == 2
-    
+
     # Check files were detected
     assert test_files["pdf"].name in [f for f in report.new]
     assert test_files["image"].name in [f for f in report.new]
@@ -907,17 +907,19 @@ async def test_sync_non_markdown_files_move(sync_service, test_config, test_file
     test_files["pdf"].rename(test_config.home / "moved_pdf.pdf")
     report2 = await sync_service.sync(test_config.home)
     assert len(report2.moves) == 1
-    
-    # Verify entity permalink is updated
-    pdf_entity = await sync_service.entity_repository.get_by_file_path(
-        "moved_pdf.pdf")
+
+    # Verify entity is updated
+    pdf_entity = await sync_service.entity_repository.get_by_file_path("moved_pdf.pdf")
     assert pdf_entity is not None
-    assert pdf_entity.permalink == "moved-pdf"
+    assert pdf_entity.permalink is None
 
 
 @pytest.mark.asyncio
-async def test_sync_non_markdown_files_move_with_conflict(sync_service, test_config, test_files):
-    """Test syncing non-markdown files handles permalink conflicts during move"""
+async def test_sync_non_markdown_files_move_with_delete(
+    sync_service, test_config, test_files, file_service
+):
+    """Test syncing non-markdown files handles file deletes and renames during sync"""
+
     # Create initial files
     await create_test_file(test_config.home / "doc.pdf", "content1")
     await create_test_file(test_config.home / "other/doc-1.pdf", "content2")
@@ -930,9 +932,12 @@ async def test_sync_non_markdown_files_move_with_conflict(sync_service, test_con
     (test_config.home / "other/doc-1.pdf").rename(test_config.home / "doc.pdf")
 
     # Sync again
-    report = await sync_service.sync(test_config.home)
+    await sync_service.sync(test_config.home)
 
     # Verify the changes
     moved_entity = await sync_service.entity_repository.get_by_file_path("doc.pdf")
     assert moved_entity is not None
-    assert moved_entity.permalink == "doc"  # Should get a new permalink to match filename
+    assert moved_entity.permalink is None
+
+    file_content, _ = await file_service.read_file("doc.pdf")
+    assert "content2" in file_content

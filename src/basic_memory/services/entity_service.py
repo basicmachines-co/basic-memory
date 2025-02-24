@@ -127,7 +127,7 @@ class EntityService(BaseService[EntityModel]):
         await self.create_entity_from_markdown(file_path, entity_markdown)
 
         # add relations
-        entity = await self.update_entity_relations(file_path, entity_markdown)
+        entity = await self.update_entity_relations(str(file_path), entity_markdown)
 
         # Set final checksum to mark complete
         return await self.repository.update(entity.id, {"checksum": checksum})
@@ -152,20 +152,25 @@ class EntityService(BaseService[EntityModel]):
         entity = await self.update_entity_and_observations(file_path, entity_markdown)
 
         # add relations
-        await self.update_entity_relations(file_path, entity_markdown)
+        await self.update_entity_relations(str(file_path), entity_markdown)
 
         # Set final checksum to match file
         entity = await self.repository.update(entity.id, {"checksum": checksum})
 
         return entity
 
-    async def delete_entity(self, permalink: str) -> bool:
+    async def delete_entity(self, permalink_or_id: str | int) -> bool:
         """Delete entity and its file."""
-        logger.debug(f"Deleting entity: {permalink}")
+        logger.debug(f"Deleting entity: {permalink_or_id}")
 
         try:
             # Get entity first for file deletion
-            entity = await self.get_by_permalink(permalink)
+            if isinstance(permalink_or_id, str):
+                entity = await self.get_by_permalink(permalink_or_id)
+            else:
+                entities = await self.get_entities_by_id([permalink_or_id])
+                assert len(entities) == 1, f"Expected 1 entity, got {len(entities)}"
+                entity = entities[0]
 
             # Delete file first
             await self.file_service.delete_entity_file(entity)
@@ -174,7 +179,7 @@ class EntityService(BaseService[EntityModel]):
             return await self.repository.delete(entity.id)
 
         except EntityNotFoundError:
-            logger.info(f"Entity not found: {permalink}")
+            logger.info(f"Entity not found: {permalink_or_id}")
             return True  # Already deleted
 
     async def get_by_permalink(self, permalink: str) -> EntityModel:
