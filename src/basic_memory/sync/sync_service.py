@@ -143,9 +143,10 @@ class SyncService:
                 if db_checksum in scan_result.checksums:
                     new_path = scan_result.checksums[db_checksum]
                     report.moves[db_path] = new_path
-                    
-                    # Remove from new files since it's a move
-                    report.new.remove(new_path)
+
+                    # Remove from new files if present
+                    if new_path in report.new:
+                        report.new.remove(new_path)
 
                 # deleted
                 else:
