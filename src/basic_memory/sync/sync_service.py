@@ -276,7 +276,7 @@ class SyncService:
             for permalink in permalinks:
                 if permalink:
                     await self.search_service.delete_by_permalink(permalink)
-                else: 
+                else:
                     await self.search_service.delete_by_entity_id(entity.id)
 
     async def handle_move(self, old_path, new_path):
@@ -292,8 +292,9 @@ class SyncService:
     async def resolve_relations(self):
         """Try to resolve any unresolved relations"""
 
-        logger.debug("Attempting to resolve forward references")
-        for relation in await self.relation_repository.find_unresolved_relations():
+        unresolved_relations = await self.relation_repository.find_unresolved_relations()
+        logger.debug(f"Attempting to resolve {len(unresolved_relations)} forward references")
+        for relation in unresolved_relations:
             resolved_entity = await self.entity_service.link_resolver.resolve_link(relation.to_name)
 
             # ignore reference to self
@@ -301,16 +302,13 @@ class SyncService:
                 logger.debug(
                     f"Resolved forward reference: {relation.to_name} -> {resolved_entity.title}"
                 )
-                try:
-                    await self.relation_repository.update(
-                        relation.id,
-                        {
-                            "to_id": resolved_entity.id,
-                            "to_name": resolved_entity.title,
-                        },
-                    )
-                except IntegrityError:
-                    logger.debug(f"Ignoring duplicate relation {relation}")
+                await self.relation_repository.update(
+                    relation.id,
+                    {
+                        "to_id": resolved_entity.id,
+                        "to_name": resolved_entity.title,
+                    },
+                )
 
                 # update search index
                 await self.search_service.index_entity(resolved_entity)
@@ -328,10 +326,6 @@ class SyncService:
 
         logger.debug(f"Scanning directory: {directory}")
         result = ScanResult()
-
-        if not directory.exists():
-            logger.debug(f"Directory does not exist: {directory}")
-            return result
 
         for root, dirnames, filenames in os.walk(str(directory)):
             # Skip dot directories in-place
