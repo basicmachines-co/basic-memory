@@ -264,3 +264,7 @@ class SearchService:
     async def delete_by_permalink(self, permalink: str):
         """Delete an item from the search index."""
         await self.repository.delete_by_permalink(permalink)
+
+    async def delete_by_entity_id(self, id: str):
+        """Delete an item from the search index."""
+        await self.repository.delete_by_entity_id(id)

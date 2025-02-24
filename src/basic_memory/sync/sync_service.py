@@ -274,8 +274,10 @@ class SyncService:
             )
             logger.debug(f"Deleting from search index: {permalinks}")
             for permalink in permalinks:
-                assert permalink is not None, "permalink should not be None"
-                await self.search_service.delete_by_permalink(permalink)
+                if permalink:
+                    await self.search_service.delete_by_permalink(permalink)
+                else: 
+                    await self.search_service.delete_by_entity_id(entity.id)
 
     async def handle_move(self, old_path, new_path):
         logger.debug(f"Moving entity: {old_path} -> {new_path}")
