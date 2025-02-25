@@ -15,7 +15,6 @@ from basic_memory.services.search_service import SearchService
 from basic_memory.sync.sync_service import SyncService
 
 
-
 async def create_test_file(path: Path, content: str = "test content") -> None:
     """Create a test file with given content."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -985,10 +984,7 @@ async def test_sync_non_markdown_files_move_with_delete(
 
 @pytest.mark.asyncio
 async def test_sync_relation_to_non_markdown_file(
-    sync_service: SyncService,
-    test_config: ProjectConfig,
-    file_service: FileService,
-    test_files
+    sync_service: SyncService, test_config: ProjectConfig, file_service: FileService, test_files
 ):
     """Test that sync resolves permalink conflicts on update."""
     project_dir = test_config.home
@@ -1000,7 +996,7 @@ type: note
 tags: []
 ---
 
-- relates_to [[{test_files['pdf'].name}]]
+- relates_to [[{test_files["pdf"].name}]]
 """
 
     note_file = project_dir / "note.md"
@@ -1019,7 +1015,7 @@ tags: []
 permalink: note
 ---
 
-- relates_to [[{test_files['pdf'].name}]]
+- relates_to [[{test_files["pdf"].name}]]
 """.strip()
         == file_one_content
     )

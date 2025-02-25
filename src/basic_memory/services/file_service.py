@@ -201,7 +201,7 @@ class FileService:
                 content = full_path.read_bytes()
             return await file_utils.compute_checksum(content)
 
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.error(f"Failed to compute checksum for {path}: {e}")
             raise FileError(f"Failed to compute checksum for {path}: {e}")
 

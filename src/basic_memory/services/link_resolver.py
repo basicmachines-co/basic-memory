@@ -112,7 +112,7 @@ class LinkResolver:
                 path_parts = result.permalink.lower().split("/")
                 last_part = path_parts[-1] if path_parts else ""
             else:
-                last_part = "" # pragma: no cover
+                last_part = ""  # pragma: no cover
 
             # Title word match boosts
             term_matches = [term for term in terms if term in last_part]

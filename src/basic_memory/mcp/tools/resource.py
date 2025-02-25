@@ -121,13 +121,13 @@ def optimize_image(img, content_length, max_output_bytes=350000):
             quality = max(min_quality, quality - 15)
             size = max(min_size, int(size * 0.7))
         else:
-            quality = max(min_quality, quality - 10) # pragma: no cover
-            size = max(min_size, int(size * 0.8)) # pragma: no cover
+            quality = max(min_quality, quality - 10)  # pragma: no cover
+            size = max(min_size, int(size * 0.8))  # pragma: no cover
 
-        logger.debug("Reducing parameters", new_quality=quality, new_size=size) # pragma: no cover
+        logger.debug("Reducing parameters", new_quality=quality, new_size=size)  # pragma: no cover
 
         # If we've hit minimum values and still too big
-        if quality <= min_quality and size <= min_size: # pragma: no cover
+        if quality <= min_quality and size <= min_size:  # pragma: no cover
             logger.warning(
                 "Reached minimum parameters",
                 final_size=output_size,
@@ -175,7 +175,7 @@ async def read_resource(path: str) -> dict:
 
     # Handle other file types
     else:
-        logger.debug("Processing binary resource")
+        logger.debug(f"Processing binary resource content_type {content_type}")
         if content_length > 350000:
             logger.warning("Document too large for response", size=content_length)
             return {

@@ -265,6 +265,6 @@ class SearchService:
         """Delete an item from the search index."""
         await self.repository.delete_by_permalink(permalink)
 
-    async def delete_by_entity_id(self, id: str):
+    async def delete_by_entity_id(self, entity_id: int):
         """Delete an item from the search index."""
-        await self.repository.delete_by_entity_id(id)
+        await self.repository.delete_by_entity_id(entity_id)

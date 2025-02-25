@@ -183,6 +183,7 @@ async def test_delete_entity_success(entity_service: EntityService):
     with pytest.raises(EntityNotFoundError):
         await entity_service.get_by_permalink(entity_data.permalink)
 
+
 @pytest.mark.asyncio
 async def test_delete_entity_by_id(entity_service: EntityService):
     """Test successful entity deletion."""

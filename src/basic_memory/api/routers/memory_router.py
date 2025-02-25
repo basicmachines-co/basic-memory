@@ -31,7 +31,6 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
             case SearchItemType.ENTITY:
                 assert item.title is not None
                 assert item.created_at is not None
-                assert item.permalink is not None
 
                 return EntitySummary(
                     title=item.title,
@@ -107,9 +106,11 @@ async def recent(
     context = await context_service.build_context(
         types=types, depth=depth, since=since, limit=limit, offset=offset, max_related=max_related
     )
-    return await to_graph_context(
+    recent_context = await to_graph_context(
         context, entity_repository=entity_repository, page=page, page_size=page_size
     )
+    logger.debug(f"Recent context: {recent_context.model_dump_json()}")
+    return recent_context
 
 
 # get_memory_context needs to be declared last so other paths can match

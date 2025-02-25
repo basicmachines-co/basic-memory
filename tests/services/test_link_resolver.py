@@ -1,4 +1,5 @@
 """Tests for link resolution service."""
+
 from datetime import datetime, timezone
 
 import pytest
@@ -79,7 +80,7 @@ async def test_entities(entity_service, file_service):
         )
     )
 
-    return [e1, e2, e3, e4]
+    return [e1, e2, e3, e4, e5, e6, e7]
 
 
 @pytest_asyncio.fixture
@@ -155,4 +156,3 @@ async def test_resolve_file(link_resolver):
     assert resolved is not None
     assert resolved.entity_type == "file"
     assert resolved.title == "Image.png"
-

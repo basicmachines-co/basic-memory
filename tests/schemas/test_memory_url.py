@@ -51,10 +51,12 @@ def test_normalize_memory_url():
     url = normalize_memory_url("memory://specs/search")
     assert url == "memory://specs/search"
 
+
 def test_normalize_memory_url_no_prefix():
     """Test converting back to string."""
     url = normalize_memory_url("specs/search")
     assert url == "memory://specs/search"
+
 
 def test_normalize_memory_url_empty():
     """Test converting back to string."""

@@ -10,7 +10,6 @@ from typing import Tuple
 
 import logfire
 from loguru import logger
-from sqlalchemy.exc import IntegrityError
 
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity

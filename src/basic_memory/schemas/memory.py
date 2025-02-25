@@ -62,7 +62,7 @@ class EntitySummary(BaseModel):
     """Simplified entity representation."""
 
     type: str = "entity"
-    permalink: str
+    permalink: Optional[str]
     title: str
     file_path: str
     created_at: datetime
