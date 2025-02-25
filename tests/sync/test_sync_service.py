@@ -15,34 +15,6 @@ from basic_memory.services.search_service import SearchService
 from basic_memory.sync.sync_service import SyncService
 
 
-@pytest.fixture
-def test_files(test_config) -> dict[str, Path]:
-    """Copy test files into the project directory.
-
-    Returns a dict mapping file names to their paths in the project dir.
-    """
-    # Source files relative to tests directory
-    source_files = {
-        "pdf": Path("tests/Non-MarkdownFileSupport.pdf"),
-        "image": Path("tests/Screenshot.png"),
-    }
-
-    # Create copies in temp project directory
-    project_files = {}
-    for name, src_path in source_files.items():
-        # Read source file
-        content = src_path.read_bytes()
-
-        # Create destination path and ensure parent dirs exist
-        dest_path = test_config.home / src_path.name
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write file
-        dest_path.write_bytes(content)
-        project_files[name] = dest_path
-
-    return project_files
-
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
     """Create a test file with given content."""
