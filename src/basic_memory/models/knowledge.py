@@ -127,13 +127,8 @@ class Observation(Base):
         We can construct these because observations are always defined in
         and owned by a single entity.
         """
-        if self.entity.permalink:
-            return generate_permalink(
-                f"{self.entity.permalink}/observations/{self.category}/{self.content}"
-            )
-        # Fallback for non-markdown entities without permalinks
         return generate_permalink(
-            f"{self.entity.file_path}/observations/{self.category}/{self.content}"
+            f"{self.entity.permalink}/observations/{self.category}/{self.content}"
         )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -185,4 +180,4 @@ class Relation(Base):
         return generate_permalink(f"{from_permalink}/{self.relation_type}/{self.to_name}")
 
     def __repr__(self) -> str:
-        return f"Relation(id={self.id}, from_id={self.from_id}, to_id={self.to_id}, to_name={self.to_name}, type='{self.relation_type}')"
+        return f"Relation(id={self.id}, from_id={self.from_id}, to_id={self.to_id}, to_name={self.to_name}, type='{self.relation_type}')"  # pragma: no cover

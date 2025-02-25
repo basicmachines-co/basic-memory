@@ -4,11 +4,11 @@ from typing import Optional, Tuple, List
 
 from loguru import logger
 
+from basic_memory.models import Entity
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.search_repository import SearchIndexRow
-from basic_memory.services.search_service import SearchService
-from basic_memory.models import Entity
 from basic_memory.schemas.search import SearchQuery, SearchItemType
+from basic_memory.services.search_service import SearchService
 
 
 class LinkResolver:
@@ -112,7 +112,7 @@ class LinkResolver:
                 path_parts = result.permalink.lower().split("/")
                 last_part = path_parts[-1] if path_parts else ""
             else:
-                last_part = ""
+                last_part = "" # pragma: no cover
 
             # Title word match boosts
             term_matches = [term for term in terms if term in last_part]

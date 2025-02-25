@@ -183,6 +183,24 @@ async def test_delete_entity_success(entity_service: EntityService):
     with pytest.raises(EntityNotFoundError):
         await entity_service.get_by_permalink(entity_data.permalink)
 
+@pytest.mark.asyncio
+async def test_delete_entity_by_id(entity_service: EntityService):
+    """Test successful entity deletion."""
+    entity_data = EntitySchema(
+        title="TestEntity",
+        folder="test",
+        entity_type="test",
+    )
+    created = await entity_service.create_entity(entity_data)
+
+    # Act using permalink
+    result = await entity_service.delete_entity(created.id)
+
+    # Assert
+    assert result is True
+    with pytest.raises(EntityNotFoundError):
+        await entity_service.get_by_permalink(entity_data.permalink)
+
 
 @pytest.mark.asyncio
 async def test_get_entity_by_permalink_not_found(entity_service: EntityService):

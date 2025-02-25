@@ -1,6 +1,6 @@
 """Tests for MemoryUrl parsing."""
 
-from basic_memory.schemas.memory import memory_url, memory_url_path
+from basic_memory.schemas.memory import memory_url, memory_url_path, normalize_memory_url
 
 
 def test_basic_permalink():
@@ -44,3 +44,18 @@ def test_str_representation():
     """Test converting back to string."""
     url = memory_url.validate_python("memory://specs/search")
     assert url == "memory://specs/search"
+
+
+def test_normalize_memory_url():
+    """Test converting back to string."""
+    url = normalize_memory_url("memory://specs/search")
+    assert url == "memory://specs/search"
+
+def test_normalize_memory_url_no_prefix():
+    """Test converting back to string."""
+    url = normalize_memory_url("specs/search")
+    assert url == "memory://specs/search"
+
+def test_normalize_memory_url_empty():
+    """Test converting back to string."""
+    assert normalize_memory_url("") == ""

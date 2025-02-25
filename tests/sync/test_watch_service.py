@@ -330,3 +330,32 @@ Test content for rapid moves
     temp_entity = await watch_service.sync_service.entity_repository.get_by_file_path("temp.md")
     assert original_entity is None
     assert temp_entity is None
+
+@pytest.mark.asyncio
+async def test_handle_delete_then_add(watch_service, test_config):
+    """Test handling rapid move operations."""
+    project_dir = test_config.home
+
+    # Create initial file
+    original_path = project_dir / "original.md"
+    content = """---
+type: knowledge
+---
+# Move Test
+Test content for rapid moves
+"""
+    await create_test_file(original_path, content)
+
+    # Setup changes that might come in various orders
+    changes = {
+        (Change.deleted, str(original_path)),
+        (Change.added, str(original_path)),
+    }
+
+    # Handle changes
+    await watch_service.handle_changes(project_dir, changes)
+
+    # Verify final state
+    original_entity = await watch_service.sync_service.entity_repository.get_by_file_path("original.md")
+    assert original_entity is None # delete event is handled
+

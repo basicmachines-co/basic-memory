@@ -1,4 +1,5 @@
 """Tests for link resolution service."""
+from datetime import datetime, timezone
 
 import pytest
 
@@ -6,6 +7,7 @@ import pytest_asyncio
 
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services.link_resolver import LinkResolver
+from basic_memory.models.knowledge import Entity as EntityModel
 
 
 @pytest_asyncio.fixture
@@ -62,6 +64,18 @@ async def test_entities(entity_service, file_service):
             title="Sub Features 2",
             entity_type="specs",
             folder="specs/subspec",
+        )
+    )
+
+    # non markdown entity
+    e7 = await entity_service.repository.add(
+        EntityModel(
+            title="Image.png",
+            entity_type="file",
+            content_type="image/png",
+            file_path="Image.png",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
     )
 
@@ -131,3 +145,14 @@ async def test_resolve_none(link_resolver):
     """Test resolving non-existent entity."""
     # Basic new entity
     assert await link_resolver.resolve_link("New Feature") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_file(link_resolver):
+    """Test resolving non-existent entity."""
+    # Basic new entity
+    resolved = await link_resolver.resolve_link("Image.png")
+    assert resolved is not None
+    assert resolved.entity_type == "file"
+    assert resolved.title == "Image.png"
+

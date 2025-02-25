@@ -151,11 +151,11 @@ class WatchService:
         # First handle potential moves
         for added_path in adds:
             if added_path in processed:
-                continue
+                continue  # pragma: no cover
 
             for deleted_path in deletes:
                 if deleted_path in processed:
-                    continue
+                    continue  # pragma: no cover
 
                 if added_path != deleted_path:
                     # Compare checksums to detect moves

@@ -962,6 +962,7 @@ async def test_sync_non_markdown_files_move(sync_service, test_config, test_file
     assert pdf_entity is not None
     assert pdf_entity.permalink is None
 
+
 @pytest.mark.asyncio
 async def test_sync_non_markdown_files_deleted(sync_service, test_config, test_files):
     """Test syncing non-markdown files updates permalink"""
@@ -1008,3 +1009,45 @@ async def test_sync_non_markdown_files_move_with_delete(
 
     file_content, _ = await file_service.read_file("doc.pdf")
     assert "content2" in file_content
+
+
+@pytest.mark.asyncio
+async def test_sync_relation_to_non_markdown_file(
+    sync_service: SyncService,
+    test_config: ProjectConfig,
+    file_service: FileService,
+    test_files
+):
+    """Test that sync resolves permalink conflicts on update."""
+    project_dir = test_config.home
+
+    content = f"""
+---
+title: a note
+type: note
+tags: []
+---
+
+- relates_to [[{test_files['pdf'].name}]]
+"""
+
+    note_file = project_dir / "note.md"
+    await create_test_file(note_file, content)
+
+    # Run sync
+    await sync_service.sync(test_config.home)
+
+    # Check permalinks
+    file_one_content, _ = await file_service.read_file(note_file)
+    assert (
+        f"""---
+title: a note
+type: note
+tags: []
+permalink: note
+---
+
+- relates_to [[{test_files['pdf'].name}]]
+""".strip()
+        == file_one_content
+    )
