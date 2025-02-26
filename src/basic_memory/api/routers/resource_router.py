@@ -153,7 +153,7 @@ async def write_resource(
         # Get content from request body
 
         # Ensure it's UTF-8 string content
-        if isinstance(content, bytes):
+        if isinstance(content, bytes):  # pragma: no cover
             content_str = content.decode("utf-8")
         else:
             content_str = str(content)
@@ -172,7 +172,6 @@ async def write_resource(
 
         # Determine file details
         file_name = Path(file_path).name
-        folder = str(Path(file_path).parent)
         content_type = file_service.content_type(full_path)
 
         entity_type = "canvas" if file_path.endswith(".canvas") else "file"
@@ -194,6 +193,7 @@ async def write_resource(
                 },
             )
             assert entity is not None, "Entity should be returned after update"
+            status_code = 200
         else:
             # Create a new entity model
             entity = EntityModel(
@@ -206,13 +206,14 @@ async def write_resource(
                 updated_at=datetime.fromtimestamp(file_stats.st_mtime),
             )
             entity = await entity_repository.add(entity)
+            status_code = 201
 
         # Index the file for search
         await search_service.index_entity(entity)
 
         # Return success response
         return JSONResponse(
-            status_code=201,
+            status_code=status_code,
             content={
                 "file_path": file_path,
                 "checksum": checksum,
@@ -221,6 +222,6 @@ async def write_resource(
                 "modified_at": file_stats.st_mtime,
             },
         )
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         logger.error(f"Error writing resource {file_path}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to write resource: {str(e)}")

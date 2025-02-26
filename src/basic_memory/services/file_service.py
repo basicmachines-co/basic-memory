@@ -226,6 +226,11 @@ class FileService:
         full_path = path if path.is_absolute() else self.base_path / path
         # get file timestamps
         mime_type, _ = mimetypes.guess_type(full_path.name)
+
+        # .canvas files are json
+        if full_path.suffix == ".canvas":
+            mime_type = "application/json"
+
         content_type = mime_type or "text/plain"
         return content_type
 

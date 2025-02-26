@@ -23,6 +23,20 @@ def test_entity():
     assert entity.entity_type == "knowledge"
 
 
+def test_entity_non_markdown():
+    """Test entity for regular non-markdown file."""
+    data = {
+        "title": "Test Entity.txt",
+        "folder": "test",
+        "entity_type": "file",
+        "content_type": "text/plain",
+    }
+    entity = Entity.model_validate(data)
+    assert entity.file_path == "test/Test Entity.txt"
+    assert entity.permalink == "test/test-entity"
+    assert entity.entity_type == "file"
+
+
 def test_entity_in_validation():
     """Test validation errors for EntityIn."""
     with pytest.raises(ValidationError):

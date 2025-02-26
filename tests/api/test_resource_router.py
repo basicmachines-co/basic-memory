@@ -1,5 +1,6 @@
 """Tests for resource router endpoints."""
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -303,3 +304,126 @@ async def test_get_resource_relation(client, test_config, entity_repository):
     """.strip()
         in response.text
     )
+
+
+@pytest.mark.asyncio
+async def test_put_resource_new_file(client, test_config, entity_repository, search_repository):
+    """Test creating a new file via PUT."""
+    # Test data
+    file_path = "visualizations/test.canvas"
+    canvas_data = {
+        "nodes": [
+            {
+                "id": "node1",
+                "type": "text",
+                "text": "Test node content",
+                "x": 100,
+                "y": 200,
+                "width": 400,
+                "height": 300,
+            }
+        ],
+        "edges": [],
+    }
+
+    # Make sure the file doesn't exist yet
+    full_path = Path(test_config.home) / file_path
+    if full_path.exists():
+        full_path.unlink()
+
+    # Execute PUT request
+    response = await client.put(f"/resource/{file_path}", json=json.dumps(canvas_data, indent=2))
+
+    # Verify response
+    assert response.status_code == 201
+    response_data = response.json()
+    assert response_data["file_path"] == file_path
+    assert "checksum" in response_data
+    assert "size" in response_data
+
+    # Verify file was created
+    full_path = Path(test_config.home) / file_path
+    assert full_path.exists()
+
+    # Verify file content
+    file_content = full_path.read_text()
+    assert json.loads(file_content) == canvas_data
+
+    # Verify entity was created in DB
+    entity = await entity_repository.get_by_file_path(file_path)
+    assert entity is not None
+    assert entity.entity_type == "canvas"
+    assert entity.content_type == "application/json"
+
+    # Verify entity was indexed for search
+    search_results = await search_repository.search(title="test.canvas")
+    assert len(search_results) > 0
+
+
+@pytest.mark.asyncio
+async def test_put_resource_update_existing(client, test_config, entity_repository):
+    """Test updating an existing file via PUT."""
+    # Create an initial file and entity
+    file_path = "visualizations/update-test.canvas"
+    full_path = Path(test_config.home) / file_path
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+
+    initial_data = {
+        "nodes": [
+            {
+                "id": "initial",
+                "type": "text",
+                "text": "Initial content",
+                "x": 0,
+                "y": 0,
+                "width": 200,
+                "height": 100,
+            }
+        ],
+        "edges": [],
+    }
+    full_path.write_text(json.dumps(initial_data))
+
+    # Create the initial entity
+    initial_entity = await entity_repository.create(
+        {
+            "title": "update-test.canvas",
+            "entity_type": "canvas",
+            "file_path": file_path,
+            "content_type": "application/json",
+            "checksum": "initial123",
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
+
+    # New data for update
+    updated_data = {
+        "nodes": [
+            {
+                "id": "updated",
+                "type": "text",
+                "text": "Updated content",
+                "x": 100,
+                "y": 100,
+                "width": 300,
+                "height": 200,
+            }
+        ],
+        "edges": [],
+    }
+
+    # Execute PUT request to update
+    response = await client.put(f"/resource/{file_path}", json=json.dumps(updated_data, indent=2))
+
+    # Verify response
+    assert response.status_code == 200
+
+    # Verify file was updated
+    updated_content = full_path.read_text()
+    assert json.loads(updated_content) == updated_data
+
+    # Verify entity was updated
+    updated_entity = await entity_repository.get_by_file_path(file_path)
+    assert updated_entity.id == initial_entity.id  # Same entity, updated
+    assert updated_entity.checksum != initial_entity.checksum  # Checksum changed

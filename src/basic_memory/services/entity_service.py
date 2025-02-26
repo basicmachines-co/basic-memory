@@ -1,6 +1,5 @@
 """Service for managing entities in the database."""
 
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence, List, Optional, Tuple, Union
 
