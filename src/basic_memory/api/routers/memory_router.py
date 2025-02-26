@@ -29,8 +29,6 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
     async def to_summary(item: SearchIndexRow | ContextResultRow):
         match item.type:
             case SearchItemType.ENTITY:
-                assert item.title is not None
-                assert item.created_at is not None
 
                 return EntitySummary(
                     title=item.title,
@@ -39,20 +37,12 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
                     created_at=item.created_at,
                 )
             case SearchItemType.OBSERVATION:
-                assert item.category is not None
-                assert item.content is not None
-                assert item.permalink is not None
 
                 return ObservationSummary(
                     category=item.category, content=item.content, permalink=item.permalink
                 )
             case SearchItemType.RELATION:
-                assert item.from_id is not None
-                assert item.permalink is not None
                 from_entity = await entity_repository.find_by_id(item.from_id)
-                assert from_entity is not None
-                assert from_entity.permalink is not None
-
                 to_entity = await entity_repository.find_by_id(item.to_id) if item.to_id else None
                 return RelationSummary(
                     permalink=item.permalink,

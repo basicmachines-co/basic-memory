@@ -70,7 +70,7 @@ class SearchResult(BaseModel):
     id: int
     type: SearchItemType
     score: float
-    permalink: str
+    permalink: Optional[str]
     file_path: str
 
     metadata: Optional[dict] = None

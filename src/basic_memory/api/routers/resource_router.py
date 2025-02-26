@@ -98,7 +98,6 @@ async def get_resource_content(
             content = await file_service.read_entity_content(result)
             memory_url = normalize_memory_url(result.permalink)
             modified_date = result.updated_at.isoformat()
-            assert result.checksum
             checksum = result.checksum[:8]
 
             # Prepare the delimited content
@@ -192,7 +191,6 @@ async def write_resource(
                     "updated_at": datetime.fromtimestamp(file_stats.st_mtime),
                 },
             )
-            assert entity is not None, "Entity should be returned after update"
             status_code = 200
         else:
             # Create a new entity model

@@ -4,6 +4,7 @@ import asyncio
 from typing import Optional, List, Annotated
 
 import typer
+from loguru import logger
 from rich import print as rprint
 
 from basic_memory.cli.app import app
@@ -82,15 +83,14 @@ def build_context(
 
 @tool_app.command()
 def recent_activity(
-    type: Annotated[Optional[List[str]], typer.Option()] = ["entity", "observation", "relation"],
+    type: Annotated[Optional[List[str]], typer.Option()],
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
 ):
-    assert type is not None, "type is required"
-    if any(t not in ["entity", "observation", "relation"] for t in type):  # pragma: no cover
+    if type and type not in ["entity", "observation", "relation"]:  # pragma: no cover
         print("type must be one of ['entity', 'observation', 'relation']")
         raise typer.Abort()
 
@@ -140,6 +140,7 @@ def search(
         rprint(results.model_dump_json(indent=2))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
+            logger.exception("Error during search", e)
             typer.echo(f"Error during search: {e}", err=True)
             raise typer.Exit(1)
         raise

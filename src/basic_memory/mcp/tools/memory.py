@@ -16,6 +16,14 @@ from basic_memory.schemas.memory import (
 )
 from basic_memory.schemas.base import TimeFrame
 
+@mcp.prompt(
+    name="build_context",
+    description="Build context from a memory:// URI",
+)
+async def build_context_prompt(url: MemoryUrl) -> str:
+    """Build context from a memory:// URI."""
+    return await build_context(url=url)
+
 
 @mcp.tool(
     description="""Build context from a memory:// URI to continue conversations naturally.
