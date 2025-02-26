@@ -10,6 +10,7 @@ from basic_memory.mcp.tools.resource import read_resource
 from basic_memory.mcp.tools.memory import build_context, recent_activity
 from basic_memory.mcp.tools.notes import read_note, write_note
 from basic_memory.mcp.tools.search import search
+from basic_memory.mcp.tools.canvas import canvas
 
 from basic_memory.mcp.tools.knowledge import (
     delete_entities,
@@ -32,4 +33,6 @@ __all__ = [
     "write_note",
     # files
     "read_resource",
+    # canvas
+    "canvas",
 ]

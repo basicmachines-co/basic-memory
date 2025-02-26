@@ -159,7 +159,10 @@ class Entity(BaseModel):
     @property
     def file_path(self):
         """Get the file path for this entity based on its permalink."""
-        return f"{self.folder}/{self.title}.md" if self.folder else f"{self.title}.md"
+        if self.content_type == "text/markdown":
+            return f"{self.folder}/{self.title}.md" if self.folder else f"{self.title}.md"
+        else:
+            return f"{self.folder}/{self.title}" if self.folder else self.title
 
     @property
     def permalink(self) -> Permalink:

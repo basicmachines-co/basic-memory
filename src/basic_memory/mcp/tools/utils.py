@@ -79,6 +79,7 @@ async def call_put(
             timeout=timeout,
             extensions=extensions,
         )
+        logger.debug(response)
         response.raise_for_status()
         return response
     except HTTPStatusError as e:

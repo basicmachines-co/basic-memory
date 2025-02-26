@@ -2,9 +2,10 @@
 
 import tempfile
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Body
+from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 
 from basic_memory.deps import (
@@ -13,10 +14,13 @@ from basic_memory.deps import (
     SearchServiceDep,
     EntityServiceDep,
     FileServiceDep,
+    EntityRepositoryDep,
 )
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import normalize_memory_url
 from basic_memory.schemas.search import SearchQuery, SearchItemType
+from basic_memory.models.knowledge import Entity as EntityModel
+from datetime import datetime
 
 router = APIRouter(prefix="/resource", tags=["resources"])
 
@@ -122,3 +126,101 @@ def cleanup_temp_file(file_path: str):
         logger.debug(f"Temporary file deleted: {file_path}")
     except Exception as e:  # pragma: no cover
         logger.error(f"Error deleting temporary file {file_path}: {e}")
+
+
+@router.put("/{file_path:path}")
+async def write_resource(
+    config: ProjectConfigDep,
+    file_service: FileServiceDep,
+    entity_repository: EntityRepositoryDep,
+    search_service: SearchServiceDep,
+    file_path: str,
+    content: Annotated[str, Body()],
+) -> JSONResponse:
+    """Write content to a file in the project.
+
+    This endpoint allows writing content directly to a file in the project.
+    Also creates an entity record and indexes the file for search.
+
+    Args:
+        file_path: Path to write to, relative to project root
+        request: Contains the content to write
+
+    Returns:
+        JSON response with file information
+    """
+    try:
+        # Get content from request body
+
+        # Ensure it's UTF-8 string content
+        if isinstance(content, bytes):
+            content_str = content.decode("utf-8")
+        else:
+            content_str = str(content)
+
+        # Get full file path
+        full_path = Path(f"{config.home}/{file_path}")
+
+        # Ensure parent directory exists
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write content to file
+        checksum = await file_service.write_file(full_path, content_str)
+
+        # Get file info
+        file_stats = file_service.file_stats(full_path)
+
+        # Determine file details
+        file_name = Path(file_path).name
+        folder = str(Path(file_path).parent)
+        content_type = file_service.content_type(full_path)
+
+        entity_type = "canvas" if file_path.endswith(".canvas") else "file"
+
+        # Check if entity already exists
+        existing_entity = await entity_repository.get_by_file_path(file_path)
+
+        if existing_entity:
+            # Update existing entity
+            entity = await entity_repository.update(
+                existing_entity.id,
+                {
+                    "title": file_name,
+                    "entity_type": entity_type,
+                    "content_type": content_type,
+                    "file_path": file_path,
+                    "checksum": checksum,
+                    "updated_at": datetime.fromtimestamp(file_stats.st_mtime),
+                },
+            )
+            assert entity is not None, "Entity should be returned after update"
+        else:
+            # Create a new entity model
+            entity = EntityModel(
+                title=file_name,
+                entity_type=entity_type,
+                content_type=content_type,
+                file_path=file_path,
+                checksum=checksum,
+                created_at=datetime.fromtimestamp(file_stats.st_ctime),
+                updated_at=datetime.fromtimestamp(file_stats.st_mtime),
+            )
+            entity = await entity_repository.add(entity)
+
+        # Index the file for search
+        await search_service.index_entity(entity)
+
+        # Return success response
+        return JSONResponse(
+            status_code=201,
+            content={
+                "file_path": file_path,
+                "checksum": checksum,
+                "size": file_stats.st_size,
+                "created_at": file_stats.st_ctime,
+                "modified_at": file_stats.st_mtime,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error writing resource {file_path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write resource: {str(e)}")
