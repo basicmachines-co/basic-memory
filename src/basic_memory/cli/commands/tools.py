@@ -17,7 +17,7 @@ from basic_memory.mcp.tools import write_note as mcp_write_note
 
 # Import prompts
 from basic_memory.mcp.prompts.guide import basic_memory_guide as mcp_basic_memory_guide
-from basic_memory.mcp.prompts.continue_conversation import continue_conversation as mcp_continue_conversation
+from basic_memory.mcp.prompts.session import continue_session as mcp_continue_session
 
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
@@ -195,7 +195,7 @@ def continue_conversation(
     """Continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
-        session = asyncio.run(mcp_continue_conversation(topic=topic, timeframe=timeframe))
+        session = asyncio.run(mcp_continue_session(topic=topic, timeframe=timeframe))
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
