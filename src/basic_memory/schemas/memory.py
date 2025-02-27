@@ -72,19 +72,25 @@ class RelationSummary(BaseModel):
     """Simplified relation representation."""
 
     type: str = "relation"
+    title: str
+    file_path: str
     permalink: str
     relation_type: str
     from_id: str
     to_id: Optional[str] = None
+    created_at: datetime
 
 
 class ObservationSummary(BaseModel):
     """Simplified observation representation."""
 
     type: str = "observation"
+    title: str
+    file_path: str
     permalink: str
     category: str
     content: str
+    created_at: datetime
 
 
 class MemoryMetadata(BaseModel):

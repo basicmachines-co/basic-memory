@@ -196,7 +196,7 @@ def sync(
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
-            logger.exception("Sync failed")
+            logger.exception("Sync failed", e)
             typer.echo(f"Error during sync: {e}", err=True)
             raise typer.Exit(1)
         raise

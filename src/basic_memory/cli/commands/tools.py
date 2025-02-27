@@ -1,4 +1,4 @@
-"""Database management commands."""
+"""CLI tool commands for Basic Memory."""
 
 import asyncio
 from typing import Optional, List, Annotated
@@ -14,6 +14,11 @@ from basic_memory.mcp.tools import read_note as mcp_read_note
 from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
 from basic_memory.mcp.tools import search as mcp_search
 from basic_memory.mcp.tools import write_note as mcp_write_note
+
+# Import prompts
+from basic_memory.mcp.prompts.guide import basic_memory_guide as mcp_basic_memory_guide
+from basic_memory.mcp.prompts.session import continue_session as mcp_continue_session
+
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
 from basic_memory.schemas.search import SearchQuery
@@ -83,7 +88,7 @@ def build_context(
 
 @tool_app.command()
 def recent_activity(
-    type: Annotated[Optional[List[str]], typer.Option()],
+    type: Annotated[Optional[List[str]], typer.Option()] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
@@ -154,5 +159,48 @@ def get_entity(identifier: str):
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during get_entity: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command(name="basic-memory-guide")
+def cli_basic_memory_guide(
+    focus: Annotated[
+        Optional[str], 
+        typer.Option(help="Optional area to focus on (writing, context, search, etc.)")
+    ] = None,
+):
+    """Get guidance on how to use Basic Memory tools effectively."""
+    try:
+        guide = asyncio.run(mcp_basic_memory_guide(focus=focus))
+        rprint(guide)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error getting Basic Memory guide: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command(name="continue-session")
+def cli_continue_session(
+    topic: Annotated[
+        Optional[str], 
+        typer.Option(help="Topic or keyword to search for")
+    ] = None,
+    timeframe: Annotated[
+        TimeFrame, 
+        typer.Option(help="How far back to look for activity")
+    ] = "1w",
+):
+    """Continue a previous conversation or work session."""
+    try:
+        # Prompt functions return formatted strings directly
+        session = asyncio.run(mcp_continue_session(topic=topic, timeframe=timeframe))
+        # Don't try to model_dump, just print the string
+        rprint(session)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            logger.exception("Error continuing session")
+            typer.echo(f"Error continuing session: {e}", err=True)
             raise typer.Exit(1)
         raise

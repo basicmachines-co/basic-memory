@@ -29,7 +29,6 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
     async def to_summary(item: SearchIndexRow | ContextResultRow):
         match item.type:
             case SearchItemType.ENTITY:
-
                 return EntitySummary(
                     title=item.title,
                     permalink=item.permalink,
@@ -37,18 +36,25 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
                     created_at=item.created_at,
                 )
             case SearchItemType.OBSERVATION:
-
                 return ObservationSummary(
-                    category=item.category, content=item.content, permalink=item.permalink
+                    title=item.title,
+                    file_path=item.file_path,
+                    category=item.category,
+                    content=item.content,
+                    permalink=item.permalink,
+                    created_at=item.created_at,
                 )
             case SearchItemType.RELATION:
                 from_entity = await entity_repository.find_by_id(item.from_id)
                 to_entity = await entity_repository.find_by_id(item.to_id) if item.to_id else None
                 return RelationSummary(
+                    title=item.title,
+                    file_path=item.file_path,
                     permalink=item.permalink,
                     relation_type=item.type,
                     from_id=from_entity.permalink,
                     to_id=to_entity.permalink if to_entity else None,
+                    created_at=item.created_at,
                 )
             case _:  # pragma: no cover
                 raise ValueError(f"Unexpected type: {item.type}")
