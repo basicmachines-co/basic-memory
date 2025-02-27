@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import pytest
+from sqlalchemy.testing import skip_test
 from typer.testing import CliRunner
 from unittest.mock import patch, AsyncMock
 
@@ -247,6 +248,7 @@ def test_get_entity(mock_get_entity):
     )
     assert result.exit_code == 0
     mock_get_entity.assert_awaited_once_with(identifier="test/entity")
+
 
 
 def test_recent_activity(mock_recent_activity):

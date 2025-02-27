@@ -17,7 +17,7 @@ from basic_memory.mcp.tools import write_note as mcp_write_note
 
 # Import prompts
 from basic_memory.mcp.prompts.guide import basic_memory_guide as mcp_basic_memory_guide
-from basic_memory.mcp.prompts.session import continue_session as mcp_continue_session
+from basic_memory.mcp.prompts.continue_conversation import continue_conversation as mcp_continue_conversation
 
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
@@ -164,7 +164,7 @@ def get_entity(identifier: str):
 
 
 @tool_app.command(name="basic-memory-guide")
-def cli_basic_memory_guide(
+def basic_memory_guide(
     focus: Annotated[
         Optional[str], 
         typer.Option(help="Optional area to focus on (writing, context, search, etc.)")
@@ -181,26 +181,25 @@ def cli_basic_memory_guide(
         raise
 
 
-@tool_app.command(name="continue-session")
-def cli_continue_session(
+@tool_app.command(name="continue-conversation")
+def continue_conversation(
     topic: Annotated[
         Optional[str], 
         typer.Option(help="Topic or keyword to search for")
     ] = None,
     timeframe: Annotated[
-        TimeFrame, 
+        Optional[str], 
         typer.Option(help="How far back to look for activity")
-    ] = "1w",
+    ] = None,
 ):
     """Continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
-        session = asyncio.run(mcp_continue_session(topic=topic, timeframe=timeframe))
-        # Don't try to model_dump, just print the string
+        session = asyncio.run(mcp_continue_conversation(topic=topic, timeframe=timeframe))
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
-            logger.exception("Error continuing session")
-            typer.echo(f"Error continuing session: {e}", err=True)
+            logger.exception("Error continuing conversation", e)
+            typer.echo(f"Error continuing conversation: {e}", err=True)
             raise typer.Exit(1)
         raise

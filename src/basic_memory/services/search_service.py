@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import List, Optional, Set
 
+from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
 
@@ -69,7 +70,7 @@ class SearchService:
             (
                 query.after_date
                 if isinstance(query.after_date, datetime)
-                else datetime.fromisoformat(query.after_date)
+                else parse(query.after_date)
             )
             if query.after_date
             else None

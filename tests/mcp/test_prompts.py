@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 
 from basic_memory.mcp.prompts.guide import basic_memory_guide, _fallback_guide
-from basic_memory.mcp.prompts.session import continue_session
+from basic_memory.mcp.prompts.continue_conversation import continue_conversation
 
 
 @pytest.mark.asyncio
@@ -46,8 +46,8 @@ async def test_basic_memory_guide_with_focus():
 
 
 @pytest.mark.asyncio
-async def test_continue_session_with_topic():
-    """Test continue_session with a topic."""
+async def test_continue_conversation_with_topic():
+    """Test continue_conversation with a topic."""
     # Mock search results
     mock_search_results = MagicMock()
     mock_search_results.primary_results = [
@@ -67,11 +67,11 @@ async def test_continue_session_with_topic():
     mock_context.related_results = []
     
     # Set up our mocks
-    with patch("basic_memory.mcp.prompts.session.search", return_value=mock_search_results) as mock_search, \
-         patch("basic_memory.mcp.prompts.session.build_context", return_value=mock_context) as mock_build:
+    with patch("basic_memory.mcp.prompts.continue_conversation.search", return_value=mock_search_results) as mock_search, \
+         patch("basic_memory.mcp.prompts.continue_conversation.build_context", return_value=mock_context) as mock_build:
         
         # Call the function
-        result = await continue_session(topic="test", timeframe="1d")
+        result = await continue_conversation(topic="test", timeframe="1d")
         
         # Check that the appropriate functions were called
         mock_search.assert_called_once()
@@ -84,8 +84,8 @@ async def test_continue_session_with_topic():
 
 
 @pytest.mark.asyncio
-async def test_continue_session_no_topic():
-    """Test continue_session without a topic."""
+async def test_continue_conversation_no_topic():
+    """Test continue_conversation without a topic."""
     # Mock recent activity results
     mock_recent = MagicMock()
     mock_recent.primary_results = [
@@ -99,10 +99,10 @@ async def test_continue_session_no_topic():
     mock_recent.related_results = []
     
     # Set up our mock
-    with patch("basic_memory.mcp.prompts.session.recent_activity", return_value=mock_recent) as mock_recent_activity:
+    with patch("basic_memory.mcp.prompts.continue_conversation.recent_activity", return_value=mock_recent) as mock_recent_activity:
         
         # Call the function
-        result = await continue_session(timeframe="1d")
+        result = await continue_conversation(timeframe="1d")
         
         # Check that recent_activity was called
         mock_recent_activity.assert_called_once()
