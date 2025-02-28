@@ -350,3 +350,24 @@ async def test_read_note_memory_url(app):
     memory_url = "memory://test/memory-url-test"
     content = await read_note(memory_url)
     assert "Testing memory:// URL handling" in content
+
+
+@pytest.mark.asyncio
+async def test_read_note_non_error_status(app, mocker):
+    """Test scenario where read_note gets a non-200 status code that doesn't raise an exception.
+    
+    This tests the specific path that returns an error message for non-200 status 
+    when we don't have an exception.
+    """
+    # Create a mock response with a non-200 status that doesn't raise an exception
+    mock_response = mocker.MagicMock()
+    mock_response.status_code = 204  # No content
+    
+    # Mock the call_get function to return our mock response
+    mocker.patch("basic_memory.mcp.tools.read_note.call_get", return_value=mock_response)
+    
+    # Call read_note which should hit our error message path
+    result = await read_note("test/non-existing-note")
+    
+    # Verify the error message format
+    assert result == "Error: Could not find entity at test/non-existing-note"
