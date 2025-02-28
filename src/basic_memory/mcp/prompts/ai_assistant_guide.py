@@ -8,7 +8,7 @@ from basic_memory.mcp.server import mcp
 
 @mcp.resource(
     uri="memory://ai_assistant_guide",
-    name="ai_assistant_guide",
+    name="ai assistant guide",
     description="Give an AI assistant guidance on how to use Basic Memory tools effectively",
 )
 def ai_assistant_guide() -> str:

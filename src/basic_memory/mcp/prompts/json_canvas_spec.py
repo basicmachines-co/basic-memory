@@ -8,7 +8,7 @@ from basic_memory.mcp.server import mcp
 
 @mcp.resource(
     uri="memory://json_canvas_spec",
-    name="json_canvas_spec",
+    name="json canvas spec",
     description="JSON Canvas specification for visualizing knowledge graphs in Obsidian"
 )
 def json_canvas_spec() -> str:

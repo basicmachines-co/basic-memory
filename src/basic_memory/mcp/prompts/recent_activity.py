@@ -16,7 +16,7 @@ from basic_memory.schemas.base import TimeFrame
 
 
 @mcp.prompt(
-    name="recent_activity",
+    name="recent activity",
     description="Get recent activity from across the knowledge base",
 )
 async def recent_activity_prompt(

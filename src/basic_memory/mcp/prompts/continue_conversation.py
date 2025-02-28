@@ -20,7 +20,7 @@ from basic_memory.schemas.search import SearchQuery
 
 
 @mcp.prompt(
-    name="continue_conversation",
+    name="continue conversation",
     description="Continue a previous conversation",
 )
 async def continue_conversation(
