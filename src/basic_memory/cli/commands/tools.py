@@ -78,7 +78,7 @@ def build_context(
                 max_related=max_related,
             )
         )
-        rprint(context.model_dump_json(indent=2))
+        rprint(context.model_dump_json(indent=2, exclude_none=True))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during build_context: {e}", err=True)
@@ -106,7 +106,7 @@ def recent_activity(
                 max_related=max_related,
             )
         )
-        rprint(context.model_dump_json(indent=2))
+        rprint(context.model_dump_json(indent=2, exclude_none=True))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during build_context: {e}", err=True)
