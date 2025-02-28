@@ -16,8 +16,6 @@ import basic_memory.mcp.tools  # noqa: F401 # pragma: no cover
 # Import prompts to register them
 import basic_memory.mcp.prompts  # noqa: F401 # pragma: no cover
 
-# Import resources to register them
-import basic_memory.mcp.resources  # noqa: F401 # pragma: no cover
 
 
 if __name__ == "__main__":  # pragma: no cover
