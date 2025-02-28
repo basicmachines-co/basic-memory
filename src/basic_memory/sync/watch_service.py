@@ -210,7 +210,7 @@ class WatchService:
 
         # Add a divider if we processed any files
         if processed:
-            self.console.print("─" * 50, style="dim")
+            self.console.print("─" * 80, style="dim")
 
         self.state.last_scan = datetime.now()
         self.state.synced_files += len(processed)

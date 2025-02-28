@@ -146,8 +146,8 @@ def format_continuation_context(
                         display_type = rel_type.replace("_", " ").title()
                         section += f"- **{display_type}**:\n"
                         for rel in relations[:3]:  # Limit to avoid overwhelming
-                            if hasattr(rel, "to_id") and rel.to_id:
-                                section += f"  - `{rel.to_id}`\n"
+                            if hasattr(rel, "to_entity") and rel.to_entity:
+                                section += f"  - `{rel.to_entity}`\n"
 
                 sections.append(section)
 

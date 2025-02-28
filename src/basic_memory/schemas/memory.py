@@ -76,8 +76,8 @@ class RelationSummary(BaseModel):
     file_path: str
     permalink: str
     relation_type: str
-    from_id: str
-    to_id: Optional[str] = None
+    from_entity: str
+    to_entity: Optional[str] = None
     created_at: datetime
 
 

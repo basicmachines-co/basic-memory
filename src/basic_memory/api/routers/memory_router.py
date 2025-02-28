@@ -52,8 +52,8 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
                     file_path=item.file_path,
                     permalink=item.permalink,  # pyright: ignore
                     relation_type=item.type,
-                    from_id=from_entity.permalink,  # pyright: ignore
-                    to_id=to_entity.permalink if to_entity else None,
+                    from_entity=from_entity.permalink,  # pyright: ignore
+                    to_entity=to_entity.permalink if to_entity else None,
                     created_at=item.created_at,
                 )
             case _:  # pragma: no cover
