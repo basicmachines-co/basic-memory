@@ -16,6 +16,7 @@ def mock_response(monkeypatch):
     class MockResponse:
         def __init__(self, status_code=200):
             self.status_code = status_code
+            self.is_success = status_code < 400
 
         def raise_for_status(self):
             if self.status_code >= 400:
@@ -44,7 +45,7 @@ async def test_call_get_error(mock_response):
 
     with pytest.raises(ToolError) as exc:
         await call_get(client, "http://test.com")
-    assert "Error calling tool" in str(exc.value)
+    assert "Resource not found" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -65,7 +66,7 @@ async def test_call_post_error(mock_response):
 
     with pytest.raises(ToolError) as exc:
         await call_post(client, "http://test.com", json={"test": "data"})
-    assert "Error calling tool" in str(exc.value)
+    assert "Internal server error" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -86,7 +87,7 @@ async def test_call_put_error(mock_response):
 
     with pytest.raises(ToolError) as exc:
         await call_put(client, "http://test.com", json={"test": "data"})
-    assert "Error calling tool" in str(exc.value)
+    assert "Invalid request" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -107,7 +108,7 @@ async def test_call_delete_error(mock_response):
 
     with pytest.raises(ToolError) as exc:
         await call_delete(client, "http://test.com")
-    assert "Error calling tool" in str(exc.value)
+    assert "Access denied" in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -123,6 +124,34 @@ async def test_call_get_with_params(mock_response):
     mock_get.assert_called_once()
     call_kwargs = mock_get.call_args[1]
     assert call_kwargs["params"] == params
+    
+    
+@pytest.mark.asyncio
+async def test_get_error_message():
+    """Test the get_error_message function."""
+    from basic_memory.mcp.tools.utils import get_error_message
+    
+    # Test 400 status code
+    message = get_error_message(400, "http://test.com/resource", "GET")
+    assert "Invalid request" in message
+    assert "resource" in message
+    
+    # Test 404 status code
+    message = get_error_message(404, "http://test.com/missing", "GET")
+    assert "Resource not found" in message
+    assert "missing" in message
+    
+    # Test 500 status code
+    message = get_error_message(500, "http://test.com/server", "POST")
+    assert "Internal server error" in message
+    assert "server" in message
+    
+    # Test URL object handling
+    from httpx import URL
+    url = URL("http://test.com/complex/path")
+    message = get_error_message(403, url, "DELETE")
+    assert "Access denied" in message
+    assert "path" in message
 
 
 @pytest.mark.asyncio
