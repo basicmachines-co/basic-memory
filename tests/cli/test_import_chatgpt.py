@@ -155,6 +155,8 @@ async def test_process_chatgpt_json(tmp_path, sample_chatgpt_json):
     entity_parser = EntityParser(tmp_path)
     processor = MarkdownProcessor(entity_parser)
 
+    config.home = tmp_path
+
     results = await import_chatgpt.process_chatgpt_json(sample_chatgpt_json, tmp_path, processor)
 
     assert results["conversations"] == 1
