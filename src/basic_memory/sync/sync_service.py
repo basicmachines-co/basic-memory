@@ -180,7 +180,7 @@ class SyncService:
 
         except Exception as e:  # pragma: no cover
             logger.exception(f"Failed to sync {path}: {e}")
-
+            return None, None 
 
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
         """Sync a markdown file with full proces    sing."""
@@ -310,7 +310,7 @@ class SyncService:
                             "to_name": resolved_entity.title,
                         },
                     )
-                except IntegrityError:
+                except IntegrityError:  # pragma: no cover
                     logger.debug(f"Ignoring duplicate relation {relation}")
 
                 # update search index

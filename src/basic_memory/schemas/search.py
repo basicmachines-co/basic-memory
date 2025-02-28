@@ -38,7 +38,7 @@ class SearchQuery(BaseModel):
 
     # Primary search modes (use ONE of these)
     permalink: Optional[str] = None  # Exact permalink match
-    permalink_match: Optional[str] = None  # Exact permalink match
+    permalink_match: Optional[str] = None  # Glob permalink match
     text: Optional[str] = None  # Full-text search
     title: Optional[str] = None  # title only search
 
@@ -84,19 +84,6 @@ class SearchResult(BaseModel):
     to_entity: Optional[Permalink] = None  # For relations
     relation_type: Optional[str] = None  # For relations
 
-
-class RelatedResult(BaseModel):
-    type: SearchItemType
-    title: str
-    entity_id: int 
-    permalink: str
-    depth: int
-    root_id: int
-    created_at: datetime
-    from_id: Optional[int] = None
-    to_id: Optional[int] = None
-    relation_type: Optional[str] = None
-    category: Optional[str] = None
 
 
 class SearchResponse(BaseModel):
