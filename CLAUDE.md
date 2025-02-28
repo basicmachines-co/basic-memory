@@ -86,18 +86,28 @@ be traversed using links between documents.
 ### MCP Capabilities
 
 - Basic Memory exposes these MCP tools to LLMs:
-    - `write_note(title, content, folder, tags)` - Create/update markdown notes
-    - `read_note(permalink)` - Read existing notes by permalink or title
-    - `build_context(url)` - Navigate the knowledge graph via memory:// URLs
-    - `search(query)` - Query the knowledge base with full-text search
-    - `recent_activity(timeframe)` - Get recently updated information (e.g., "1d", "1 week")
-    - `canvas()` - Generate JSON canvas files for Obsidian visualization
+
+    **Content Management:**
+    - `write_note(title, content, folder, tags)` - Create/update markdown notes with semantic observations and relations
+    - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph awareness
+    - `read_file(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
+
+    **Knowledge Graph Navigation:**
+    - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation continuity
+    - `recent_activity(type, depth, timeframe)` - Get recently updated information with specified timeframe (e.g., "1d", "1 week")
+    
+    **Search & Discovery:**
+    - `search(query, page, page_size)` - Full-text search across all content with filtering options
+    
+    **Visualization:**
+    - `canvas(nodes, edges, title, folder)` - Generate Obsidian canvas files for knowledge graph visualization
 
 - MCP Prompts for better AI interaction:
-    - `ai_assistant_guide()` - Give an AI assistant guidance on how to use Basic Memory tools effectively
-    - `continue_conversation()` - Continue previous conversations with context and relevant history
-    - `json_canvas_spec()` - JSON Canvas specification for visualizing knowledge graphs in Obsidian
-    - `search()` - Search with formatted results for better context understanding
+    - `ai_assistant_guide()` - Guidance on effectively using Basic Memory tools for AI assistants
+    - `continue_conversation(topic, timeframe)` - Continue previous conversations with relevant historical context
+    - `search(query, after_date)` - Search with detailed, formatted results for better context understanding
+    - `recent_activity(timeframe)` - View recently changed items with formatted output
+    - `json_canvas_spec()` - Full JSON Canvas specification for Obsidian visualization
 
 ## AI-Human Collaborative Development
 
