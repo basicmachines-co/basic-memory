@@ -17,6 +17,8 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
 
     This tool finds and retrieves a note by its title or permalink, returning
     the raw markdown content including observations, relations, and metadata.
+    Unlike read_file, this tool is aware of the knowledge graph structure and
+    will attempt to resolve entity references if the file path doesn't exist.
 
     Args:
         identifier: The title or permalink of the note to read
@@ -25,7 +27,10 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
         page_size: Number of items per page (default: 10)
 
     Returns:
-        The full markdown content of the note
+        The full markdown content of the note, either from file content
+        or constructed from entity data if direct file access fails.
+        For entities without markdown content, returns a message indicating
+        the entity was found but has no content.
 
     Examples:
         # Read by permalink

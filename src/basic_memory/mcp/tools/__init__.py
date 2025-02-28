@@ -6,7 +6,7 @@ all tools with the MCP server.
 """
 
 # Import tools to register them with MCP
-from basic_memory.mcp.tools.resource import read_resource
+from basic_memory.mcp.tools.read_file import read_file
 from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.read_note import read_note
@@ -24,7 +24,7 @@ __all__ = [
     "read_note",
     "write_note",
     # files
-    "read_resource",
+    "read_file",
     # canvas
     "canvas",
 ]
