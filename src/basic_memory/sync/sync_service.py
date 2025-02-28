@@ -10,6 +10,7 @@ from typing import Tuple
 
 import logfire
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
@@ -301,13 +302,16 @@ class SyncService:
                 logger.debug(
                     f"Resolved forward reference: {relation.to_name} -> {resolved_entity.title}"
                 )
-                await self.relation_repository.update(
-                    relation.id,
-                    {
-                        "to_id": resolved_entity.id,
-                        "to_name": resolved_entity.title,
-                    },
-                )
+                try:
+                    await self.relation_repository.update(
+                        relation.id,
+                        {
+                            "to_id": resolved_entity.id,
+                            "to_name": resolved_entity.title,
+                        },
+                    )
+                except IntegrityError:
+                    logger.debug(f"Ignoring duplicate relation {relation}")
 
                 # update search index
                 await self.search_service.index_entity(resolved_entity)

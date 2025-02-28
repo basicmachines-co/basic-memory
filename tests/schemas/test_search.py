@@ -45,7 +45,6 @@ def test_search_filters():
 def test_search_result():
     """Test search result structure."""
     result = SearchResult(
-        id=1,
         title="test",
         type=SearchItemType.ENTITY,
         score=0.8,
@@ -53,7 +52,6 @@ def test_search_result():
         permalink="specs/search",
         file_path="specs/search.md",
     )
-    assert result.id == 1
     assert result.type == SearchItemType.ENTITY
     assert result.score == 0.8
     assert result.metadata == {"entity_type": "component"}
@@ -62,7 +60,6 @@ def test_search_result():
 def test_observation_result():
     """Test observation result fields."""
     result = SearchResult(
-        id=1,
         title="test",
         permalink="specs/search",
         file_path="specs/search.md",
@@ -79,7 +76,6 @@ def test_observation_result():
 def test_relation_result():
     """Test relation result fields."""
     result = SearchResult(
-        id=1,
         title="test",
         permalink="specs/search",
         file_path="specs/search.md",
@@ -99,7 +95,6 @@ def test_search_response():
     """Test search response wrapper."""
     results = [
         SearchResult(
-            id=1,
             title="test",
             permalink="specs/search",
             file_path="specs/search.md",
@@ -108,7 +103,6 @@ def test_search_response():
             metadata={},
         ),
         SearchResult(
-            id=2,
             title="test",
             permalink="specs/search",
             file_path="specs/search.md",

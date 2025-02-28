@@ -31,14 +31,15 @@ class EntityRepository(Repository[Entity]):
         query = self.select().where(Entity.permalink == permalink).options(*self.get_load_options())
         return await self.find_one(query)
 
-    async def get_by_title(self, title: str) -> Optional[Entity]:
+    async def get_by_title(self, title: str) -> Sequence[Entity]:
         """Get entity by title.
 
         Args:
             title: Title of the entity to find
         """
         query = self.select().where(Entity.title == title).options(*self.get_load_options())
-        return await self.find_one(query)
+        result = await self.execute_query(query)
+        return list(result.scalars().all())
 
     async def get_by_file_path(self, file_path: Union[Path, str]) -> Optional[Entity]:
         """Get entity by file_path.

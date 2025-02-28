@@ -67,7 +67,6 @@ class SearchQuery(BaseModel):
 class SearchResult(BaseModel):
     """Search result with score and metadata."""
 
-    id: int
     title: str
     type: SearchItemType
     score: float
@@ -86,7 +85,6 @@ class SearchResult(BaseModel):
 
 class RelatedResult(BaseModel):
     type: SearchItemType
-    id: int
     title: str
     permalink: str
     depth: int

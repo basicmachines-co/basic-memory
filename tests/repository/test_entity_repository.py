@@ -361,6 +361,15 @@ async def test_get_by_title(entity_repository: EntityRepository, session_maker):
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             ),
+            Entity(
+                title="Another Title",
+                entity_type="test",
+                permalink="test/another-title-1",
+                file_path="test/another-title-1.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
         ]
         session.add_all(entities)
         await session.flush()
@@ -368,15 +377,20 @@ async def test_get_by_title(entity_repository: EntityRepository, session_maker):
     # Test getting by exact title
     found = await entity_repository.get_by_title("Unique Title")
     assert found is not None
-    assert found.title == "Unique Title"
+    assert len(found) == 1
+    assert found[0].title == "Unique Title"
 
     # Test case sensitivity
     found = await entity_repository.get_by_title("unique title")
-    assert found is None  # Should be case-sensitive
+    assert not found  # Should be case-sensitive
 
     # Test non-existent title
     found = await entity_repository.get_by_title("Non Existent")
-    assert found is None
+    assert not found
+
+    # Test multiple rows found
+    found = await entity_repository.get_by_title("Another Title")
+    assert len(found) == 2
 
 
 @pytest.mark.asyncio
