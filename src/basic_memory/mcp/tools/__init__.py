@@ -6,6 +6,7 @@ all tools with the MCP server.
 """
 
 # Import tools to register them with MCP
+from basic_memory.mcp.tools.delete_note import delete_note
 from basic_memory.mcp.tools.read_file import read_file
 from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
@@ -15,16 +16,12 @@ from basic_memory.mcp.tools.search import search
 from basic_memory.mcp.tools.canvas import canvas
 
 __all__ = [
-    # Search tools
-    "search",
-    # memory tools
     "build_context",
-    "recent_activity",
-    # notes
-    "read_note",
-    "write_note",
-    # files
-    "read_file",
-    # canvas
     "canvas",
+    "delete_note",
+    "read_file",
+    "read_note",
+    "recent_activity",
+    "search",
+    "write_note",
 ]

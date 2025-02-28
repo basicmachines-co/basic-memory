@@ -5,7 +5,7 @@ from textwrap import dedent
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import notes
+from basic_memory.mcp.tools import write_note, read_note, delete_note
 
 
 @pytest.mark.asyncio
@@ -18,7 +18,7 @@ async def test_write_note(app):
     - Handle tags correctly
     - Return valid permalink
     """
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is a test note",
@@ -38,7 +38,7 @@ async def test_write_note(app):
     )
 
     # Try reading it back via permalink
-    content = await notes.read_note("test/test-note")
+    content = await read_note("test/test-note")
     assert (
         dedent("""
         ---
@@ -60,7 +60,7 @@ async def test_write_note(app):
 @pytest.mark.asyncio
 async def test_write_note_no_tags(app):
     """Test creating a note without tags."""
-    result = await notes.write_note(title="Simple Note", folder="test", content="Just some text")
+    result = await write_note(title="Simple Note", folder="test", content="Just some text")
 
     assert result
     assert (
@@ -71,7 +71,7 @@ async def test_write_note_no_tags(app):
         in result
     )
     # Should be able to read it back
-    content = await notes.read_note("test/simple-note")
+    content = await read_note("test/simple-note")
     assert (
         dedent("""
         --
@@ -90,7 +90,7 @@ async def test_write_note_no_tags(app):
 async def test_read_note_not_found(app):
     """Test trying to read a non-existent note."""
     with pytest.raises(ToolError, match="Error calling tool: Client error '404 Not Found'"):
-        await notes.read_note("notes/does-not-exist")
+        await read_note("notes/does-not-exist")
 
 
 @pytest.mark.asyncio
@@ -103,7 +103,7 @@ async def test_write_note_update_existing(app):
     - Handle tags correctly
     - Return valid permalink
     """
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is a test note",
@@ -122,7 +122,7 @@ async def test_write_note_update_existing(app):
         in result
     )
 
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is an updated note",
@@ -140,7 +140,7 @@ async def test_write_note_update_existing(app):
     )
 
     # Try reading it back
-    content = await notes.read_note("test/test-note")
+    content = await read_note("test/test-note")
     assert (
         """
 ---
@@ -163,18 +163,18 @@ This is an updated note
 async def test_read_note_by_title(app):
     """Test reading a note by its title."""
     # First create a note
-    await notes.write_note(title="Special Note", folder="test", content="Note content here")
+    await write_note(title="Special Note", folder="test", content="Note content here")
 
     # Should be able to read it by title
-    content = await notes.read_note("Special Note")
+    content = await read_note("Special Note")
     assert "Note content here" in content
 
 
 @pytest.mark.asyncio
 async def test_note_unicode_content(app):
-    """Test handling of unicode content in notes."""
+    """Test handling of unicode content in """
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    result = await notes.write_note(title="Unicode Test", folder="test", content=content)
+    result = await write_note(title="Unicode Test", folder="test", content=content)
 
     assert (
         dedent("""
@@ -185,13 +185,13 @@ async def test_note_unicode_content(app):
     )
 
     # Read back should preserve unicode
-    result = await notes.read_note("test/unicode-test")
+    result = await read_note("test/unicode-test")
     assert content in result
 
 
 @pytest.mark.asyncio
 async def test_multiple_notes(app):
-    """Test creating and managing multiple notes."""
+    """Test creating and managing multiple """
     # Create several notes
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
@@ -200,16 +200,16 @@ async def test_multiple_notes(app):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await notes.write_note(title=title, folder=folder, content=content, tags=tags)
+        await write_note(title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await notes.read_note(permalink)
+        note = await read_note(permalink)
         assert content in note
 
     # read multiple notes at once
 
-    result = await notes.read_note("test/*")
+    result = await read_note("test/*")
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -224,7 +224,7 @@ async def test_multiple_notes(app):
 
 @pytest.mark.asyncio
 async def test_multiple_notes_pagination(app):
-    """Test creating and managing multiple notes."""
+    """Test creating and managing multiple """
     # Create several notes
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
@@ -233,15 +233,15 @@ async def test_multiple_notes_pagination(app):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await notes.write_note(title=title, folder=folder, content=content, tags=tags)
+        await write_note(title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await notes.read_note(permalink)
+        note = await read_note(permalink)
         assert content in note
 
     # read multiple notes at once with pagination
-    result = await notes.read_note("test/*", page=1, page_size=2)
+    result = await read_note("test/*", page=1, page_size=2)
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -260,7 +260,7 @@ async def test_delete_note_existing(app):
     - Return valid permalink
     - Delete the note
     """
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Note",
         folder="test",
         content="# Test\nThis is a test note",
@@ -269,7 +269,7 @@ async def test_delete_note_existing(app):
 
     assert result
 
-    deleted = await notes.delete_note("test/test-note")
+    deleted = await delete_note("test/test-note")
     assert deleted is True
 
 
@@ -281,7 +281,7 @@ async def test_delete_note_doesnt_exist(app):
     - Delete the note
     - verify returns false
     """
-    deleted = await notes.delete_note("doesnt-exist")
+    deleted = await delete_note("doesnt-exist")
     assert deleted is False
 
 
@@ -295,7 +295,7 @@ async def test_write_note_verbose(app):
     - Handle tags correctly
     - Return valid permalink
     """
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Note",
         folder="test",
         content="""
@@ -339,7 +339,7 @@ async def test_read_note_memory_url(app):
     - Return the note content
     """
     # First create a note
-    result = await notes.write_note(
+    result = await write_note(
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling",
@@ -348,5 +348,5 @@ async def test_read_note_memory_url(app):
 
     # Should be able to read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    content = await notes.read_note(memory_url)
+    content = await read_note(memory_url)
     assert "Testing memory:// URL handling" in content

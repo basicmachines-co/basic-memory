@@ -5,7 +5,7 @@ from datetime import datetime
 
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools.memory import build_context, recent_activity
+from basic_memory.mcp.tools import build_context, recent_activity
 from basic_memory.schemas.memory import (
     GraphContext,
     EntitySummary,

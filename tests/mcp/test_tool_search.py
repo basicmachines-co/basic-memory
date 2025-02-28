@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timedelta
 
-from basic_memory.mcp.tools import notes
+from basic_memory.mcp.tools import read_note, write_note
 from basic_memory.mcp.tools.search import search
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 
@@ -12,7 +12,7 @@ from basic_memory.schemas.search import SearchQuery, SearchItemType
 async def test_search_basic(client):
     """Test basic search functionality."""
     # Create a test note
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -33,7 +33,7 @@ async def test_search_basic(client):
 async def test_search_pagination(client):
     """Test basic search functionality."""
     # Create a test note
-    result = await notes.write_note(
+    result = await write_note(
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -54,7 +54,7 @@ async def test_search_pagination(client):
 async def test_search_with_type_filter(client):
     """Test search with entity type filter."""
     # Create test content
-    await notes.write_note(
+    await write_note(
         title="Entity Type Test",
         folder="test",
         content="# Test\nFiltered by type",
@@ -72,7 +72,7 @@ async def test_search_with_type_filter(client):
 async def test_search_with_date_filter(client):
     """Test search with date filter."""
     # Create test content
-    await notes.write_note(
+    await write_note(
         title="Recent Note",
         folder="test",
         content="# Test\nRecent content",

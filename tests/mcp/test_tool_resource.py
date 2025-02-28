@@ -7,12 +7,12 @@ from PIL import Image as PILImage
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import resource
-from basic_memory.mcp.tools import notes
+from basic_memory.mcp.tools import read_file, write_note
+from basic_memory.mcp.tools.read_file import calculate_target_params, resize_image, optimize_image
 
 
 @pytest.mark.asyncio
-async def test_read_resource_text_file(app, synced_files):
+async def test_read_file_text_file(app, synced_files):
     """Test reading a text file.
 
     Should:
@@ -21,7 +21,7 @@ async def test_read_resource_text_file(app, synced_files):
     - Include correct metadata
     """
     # First create a text file via notes
-    result = await notes.write_note(
+    result = await write_note(
         title="Text Resource",
         folder="test",
         content="This is a test text resource",
@@ -30,7 +30,7 @@ async def test_read_resource_text_file(app, synced_files):
     assert result is not None
 
     # Now read it as a resource
-    response = await resource.read_resource("test/text-resource")
+    response = await read_file("test/text-resource")
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -39,7 +39,7 @@ async def test_read_resource_text_file(app, synced_files):
 
 
 @pytest.mark.asyncio
-async def test_read_resource_image_file(app, synced_files):
+async def test_read_file_image_file(app, synced_files):
     """Test reading an image file.
 
     Should:
@@ -51,7 +51,7 @@ async def test_read_resource_image_file(app, synced_files):
     image_path = synced_files["image"].name
 
     # Read it as a resource
-    response = await resource.read_resource(image_path)
+    response = await read_file(image_path)
 
     assert response["type"] == "image"
     assert response["source"]["type"] == "base64"
@@ -68,7 +68,7 @@ async def test_read_resource_image_file(app, synced_files):
 
 
 @pytest.mark.asyncio
-async def test_read_resource_pdf_file(app, synced_files):
+async def test_read_file_pdf_file(app, synced_files):
     """Test reading a PDF file.
 
     Should:
@@ -79,7 +79,7 @@ async def test_read_resource_pdf_file(app, synced_files):
     pdf_path = synced_files["pdf"].name
 
     # Read it as a resource
-    response = await resource.read_resource(pdf_path)
+    response = await read_file(pdf_path)
 
     assert response["type"] == "document"
     assert response["source"]["type"] == "base64"
@@ -92,17 +92,17 @@ async def test_read_resource_pdf_file(app, synced_files):
 
 
 @pytest.mark.asyncio
-async def test_read_resource_not_found(app):
-    """Test trying to read a non-existent resource."""
+async def test_read_file_not_found(app):
+    """Test trying to read a non-existent """
     with pytest.raises(ToolError, match="Error calling tool: Client error '404 Not Found'"):
-        await resource.read_resource("does-not-exist")
+        await read_file("does-not-exist")
 
 
 @pytest.mark.asyncio
-async def test_read_resource_memory_url(app, synced_files):
+async def test_read_file_memory_url(app, synced_files):
     """Test reading a resource using a memory:// URL."""
     # Create a text file via notes
-    await notes.write_note(
+    await write_note(
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling for resources",
@@ -110,7 +110,7 @@ async def test_read_resource_memory_url(app, synced_files):
 
     # Read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    response = await resource.read_resource(memory_url)
+    response = await read_file(memory_url)
 
     assert response["type"] == "text"
     assert "Testing memory:// URL handling for resources" in response["text"]
@@ -124,29 +124,29 @@ async def test_image_optimization_functions(app):
 
     # Test calculate_target_params function
     # Small image
-    quality, size = resource.calculate_target_params(100000)
+    quality, size = calculate_target_params(100000)
     assert quality == 70
     assert size == 1000
 
     # Medium image
-    quality, size = resource.calculate_target_params(800000)
+    quality, size = calculate_target_params(800000)
     assert quality == 60
     assert size == 800
 
     # Large image
-    quality, size = resource.calculate_target_params(2000000)
+    quality, size = calculate_target_params(2000000)
     assert quality == 50
     assert size == 600
 
     # Test resize_image function
     # Image that needs resizing
-    resized = resource.resize_image(img, 500)
+    resized = resize_image(img, 500)
     assert resized.width <= 500
     assert resized.height <= 500
 
     # Image that doesn't need resizing
     small_img = PILImage.new("RGB", (300, 200), color="white")
-    resized = resource.resize_image(small_img, 500)
+    resized = resize_image(small_img, 500)
     assert resized.width == 300
     assert resized.height == 200
 
@@ -158,12 +158,12 @@ async def test_image_optimization_functions(app):
 
     # In a small test image, optimization might make the image larger
     # because of JPEG overhead. Let's just test that it returns something
-    optimized = resource.optimize_image(img, content_length)
+    optimized = optimize_image(img, content_length)
     assert len(optimized) > 0
 
 
 @pytest.mark.asyncio
-async def test_read_resource_with_transparency(app, synced_files, mocker):
+async def test_read_file_with_transparency(app, synced_files, mocker):
     """Test reading an image with transparency.
 
     Should:
@@ -182,10 +182,10 @@ async def test_read_resource_with_transparency(app, synced_files, mocker):
     mock_response.content = img_bytes.getvalue()
 
     # Mock call_get to return our transparent image
-    mocker.patch("basic_memory.mcp.tools.resource.call_get", return_value=mock_response)
+    mocker.patch("basic_memory.mcp.tools.call_get", return_value=mock_response)
 
     # Test reading the resource
-    response = await resource.read_resource("transparent-image.png")
+    response = await read_file("transparent-image.png")
 
     assert response["type"] == "image"
     assert response["source"]["media_type"] == "image/jpeg"
@@ -197,7 +197,7 @@ async def test_read_resource_with_transparency(app, synced_files, mocker):
 
 
 @pytest.mark.asyncio
-async def test_read_resource_large_document(app, mocker):
+async def test_read_file_large_document(app, mocker):
     """Test handling of documents that exceed the size limit.
 
     Should:
@@ -210,19 +210,10 @@ async def test_read_resource_large_document(app, mocker):
     mock_response.content = b"0" * 500000  # Create a large fake binary document
 
     # Mock call_get to return our large document
-    mocker.patch("basic_memory.mcp.tools.resource.call_get", return_value=mock_response)
+    mocker.patch("basic_memory.mcp.tools.call_get", return_value=mock_response)
 
     # Test reading the resource
-    response = await resource.read_resource("large-document.bin")
+    response = await read_file("large-document.bin")
 
     assert response["type"] == "error"
     assert "Document size 500000 bytes exceeds maximum allowed size" in response["error"]
-
-
-# Let's skip the minimum parameters test since those values are internal to the optimize_image function
-# The rest of the code is well covered by the other tests
-# @pytest.mark.skip("Minimum parameter test not needed - code already has good coverage")
-# @pytest.mark.asyncio
-# async def test_optimize_image_limits(app, monkeypatch):
-#     """Test image optimization when it reaches minimum parameters."""
-#     pass
