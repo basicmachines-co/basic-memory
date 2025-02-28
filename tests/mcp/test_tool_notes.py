@@ -89,7 +89,7 @@ async def test_write_note_no_tags(app):
 @pytest.mark.asyncio
 async def test_read_note_not_found(app):
     """Test trying to read a non-existent note."""
-    with pytest.raises(ToolError, match="Error calling tool: Client error '404 Not Found'"):
+    with pytest.raises(ToolError, match="Resource not found"):
         await read_note("notes/does-not-exist")
 
 

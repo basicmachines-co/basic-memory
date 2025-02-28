@@ -258,22 +258,8 @@ def test_build_context_with_options(cli_env, setup_test_note):
     assert found, "Context did not include the test note"
 
 
-def test_get_entity(cli_env, setup_test_note):
-    """Test get_entity command."""
-    permalink = setup_test_note["permalink"]
-
-    result = runner.invoke(
-        tool_app,
-        ["get-entity", permalink],
-    )
-    assert result.exit_code == 0
-
-    # Result should be JSON containing our entity
-    entity_result = json.loads(result.stdout)
-    assert entity_result["permalink"] == permalink
-    assert entity_result["title"] == "Test Note"
-    assert len(entity_result["observations"]) >= 2
-    assert len(entity_result["relations"]) >= 1
+# The get-entity CLI command was removed when tools were refactored
+# into separate files with improved error handling
 
 
 def test_recent_activity(cli_env, setup_test_note):
