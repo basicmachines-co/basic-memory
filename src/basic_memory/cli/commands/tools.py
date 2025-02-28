@@ -9,7 +9,6 @@ from rich import print as rprint
 
 from basic_memory.cli.app import app
 from basic_memory.mcp.tools import build_context as mcp_build_context
-from basic_memory.mcp.tools import get_entity as mcp_get_entity
 from basic_memory.mcp.tools import read_note as mcp_read_note
 from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
 from basic_memory.mcp.tools import search as mcp_search
@@ -144,18 +143,6 @@ def search(
         if not isinstance(e, typer.Exit):
             logger.exception("Error during search", e)
             typer.echo(f"Error during search: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
-@tool_app.command()
-def get_entity(identifier: str):
-    try:
-        entity = asyncio.run(mcp_get_entity(identifier=identifier))
-        rprint(entity.model_dump_json(indent=2))
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during get_entity: {e}", err=True)
             raise typer.Exit(1)
         raise
 

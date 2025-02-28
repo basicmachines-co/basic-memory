@@ -12,17 +12,7 @@ from basic_memory.mcp.tools.notes import read_note, write_note
 from basic_memory.mcp.tools.search import search
 from basic_memory.mcp.tools.canvas import canvas
 
-from basic_memory.mcp.tools.knowledge import (
-    delete_entities,
-    get_entity,
-    get_entities,
-)
-
 __all__ = [
-    # Knowledge graph tools
-    "delete_entities",
-    "get_entity",
-    "get_entities",
     # Search tools
     "search",
     # memory tools
