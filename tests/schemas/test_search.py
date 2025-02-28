@@ -47,6 +47,7 @@ def test_search_result():
     result = SearchResult(
         title="test",
         type=SearchItemType.ENTITY,
+        entity="some_entity",
         score=0.8,
         metadata={"entity_type": "component"},
         permalink="specs/search",
@@ -66,10 +67,10 @@ def test_observation_result():
         type=SearchItemType.OBSERVATION,
         score=0.5,
         metadata={},
-        entity_id=123,
+        entity="some_entity",
         category="tech",
     )
-    assert result.entity_id == 123
+    assert result.entity == "some_entity"
     assert result.category == "tech"
 
 
@@ -80,14 +81,15 @@ def test_relation_result():
         permalink="specs/search",
         file_path="specs/search.md",
         type=SearchItemType.RELATION,
+        entity="some_entity",
         score=0.5,
         metadata={},
-        from_id=123,
-        to_id=456,
+        from_entity="123",
+        to_entity="456",
         relation_type="depends_on",
     )
-    assert result.from_id == 123
-    assert result.to_id == 456
+    assert result.from_entity == "123"
+    assert result.to_entity == "456"
     assert result.relation_type == "depends_on"
 
 
@@ -99,6 +101,7 @@ def test_search_response():
             permalink="specs/search",
             file_path="specs/search.md",
             type=SearchItemType.ENTITY,
+            entity="some_entity",
             score=0.8,
             metadata={},
         ),
@@ -107,6 +110,7 @@ def test_search_response():
             permalink="specs/search",
             file_path="specs/search.md",
             type=SearchItemType.ENTITY,
+            entity="some_entity",
             score=0.6,
             metadata={},
         ),
