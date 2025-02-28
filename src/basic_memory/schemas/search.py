@@ -9,7 +9,9 @@ The search system supports three primary modes:
 from typing import Optional, List, Union
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field, AliasChoices, AliasPath
+
+from basic_memory.schemas.base import Permalink
 
 
 class SearchItemType(str, Enum):
@@ -70,22 +72,23 @@ class SearchResult(BaseModel):
     title: str
     type: SearchItemType
     score: float
+    entity: Permalink
     permalink: Optional[str]
     file_path: str
 
     metadata: Optional[dict] = None
 
     # Type-specific fields
-    entity_id: Optional[int] = None  # For observations
     category: Optional[str] = None  # For observations
-    from_id: Optional[int] = None  # For relations
-    to_id: Optional[int] = None  # For relations
+    from_entity: Optional[Permalink] = None  # For relations
+    to_entity: Optional[Permalink] = None  # For relations
     relation_type: Optional[str] = None  # For relations
 
 
 class RelatedResult(BaseModel):
     type: SearchItemType
     title: str
+    entity_id: int 
     permalink: str
     depth: int
     root_id: int
@@ -94,7 +97,6 @@ class RelatedResult(BaseModel):
     to_id: Optional[int] = None
     relation_type: Optional[str] = None
     category: Optional[str] = None
-    entity_id: Optional[int] = None
 
 
 class SearchResponse(BaseModel):

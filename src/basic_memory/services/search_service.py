@@ -145,6 +145,7 @@ class SearchService:
         await self.repository.index_item(
             SearchIndexRow(
                 id=entity.id,
+                entity_id=entity.id,
                 type=SearchItemType.ENTITY.value,
                 title=entity.title,
                 file_path=entity.file_path,

@@ -13,6 +13,8 @@ from unidecode import unidecode
 import basic_memory
 
 import logfire
+# Disable the "Queue is full" warning
+logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(logging.ERROR)
 
 
 def generate_permalink(file_path: Union[Path, str]) -> str:
@@ -130,5 +132,6 @@ def setup_logging(
     for logger_name in ["instrumentor", 
                        "opentelemetry.instrumentation.instrumentor",
                        "opentelemetry.instrumentation",
-                       "logfire.instrumentor"]:
+                       "logfire.instrumentor",
+                       "opentelemetry.sdk.metrics._internal.instrument"]:
         logging.getLogger(logger_name).setLevel(logging.ERROR)
