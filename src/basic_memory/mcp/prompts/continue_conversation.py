@@ -1,6 +1,7 @@
 """Session continuation prompts for Basic Memory MCP server.
 
-These prompts help users continue conversations and work across sessions.
+These prompts help users continue conversations and work across sessions,
+providing context from previous interactions to maintain continuity.
 """
 
 from textwrap import dedent

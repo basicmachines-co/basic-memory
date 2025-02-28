@@ -1,3 +1,9 @@
+"""Utility functions for formatting prompt responses.
+
+These utilities help format data from various tools into consistent,
+user-friendly markdown summaries.
+"""
+
 from basic_memory.schemas.memory import GraphContext
 
 
@@ -6,6 +12,13 @@ def format_context_summary(header: str, context: GraphContext) -> str:
 
     This creates a user-friendly markdown response that explains the context
     and provides guidance on how to explore further.
+    
+    Args:
+        header: The title to use for the summary
+        context: The GraphContext object to format
+        
+    Returns:
+        Formatted markdown string with the context summary
     """
     summary = []
 

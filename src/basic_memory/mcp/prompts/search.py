@@ -13,7 +13,7 @@ from pydantic import Field
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search as search_tool
-from basic_memory.schemas.search import SearchQuery, SearchResult
+from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchResult
 from basic_memory.schemas.base import TimeFrame
 
 
@@ -47,7 +47,7 @@ async def search_prompt(
         return format_search_results(query, search_results, timeframe)
 
 
-def format_search_results(query: str, results: SearchResult, timeframe: Optional[TimeFrame] = None) -> str:
+def format_search_results(query: str, results: SearchResponse, timeframe: Optional[TimeFrame] = None) -> str:
     """Format search results into a helpful summary.
     
     Args:
@@ -90,14 +90,19 @@ def format_search_results(query: str, results: SearchResult, timeframe: Optional
             - **Type**: {result.type}
             """)
         
-        # Add creation date if available
-        if hasattr(result, "created_at") and result.created_at:
-            summary += f"- **Created**: {result.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+        # Add creation date if available in metadata
+        if hasattr(result, "metadata") and result.metadata and "created_at" in result.metadata:
+            created_at = result.metadata["created_at"]
+            if hasattr(created_at, "strftime"):
+                summary += f"- **Created**: {created_at.strftime('%Y-%m-%d %H:%M')}\n"
+            elif isinstance(created_at, str):
+                summary += f"- **Created**: {created_at}\n"
         
         # Add score and excerpt
         summary += f"- **Relevance Score**: {result.score:.2f}\n"
-        if hasattr(result, "excerpt") and result.excerpt:
-            summary += f"- **Excerpt**: {result.excerpt}\n"
+        # Add excerpt if available in metadata
+        if hasattr(result, "metadata") and result.metadata and "excerpt" in result.metadata:
+            summary += f"- **Excerpt**: {result.metadata['excerpt']}\n"
         
         # Add permalink for retrieving content
         if hasattr(result, "permalink") and result.permalink:
