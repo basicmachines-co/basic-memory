@@ -3,9 +3,8 @@
 These tests use real MCP tools with the test environment instead of mocks.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import json
-import asyncio
 from textwrap import dedent
 from typing import AsyncGenerator
 

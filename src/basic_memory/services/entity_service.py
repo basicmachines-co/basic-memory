@@ -127,7 +127,7 @@ class EntityService(BaseService[EntityModel]):
         created = await self.create_entity_from_markdown(file_path, entity_markdown)
 
         # add relations
-        entity = await self.update_entity_relations(str(file_path), entity_markdown)
+        entity = await self.update_entity_relations(created.file_path, entity_markdown)
 
         # Set final checksum to mark complete
         return await self.repository.update(entity.id, {"checksum": checksum})

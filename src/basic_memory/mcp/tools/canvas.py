@@ -14,7 +14,6 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
 
 
-
 @mcp.tool(
     description="Create an Obsidian canvas file to visualize concepts and connections.",
 )

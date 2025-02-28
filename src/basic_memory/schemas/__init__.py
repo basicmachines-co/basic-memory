@@ -59,8 +59,4 @@ __all__ = [
     "DeleteEntitiesResponse",
     # Delete Operations
     "DeleteEntitiesRequest",
-    # Discovery and Analytics
-    "EntityTypeList",
-    "ObservationCategoryList",
-    "TypedEntityList",
 ]

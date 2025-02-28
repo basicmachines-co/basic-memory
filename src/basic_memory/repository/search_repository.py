@@ -22,12 +22,13 @@ class SearchIndexRow:
     id: int
     type: str
     file_path: str
-    permalink: Optional[str] = None
-    metadata: Optional[dict] = None
 
     # date values
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    permalink: Optional[str] = None
+    metadata: Optional[dict] = None
 
     # assigned in result
     score: Optional[float] = None

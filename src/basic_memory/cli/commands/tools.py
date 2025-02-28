@@ -16,7 +16,9 @@ from basic_memory.mcp.tools import search as mcp_search
 from basic_memory.mcp.tools import write_note as mcp_write_note
 
 # Import prompts
-from basic_memory.mcp.prompts.continue_conversation import continue_conversation as mcp_continue_conversation
+from basic_memory.mcp.prompts.continue_conversation import (
+    continue_conversation as mcp_continue_conversation,
+)
 
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
@@ -160,13 +162,9 @@ def get_entity(identifier: str):
 
 @tool_app.command(name="continue-conversation")
 def continue_conversation(
-    topic: Annotated[
-        Optional[str], 
-        typer.Option(help="Topic or keyword to search for")
-    ] = None,
+    topic: Annotated[Optional[str], typer.Option(help="Topic or keyword to search for")] = None,
     timeframe: Annotated[
-        Optional[str], 
-        typer.Option(help="How far back to look for activity")
+        Optional[str], typer.Option(help="How far back to look for activity")
     ] = None,
 ):
     """Continue a previous conversation or work session."""

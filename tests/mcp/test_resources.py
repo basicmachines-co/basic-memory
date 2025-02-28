@@ -3,7 +3,6 @@ from basic_memory.mcp.resources import canvas_spec, ai_assistant_guide
 import pytest
 
 
-
 @pytest.mark.asyncio
 async def test_canvas_spec_resource_exists(app):
     """Test that the canvas spec resource exists and returns content."""

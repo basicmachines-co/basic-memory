@@ -26,21 +26,21 @@ async def recent_activity_prompt(
     ] = None,
 ) -> str:
     """Get recent activity from across the knowledge base.
-    
+
     This prompt helps you see what's changed recently in the knowledge base,
     showing new or updated documents and related information.
-    
+
     Args:
         timeframe: How far back to look for activity (e.g. '1d', '1 week')
-        
+
     Returns:
         Formatted summary of recent activity
     """
     with logfire.span("Getting recent activity", timeframe=timeframe):  # pyright: ignore
         logger.info(f"Getting recent activity, timeframe: {timeframe}")
-        
+
         results = await recent_activity_tool(timeframe=timeframe)
-        
+
         time_display = f" ({timeframe})" if timeframe else ""
         header = f"# Recent Activity{time_display}"
         return format_context_summary(header, results)

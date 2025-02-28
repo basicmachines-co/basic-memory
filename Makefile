@@ -40,7 +40,7 @@ installer-win:
 
 
 update-deps:
-	uv lock f--upgrade
+	uv lock --upgrade
 
 check: lint  format type-check test
 

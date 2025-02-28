@@ -1,5 +1,3 @@
-
-
 from .resources import ai_assistant_guide, canvas_spec
 
 

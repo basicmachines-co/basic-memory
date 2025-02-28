@@ -161,12 +161,14 @@ async def recent_activity(
         if depth:
             params["depth"] = depth
         if timeframe:
-            params["timeframe"] = timeframe
-            
+            params["timeframe"] = timeframe  # pyright: ignore
+
         # send enum values if we have an enum, else send string value
         if type:
-            params["type"] = [type.value if isinstance(type, SearchItemType) else type for type in type ]
-        
+            params["type"] = [  # pyright: ignore
+                type.value if isinstance(type, SearchItemType) else type for type in type
+            ]
+
         response = await call_get(
             client,
             "/memory/recent",

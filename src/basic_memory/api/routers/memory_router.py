@@ -30,29 +30,29 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
         match item.type:
             case SearchItemType.ENTITY:
                 return EntitySummary(
-                    title=item.title,
+                    title=item.title,  # pyright: ignore
                     permalink=item.permalink,
                     file_path=item.file_path,
                     created_at=item.created_at,
                 )
             case SearchItemType.OBSERVATION:
                 return ObservationSummary(
-                    title=item.title,
+                    title=item.title,  # pyright: ignore
                     file_path=item.file_path,
-                    category=item.category,
-                    content=item.content,
-                    permalink=item.permalink,
+                    category=item.category,  # pyright: ignore
+                    content=item.content,  # pyright: ignore
+                    permalink=item.permalink,  # pyright: ignore
                     created_at=item.created_at,
                 )
             case SearchItemType.RELATION:
-                from_entity = await entity_repository.find_by_id(item.from_id)
+                from_entity = await entity_repository.find_by_id(item.from_id)  # pyright: ignore
                 to_entity = await entity_repository.find_by_id(item.to_id) if item.to_id else None
                 return RelationSummary(
-                    title=item.title,
+                    title=item.title,  # pyright: ignore
                     file_path=item.file_path,
-                    permalink=item.permalink,
+                    permalink=item.permalink,  # pyright: ignore
                     relation_type=item.type,
-                    from_id=from_entity.permalink,
+                    from_id=from_entity.permalink,  # pyright: ignore
                     to_id=to_entity.permalink if to_entity else None,
                     created_at=item.created_at,
                 )

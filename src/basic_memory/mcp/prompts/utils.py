@@ -12,11 +12,11 @@ def format_context_summary(header: str, context: GraphContext) -> str:
 
     This creates a user-friendly markdown response that explains the context
     and provides guidance on how to explore further.
-    
+
     Args:
         header: The title to use for the summary
         context: The GraphContext object to format
-        
+
     Returns:
         Formatted markdown string with the context summary
     """
@@ -54,7 +54,7 @@ def format_context_summary(header: str, context: GraphContext) -> str:
         relation_types = {}
         for rel in context.related_results:
             if hasattr(rel, "relation_type"):
-                rel_type = rel.relation_type
+                rel_type = rel.relation_type  # pyright: ignore
                 if rel_type not in relation_types:
                     relation_types[rel_type] = []
                 relation_types[rel_type].append(rel)
