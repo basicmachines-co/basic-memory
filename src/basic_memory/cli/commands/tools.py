@@ -138,7 +138,7 @@ def search(
             after_date=after_date,
         )
         results = asyncio.run(mcp_search(query=search_query, page=page, page_size=page_size))
-        rprint(results.model_dump_json(indent=2))
+        rprint(results.model_dump_json(indent=2, exclude_none=True))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Error during search", e)
