@@ -1,20 +1,15 @@
-"""Note management tools for Basic Memory MCP server.
-
-These tools provide a natural interface for working with markdown notes
-while leveraging the underlying knowledge graph structure.
-"""
+"""Write note tool for Basic Memory MCP server."""
 
 from typing import Optional, List
 
-from loguru import logger
 import logfire
+from loguru import logger
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import client
-from basic_memory.schemas import EntityResponse, DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
-from basic_memory.mcp.tools.utils import call_get, call_put, call_delete
-from basic_memory.schemas.memory import memory_url_path
+from basic_memory.schemas import EntityResponse
+from basic_memory.mcp.tools.utils import call_put
 
 
 @mcp.tool(
@@ -112,90 +107,3 @@ async def write_note(
             summary.append(f"\n## Tags\n- {', '.join(tags)}")
 
         return "\n".join(summary)
-
-
-@mcp.tool(description="Read note content by title, permalink, relation, or pattern")
-async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
-    """Get note content in unified diff format.
-
-    The content is returned in a unified diff inspired format:
-    ```
-    --- memory://docs/example 2025-01-31T19:32:49 7d9f1c8b
-    <document content>
-    ```
-
-    Multiple documents (from relations or pattern matches) are separated by
-    additional headers.
-
-    Args:
-        identifier: Can be one of:
-            - Note title ("Project Planning")
-            - Note permalink ("docs/example")
-            - Relation path ("docs/example/depends-on/other-doc")
-            - Pattern match ("docs/*-architecture")
-        page: the page number of results to return (default 1)
-        page_size: the number of results to return per page (default 10)
-
-    Returns:
-        Document content in unified diff format. For single documents, returns
-        just that document's content. For relations or pattern matches, returns
-        multiple documents separated by unified diff headers.
-
-    Examples:
-        # Single document
-        content = await read_note("Project Planning")
-
-        # Read by permalink
-        content = await read_note("docs/architecture/file-first")
-
-        # Follow relation
-        content = await read_note("docs/architecture/depends-on/docs/content-parser")
-
-        # Pattern matching
-        content = await read_note("docs/*-architecture")  # All architecture docs
-        content = await read_note("docs/*/implements/*")  # Find implementations
-
-    Output format:
-        ```
-        --- memory://docs/example 2025-01-31T19:32:49 7d9f1c8b
-        <first document content>
-
-        --- memory://docs/other 2025-01-30T15:45:22 a1b2c3d4
-        <second document content>
-        ```
-
-    The headers include:
-    - Full memory:// URI for the document
-    - Last modified timestamp
-    - Content checksum
-    """
-    with logfire.span("Reading note", identifier=identifier):  # pyright: ignore [reportGeneralTypeIssues]
-        logger.info(f"Reading note {identifier}")
-        url = memory_url_path(identifier)
-        response = await call_get(
-            client, f"/resource/{url}", params={"page": page, "page_size": page_size}
-        )
-        return response.text
-
-
-@mcp.tool(description="Delete a note by title or permalink")
-async def delete_note(identifier: str) -> bool:
-    """Delete a note from the knowledge base.
-
-    Args:
-        identifier: Note title or permalink
-
-    Returns:
-        True if note was deleted, False otherwise
-
-    Examples:
-        # Delete by title
-        delete_note("Meeting Notes: Project Planning")
-
-        # Delete by permalink
-        delete_note("notes/project-planning")
-    """
-    with logfire.span("Deleting note", identifier=identifier):  # pyright: ignore [reportGeneralTypeIssues]
-        response = await call_delete(client, f"/knowledge/entities/{identifier}")
-        result = DeleteEntitiesResponse.model_validate(response.json())
-        return result.deleted

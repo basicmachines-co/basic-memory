@@ -1,0 +1,77 @@
+"""Read note tool for Basic Memory MCP server."""
+
+from loguru import logger
+import logfire
+
+from basic_memory.mcp.server import mcp
+from basic_memory.mcp.async_client import client
+from basic_memory.mcp.tools.utils import call_get
+from basic_memory.schemas.memory import memory_url_path
+
+
+@mcp.tool(
+    description="Read a markdown note by title or permalink.",
+)
+async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
+    """Read a markdown note from the knowledge base.
+
+    This tool finds and retrieves a note by its title or permalink, returning
+    the raw markdown content including observations, relations, and metadata.
+
+    Args:
+        identifier: The title or permalink of the note to read
+                   Can be a full memory:// URL, a permalink, or a title
+        page: Page number for paginated results (default: 1)
+        page_size: Number of items per page (default: 10)
+
+    Returns:
+        The full markdown content of the note
+
+    Examples:
+        # Read by permalink
+        read_note("specs/search-spec")
+
+        # Read by title
+        read_note("Search Specification")
+
+        # Read with memory URL
+        read_note("memory://specs/search-spec")
+
+        # Read with pagination
+        read_note("Project Updates", page=2, page_size=5)
+    """
+    with logfire.span("Reading note", identifier=identifier):  # pyright: ignore [reportGeneralTypeIssues]
+        try:
+            # Get the file via REST API
+            entity_path = memory_url_path(identifier)
+            path = f"/resource/{entity_path}"
+            logger.info(f"Reading note from URL: {path}")
+
+            response = await call_get(client, path, params={"page": page, "page_size": page_size})
+
+            # Just return the content as a string
+            if response.status_code == 200:
+                return response.text
+            else:
+                # If we got an error, use the entity API
+                entity_path = memory_url_path(identifier)
+                path = f"/knowledge/entities/{entity_path}"
+                logger.info(f"Reading entity from URL: {path}")
+                entity_response = await call_get(
+                    client, path, params={"page": page, "page_size": page_size}
+                )
+                if entity_response.status_code == 200:
+                    entity_data = entity_response.json()
+                    if "title" in entity_data and "content" in entity_data:
+                        return f"""# {entity_data["title"]}
+
+{entity_data["content"]}
+"""
+                    else:
+                        # We have some other kind of entity
+                        return f"Entity found at {identifier}, but it doesn't have markdown content."
+                else:
+                    return f"Error: Could not find entity at {identifier}"
+        except Exception as e:
+            logger.exception(f"Error reading note: {e}")
+            raise

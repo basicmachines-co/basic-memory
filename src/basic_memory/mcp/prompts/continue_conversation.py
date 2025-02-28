@@ -12,7 +12,8 @@ import logfire
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.memory import build_context, recent_activity
+from basic_memory.mcp.tools.build_context import build_context
+from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.search import search
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import GraphContext

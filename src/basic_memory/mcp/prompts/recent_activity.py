@@ -11,7 +11,7 @@ from pydantic import Field
 
 from basic_memory.mcp.prompts.utils import format_context_summary
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.memory import recent_activity as recent_activity_tool
+from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity_tool
 from basic_memory.schemas.base import TimeFrame
 
 

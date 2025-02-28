@@ -7,8 +7,10 @@ all tools with the MCP server.
 
 # Import tools to register them with MCP
 from basic_memory.mcp.tools.resource import read_resource
-from basic_memory.mcp.tools.memory import build_context, recent_activity
-from basic_memory.mcp.tools.notes import read_note, write_note
+from basic_memory.mcp.tools.build_context import build_context
+from basic_memory.mcp.tools.recent_activity import recent_activity
+from basic_memory.mcp.tools.read_note import read_note
+from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.search import search
 from basic_memory.mcp.tools.canvas import canvas
 
