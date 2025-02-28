@@ -179,11 +179,11 @@ class SyncService:
             return entity, checksum
 
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to sync {path}: {e}")
-            raise
+            logger.exception(f"Failed to sync {path}: {e}")
+
 
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
-        """Sync a markdown file with full processing."""
+        """Sync a markdown file with full proces    sing."""
 
         # Parse markdown first to get any existing permalink
         entity_markdown = await self.entity_parser.parse_file(path)
