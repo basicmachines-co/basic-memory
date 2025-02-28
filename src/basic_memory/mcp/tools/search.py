@@ -8,14 +8,6 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.search import SearchQuery, SearchResponse
 from basic_memory.mcp.async_client import client
 
-@mcp.prompt(
-    name="search",
-    description="Search across all content in basic-memory",
-)
-async def search_prompt(query: str) -> str:
-    """Search across all content in basic-memory."""
-    return await search(SearchQuery(text=query))
-
 
 @mcp.tool(
     description="Search across all content in basic-memory, including documents and entities",

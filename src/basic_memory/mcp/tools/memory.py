@@ -1,6 +1,6 @@
 """Discussion context tools for Basic Memory MCP server."""
 
-from typing import Optional, Literal, List
+from typing import Optional, List
 
 from loguru import logger
 import logfire
@@ -15,6 +15,7 @@ from basic_memory.schemas.memory import (
     normalize_memory_url,
 )
 from basic_memory.schemas.base import TimeFrame
+from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.tool(
@@ -100,7 +101,7 @@ async def build_context(
     """,
 )
 async def recent_activity(
-    type: List[Literal["entity", "observation", "relation"]] = [],
+    type: Optional[List[SearchItemType]] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
@@ -153,15 +154,19 @@ async def recent_activity(
             f"Getting recent activity from {type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
         )
         params = {
-            "depth": depth,
-            "timeframe": timeframe,
             "page": page,
             "page_size": page_size,
             "max_related": max_related,
         }
+        if depth:
+            params["depth"] = depth
+        if timeframe:
+            params["timeframe"] = timeframe
+            
+        # send enum values if we have an enum, else send string value
         if type:
-            params["type"] = type
-
+            params["type"] = [type.value if isinstance(type, SearchItemType) else type for type in type ]
+        
         response = await call_get(
             client,
             "/memory/recent",

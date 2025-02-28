@@ -49,11 +49,14 @@ be traversed using memory:// URLs.
 ### Development Notes
 
 - MCP tools are defined in src/basic_memory/mcp/tools/
+- MCP prompts are defined in src/basic_memory/mcp/prompts/
 - Schema changes require Alembic migrations
 - SQLite is used for indexing, files are source of truth
 - Testing uses pytest with asyncio support (strict mode)
 - Test database uses in-memory SQLite
 - MCP tools should be atomic, composable operations
+- Use `textwrap.dedent()` for multi-line string formatting in prompts and tools
+- Prompts are special types of tools that format content for user consumption
 
 ## BASIC MEMORY PRODUCT USAGE
 
@@ -75,6 +78,9 @@ be traversed using memory:// URLs.
 - Import from ChatGPT: `basic-memory import chatgpt`
 - Import from JSON: `basic-memory import memory-json`
 - Check status: `basic-memory status`
+- Tool access: `basic-memory tools` (provides CLI access to MCP tools)
+  - Guide: `basic-memory tools basic-memory-guide`
+  - Continue: `basic-memory tools continue-conversation --topic="search"`
 
 ### MCP Capabilities
 
@@ -86,6 +92,10 @@ be traversed using memory:// URLs.
     - `recent_activity()` - Get recently updated information
     - `canvas()` - Generate JSON canvas files for Obsidian
 
+- MCP Prompts for better AI interaction:
+    - `basic_memory_guide()` - Get guidance on using Basic Memory tools
+    - `continue_session()` - Continue previous conversations with context
+
 ### Best Practices
 
 - Use memory:// URLs to reference entities
@@ -93,6 +103,9 @@ be traversed using memory:// URLs.
 - Use descriptive relation types (e.g., implements, depends_on, contradicts)
 - Maintain unique permalinks for stable entity references
 - Take advantage of both manual editing and LLM-assisted knowledge creation
+- Use `basic_memory_guide()` when starting new conversations to bootstrap tool knowledge
+- Use `continue_session()` with topic keywords to pick up previous conversations
+- Encourage Claude to proactively use tools by providing clear instructions
 
 ---
 id: process/ai-code-flow.md

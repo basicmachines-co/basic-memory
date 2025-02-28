@@ -26,7 +26,7 @@ async def continue_conversation(
     topic: Annotated[Optional[str], Field(description="Topic or keyword to search for")] = None,
     timeframe: Annotated[
         Optional[TimeFrame],
-        Field(description="How far back to look for activity (e.g. '1d', '1 week'"),
+        Field(description="How far back to look for activity (e.g. '1d', '1 week')"),
     ] = None,
 ) -> str:
     """Continue a previous conversation or work session.
@@ -52,11 +52,8 @@ async def continue_conversation(
             contexts = []
             for result in search_results.results[:3]:
                 if hasattr(result, "permalink") and result.permalink:
-                    try:
-                        context = await build_context(f"memory://{result.permalink}")
-                        contexts.append(context)
-                    except Exception as e:
-                        logger.warning(f"Error building context for {result.permalink}: {e}")
+                    context = await build_context(f"memory://{result.permalink}")
+                    contexts.append(context)
                         
             return format_continuation_context(topic, contexts, timeframe)
         

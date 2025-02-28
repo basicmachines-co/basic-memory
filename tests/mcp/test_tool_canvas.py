@@ -6,24 +6,6 @@ from pathlib import Path
 import pytest
 
 from basic_memory.mcp.tools import canvas
-from basic_memory.mcp.tools.canvas import canvas_spec
-
-
-@pytest.mark.asyncio
-async def test_canvas_spec_resource_exists(app):
-    """Test that the canvas spec resource exists and returns content."""
-    # Call the resource function
-    spec_content = canvas_spec()
-
-    # Verify basic characteristics of the content
-    assert spec_content is not None
-    assert isinstance(spec_content, str)
-    assert len(spec_content) > 0
-
-    # Verify it contains expected sections of the Canvas spec
-    assert "JSON Canvas Spec" in spec_content
-    assert "nodes" in spec_content
-    assert "edges" in spec_content
 
 
 @pytest.mark.asyncio

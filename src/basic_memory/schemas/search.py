@@ -68,6 +68,7 @@ class SearchResult(BaseModel):
     """Search result with score and metadata."""
 
     id: int
+    title: str
     type: SearchItemType
     score: float
     permalink: Optional[str]

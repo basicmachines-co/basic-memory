@@ -16,12 +16,11 @@ from basic_memory.mcp.tools import search as mcp_search
 from basic_memory.mcp.tools import write_note as mcp_write_note
 
 # Import prompts
-from basic_memory.mcp.prompts.guide import basic_memory_guide as mcp_basic_memory_guide
-from basic_memory.mcp.prompts.session import continue_session as mcp_continue_session
+from basic_memory.mcp.prompts.continue_conversation import continue_conversation as mcp_continue_conversation
 
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
-from basic_memory.schemas.search import SearchQuery
+from basic_memory.schemas.search import SearchQuery, SearchItemType
 
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tools", help="cli versions mcp tools")
@@ -88,17 +87,13 @@ def build_context(
 
 @tool_app.command()
 def recent_activity(
-    type: Annotated[Optional[List[str]], typer.Option()] = None,
+    type: Annotated[Optional[List[SearchItemType]], typer.Option()] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
 ):
-    if type and type not in ["entity", "observation", "relation"]:  # pragma: no cover
-        print("type must be one of ['entity', 'observation', 'relation']")
-        raise typer.Abort()
-
     try:
         context = asyncio.run(
             mcp_recent_activity(
@@ -137,7 +132,7 @@ def search(
     try:
         search_query = SearchQuery(
             permalink_match=query if permalink else None,
-            text=query if query else None,
+            text=query if not (permalink or title) else None,
             title=query if title else None,
             after_date=after_date,
         )
@@ -163,24 +158,6 @@ def get_entity(identifier: str):
         raise
 
 
-@tool_app.command(name="basic-memory-guide")
-def basic_memory_guide(
-    focus: Annotated[
-        Optional[str], 
-        typer.Option(help="Optional area to focus on (writing, context, search, etc.)")
-    ] = None,
-):
-    """Get guidance on how to use Basic Memory tools effectively."""
-    try:
-        guide = asyncio.run(mcp_basic_memory_guide(focus=focus))
-        rprint(guide)
-    except Exception as e:  # pragma: no cover
-        if not isinstance(e, typer.Exit):
-            typer.echo(f"Error getting Basic Memory guide: {e}", err=True)
-            raise typer.Exit(1)
-        raise
-
-
 @tool_app.command(name="continue-conversation")
 def continue_conversation(
     topic: Annotated[
@@ -195,7 +172,7 @@ def continue_conversation(
     """Continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
-        session = asyncio.run(mcp_continue_session(topic=topic, timeframe=timeframe))
+        session = asyncio.run(mcp_continue_conversation(topic=topic, timeframe=timeframe))
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):

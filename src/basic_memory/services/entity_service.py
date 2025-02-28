@@ -124,7 +124,7 @@ class EntityService(BaseService[EntityModel]):
         entity_markdown = await self.entity_parser.parse_file(file_path)
 
         # create entity
-        await self.create_entity_from_markdown(file_path, entity_markdown)
+        created = await self.create_entity_from_markdown(file_path, entity_markdown)
 
         # add relations
         entity = await self.update_entity_relations(str(file_path), entity_markdown)

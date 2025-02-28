@@ -1,40 +1,4 @@
-from typing import Annotated
-
-from pydantic import Field
-
-from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools import build_context, recent_activity
-from basic_memory.schemas.memory import (
-    GraphContext,
-    MemoryUrl,
-)
-
-
-@mcp.prompt(
-    name="build_context",
-    description="Build context from a memory:// URI",
-)
-async def build_context(url: MemoryUrl) -> str:
-    """Build context from a memory:// URI."""
-    context = await build_context(url=url)
-    return format_context_summary(f"# Knowledge Context: {url}", context)
-
-
-@mcp.prompt(
-    name="recent_activity",
-    description="Get recent activity from across the knowledge base",
-)
-async def recent_activity(
-    instructions: Annotated[
-        str, Field(description="How to process or focus on the recent activity")
-    ] = None,
-) -> str:
-    """Get recent activity from across the knowledge base."""
-    timeframe = "2d"
-    results = await recent_activity(timeframe=timeframe)
-
-    header = f"{instructions}\n #Recent Activity: {timeframe}"
-    return format_context_summary(header, results)
+from basic_memory.schemas.memory import GraphContext
 
 
 def format_context_summary(header: str, context: GraphContext) -> str:

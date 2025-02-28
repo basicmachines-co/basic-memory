@@ -4,7 +4,6 @@ This tool creates Obsidian canvas files (.canvas) using the JSON Canvas 1.0 spec
 """
 
 import json
-from pathlib import Path
 from typing import Dict, List, Any
 
 import logfire
@@ -14,12 +13,6 @@ from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
 
-
-@mcp.resource("spec://canvas")
-def canvas_spec() -> str:
-    """Static configuration data"""
-    canvas_spec = Path(__file__).parent.parent.parent.parent.parent / "data/json_canvas_spec_1_0.md"
-    return canvas_spec.read_text()
 
 
 @mcp.tool(

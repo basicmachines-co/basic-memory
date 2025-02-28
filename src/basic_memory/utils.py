@@ -125,3 +125,6 @@ def setup_logging(
 
     # turn watchfiles to WARNING
     logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+
+    # disable open telemetry warning
+    logging.getLogger("instrumentor").setLevel(logging.ERROR)
