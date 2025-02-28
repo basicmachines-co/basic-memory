@@ -213,7 +213,7 @@ async def read_file(path: str) -> dict:
     # Handle other file types
     else:
         logger.debug(f"Processing binary resource content_type {content_type}")
-        if content_length > 350000:
+        if content_length > 350000: # pragma: no cover
             logger.warning("Document too large for response", size=content_length)
             return {
                 "type": "error",

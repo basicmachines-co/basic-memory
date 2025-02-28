@@ -58,25 +58,7 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
             if response.status_code == 200:
                 return response.text
             else:
-                # If we got an error, use the entity API
-                entity_path = memory_url_path(identifier)
-                path = f"/knowledge/entities/{entity_path}"
-                logger.info(f"Reading entity from URL: {path}")
-                entity_response = await call_get(
-                    client, path, params={"page": page, "page_size": page_size}
-                )
-                if entity_response.status_code == 200:
-                    entity_data = entity_response.json()
-                    if "title" in entity_data and "content" in entity_data:
-                        return f"""# {entity_data["title"]}
-
-{entity_data["content"]}
-"""
-                    else:
-                        # We have some other kind of entity
-                        return f"Entity found at {identifier}, but it doesn't have markdown content."
-                else:
-                    return f"Error: Could not find entity at {identifier}"
+                return f"Error: Could not find entity at {identifier}"
         except Exception as e:
             logger.exception(f"Error reading note: {e}")
             raise
