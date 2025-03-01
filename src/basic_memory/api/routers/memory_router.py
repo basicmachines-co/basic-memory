@@ -32,6 +32,7 @@ async def to_graph_context(context, entity_repository: EntityRepository, page: i
                 return EntitySummary(
                     title=item.title,  # pyright: ignore
                     permalink=item.permalink,
+                    content=item.content,
                     file_path=item.file_path,
                     created_at=item.created_at,
                 )

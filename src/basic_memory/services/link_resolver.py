@@ -1,12 +1,11 @@
 """Service for resolving markdown links to permalinks."""
 
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 
 from loguru import logger
 
 from basic_memory.models import Entity
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
 
@@ -55,7 +54,7 @@ class LinkResolver:
 
             if results:
                 # Look for best match
-                best_match = min(results, key=lambda x: x.score)
+                best_match = min(results, key=lambda x: x.score)  # pyright: ignore
                 logger.debug(
                     f"Selected best match from {len(results)} results: {best_match.permalink}"
                 )
@@ -89,4 +88,3 @@ class LinkResolver:
             alias = alias.strip()
 
         return text, alias
-

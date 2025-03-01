@@ -80,7 +80,7 @@ async def test_entities(entity_service, file_service):
         )
     )
 
-    e8 = await entity_service.create_entity( # duplicate title
+    e8 = await entity_service.create_entity(  # duplicate title
         EntitySchema(
             title="Core Service",
             entity_type="component",
@@ -113,6 +113,7 @@ async def test_exact_title_match(link_resolver, test_entities):
     """Test resolving a link that matches an entity title."""
     entity = await link_resolver.resolve_link("Core Service")
     assert entity.permalink == "components/core-service"
+
 
 @pytest.mark.asyncio
 async def test_duplicate_title_match(link_resolver, test_entities):

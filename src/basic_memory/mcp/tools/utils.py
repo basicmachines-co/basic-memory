@@ -5,8 +5,6 @@ to the Basic Memory API, with improved error handling and logging.
 """
 
 import typing
-import http
-from functools import wraps
 
 from httpx import Response, URL, AsyncClient, HTTPStatusError
 from httpx._client import UseClientDefault, USE_CLIENT_DEFAULT
@@ -27,21 +25,21 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 def get_error_message(status_code: int, url: URL | str, method: str) -> str:
     """Get a friendly error message based on the HTTP status code.
-    
+
     Args:
         status_code: The HTTP status code
         url: The URL that was requested
         method: The HTTP method used
-        
+
     Returns:
         A user-friendly error message
     """
     # Extract path from URL for cleaner error messages
     if isinstance(url, str):
-        path = url.split("/")[-1] 
+        path = url.split("/")[-1]
     else:
         path = str(url).split("/")[-1] if url else "resource"
-    
+
     # Client errors (400-499)
     if status_code == 400:
         return f"Invalid request: The request to '{path}' was malformed or invalid"
@@ -54,18 +52,20 @@ def get_error_message(status_code: int, url: URL | str, method: str) -> str:
     elif status_code == 409:  # pragma: no cover
         return f"Conflict: The request for '{path}' conflicts with the current state"
     elif status_code == 429:  # pragma: no cover
-        return f"Too many requests: Please slow down and try again later"
+        return "Too many requests: Please slow down and try again later"
     elif 400 <= status_code < 500:  # pragma: no cover
         return f"Client error ({status_code}): The request for '{path}' could not be completed"
-    
+
     # Server errors (500-599)
     elif status_code == 500:
         return f"Internal server error: Something went wrong processing '{path}'"
     elif status_code == 503:  # pragma: no cover
-        return f"Service unavailable: The server is currently unable to handle requests for '{path}'"
+        return (
+            f"Service unavailable: The server is currently unable to handle requests for '{path}'"
+        )
     elif 500 <= status_code < 600:  # pragma: no cover
         return f"Server error ({status_code}): The server encountered an error handling '{path}'"
-    
+
     # Fallback for any other status code
     else:  # pragma: no cover
         return f"HTTP error {status_code}: {method} request to '{path}' failed"
@@ -84,7 +84,7 @@ async def call_get(
     extensions: RequestExtensions | None = None,
 ) -> Response:
     """Make a GET request and handle errors appropriately.
-    
+
     Args:
         client: The HTTPX AsyncClient to use
         url: The URL to request
@@ -95,10 +95,10 @@ async def call_get(
         follow_redirects: Whether to follow redirects
         timeout: Request timeout
         extensions: HTTPX extensions
-        
+
     Returns:
         The HTTP response
-        
+
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
@@ -114,14 +114,14 @@ async def call_get(
             timeout=timeout,
             extensions=extensions,
         )
-        
+
         if response.is_success:
             return response
-            
+
         # Handle different status codes differently
         status_code = response.status_code
         error_message = get_error_message(status_code, url, "GET")
-        
+
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
             # Client errors: log as info except for 429 (Too Many Requests)
@@ -132,11 +132,11 @@ async def call_get(
         else:  # pragma: no cover
             # Server errors: log as error
             logger.error(f"Server error: GET {url}: {error_message}")
-            
+
         # Raise a tool error with the friendly message
         response.raise_for_status()  # Will always raise since we're in the error case
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
-        
+
     except HTTPStatusError as e:
         status_code = e.response.status_code
         error_message = get_error_message(status_code, url, "GET")
@@ -160,7 +160,7 @@ async def call_put(
     extensions: RequestExtensions | None = None,
 ) -> Response:
     """Make a PUT request and handle errors appropriately.
-    
+
     Args:
         client: The HTTPX AsyncClient to use
         url: The URL to request
@@ -175,10 +175,10 @@ async def call_put(
         follow_redirects: Whether to follow redirects
         timeout: Request timeout
         extensions: HTTPX extensions
-        
+
     Returns:
         The HTTP response
-        
+
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
@@ -198,14 +198,14 @@ async def call_put(
             timeout=timeout,
             extensions=extensions,
         )
-        
+
         if response.is_success:
             return response
-            
+
         # Handle different status codes differently
         status_code = response.status_code
         error_message = get_error_message(status_code, url, "PUT")
-        
+
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
             # Client errors: log as info except for 429 (Too Many Requests)
@@ -216,11 +216,11 @@ async def call_put(
         else:  # pragma: no cover
             # Server errors: log as error
             logger.error(f"Server error: PUT {url}: {error_message}")
-            
+
         # Raise a tool error with the friendly message
         response.raise_for_status()  # Will always raise since we're in the error case
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
-        
+
     except HTTPStatusError as e:
         status_code = e.response.status_code
         error_message = get_error_message(status_code, url, "PUT")
@@ -244,7 +244,7 @@ async def call_post(
     extensions: RequestExtensions | None = None,
 ) -> Response:
     """Make a POST request and handle errors appropriately.
-    
+
     Args:
         client: The HTTPX AsyncClient to use
         url: The URL to request
@@ -259,10 +259,10 @@ async def call_post(
         follow_redirects: Whether to follow redirects
         timeout: Request timeout
         extensions: HTTPX extensions
-        
+
     Returns:
         The HTTP response
-        
+
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
@@ -282,14 +282,14 @@ async def call_post(
             timeout=timeout,
             extensions=extensions,
         )
-        
+
         if response.is_success:
             return response
-            
+
         # Handle different status codes differently
         status_code = response.status_code
         error_message = get_error_message(status_code, url, "POST")
-        
+
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
             # Client errors: log as info except for 429 (Too Many Requests)
@@ -300,11 +300,11 @@ async def call_post(
         else:
             # Server errors: log as error
             logger.error(f"Server error: POST {url}: {error_message}")
-            
+
         # Raise a tool error with the friendly message
         response.raise_for_status()  # Will always raise since we're in the error case
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
-        
+
     except HTTPStatusError as e:
         status_code = e.response.status_code
         error_message = get_error_message(status_code, url, "POST")
@@ -324,7 +324,7 @@ async def call_delete(
     extensions: RequestExtensions | None = None,
 ) -> Response:
     """Make a DELETE request and handle errors appropriately.
-    
+
     Args:
         client: The HTTPX AsyncClient to use
         url: The URL to request
@@ -335,10 +335,10 @@ async def call_delete(
         follow_redirects: Whether to follow redirects
         timeout: Request timeout
         extensions: HTTPX extensions
-        
+
     Returns:
         The HTTP response
-        
+
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
@@ -354,14 +354,14 @@ async def call_delete(
             timeout=timeout,
             extensions=extensions,
         )
-        
+
         if response.is_success:
             return response
-            
+
         # Handle different status codes differently
         status_code = response.status_code
         error_message = get_error_message(status_code, url, "DELETE")
-        
+
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
             # Client errors: log as info except for 429 (Too Many Requests)
@@ -372,11 +372,11 @@ async def call_delete(
         else:  # pragma: no cover
             # Server errors: log as error
             logger.error(f"Server error: DELETE {url}: {error_message}")
-            
+
         # Raise a tool error with the friendly message
         response.raise_for_status()  # Will always raise since we're in the error case
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
-        
+
     except HTTPStatusError as e:
         status_code = e.response.status_code
         error_message = get_error_message(status_code, url, "DELETE")

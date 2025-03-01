@@ -8,7 +8,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     -- Core entity fields
     id UNINDEXED,          -- Row ID
     title,                 -- Title for searching
-    content,               -- Main searchable content
+    content_stems,         -- Main searchable content split into stems
+    content_snippet,       -- File content snippet for display
     permalink,             -- Stable identifier (now indexed for path search)
     file_path UNINDEXED,   -- Physical location
     type UNINDEXED,        -- entity/relation/observation

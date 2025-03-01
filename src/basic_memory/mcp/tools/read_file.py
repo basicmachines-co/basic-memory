@@ -146,33 +146,33 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 @mcp.tool(description="Read a file's raw content by path or permalink")
 async def read_file(path: str) -> dict:
     """Read a file's raw content by path or permalink.
-    
+
     This tool provides direct access to file content in the knowledge base,
     handling different file types appropriately:
     - Text files (markdown, code, etc.) are returned as plain text
     - Images are automatically resized/optimized for display
     - Other binary files are returned as base64 if below size limits
-    
+
     Args:
         path: The path or permalink to the file. Can be:
             - A regular file path (docs/example.md)
             - A memory URL (memory://docs/example)
             - A permalink (docs/example)
-    
+
     Returns:
         A dictionary with the file content and metadata:
         - For text: {"type": "text", "text": "content", "content_type": "text/markdown", "encoding": "utf-8"}
         - For images: {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "base64_data"}}
         - For other files: {"type": "document", "source": {"type": "base64", "media_type": "content_type", "data": "base64_data"}}
         - For errors: {"type": "error", "error": "error message"}
-    
+
     Examples:
         # Read a markdown file
         result = await read_file("docs/project-specs.md")
-        
+
         # Read an image
         image_data = await read_file("assets/diagram.png")
-        
+
         # Read using memory URL
         content = await read_file("memory://docs/architecture")
     """
@@ -213,7 +213,7 @@ async def read_file(path: str) -> dict:
     # Handle other file types
     else:
         logger.debug(f"Processing binary resource content_type {content_type}")
-        if content_length > 350000: # pragma: no cover
+        if content_length > 350000:  # pragma: no cover
             logger.warning("Document too large for response", size=content_length)
             return {
                 "type": "error",

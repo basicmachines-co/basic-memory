@@ -64,6 +64,7 @@ class EntitySummary(BaseModel):
     type: str = "entity"
     permalink: Optional[str]
     title: str
+    content: Optional[str] = None
     file_path: str
     created_at: datetime
 

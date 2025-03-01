@@ -13,8 +13,11 @@ from unidecode import unidecode
 import basic_memory
 
 import logfire
+
 # Disable the "Queue is full" warning
 logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(logging.ERROR)
+# Disable logfire prompts in CI/automated environments
+os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
 
 
 def generate_permalink(file_path: Union[Path, str]) -> str:
@@ -86,20 +89,26 @@ def setup_logging(
 
     # Add file handler if we are not running tests
     if log_file and env != "test":
-        # enable pydantic logfire
-        logfire.configure(
-            code_source=logfire.CodeSource(
-                repository="https://github.com/basicmachines-co/basic-memory",
-                revision=basic_memory.__version__,
-            ),
-            environment=env,
-            console=False,
-        )
-        logger.configure(handlers=[logfire.loguru_handler()])
+        try:
+            # Skip logfire configuration if LOGFIRE_API_KEY is not set
+            # This avoids interactive prompts when running automated tasks
+            if "LOGFIRE_API_KEY" in os.environ:
+                # enable pydantic logfire
+                logfire.configure(
+                    code_source=logfire.CodeSource(
+                        repository="https://github.com/basicmachines-co/basic-memory",
+                        revision=basic_memory.__version__,
+                    ),
+                    environment=env,
+                    console=False,
+                )
+                logger.configure(handlers=[logfire.loguru_handler()])
 
-        # instrument code spans
-        logfire.instrument_sqlite3()
-        logfire.instrument_httpx()
+                # instrument code spans
+                logfire.instrument_sqlite3()
+                logfire.instrument_httpx()
+        except Exception as e:
+            logger.warning(f"Failed to configure logfire: {e}")
 
         # setup logger
         log_path = home_dir / log_file
@@ -129,9 +138,11 @@ def setup_logging(
     logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
 
     # Disable all instrumentor-related warnings
-    for logger_name in ["instrumentor", 
-                       "opentelemetry.instrumentation.instrumentor",
-                       "opentelemetry.instrumentation",
-                       "logfire.instrumentor",
-                       "opentelemetry.sdk.metrics._internal.instrument"]:
+    for logger_name in [
+        "instrumentor",
+        "opentelemetry.instrumentation.instrumentor",
+        "opentelemetry.instrumentation",
+        "logfire.instrumentor",
+        "opentelemetry.sdk.metrics._internal.instrument",
+    ]:
         logging.getLogger(logger_name).setLevel(logging.ERROR)

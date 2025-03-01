@@ -93,7 +93,7 @@ async def test_read_file_pdf_file(app, synced_files):
 
 @pytest.mark.asyncio
 async def test_read_file_not_found(app):
-    """Test trying to read a non-existent """
+    """Test trying to read a non-existent"""
     with pytest.raises(ToolError, match="Resource not found"):
         await read_file("does-not-exist")
 
@@ -172,7 +172,7 @@ async def test_image_conversion(app, synced_files):
     """
     # Use the synced image file that's already part of our test fixtures
     image_path = synced_files["image"].name
-    
+
     # Test reading the resource
     response = await read_file(image_path)
 
@@ -187,7 +187,7 @@ async def test_image_conversion(app, synced_files):
     assert img.mode == "RGB"  # Should be in RGB mode
 
 
-# Skip testing the large document size handling since it would require 
+# Skip testing the large document size handling since it would require
 # complex mocking of internal logic. We've already tested the happy path
 # with the PDF file, and the error handling with our updated tool_utils tests.
 # We have 100% coverage of this code in read_file.py according to the coverage report.

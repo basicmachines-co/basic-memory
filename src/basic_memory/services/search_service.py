@@ -183,29 +183,33 @@ class SearchService:
             "entity.permalink should not be None for markdown entities"
         )
 
-        content_parts = []
+        content_stems = []
+        content_snippet = ""
         title_variants = self._generate_variants(entity.title)
-        content_parts.extend(title_variants)
+        content_stems.extend(title_variants)
 
         content = await self.file_service.read_entity_content(entity)
         if content:
-            content_parts.append(content)
+            content_stems.append(content)
+            content_snippet = f"{content[:250]}"
 
-        content_parts.extend(self._generate_variants(entity.permalink))
-        content_parts.extend(self._generate_variants(entity.file_path))
+        content_stems.extend(self._generate_variants(entity.permalink))
+        content_stems.extend(self._generate_variants(entity.file_path))
 
-        entity_content = "\n".join(p for p in content_parts if p and p.strip())
+        entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
         assert entity.permalink is not None, (
             "entity.permalink should not be None for markdown entities"
         )
+
         # Index entity
         await self.repository.index_item(
             SearchIndexRow(
                 id=entity.id,
                 type=SearchItemType.ENTITY.value,
                 title=entity.title,
-                content=entity_content,
+                content_stems=entity_content_stems,
+                content_snippet=content_snippet,
                 permalink=entity.permalink,
                 file_path=entity.file_path,
                 entity_id=entity.id,
@@ -220,12 +224,16 @@ class SearchService:
         # Index each observation with permalink
         for obs in entity.observations:
             # Index with parent entity's file path since that's where it's defined
+            obs_content_stems = "\n".join(
+                p for p in self._generate_variants(obs.content) if p and p.strip()
+            )
             await self.repository.index_item(
                 SearchIndexRow(
                     id=obs.id,
                     type=SearchItemType.OBSERVATION.value,
-                    title=f"{obs.category}: {obs.content[:50]}...",
-                    content=obs.content,
+                    title=f"{obs.category}: {obs.content[:100]}...",
+                    content_stems=obs_content_stems,
+                    content_snippet=obs.content,
                     permalink=obs.permalink,
                     file_path=entity.file_path,
                     category=obs.category,
@@ -247,11 +255,15 @@ class SearchService:
                 else f"{rel.from_entity.title}"
             )
 
+            rel_content_stems = "\n".join(
+                p for p in self._generate_variants(relation_title) if p and p.strip()
+            )
             await self.repository.index_item(
                 SearchIndexRow(
                     id=rel.id,
                     title=relation_title,
                     permalink=rel.permalink,
+                    content_stems=rel_content_stems,
                     file_path=entity.file_path,
                     type=SearchItemType.RELATION.value,
                     entity_id=entity.id,

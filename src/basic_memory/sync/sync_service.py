@@ -180,7 +180,7 @@ class SyncService:
 
         except Exception as e:  # pragma: no cover
             logger.exception(f"Failed to sync {path}: {e}")
-            return None, None 
+            return None, None  # pyright: ignore
 
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
         """Sync a markdown file with full proces    sing."""

@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timedelta
 
-from basic_memory.mcp.tools import read_note, write_note
+from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import search
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 

@@ -58,7 +58,7 @@ async def test_find_connected_timeframe(context_service, test_graph, search_repo
         SearchIndexRow(
             id=test_graph["root"].id,
             title=test_graph["root"].title,
-            content="Root content",
+            content_snippet="Root content",
             permalink=test_graph["root"].permalink,
             file_path=test_graph["root"].file_path,
             type=SearchItemType.ENTITY,
@@ -71,7 +71,7 @@ async def test_find_connected_timeframe(context_service, test_graph, search_repo
         SearchIndexRow(
             id=test_graph["relations"][0].id,
             title="Root Entity → Connected Entity 1",
-            content="",
+            content_snippet="",
             permalink=f"{test_graph['root'].permalink}/connects_to/{test_graph['connected1'].permalink}",
             file_path=test_graph["root"].file_path,
             type=SearchItemType.RELATION,
@@ -89,7 +89,7 @@ async def test_find_connected_timeframe(context_service, test_graph, search_repo
         SearchIndexRow(
             id=test_graph["connected1"].id,
             title=test_graph["connected1"].title,
-            content="Connected 1 content",
+            content_snippet="Connected 1 content",
             permalink=test_graph["connected1"].permalink,
             file_path=test_graph["connected1"].file_path,
             type=SearchItemType.ENTITY,

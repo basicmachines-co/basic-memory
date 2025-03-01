@@ -1,7 +1,5 @@
 """Router for search operations."""
 
-from dataclasses import asdict
-
 from fastapi import APIRouter, BackgroundTasks
 
 from basic_memory.schemas.search import SearchQuery, SearchResult, SearchResponse
@@ -22,18 +20,18 @@ async def search(
     limit = page_size
     offset = (page - 1) * page_size
     results = await search_service.search(query, limit=limit, offset=offset)
-    
 
     search_results = []
     for r in results:
-        entities = await entity_service.get_entities_by_id([r.entity_id, r.from_id, r.to_id])
+        entities = await entity_service.get_entities_by_id([r.entity_id, r.from_id, r.to_id])  # pyright: ignore
         search_results.append(
             SearchResult(
-                title=r.title,
-                type=r.type,
+                title=r.title,  # pyright: ignore
+                type=r.type,  # pyright: ignore
                 permalink=r.permalink,
-                score=r.score,
+                score=r.score,  # pyright: ignore
                 entity=entities[0].permalink if entities else None,
+                content=r.content,
                 file_path=r.file_path,
                 metadata=r.metadata,
                 category=r.category,

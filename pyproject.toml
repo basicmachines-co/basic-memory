@@ -102,3 +102,6 @@ commit_message = "chore(release): {version} [skip ci]"
 
 [tool.coverage.run]
 concurrency = ["thread", "gevent"]
+
+[tool.logfire]
+ignore_no_config = true

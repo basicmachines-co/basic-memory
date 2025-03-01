@@ -43,23 +43,23 @@ async def search(query: SearchQuery, page: int = 1, page_size: int = 10) -> Sear
                 - metadata: Additional metadata about the result
             - current_page: Current page number
             - page_size: Number of results per page
-    
+
     Examples:
         # Basic text search
         results = await search(SearchQuery(text="project planning"))
-        
+
         # Search with type filter
         results = await search(SearchQuery(
             text="meeting notes",
             types=["entity"],
         ))
-        
+
         # Search for recent content
         results = await search(SearchQuery(
             text="bug report",
             after_date="1 week"
         ))
-        
+
         # Pattern matching on permalinks
         results = await search(SearchQuery(
             permalink_match="docs/meeting-*"

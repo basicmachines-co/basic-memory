@@ -193,12 +193,14 @@ class WatchService:
             if path not in processed:
                 _, checksum = await self.sync_service.sync_file(path, new=True)
                 if checksum:
-                    self.state.add_event(path=path, action="new", status="success", checksum=checksum)
+                    self.state.add_event(
+                        path=path, action="new", status="success", checksum=checksum
+                    )
                     self.console.print(f"[green]✓[/green] Added: {path}")
                     processed.add(path)
                 else:
                     self.console.print(f"[orange]?[/orange] Error syncing: {path}")
-                    
+
         for path in modifies:
             if path not in processed:
                 _, checksum = await self.sync_service.sync_file(path, new=False)

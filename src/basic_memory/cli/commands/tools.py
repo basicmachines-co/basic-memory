@@ -78,7 +78,11 @@ def build_context(
                 max_related=max_related,
             )
         )
-        rprint(context.model_dump_json(indent=2, exclude_none=True))
+        # Use json module for more controlled serialization
+        import json
+
+        context_dict = context.model_dump(exclude_none=True)
+        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during build_context: {e}", err=True)
@@ -106,7 +110,11 @@ def recent_activity(
                 max_related=max_related,
             )
         )
-        rprint(context.model_dump_json(indent=2, exclude_none=True))
+        # Use json module for more controlled serialization
+        import json
+
+        context_dict = context.model_dump(exclude_none=True)
+        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during build_context: {e}", err=True)
@@ -138,7 +146,11 @@ def search(
             after_date=after_date,
         )
         results = asyncio.run(mcp_search(query=search_query, page=page, page_size=page_size))
-        rprint(results.model_dump_json(indent=2, exclude_none=True))
+        # Use json module for more controlled serialization
+        import json
+
+        results_dict = results.model_dump(exclude_none=True)
+        print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Error during search", e)

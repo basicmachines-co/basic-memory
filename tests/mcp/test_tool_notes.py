@@ -172,7 +172,7 @@ async def test_read_note_by_title(app):
 
 @pytest.mark.asyncio
 async def test_note_unicode_content(app):
-    """Test handling of unicode content in """
+    """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
     result = await write_note(title="Unicode Test", folder="test", content=content)
 
@@ -191,7 +191,7 @@ async def test_note_unicode_content(app):
 
 @pytest.mark.asyncio
 async def test_multiple_notes(app):
-    """Test creating and managing multiple """
+    """Test creating and managing multiple"""
     # Create several notes
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
@@ -224,7 +224,7 @@ async def test_multiple_notes(app):
 
 @pytest.mark.asyncio
 async def test_multiple_notes_pagination(app):
-    """Test creating and managing multiple """
+    """Test creating and managing multiple"""
     # Create several notes
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
@@ -355,19 +355,19 @@ async def test_read_note_memory_url(app):
 @pytest.mark.asyncio
 async def test_read_note_non_error_status(app, mocker):
     """Test scenario where read_note gets a non-200 status code that doesn't raise an exception.
-    
-    This tests the specific path that returns an error message for non-200 status 
+
+    This tests the specific path that returns an error message for non-200 status
     when we don't have an exception.
     """
     # Create a mock response with a non-200 status that doesn't raise an exception
     mock_response = mocker.MagicMock()
     mock_response.status_code = 204  # No content
-    
+
     # Mock the call_get function to return our mock response
     mocker.patch("basic_memory.mcp.tools.read_note.call_get", return_value=mock_response)
-    
+
     # Call read_note which should hit our error message path
     result = await read_note("test/non-existing-note")
-    
+
     # Verify the error message format
     assert result == "Error: Could not find entity at test/non-existing-note"

@@ -35,18 +35,24 @@ class SearchIndexRow:
 
     # Type-specific fields
     title: Optional[str] = None  # entity
-    content: Optional[str] = None  # entity, observation
+    content_stems: Optional[str] = None  # entity, observation
+    content_snippet: Optional[str] = None  # entity, observation
     entity_id: Optional[int] = None  # observations
     category: Optional[str] = None  # observations
     from_id: Optional[int] = None  # relations
     to_id: Optional[int] = None  # relations
     relation_type: Optional[str] = None  # relations
 
+    @property
+    def content(self):
+        return self.content_snippet
+
     def to_insert(self):
         return {
             "id": self.id,
             "title": self.title,
-            "content": self.content,
+            "content_stems": self.content_stems,
+            "content_snippet": self.content_snippet,
             "permalink": self.permalink,
             "file_path": self.file_path,
             "type": self.type,
@@ -126,7 +132,7 @@ class SearchRepository:
         if search_text:
             search_text = self._prepare_search_term(search_text.strip())
             params["text"] = search_text
-            conditions.append("(title MATCH :text OR content MATCH :text)")
+            conditions.append("(title MATCH :text OR content_stems MATCH :text)")
 
         # Handle title match search
         if title:
@@ -188,7 +194,7 @@ class SearchRepository:
                 to_id,
                 relation_type,
                 entity_id,
-                content,
+                content_snippet,
                 category,
                 created_at,
                 updated_at,
@@ -218,7 +224,7 @@ class SearchRepository:
                 to_id=row.to_id,
                 relation_type=row.relation_type,
                 entity_id=row.entity_id,
-                content=row.content,
+                content_snippet=row.content_snippet,
                 category=row.category,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -250,12 +256,12 @@ class SearchRepository:
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at
                     ) VALUES (
-                        :id, :title, :content, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at

@@ -17,7 +17,6 @@ import basic_memory.mcp.tools  # noqa: F401 # pragma: no cover
 import basic_memory.mcp.prompts  # noqa: F401 # pragma: no cover
 
 
-
 if __name__ == "__main__":  # pragma: no cover
     home_dir = config.home
     logger.info("Starting Basic Memory MCP server")
