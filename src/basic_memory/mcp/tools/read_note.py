@@ -1,10 +1,10 @@
 """Read note tool for Basic Memory MCP server."""
 
-from loguru import logger
 import logfire
+from loguru import logger
 
-from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.memory import memory_url_path
 
@@ -46,19 +46,15 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
         read_note("Project Updates", page=2, page_size=5)
     """
     with logfire.span("Reading note", identifier=identifier):  # pyright: ignore [reportGeneralTypeIssues]
-        try:
-            # Get the file via REST API
-            entity_path = memory_url_path(identifier)
-            path = f"/resource/{entity_path}"
-            logger.info(f"Reading note from URL: {path}")
+        # Get the file via REST API
+        entity_path = memory_url_path(identifier)
+        path = f"/resource/{entity_path}"
+        logger.info(f"Reading note from URL: {path}")
 
-            response = await call_get(client, path, params={"page": page, "page_size": page_size})
+        response = await call_get(client, path, params={"page": page, "page_size": page_size})
 
-            # Just return the content as a string
-            if response.status_code == 200:
-                return response.text
-            else:
-                return f"Error: Could not find entity at {identifier}"
-        except Exception as e:
-            logger.exception(f"Error reading note: {e}")
-            raise
+        # Just return the content as a string
+        if response.status_code == 200:
+            return response.text
+        else:
+            return f"Error: Could not find entity at {identifier}"
