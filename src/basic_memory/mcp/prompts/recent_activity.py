@@ -9,21 +9,22 @@ from loguru import logger
 import logfire
 from pydantic import Field
 
-from basic_memory.mcp.prompts.utils import format_context_summary
+from basic_memory.mcp.prompts.utils import format_prompt_context
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity_tool
 from basic_memory.schemas.base import TimeFrame
+from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.prompt(
-    name="recent activity",
+    name="Share Recent Activity",
     description="Get recent activity from across the knowledge base",
 )
 async def recent_activity_prompt(
     timeframe: Annotated[
-        Optional[TimeFrame],
+        TimeFrame,
         Field(description="How far back to look for activity (e.g. '1d', '1 week')"),
-    ] = None,
+    ] = "7d",
 ) -> str:
     """Get recent activity from across the knowledge base.
 
@@ -39,8 +40,7 @@ async def recent_activity_prompt(
     with logfire.span("Getting recent activity", timeframe=timeframe):  # pyright: ignore
         logger.info(f"Getting recent activity, timeframe: {timeframe}")
 
-        results = await recent_activity_tool(timeframe=timeframe)
+        results = await recent_activity_tool(timeframe=timeframe, type=[SearchItemType.ENTITY])
 
-        time_display = f" ({timeframe})" if timeframe else ""
-        header = f"# Recent Activity{time_display}"
-        return format_context_summary(header, results)
+        header = f"Recent Activity from ({timeframe})"
+        return format_prompt_context(header, [results], timeframe)

@@ -19,6 +19,10 @@ from basic_memory.mcp.prompts.continue_conversation import (
     continue_conversation as mcp_continue_conversation,
 )
 
+from basic_memory.mcp.prompts.recent_activity import (
+    recent_activity_prompt as recent_activity_prompt,
+)
+
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
 from basic_memory.schemas.search import SearchQuery, SearchItemType
@@ -166,10 +170,28 @@ def continue_conversation(
         Optional[str], typer.Option(help="How far back to look for activity")
     ] = None,
 ):
-    """Continue a previous conversation or work session."""
+    """Prompt to continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
         session = asyncio.run(mcp_continue_conversation(topic=topic, timeframe=timeframe))
+        rprint(session)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            logger.exception("Error continuing conversation", e)
+            typer.echo(f"Error continuing conversation: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+@tool_app.command(name="show-recent-activity")
+def show_recent_activity(
+    timeframe: Annotated[
+        str, typer.Option(help="How far back to look for activity")
+    ] = "7d",
+):
+    """Prompt to show recent activity."""
+    try:
+        # Prompt functions return formatted strings directly
+        session = asyncio.run(recent_activity_prompt(timeframe=timeframe))
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):

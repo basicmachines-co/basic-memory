@@ -76,7 +76,7 @@ async def recent_activity(
     """
     with logfire.span("Getting recent activity", type=type, depth=depth, timeframe=timeframe):  # pyright: ignore [reportGeneralTypeIssues]
         logger.info(
-            f"Getting recent activity from {type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
+            f"Getting recent activity from type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
         )
         params = {
             "page": page,

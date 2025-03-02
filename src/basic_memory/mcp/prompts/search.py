@@ -17,7 +17,7 @@ from basic_memory.schemas.base import TimeFrame
 
 
 @mcp.prompt(
-    name="search",
+    name="Search Knowledge Base",
     description="Search across all content in basic-memory",
 )
 async def search_prompt(

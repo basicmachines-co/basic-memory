@@ -9,13 +9,9 @@ and transforming their results into user-friendly text.
 from basic_memory.mcp.prompts import continue_conversation
 from basic_memory.mcp.prompts import recent_activity
 from basic_memory.mcp.prompts import search
-from basic_memory.mcp.prompts import ai_assistant_guide
-from basic_memory.mcp.prompts import json_canvas_spec
 
 __all__ = [
-    "ai_assistant_guide",
     "continue_conversation",
-    "json_canvas_spec",
     "recent_activity",
     "search",
 ]
