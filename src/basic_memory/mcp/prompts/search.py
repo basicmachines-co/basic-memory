@@ -88,11 +88,11 @@ def format_search_results(
     for i, result in enumerate(results.results[:5]):  # Limit to top 5 results
         summary += dedent(f"""
             ## {i + 1}. {result.title}
-            - **Type**: {result.type}
+            - **Type**: {result.type.value}
             """)
 
         # Add creation date if available in metadata
-        if hasattr(result, "metadata") and result.metadata and "created_at" in result.metadata:
+        if result.metadata and "created_at" in result.metadata:
             created_at = result.metadata["created_at"]
             if hasattr(created_at, "strftime"):
                 summary += f"- **Created**: {created_at.strftime('%Y-%m-%d %H:%M')}\n"
@@ -101,16 +101,20 @@ def format_search_results(
 
         # Add score and excerpt
         summary += f"- **Relevance Score**: {result.score:.2f}\n"
+
         # Add excerpt if available in metadata
-        if hasattr(result, "metadata") and result.metadata and "excerpt" in result.metadata:
-            summary += f"- **Excerpt**: {result.metadata['excerpt']}\n"
+        if result.content:
+            summary += f"- **Excerpt**:\n{result.content}\n"
 
         # Add permalink for retrieving content
-        if hasattr(result, "permalink") and result.permalink:
+        if result.permalink:
             summary += dedent(f"""
-                
                 You can view this content with: `read_note("{result.permalink}")`
                 Or explore its context with: `build_context("memory://{result.permalink}")`
+                """)
+        else:
+            summary += dedent(f"""
+                You can view this file with: `read_file("{result.file_path}")`
                 """)
 
     # Add next steps

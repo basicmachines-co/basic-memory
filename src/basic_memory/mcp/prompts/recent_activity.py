@@ -9,9 +9,9 @@ from loguru import logger
 import logfire
 from pydantic import Field
 
-from basic_memory.mcp.prompts.utils import format_prompt_context
+from basic_memory.mcp.prompts.utils import format_prompt_context, PromptContext, PromptContextItem
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity_tool
+from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity_tool, recent_activity
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.search import SearchItemType
 
@@ -40,7 +40,18 @@ async def recent_activity_prompt(
     with logfire.span("Getting recent activity", timeframe=timeframe):  # pyright: ignore
         logger.info(f"Getting recent activity, timeframe: {timeframe}")
 
-        results = await recent_activity_tool(timeframe=timeframe, type=[SearchItemType.ENTITY])
-
-        header = f"Recent Activity from ({timeframe})"
-        return format_prompt_context(header, [results], timeframe)
+        recent = await recent_activity(
+            timeframe=timeframe, type=[SearchItemType.ENTITY]
+        )
+        return format_prompt_context(
+            PromptContext(
+                topic=f"Recent Activity from ({timeframe})",
+                timeframe=timeframe,
+                results=[
+                    PromptContextItem(
+                        primary_results=recent.primary_results[:5],
+                        related_results=recent.related_results[:2],
+                    )
+                ],
+            )
+        )

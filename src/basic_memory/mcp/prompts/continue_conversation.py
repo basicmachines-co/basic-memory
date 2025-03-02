@@ -3,6 +3,7 @@
 These prompts help users continue conversations and work across sessions,
 providing context from previous interactions to maintain continuity.
 """
+
 from textwrap import dedent
 from typing import Optional, Annotated
 
@@ -10,12 +11,13 @@ from loguru import logger
 import logfire
 from pydantic import Field
 
-from basic_memory.mcp.prompts.utils import format_prompt_context
+from basic_memory.mcp.prompts.utils import format_prompt_context, PromptContext, PromptContextItem
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.search import search
 from basic_memory.schemas.base import TimeFrame
+from basic_memory.schemas.memory import GraphContext
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 
 
@@ -55,16 +57,38 @@ async def continue_conversation(
             contexts = []
             for result in search_results.results:
                 if hasattr(result, "permalink") and result.permalink:
-                    context = await build_context(f"memory://{result.permalink}")
-                    contexts.append(context)
+                    context: GraphContext = await build_context(f"memory://{result.permalink}")
+                    if context.primary_results:
+                        contexts.append(
+                            PromptContextItem(
+                                primary_results=context.primary_results[:1],
+                                related_results=context.related_results[:3],
+                            )
+                        )
 
             # get context for the top 3 results
-            return format_prompt_context(topic, contexts[:3], timeframe)
-
-        # If no topic, get recent activity
-        timeframe = timeframe or "7d"
-        recent = await recent_activity(timeframe=timeframe)
-        prompt_context = format_prompt_context(f"Recent Activity from ({timeframe})", [recent], timeframe)
+            prompt_context = format_prompt_context(
+                PromptContext(topic=topic, timeframe=timeframe, results=contexts)
+            )
+            
+        else:
+            # If no topic, get recent activity
+            timeframe = timeframe or "7d"
+            recent: GraphContext = await recent_activity(
+                timeframe=timeframe, type=[SearchItemType.ENTITY]
+            )
+            prompt_context = format_prompt_context(
+                PromptContext(
+                    topic=f"Recent Activity from ({timeframe})",
+                    timeframe=timeframe,
+                    results=[
+                        PromptContextItem(
+                            primary_results=recent.primary_results[:5],
+                            related_results=recent.related_results[:2],
+                        )
+                    ],
+                )
+            )
 
         # Add next steps
         next_steps = dedent(f"""
@@ -72,9 +96,7 @@ async def continue_conversation(
 
             You can:
             - Explore more with: `search({{"text": "{topic}"}})`
-            - See what's changed: `recent_activity(timeframe="{timeframe}")`
+            - See what's changed: `recent_activity(timeframe="{timeframe or "7d"}")`
             """)
 
         return prompt_context + next_steps
-
-
