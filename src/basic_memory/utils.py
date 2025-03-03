@@ -1,7 +1,10 @@
 """Utility functions for basic-memory."""
 
-import logging
+# Set environment variable before importing logfire to suppress warnings
 import os
+os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
+
+import logging
 import re
 import sys
 from pathlib import Path
@@ -11,8 +14,7 @@ from loguru import logger
 from pydantic import AfterValidator
 from unidecode import unidecode
 
-import basic_memory
-
+import basic_memory 
 import logfire
 
 
@@ -37,8 +39,6 @@ FilePath = Union[Path, str]
 
 # Disable the "Queue is full" warning
 logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(logging.ERROR)
-# Disable logfire prompts in CI/automated environments
-os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
 
 
 def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
@@ -99,22 +99,23 @@ def setup_logging(
 ) -> None:  # pragma: no cover
     """
     Configure logging for the application.
-    :param home_dir: the root directory for the application
-    :param log_file: the name of the log file to write to
-    :param app: the fastapi application instance
-    :param console: whether to log to the console
+    
+    Args:
+        env: The environment name (dev, test, prod)
+        home_dir: The root directory for the application
+        log_file: The name of the log file to write to
+        log_level: The logging level to use
+        console: Whether to log to the console
     """
-
     # Remove default handler and any existing handlers
     logger.remove()
 
-    # Add file handler if we are not running tests
+    # Add file handler if we are not running tests and a log file is specified
     if log_file and env != "test":
         try:
-            # Skip logfire configuration if LOGFIRE_API_KEY is not set
-            # This avoids interactive prompts when running automated tasks
+            # Only configure logfire if API key is set - avoids interactive prompts
             if "LOGFIRE_API_KEY" in os.environ:
-                # enable pydantic logfire
+                # Configure logfire with code source info
                 logfire.configure(
                     code_source=logfire.CodeSource(
                         repository="https://github.com/basicmachines-co/basic-memory",
@@ -122,16 +123,17 @@ def setup_logging(
                     ),
                     environment=env,
                     console=False,
+                    ignore_no_config=True,  # Extra safety to prevent warnings
                 )
                 logger.configure(handlers=[logfire.loguru_handler()])
 
-                # instrument code spans
+                # Instrument code spans for better observability
                 logfire.instrument_sqlite3()
                 logfire.instrument_httpx()
         except Exception as e:
             logger.warning(f"Failed to configure logfire: {e}")
 
-        # setup logger
+        # Setup file logger
         log_path = home_dir / log_file
         logger.add(
             str(log_path),
@@ -144,26 +146,26 @@ def setup_logging(
             colorize=False,
         )
 
+    # Add console logger if requested or in test mode
     if env == "test" or console:
-        # Add stderr handler
         logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=True, colorize=True)
 
     logger.info(f"ENV: '{env}' Log level: '{log_level}' Logging to {log_file}")
 
-    # Get the logger for 'httpx'
-    httpx_logger = logging.getLogger("httpx")
-    # Set the logging level to WARNING to ignore INFO and DEBUG logs
-    httpx_logger.setLevel(logging.WARNING)
-
-    # turn watchfiles to WARNING
-    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
-
-    # Disable all instrumentor-related warnings
-    for logger_name in [
-        "instrumentor",
-        "opentelemetry.instrumentation.instrumentor",
-        "opentelemetry.instrumentation",
-        "logfire.instrumentor",
-        "opentelemetry.sdk.metrics._internal.instrument",
-    ]:
-        logging.getLogger(logger_name).setLevel(logging.ERROR)
+    # Reduce noise from third-party libraries
+    noisy_loggers = {
+        # HTTP client logs
+        "httpx": logging.WARNING,
+        # File watching logs
+        "watchfiles.main": logging.WARNING,
+        # Instrumentation noise
+        "instrumentor": logging.ERROR,
+        "opentelemetry.instrumentation.instrumentor": logging.ERROR,
+        "opentelemetry.instrumentation": logging.ERROR,
+        "logfire.instrumentor": logging.ERROR,
+        "opentelemetry.sdk.metrics._internal.instrument": logging.ERROR,
+    }
+    
+    # Set log levels for noisy loggers
+    for logger_name, level in noisy_loggers.items():
+        logging.getLogger(logger_name).setLevel(level)

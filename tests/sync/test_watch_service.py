@@ -117,7 +117,7 @@ Initial content
     await create_test_file(test_file, initial_content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir)
+    await watch_service.sync_service.sync(project_dir, show_progress=False)
 
     # Modify file
     modified_content = """---
@@ -161,7 +161,7 @@ Test content
     await create_test_file(test_file, content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir)
+    await watch_service.sync_service.sync(project_dir, show_progress=False)
 
     # Delete file
     test_file.unlink()
@@ -199,7 +199,7 @@ Test content
     await create_test_file(old_path, content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir)
+    await watch_service.sync_service.sync(project_dir, show_progress=False)
     initial_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
         "old/test_move.md"
     )
@@ -298,7 +298,7 @@ type: knowledge
 Test content for rapid moves
 """
     await create_test_file(original_path, content)
-    await watch_service.sync_service.sync(project_dir)
+    await watch_service.sync_service.sync(project_dir, show_progress=False)
 
     # Perform rapid moves
     temp_path = project_dir / "temp.md"

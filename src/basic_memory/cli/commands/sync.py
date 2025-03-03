@@ -169,15 +169,15 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
             config=config,
         )
         
-        # full sync
-        await sync_service.sync(config.home)
+        # full sync - no progress bars in watch mode
+        await sync_service.sync(config.home, show_progress=False)
         
         # watch changes
         await watch_service.run()  # pragma: no cover
     else:
-        # one time sync
+        # one time sync - use progress bars for better UX 
         logger.info("Running one-time sync")
-        knowledge_changes = await sync_service.sync(config.home)
+        knowledge_changes = await sync_service.sync(config.home, show_progress=True)
         
         # Log results
         duration_ms = int((time.time() - start_time) * 1000)
@@ -189,7 +189,7 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
                    moved_files=len(knowledge_changes.moves),
                    duration_ms=duration_ms)
         
-        # Display results
+        # Display results 
         if verbose:
             display_detailed_sync_results(knowledge_changes)
         else:

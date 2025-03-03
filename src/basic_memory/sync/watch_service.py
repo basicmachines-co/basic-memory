@@ -199,7 +199,7 @@ class WatchService:
                                 status="success",
                             )
                             self.console.print(
-                                f"[blue]→[/blue] Moved: {deleted_path} → {added_path}"
+                                f"[blue]→[/blue] {deleted_path} → {added_path}"
                             )
                             processed.add(added_path)
                             processed.add(deleted_path)
@@ -210,15 +210,23 @@ class WatchService:
                                       new_path=added_path,
                                       error=str(e))
 
-        # Handle remaining changes
+        # Handle remaining changes - group them by type for concise output
+        moved_count = len([p for p in processed if p in deletes or p in adds])
+        delete_count = 0
+        add_count = 0
+        modify_count = 0
+        
+        # Process deletes
         for path in deletes:
             if path not in processed:
                 logger.debug("Processing deleted file", path=path)
                 await self.sync_service.handle_delete(path)
                 self.state.add_event(path=path, action="deleted", status="success")
-                self.console.print(f"[red]✕[/red] Deleted: {path}")
+                self.console.print(f"[red]✕[/red] {path}")
                 processed.add(path)
+                delete_count += 1
 
+        # Process adds
         for path in adds:
             if path not in processed:
                 logger.debug("Processing new file", path=path)
@@ -227,16 +235,21 @@ class WatchService:
                     self.state.add_event(
                         path=path, action="new", status="success", checksum=checksum
                     )
-                    self.console.print(f"[green]✓[/green] Added: {path}")
+                    self.console.print(f"[green]✓[/green] {path}")
                     logger.debug("Added file processed", 
                                path=path, 
                                entity_id=entity.id if entity else None,
                                checksum=checksum)
                     processed.add(path)
+                    add_count += 1
                 else:
                     logger.warning("Error syncing new file", path=path)
                     self.console.print(f"[orange]?[/orange] Error syncing: {path}")
 
+        # Process modifies - detect repeats
+        last_modified_path = None
+        repeat_count = 0
+        
         for path in modifies:
             if path not in processed:
                 logger.debug("Processing modified file", path=path)
@@ -244,16 +257,40 @@ class WatchService:
                 self.state.add_event(
                     path=path, action="modified", status="success", checksum=checksum
                 )
-                self.console.print(f"[yellow]✎[/yellow] Modified: {path}")
+                
+                # Check if this is a repeat of the last modified file
+                if path == last_modified_path:
+                    repeat_count += 1
+                    # Only show a message for the first repeat
+                    if repeat_count == 1:
+                        self.console.print(f"[yellow]...[/yellow] Repeated changes to {path}")
+                else:
+                    # New file being modified
+                    self.console.print(f"[yellow]✎[/yellow] {path}")
+                    last_modified_path = path
+                    repeat_count = 0
+                    modify_count += 1
+                
                 logger.debug("Modified file processed", 
                            path=path, 
                            entity_id=entity.id if entity else None,
                            checksum=checksum)
                 processed.add(path)
 
-        # Add a divider if we processed any files
+        # Add a concise summary instead of a divider
         if processed:
-            self.console.print("─" * 80, style="dim")
+            changes = []
+            if add_count > 0:
+                changes.append(f"[green]{add_count} added[/green]")
+            if modify_count > 0:
+                changes.append(f"[yellow]{modify_count} modified[/yellow]")
+            if moved_count > 0:
+                changes.append(f"[blue]{moved_count} moved[/blue]")
+            if delete_count > 0:
+                changes.append(f"[red]{delete_count} deleted[/red]")
+                
+            if changes:
+                self.console.print(f"{', '.join(changes)}", style="dim")
 
         duration_ms = int((time.time() - start_time) * 1000)
         self.state.last_scan = datetime.now()

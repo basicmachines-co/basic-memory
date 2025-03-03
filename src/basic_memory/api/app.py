@@ -1,5 +1,9 @@
 """FastAPI application for basic-memory knowledge graph API."""
 
+# Suppress logfire warnings
+import os
+os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
+
 from contextlib import asynccontextmanager
 
 import logfire

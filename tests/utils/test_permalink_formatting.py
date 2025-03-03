@@ -57,7 +57,7 @@ Testing permalink generation.
         await create_test_file(project_dir / filename, content)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(test_config.home, show_progress=False)
 
     # Verify permalinks
     for filename, expected_permalink in test_cases:
