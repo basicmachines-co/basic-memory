@@ -179,9 +179,12 @@ class SearchService:
         Each type gets its own row in the search index with appropriate metadata.
         """
 
-        assert entity.permalink is not None, (
-            "entity.permalink should not be None for markdown entities"
-        )
+        if entity.permalink is None:
+            logger.error("Missing permalink for markdown entity", 
+                       entity_id=entity.id,
+                       title=entity.title,
+                       file_path=entity.file_path)
+            raise ValueError(f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})")
 
         content_stems = []
         content_snippet = ""
@@ -198,9 +201,12 @@ class SearchService:
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
-        assert entity.permalink is not None, (
-            "entity.permalink should not be None for markdown entities"
-        )
+        if entity.permalink is None:
+            logger.error("Missing permalink for markdown entity", 
+                       entity_id=entity.id,
+                       title=entity.title,
+                       file_path=entity.file_path)
+            raise ValueError(f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})")
 
         # Index entity
         await self.repository.index_item(
