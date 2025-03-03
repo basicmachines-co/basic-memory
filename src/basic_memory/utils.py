@@ -5,14 +5,35 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Annotated, Optional, Protocol, Union, runtime_checkable
 
 from loguru import logger
+from pydantic import AfterValidator
 from unidecode import unidecode
 
 import basic_memory
 
 import logfire
+
+
+@runtime_checkable
+class PathLike(Protocol):
+    """Protocol for objects that can be used as paths."""
+    def __str__(self) -> str: ...
+
+
+# Define a custom type for file paths
+def validate_path(v: Union[str, Path]) -> Path:
+    """Convert a string or Path to a Path object."""
+    if isinstance(v, str):
+        return Path(v)
+    return v
+
+
+# In type annotations, use Union[Path, str] instead of FilePath for now
+# This preserves compatibility with existing code while we migrate
+# FilePath = Annotated[Path, AfterValidator(validate_path)]
+FilePath = Union[Path, str]
 
 # Disable the "Queue is full" warning
 logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(logging.ERROR)
@@ -20,11 +41,11 @@ logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(log
 os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
 
 
-def generate_permalink(file_path: Union[Path, str]) -> str:
+def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
     """Generate a stable permalink from a file path.
 
     Args:
-        file_path: Original file path
+        file_path: Original file path (str, Path, or PathLike)
 
     Returns:
         Normalized permalink that matches validation rules. Converts spaces and underscores

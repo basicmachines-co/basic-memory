@@ -3,7 +3,7 @@
 import mimetypes
 from os import stat_result
 from pathlib import Path
-from typing import Tuple, Union, Dict, Any
+from typing import Any, Dict, Optional, Tuple, Union
 
 from loguru import logger
 
@@ -13,6 +13,7 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Entity as EntityModel
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
+from basic_memory.utils import FilePath
 
 
 class FileService:
@@ -80,13 +81,13 @@ class FileService:
         path = self.get_entity_path(entity)
         await self.delete_file(path)
 
-    async def exists(self, path: Union[Path, str]) -> bool:
+    async def exists(self, path: FilePath) -> bool:
         """Check if file exists at the provided path.
 
         If path is relative, it is assumed to be relative to base_path.
 
         Args:
-            path: Path to check (Path object or string)
+            path: Path to check (Path or string)
 
         Returns:
             True if file exists, False otherwise
@@ -95,23 +96,27 @@ class FileService:
             FileOperationError: If check fails
         """
         try:
-            path = Path(path)
-            if path.is_absolute():
-                return path.exists()
+            # Convert string to Path if needed
+            path_obj = Path(path) if isinstance(path, str) else path
+            
+            if path_obj.is_absolute():
+                return path_obj.exists()
             else:
-                return (self.base_path / path).exists()
+                return (self.base_path / path_obj).exists()
         except Exception as e:
-            logger.error(f"Failed to check file existence {path}: {e}")
+            logger.error("Failed to check file existence", 
+                       path=str(path), 
+                       error=str(e))
             raise FileOperationError(f"Failed to check file existence: {e}")
 
-    async def write_file(self, path: Union[Path, str], content: str) -> str:
+    async def write_file(self, path: FilePath, content: str) -> str:
         """Write content to file and return checksum.
 
         Handles both absolute and relative paths. Relative paths are resolved
         against base_path.
 
         Args:
-            path: Where to write (Path object or string)
+            path: Where to write (Path or string)
             content: Content to write
 
         Returns:
@@ -120,8 +125,9 @@ class FileService:
         Raises:
             FileOperationError: If write fails
         """
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
             # Ensure parent directory exists
@@ -150,14 +156,14 @@ class FileService:
             raise FileOperationError(f"Failed to write file: {e}")
 
     # TODO remove read_file
-    async def read_file(self, path: Union[Path, str]) -> Tuple[str, str]:
+    async def read_file(self, path: FilePath) -> Tuple[str, str]:
         """Read file and compute checksum.
 
         Handles both absolute and relative paths. Relative paths are resolved
         against base_path.
 
         Args:
-            path: Path to read (Path object or string)
+            path: Path to read (Path or string)
 
         Returns:
             Tuple of (content, checksum)
@@ -165,8 +171,9 @@ class FileService:
         Raises:
             FileOperationError: If read fails
         """
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
             logger.debug("Reading file", 
@@ -188,32 +195,52 @@ class FileService:
                            error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")
 
-    async def delete_file(self, path: Union[Path, str]) -> None:
+    async def delete_file(self, path: FilePath) -> None:
         """Delete file if it exists.
 
         Handles both absolute and relative paths. Relative paths are resolved
         against base_path.
 
         Args:
-            path: Path to delete (Path object or string)
+            path: Path to delete (Path or string)
         """
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         full_path.unlink(missing_ok=True)
 
-    async def update_frontmatter(self, path: Union[Path, str], updates: Dict[str, Any]) -> str:
+    async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
         """
         Update frontmatter fields in a file while preserving all content.
+        
+        Args:
+            path: Path to the file (Path or string)
+            updates: Dictionary of frontmatter fields to update
+            
+        Returns:
+            Checksum of updated file
         """
-
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         return await file_utils.update_frontmatter(full_path, updates)
 
-    async def compute_checksum(self, path: Union[str, Path]) -> str:
-        """Compute checksum for a file."""
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+    async def compute_checksum(self, path: FilePath) -> str:
+        """Compute checksum for a file.
+        
+        Args:
+            path: Path to the file (Path or string)
+            
+        Returns:
+            Checksum of the file content
+            
+        Raises:
+            FileError: If checksum computation fails
+        """
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
+        
         try:
             if self.is_markdown(path):
                 # read str
@@ -224,28 +251,38 @@ class FileService:
             return await file_utils.compute_checksum(content)
 
         except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to compute checksum for {path}: {e}")
+            logger.error("Failed to compute checksum", 
+                       path=str(full_path), 
+                       error=str(e))
             raise FileError(f"Failed to compute checksum for {path}: {e}")
 
-    def file_stats(self, path: Union[Path, str]) -> stat_result:
+    def file_stats(self, path: FilePath) -> stat_result:
+        """Return file stats for a given path.
+        
+        Args:
+            path: Path to the file (Path or string)
+            
+        Returns:
+            File statistics
         """
-        Return file stats for a given path.
-        :param path:
-        :return:
-        """
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         # get file timestamps
         return full_path.stat()
 
-    def content_type(self, path: Union[Path, str]) -> str:
+    def content_type(self, path: FilePath) -> str:
+        """Return content_type for a given path.
+        
+        Args:
+            path: Path to the file (Path or string)
+            
+        Returns:
+            MIME type of the file
         """
-        Return content_type for a given path.
-        :param path:
-        :return:
-        """
-        path = Path(path)
-        full_path = path if path.is_absolute() else self.base_path / path
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         # get file timestamps
         mime_type, _ = mimetypes.guess_type(full_path.name)
 
@@ -256,10 +293,13 @@ class FileService:
         content_type = mime_type or "text/plain"
         return content_type
 
-    def is_markdown(self, path: Union[Path, str]) -> bool:
-        """
-        Return content_type for a given path.
-        :param path:
-        :return:
+    def is_markdown(self, path: FilePath) -> bool:
+        """Check if a file is a markdown file.
+        
+        Args:
+            path: Path to the file (Path or string)
+            
+        Returns:
+            True if the file is a markdown file, False otherwise
         """
         return self.content_type(path) == "text/markdown"

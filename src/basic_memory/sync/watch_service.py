@@ -29,8 +29,8 @@ class WatchEvent(BaseModel):
 class WatchServiceState(BaseModel):
     # Service status
     running: bool = False
-    start_time: datetime = dataclasses.field(default_factory=datetime.now)
-    pid: int = dataclasses.field(default_factory=os.getpid)
+    start_time: datetime = datetime.now()  # Use directly with Pydantic model
+    pid: int = os.getpid()  # Use directly with Pydantic model
 
     # Stats
     error_count: int = 0
@@ -41,7 +41,7 @@ class WatchServiceState(BaseModel):
     synced_files: int = 0
 
     # Recent activity
-    recent_events: List[WatchEvent] = dataclasses.field(default_factory=list)
+    recent_events: List[WatchEvent] = []  # Use directly with Pydantic model
 
     def add_event(
         self,
@@ -143,6 +143,8 @@ class WatchService:
     async def handle_changes(self, directory: Path, changes: Set[FileChange]):
         """Process a batch of file changes"""
         import time
+        from typing import List, Set
+        
         start_time = time.time()
         
         logger.info("Processing file changes", 
@@ -150,9 +152,9 @@ class WatchService:
                    directory=str(directory))
 
         # Group changes by type
-        adds = []
-        deletes = []
-        modifies = []
+        adds: List[str] = []
+        deletes: List[str] = []
+        modifies: List[str] = []
 
         for change, path in changes:
             # convert to relative path
@@ -170,7 +172,7 @@ class WatchService:
                     modified=len(modifies))
 
         # Track processed files to avoid duplicates
-        processed = set()
+        processed: Set[str] = set()
 
         # First handle potential moves
         for added_path in adds:

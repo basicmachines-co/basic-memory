@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
 from pathlib import Path
-from typing import Set, Dict
-from typing import Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import logfire
 from loguru import logger
@@ -188,9 +187,16 @@ class SyncService:
         db_records = await self.entity_repository.find_all()
         return {r.file_path: r.checksum or "" for r in db_records}
 
-    async def sync_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
-        """Sync a single file."""
-
+    async def sync_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], Optional[str]]:
+        """Sync a single file.
+        
+        Args:
+            path: Path to file to sync
+            new: Whether this is a new file
+            
+        Returns:
+            Tuple of (entity, checksum) or (None, None) if sync fails
+        """
         try:
             logger.debug("Syncing file", 
                         path=path, 
@@ -202,23 +208,31 @@ class SyncService:
             else:
                 entity, checksum = await self.sync_regular_file(path, new)
                 
-            await self.search_service.index_entity(entity)
-            
-            logger.debug("File sync completed", 
-                        path=path, 
-                        entity_id=entity.id, 
-                        checksum=checksum)
+            if entity is not None:
+                await self.search_service.index_entity(entity)
+                
+                logger.debug("File sync completed", 
+                            path=path, 
+                            entity_id=entity.id, 
+                            checksum=checksum)
             return entity, checksum
 
         except Exception as e:  # pragma: no cover
             logger.exception("Failed to sync file", 
                            path=path, 
                            error=str(e))
-            return None, None  # pyright: ignore
+            return None, None
 
-    async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
-        """Sync a markdown file with full processing."""
-
+    async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
+        """Sync a markdown file with full processing.
+        
+        Args:
+            path: Path to markdown file
+            new: Whether this is a new file
+            
+        Returns:
+            Tuple of (entity, checksum)
+        """
         # Parse markdown first to get any existing permalink
         logger.debug("Parsing markdown file", path=path)
         entity_markdown = await self.entity_parser.parse_file(path)
@@ -270,9 +284,16 @@ class SyncService:
                     
         return entity, checksum
 
-    async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
-        """Sync a non-markdown file with basic tracking."""
-
+    async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
+        """Sync a non-markdown file with basic tracking.
+        
+        Args:
+            path: Path to file
+            new: Whether this is a new file
+            
+        Returns:
+            Tuple of (entity, checksum)
+        """
         checksum = await self.file_service.compute_checksum(path)
         if new:
             # Generate permalink from path
@@ -301,11 +322,18 @@ class SyncService:
             return entity, checksum
         else:
             entity = await self.entity_repository.get_by_file_path(path)
-            assert entity is not None, "entity should not be None for existing file"
+            if entity is None:
+                logger.error("Entity not found for existing file", path=path)
+                raise ValueError(f"Entity not found for existing file: {path}")
+                
             updated = await self.entity_repository.update(
                 entity.id, {"file_path": path, "checksum": checksum}
             )
-            assert updated is not None, "entity should be updated"
+            
+            if updated is None:
+                logger.error("Failed to update entity", entity_id=entity.id, path=path)
+                raise ValueError(f"Failed to update entity with ID {entity.id}")
+                
             return updated, checksum
 
     async def handle_delete(self, file_path: str):
@@ -349,7 +377,13 @@ class SyncService:
         if entity:
             # Update file_path but keep the same permalink for link stability
             updated = await self.entity_repository.update(entity.id, {"file_path": new_path})
-            assert updated is not None, "entity should be updated"
+            
+            if updated is None:
+                logger.error("Failed to update entity path", 
+                           entity_id=entity.id, 
+                           old_path=old_path, 
+                           new_path=new_path)
+                raise ValueError(f"Failed to update entity path for ID {entity.id}")
             
             logger.debug("Entity path updated", 
                         entity_id=entity.id,

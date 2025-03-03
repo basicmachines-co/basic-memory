@@ -2,10 +2,12 @@
 
 import hashlib
 from pathlib import Path
-from typing import Dict, Any, Union
+from typing import Any, Dict, Optional, Union
 
 import yaml
 from loguru import logger
+
+from basic_memory.utils import FilePath
 
 
 class FileError(Exception):
@@ -48,42 +50,53 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
         raise FileError(f"Failed to compute checksum: {e}")
 
 
-async def ensure_directory(path: Path) -> None:
+async def ensure_directory(path: FilePath) -> None:
     """
     Ensure directory exists, creating if necessary.
 
     Args:
-        path: Directory path to ensure
+        path: Directory path to ensure (Path or string)
 
     Raises:
         FileWriteError: If directory creation fails
     """
     try:
-        path.mkdir(parents=True, exist_ok=True)
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj.mkdir(parents=True, exist_ok=True)
     except Exception as e:  # pragma: no cover
-        logger.error(f"Failed to create directory: {path}: {e}")
+        logger.error("Failed to create directory", 
+                   path=str(path), 
+                   error=str(e))
         raise FileWriteError(f"Failed to create directory {path}: {e}")
 
 
-async def write_file_atomic(path: Path, content: str) -> None:
+async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     Write file with atomic operation using temporary file.
 
     Args:
-        path: Target file path
+        path: Target file path (Path or string)
         content: Content to write
 
     Raises:
         FileWriteError: If write operation fails
     """
-    temp_path = path.with_suffix(".tmp")
+    # Convert string to Path if needed
+    path_obj = Path(path) if isinstance(path, str) else path
+    temp_path = path_obj.with_suffix(".tmp")
+    
     try:
         temp_path.write_text(content)
-        temp_path.replace(path)
-        logger.debug(f"wrote file: {path}")
+        temp_path.replace(path_obj)
+        logger.debug("Wrote file atomically", 
+                   path=str(path_obj), 
+                   content_length=len(content))
     except Exception as e:  # pragma: no cover
         temp_path.unlink(missing_ok=True)
-        logger.error(f"Failed to write file: {path}: {e}")
+        logger.error("Failed to write file", 
+                   path=str(path_obj), 
+                   error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
 
@@ -173,7 +186,7 @@ def remove_frontmatter(content: str) -> str:
     return parts[2].strip()
 
 
-async def update_frontmatter(path: Path, updates: Dict[str, Any]) -> str:
+async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
     """Update frontmatter fields in a file while preserving all content.
 
     Only modifies the frontmatter section, leaving all content untouched.
@@ -181,7 +194,7 @@ async def update_frontmatter(path: Path, updates: Dict[str, Any]) -> str:
     Returns checksum of updated file.
 
     Args:
-        path: Path to markdown file
+        path: Path to markdown file (Path or string)
         updates: Dict of frontmatter fields to update
 
     Returns:
@@ -192,8 +205,11 @@ async def update_frontmatter(path: Path, updates: Dict[str, Any]) -> str:
         ParseError: If frontmatter parsing fails
     """
     try:
+        # Convert string to Path if needed
+        path_obj = Path(path) if isinstance(path, str) else path
+        
         # Read current content
-        content = path.read_text()
+        content = path_obj.read_text()
 
         # Parse current frontmatter
         current_fm = {}
@@ -208,9 +224,15 @@ async def update_frontmatter(path: Path, updates: Dict[str, Any]) -> str:
         yaml_fm = yaml.dump(new_fm, sort_keys=False)
         final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
 
-        await write_file_atomic(path, final_content)
+        logger.debug("Updating frontmatter", 
+                   path=str(path_obj), 
+                   update_keys=list(updates.keys()))
+                   
+        await write_file_atomic(path_obj, final_content)
         return await compute_checksum(final_content)
 
     except Exception as e:  # pragma: no cover
-        logger.error(f"Failed to update frontmatter in {path}: {e}")
+        logger.error("Failed to update frontmatter", 
+                   path=str(path) if isinstance(path, (str, Path)) else "<unknown>", 
+                   error=str(e))
         raise FileError(f"Failed to update frontmatter: {e}")
