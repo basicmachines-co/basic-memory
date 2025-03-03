@@ -36,16 +36,42 @@ def format_prompt_context(context: PromptContext) -> str:
             This is a memory retrieval session. 
             The supplied query did not return any information specifically on this topic.
             
-            Please use the available basic-memory tools to gather relevant context before responding. 
-            Start by executing one of the suggested commands below to retrieve content.
-
-            ## Suggestions
+            ## Opportunity to Capture New Knowledge!
+            
+            This is an excellent chance to start documenting this topic:
+            
+            ```python
+            await write_note(
+                title="{context.topic}",
+                content=f'''
+                # {context.topic}
+                
+                ## Overview
+                [Summary of what we know about {context.topic}]
+                
+                ## Key Points
+                [Main aspects or components of {context.topic}]
+                
+                ## Observations
+                - [category] [First important observation about {context.topic}]
+                - [category] [Second observation about {context.topic}]
+                
+                ## Relations
+                - relates_to [[Related Topic]]
+                - part_of [[Broader Context]]
+                '''
+            )
+            ```
+            
+            ## Other Options
+            
+            Please use the available basic-memory tools to gather relevant context before responding.
+            You can also:
             - Try a different search term
             - Check recent activity with `recent_activity(timeframe="1w")`
-            - Start a new topic with `write_note(...)`
             """)
 
-    # Start building our summary with header
+    # Start building our summary with header - add knowledge capture emphasis
     summary = dedent(f"""
         # Continuing conversation on: {context.topic}
 
@@ -55,6 +81,8 @@ def format_prompt_context(context: PromptContext) -> str:
         Start by executing one of the suggested commands below to retrieve content.
 
         Here's what I found from previous conversations:
+        
+        > **Knowledge Capture Recommendation:** As you continue this conversation, actively look for opportunities to record new information, decisions, or insights that emerge. Use `write_note()` to document important context.
         """)
 
     # Track what we've added to avoid duplicates

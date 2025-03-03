@@ -1,275 +1,413 @@
-# AI Assistant Guide
+# AI Assistant Guide for Basic Memory
 
-This guide explains how to use Basic Memory's tools effectively when working with users.
-It explains how to read, write, and navigate knowledge through the Model Context Protocol (MCP).
+This guide helps AIs use Basic Memory tools effectively when working with users. It covers reading, writing, and
+navigating knowledge through the Model Context Protocol (MCP).
 
 ## Overview
 
-Basic Memory allows users and LLMs to record context in local files using plain text Markdown formats to build a rich,
-organized knowledge base through natural conversations and simple tools.
+Basic Memory allows you and users to record context in local Markdown files, building a rich knowledge base through
+natural conversations. The system automatically creates a semantic knowledge graph from simple text patterns.
 
-- LLMs can read and write notes
-- Users can see content in real time
-- Simple Markdown formats are parsed to create a semantic knowledge graph
-- All data is local and stored in plain text files on the user's computer
-- Files can be updated externally and synced back to the knowledge base
+- **Local-First**: All data is stored in plain text files on the user's computer
+- **Real-Time**: Users see content updates immediately
+- **Bi-Directional**: Both you and users can read and edit notes
+- **Semantic**: Simple patterns create a structured knowledge graph
+- **Persistent**: Knowledge persists across sessions and conversations
 
-## Core Tools
+## The Importance of the Knowledge Graph
 
-Basic Memory provides several tools through the MCP (Model Context Protocol) for LLMs:
+**Basic Memory's value comes from connections between notes, not just the notes themselves.**
+
+When writing notes, your primary goal should be creating a rich, interconnected knowledge graph:
+
+1. **Increase Semantic Density**: Add multiple observations and relations to each note
+2. **Use Accurate References**: Aim to reference existing entities by their exact titles
+3. **Create Forward References**: Feel free to reference entities that don't exist yet - Basic Memory will resolve these
+   when they're created later
+4. **Create Bidirectional Links**: When appropriate, connect entities from both directions
+5. **Use Meaningful Categories**: Add semantic context with appropriate observation categories
+6. **Choose Precise Relations**: Use specific relation types that convey meaning
+
+Remember: A knowledge graph with 10 heavily connected notes is more valuable than 20 isolated notes. Your job is to help
+build these connections!
+
+## Core Tools Reference
 
 ```python
-# Writing knowledge
+# Writing knowledge - THE MOST IMPORTANT TOOL!
 response = await write_note(
-    title="Search Design",
-    content=content,
-    folder="specs",
-    tags=["search", "design"],
-    verbose=True  # Get parsing details
+    title="Search Design",  # Required: Note title
+    content="# Search Design\n...",  # Required: Note content
+    folder="specs",  # Optional: Folder to save in
+    tags=["search", "design"],  # Optional: Tags for categorization
+    verbose=True  # Optional: Get parsing details
 )
 
 # Reading knowledge
 content = await read_note("Search Design")  # By title
-content = await read_note("specs/search")  # By path
-content = await read_note("memory://specs/search")  # By memory url
+content = await read_note("specs/search-design")  # By path
+content = await read_note("memory://specs/search")  # By memory URL
 
-# Building context
-context = await build_context("memory://specs/search")
+# Searching for knowledge
+results = await search(
+    query="authentication system",  # Text to search for
+    page=1,  # Optional: Pagination
+    page_size=10  # Optional: Results per page
+)
 
-# Following relations
-impl = await build_context("memory://specs/search/implements/*")
+# Building context from the knowledge graph
+context = await build_context(
+    url="memory://specs/search",  # Starting point
+    depth=2,  # Optional: How many hops to follow
+    timeframe="1 month"  # Optional: Recent timeframe
+)
 
-# Checking changes
-activity = await recent_activity(timeframe="1 week")
+# Checking recent changes
+activity = await recent_activity(
+    type="all",  # Optional: Entity types to include
+    depth=1,  # Optional: Related items to include
+    timeframe="1 week"  # Optional: Time window
+)
 
-# Creating a json canvas diagram
-activity = await canvas(...)
-
+# Creating a knowledge visualization
+canvas_result = await canvas(
+    nodes=[{"id": "note1", "label": "Search Design"}],  # Nodes to display
+    edges=[{"from": "note1", "to": "note2"}],  # Connections
+    title="Project Overview",  # Canvas title
+    folder="diagrams"  # Storage location
+)
 ```
 
-## Semantic Markup in Plain Text
+## memory:// URLs Explained
 
-Knowledge is encoded within standard markdown using semantic conventions that are both human-readable and
-machine-processable.
+Basic Memory uses a special URL format to reference entities in the knowledge graph:
 
-**Key aspects:**
+- `memory://title` - Reference by title
+- `memory://folder/title` - Reference by folder and title
+- `memory://permalink` - Reference by permalink
+- `memory://path/relation_type/*` - Follow all relations of a specific type
+- `memory://path/*/target` - Find all entities with relations to target
 
-- Files in the knowledge base are each an `Entity` within the system
-- Markdown files can contain semantic content through simple markup.
-- `Observations` as categorized list items
-- `Relations` as wiki-style links with types
-- Frontmatter for metadata
-- Minimal specialized syntax
+## Semantic Markdown Format
 
-**Examples:**
+Knowledge is encoded in standard markdown using simple patterns:
 
-- Observation syntax: `- [category] Content text #tag1 #tag2 (optional context)`
-- Relation syntax: `- relation_type [[Entity]] (optional context)`
-- Inline relations through `[[Entity]]` Wiki Link style references
+**Observations** - Facts about an entity:
 
-## Knowledge Graph Through Relations
+```markdown
+- [category] This is an observation #tag1 #tag2 (optional context)
+```
 
-Connections between documents create a knowledge graph without requiring a specialized database.
+**Relations** - Links between entities:
 
-**Key aspects:**
+```markdown
+- relation_type [[Target Entity]] (optional context)
+```
 
-- Relations create edges between document nodes
-- Relation types provide semantic meaning to connections
-- Navigation between knowledge via relation traversal
-- Emergent structure through use
+**Common Categories & Relation Types:**
 
-**Examples:**
+- Categories: `[idea]`, `[decision]`, `[question]`, `[fact]`, `[requirement]`, `[technique]`, `[recipe]`, `[preference]`
+- Relations: `relates_to`, `implements`, `requires`, `extends`, `part_of`, `pairs_with`, `inspired_by`,
+  `originated_from`
 
-- `implements`, `extends`, `relates_to` relations
-- Following paths like `docs/search/implements/*`
-- Context building by walking the graph
+## When to Record Context
 
-## Understanding Users
+**Always consider recording context when**:
 
-Users will interact in patterns like:
+1. Users make decisions or reach conclusions
+2. Important information emerges during conversation
+3. Multiple related topics are discussed
+4. The conversation contains information that might be useful later
+5. Plans, tasks, or action items are mentioned
 
-1. Creating knowledge:
+**Protocol for recording context**:
+
+1. Identify valuable information in the conversation
+2. Ask the user: "Would you like me to record our discussion about [topic] in Basic Memory?"
+3. If they agree, use `write_note` to capture the information
+4. If they decline, continue without recording
+5. Let the user know when information has been recorded: "I've saved our discussion about [topic] to Basic Memory."
+
+## Understanding User Interactions
+
+Users will interact with Basic Memory in patterns like:
+
+1. **Creating knowledge**:
    ```
    Human: "Let's write up what we discussed about search."
    
-   Response: I'll create a note capturing our discussion.
+   You: I'll create a note capturing our discussion about the search functionality.
+   [Use write_note() to record the conversation details]
    ```
 
-AI Actions:
-
-- record note via `write_note("...")`
-
-1. Referencing existing knowledge:
+2. **Referencing existing knowledge**:
    ```
    Human: "Take a look at memory://specs/search"
    
-   Response: Let me build context from that and related documents.
+   You: I'll examine that information.
+   [Use build_context() to gather related information]
+   [Then read_note() to access specific content]
    ```
 
-AI Actions:
-
-- build context via `build_context("memory://specs/search")`
-- examine results
-- read content via `read_note()`
-
-
-2. Finding information:
+3. **Finding information**:
    ```
    Human: "What were our decisions about auth?"
    
-   Response: I'll search for relevant notes and build context.
+   You: Let me find that information for you.
+   [Use search() to find relevant notes]
+   [Then build_context() to understand connections]
    ```
-
-AI Actions:
-
-- search via `search("auth")`
-- examine results
-- read content
 
 ## Key Things to Remember
 
-3. **Files are Truth**
-    - Everything lives in local files
-    - Users control their files
-    - Always check verbose output
-    - The user can update files locally outside the LLM
-    - Changes need to be synced by the user
+1. **Files are Truth**
+    - All knowledge lives in local files on the user's computer
+    - Users can edit files outside your interaction
+    - Changes need to be synced by the user (usually automatic)
+    - Always verify information is current with `recent_activity()`
 
-4. **Building Context**
-    - Start specific
-    - Follow relations
+2. **Building Context Effectively**
+    - Start with specific entities
+    - Follow meaningful relations
     - Check recent changes
-    - Build incrementally
+    - Build context incrementally
+    - Combine related information
 
-5. **Writing Knowledge**
-    - Using the same title + folder will overwrite a note
-    - Use semantic markup
-    - Create useful relations
-    - Keep files organized
+3. **Writing Knowledge Wisely**
+    - Using the same title+folder will overwrite existing notes
+    - Structure content with clear headings and sections
+    - Use semantic markup for observations and relations
+    - Keep files organized in logical folders
 
-## Common Patterns
+## Common Knowledge Patterns
 
-### Capturing Discussions
+### Capturing Decisions
+
+```markdown
+# Coffee Brewing Methods
+
+## Context
+
+I've experimented with various brewing methods including French press, pour over, and espresso.
+
+## Decision
+
+Pour over is my preferred method for light to medium roasts because it highlights subtle flavors and offers more control
+over the extraction.
+
+## Observations
+
+- [technique] Blooming the coffee grounds for 30 seconds improves extraction #brewing
+- [preference] Water temperature between 195-205°F works best #temperature
+- [equipment] Gooseneck kettle provides better control of water flow #tools
+
+## Relations
+
+- pairs_with [[Light Roast Beans]]
+- contrasts_with [[French Press Method]]
+- requires [[Proper Grinding Technique]]
+```
+
+### Recording Project Structure
+
+```markdown
+# Garden Planning
+
+## Overview
+
+This document outlines the garden layout and planting strategy for this season.
+
+## Observations
+
+- [structure] Raised beds in south corner for sun exposure #layout
+- [structure] Drip irrigation system installed for efficiency #watering
+- [pattern] Companion planting used to deter pests naturally #technique
+
+## Relations
+
+- contains [[Vegetable Section]]
+- contains [[Herb Garden]]
+- implements [[Organic Gardening Principles]]
+```
+
+### Technical Discussions
+
+```markdown
+# Recipe Improvement Discussion
+
+## Key Points
+
+Discussed strategies for improving the chocolate chip cookie recipe.
+
+## Observations
+
+- [issue] Cookies spread too thin when baked at 350°F #texture
+- [solution] Chilling dough for 24 hours improves flavor and reduces spreading #technique
+- [decision] Will use brown butter instead of regular butter #flavor
+
+## Relations
+
+- improves [[Basic Cookie Recipe]]
+- inspired_by [[Bakery-Style Cookies]]
+- pairs_with [[Homemade Ice Cream]]
+```
+
+### Creating Effective Relations
+
+When creating relations, you can:
+
+1. Reference existing entities by their exact title
+2. Create forward references to entities that don't exist yet
 
 ```python
-# Document a decision
-response = await write_note(
-    title="Auth System Decision",
-    folder="decisions",
-    content="""# Auth System Decision
+# Example workflow for creating notes with effective relations
+async def create_note_with_effective_relations():
+    # Search for existing entities to reference
+    search_results = await search("travel")
+    existing_entities = [result.title for result in search_results.primary_results]
+
+    # Check if specific entities exist
+    packing_tips_exists = "Packing Tips" in existing_entities
+    japan_travel_exists = "Japan Travel Guide" in existing_entities
+
+    # Prepare relations section - include both existing and forward references
+    relations_section = "## Relations\n"
+
+    # Existing reference - exact match to known entity
+    if packing_tips_exists:
+        relations_section += "- references [[Packing Tips]]\n"
+    else:
+        # Forward reference - will be linked when that entity is created later
+        relations_section += "- references [[Packing Tips]]\n"
+
+    # Another possible reference
+    if japan_travel_exists:
+        relations_section += "- part_of [[Japan Travel Guide]]\n"
+
+    # You can also check recently modified notes to reference them
+    recent = await recent_activity(timeframe="1 week")
+    recent_titles = [item.title for item in recent.primary_results]
+
+    if "Transportation Options" in recent_titles:
+        relations_section += "- relates_to [[Transportation Options]]\n"
+
+    # Always include meaningful forward references, even if they don't exist yet
+    relations_section += "- located_in [[Tokyo]]\n"
+    relations_section += "- visited_during [[Spring 2023 Trip]]\n"
+
+    # Now create the note with both verified and forward relations
+    content = f"""# Tokyo Neighborhood Guide
     
-    ## Context
-    Evaluated different auth approaches...
-    
-    ## Decision
-    Selected JWT-based authentication because...
-    
-    ## Observations
-    - [decision] Using JWT for auth #auth
-    - [tech] Implementing with bcrypt #security
-    
-    ## Relations
-    - affects [[Auth System]]
-    - based_on [[Security Requirements]]
+## Overview
+Details about different Tokyo neighborhoods and their unique characteristics.
+
+## Observations
+- [area] Shibuya is a busy shopping district #shopping
+- [transportation] Yamanote Line connects major neighborhoods #transit
+- [recommendation] Visit Shimokitazawa for vintage shopping #unique
+- [tip] Get a Suica card for easy train travel #convenience
+
+{relations_section}
     """
-)
 
-```
-
-### Building Understanding
-
-```python
-async def explore_topic(topic):
-    # Get main context
-    context = await build_context(f"memory://{topic}")
-
-    # Find implementations
-    impl = await build_context(
-        f"memory://{topic}/implements/*"
-    )
-
-    # Get recent changes
-    activity = await recent_activity(timeframe="1 week")
-    relevant = [r for r in activity.primary_results
-                if topic in r.permalink]
-
-    # Build comprehensive view
-    for result in relevant:
-        details = await build_context(
-            f"memory://{result.permalink}"
-        )
-```
-
-### Handling Files
-
-```python
-# Check before writing
-try:
-    existing = await read_note("Search Design")
-    # Update existing
-    await write_note(
-        title="Search Design",
-        content=updated_content,
+    result = await write_note(
+        title="Tokyo Neighborhood Guide",
+        content=content,
         verbose=True
     )
-except:
-    # Create new
-    await write_note(
-        title="Search Design",
-        content=new_content,
-    )
+
+    # You can check which relations were resolved and which are forward references
+    if result and 'relations' in result:
+        resolved = [r['to_name'] for r in result['relations'] if r.get('target_id')]
+        forward_refs = [r['to_name'] for r in result['relations'] if not r.get('target_id')]
+
+        print(f"Resolved relations: {resolved}")
+        print(f"Forward references that will be resolved later: {forward_refs}")
 ```
 
 ## Error Handling
 
 Common issues to watch for:
 
-6. **Missing Content**
+1. **Missing Content**
    ```python
    try:
        content = await read_note("Document")
    except:
-       # Try search
-       results = await search({"text": "Document"})
+       # Try search instead
+       results = await search("Document")
+       if results and results.primary_results:
+           # Found something similar
+           content = await read_note(results.primary_results[0].permalink)
    ```
 
-7. **Unresolved Relations**
+2. **Forward References (Unresolved Relations)**
    ```python
    response = await write_note(..., verbose=True)
-   for relation in response['relations']:
-       if not relation['target']:
-           # Relation didn't resolve
-           # Might need sync
-           # Or target doesn't exist
+   # Check for forward references (unresolved relations)
+   forward_refs = []
+   for relation in response.get('relations', []):
+       if not relation.get('target_id'):
+           forward_refs.append(relation.get('to_name'))
+   
+   if forward_refs:
+       # This is a feature, not an error! Inform the user about forward references
+       print(f"Note created with forward references to: {forward_refs}")
+       print("These will be automatically linked when those notes are created.")
+       
+       # Optionally suggest creating those entities now
+       print("Would you like me to create any of these notes now to complete the connections?")
    ```
 
-8. **Pattern Matching**
+3. **Sync Issues**
    ```python
-   # If pattern fails, try:
-   # - More specific path
-   # - Direct lookup
-   # - Search instead
-   # - Recent activity
+   # If information seems outdated
+   activity = await recent_activity(timeframe="1 hour")
+   if not activity or not activity.primary_results:
+       print("It seems there haven't been recent updates. You might need to run 'basic-memory sync'.")
    ```
 
 ## Best Practices
 
-1. **Read and write Notes as needed**
-    - Write notes to record context
-    - See what was parsed
-    - Check relations
-    - Verify changes
+1. **Proactively Record Context**
+    - Offer to capture important discussions
+    - Record decisions, rationales, and conclusions
+    - Link to related topics
+    - Ask for permission first: "Would you like me to save our discussion about [topic]?"
+    - Confirm when complete: "I've saved our discussion to Basic Memory"
 
-2. **Build Context Carefully**
-    - Start specific
-    - Follow logical paths
-    - Combine approaches
-    - Stay relevant
+2. **Create a Rich Semantic Graph**
+    - **Add meaningful observations**: Include at least 3-5 categorized observations in each note
+    - **Create deliberate relations**: Connect each note to at least 2-3 related entities
+    - **Use existing entities**: Before creating a new relation, search for existing entities
+    - **Verify wikilinks**: When referencing `[[Entity]]`, use exact titles of existing notes
+    - **Check accuracy**: Use `search()` or `recent_activity()` to confirm entity titles
+    - **Use precise relation types**: Choose specific relation types that convey meaning (e.g., "implements" instead
+      of "relates_to")
+    - **Consider bidirectional relations**: When appropriate, create inverse relations in both entities
 
-3. **Write Clean Content**
-    - Clear structure
-    - Good organization
-    - Useful relations
-    - Regular cleanup
+3. **Structure Content Thoughtfully**
+    - Use clear, descriptive titles
+    - Organize with logical sections (Context, Decision, Implementation, etc.)
+    - Include relevant context and background
+    - Add semantic observations with appropriate categories
+    - Use a consistent format for similar types of notes
+    - Balance detail with conciseness
 
-Built with ♥️ by Basic Machines
+4. **Navigate Knowledge Effectively**
+    - Start with specific searches
+    - Follow relation paths
+    - Combine information from multiple sources
+    - Verify information is current
+    - Build a complete picture before responding
+
+5. **Help Users Maintain Their Knowledge**
+    - Suggest organizing related topics
+    - Identify potential duplicates
+    - Recommend adding relations between topics
+    - Offer to create summaries of scattered information
+    - Suggest potential missing relations: "I notice this might relate to [topic], would you like me to add that
+      connection?"
+
+Built with ♥️ b
+y Basic Machines

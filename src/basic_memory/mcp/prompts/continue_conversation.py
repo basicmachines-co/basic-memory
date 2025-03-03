@@ -90,13 +90,24 @@ async def continue_conversation(
                 )
             )
 
-        # Add next steps
+        # Add next steps with strong encouragement to write
         next_steps = dedent(f"""
             ## Next Steps
 
             You can:
             - Explore more with: `search({{"text": "{topic}"}})`
             - See what's changed: `recent_activity(timeframe="{timeframe or "7d"}")`
+            - **Record new learnings or decisions from this conversation:** `write_note(title="[Create a meaningful title]", content="[Content with observations and relations]")`
+            
+            ## Knowledge Capture Recommendation
+            
+            As you continue this conversation, **actively look for opportunities to:**
+            1. Record key information, decisions, or insights that emerge
+            2. Link new knowledge to existing topics 
+            3. Suggest capturing important context when appropriate
+            4. Create forward references to topics that might be created later
+            
+            Remember that capturing knowledge during conversations is one of the most valuable aspects of Basic Memory.
             """)
 
         return prompt_context + next_steps

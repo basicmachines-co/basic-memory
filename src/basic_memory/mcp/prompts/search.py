@@ -65,11 +65,33 @@ def format_search_results(
             
             I couldn't find any results for this query.
             
-            ## Suggestions
+            ## Opportunity to Capture Knowledge!
+            
+            This is an excellent opportunity to create new knowledge on this topic. Consider:
+            
+            ```python
+            await write_note(
+                title="{query.capitalize()}",
+                content=f'''
+                # {query.capitalize()}
+                
+                ## Overview
+                [Summary of what we've discussed about {query}]
+                
+                ## Observations
+                - [category] [First observation about {query}]
+                - [category] [Second observation about {query}]
+                
+                ## Relations
+                - relates_to [[Other Relevant Topic]]
+                '''
+            )
+            ```
+            
+            ## Other Suggestions
             - Try a different search term
             - Broaden your search criteria
             - Check recent activity with `recent_activity(timeframe="1w")`
-            - Create new content with `write_note(...)`
             """)
 
     # Start building our summary with header
@@ -117,7 +139,7 @@ def format_search_results(
                 You can view this file with: `read_file("{result.file_path}")`
                 """)
 
-    # Add next steps
+    # Add next steps with strong write encouragement
     summary += dedent(f"""
         ## Next Steps
         
@@ -126,6 +148,35 @@ def format_search_results(
         - Exclude terms: `search("{query} NOT exclude_term")`
         - View more results: `search("{query}", after_date=None)`
         - Check recent activity: `recent_activity()`
+        
+        ## Synthesize and Capture Knowledge
+        
+        Consider creating a new note that synthesizes what you've learned:
+        
+        ```python
+        await write_note(
+            title="Synthesis of {query.capitalize()} Information",
+            content='''
+            # Synthesis of {query.capitalize()} Information
+            
+            ## Overview
+            [Synthesis of the search results and your conversation]
+            
+            ## Key Insights
+            [Summary of main points learned from these results]
+            
+            ## Observations
+            - [insight] [Important observation from search results]
+            - [connection] [How this connects to other topics]
+            
+            ## Relations
+            - relates_to [[{results.results[0].title if results.results else "Related Topic"}]]
+            - extends [[Another Relevant Topic]]
+            '''
+        )
+        ```
+        
+        Remember that capturing synthesized knowledge is one of the most valuable features of Basic Memory.
         """)
 
     return summary

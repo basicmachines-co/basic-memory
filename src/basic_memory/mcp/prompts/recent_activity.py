@@ -43,7 +43,8 @@ async def recent_activity_prompt(
         recent = await recent_activity(
             timeframe=timeframe, type=[SearchItemType.ENTITY]
         )
-        return format_prompt_context(
+        
+        prompt_context = format_prompt_context(
             PromptContext(
                 topic=f"Recent Activity from ({timeframe})",
                 timeframe=timeframe,
@@ -55,3 +56,37 @@ async def recent_activity_prompt(
                 ],
             )
         )
+        
+        # Add suggestions for summarizing recent activity
+        capture_suggestions = f"""
+        ## Opportunity to Capture Activity Summary
+        
+        Consider creating a summary note of recent activity:
+        
+        ```python
+        await write_note(
+            title="Activity Summary {timeframe}",
+            content='''
+            # Activity Summary for {timeframe}
+            
+            ## Overview
+            [Summary of key changes and developments over this period]
+            
+            ## Key Updates
+            [List main updates and their significance]
+            
+            ## Observations
+            - [trend] [Observation about patterns in recent activity]
+            - [insight] [Connection between different activities]
+            
+            ## Relations
+            - summarizes [[{recent.primary_results[0].title if recent.primary_results else "Recent Topic"}]]
+            - relates_to [[Project Overview]]
+            '''
+        )
+        ```
+        
+        Summarizing periodic activity helps create high-level insights and connections between topics.
+        """
+        
+        return prompt_context + capture_suggestions
