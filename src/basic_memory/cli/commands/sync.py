@@ -150,23 +150,45 @@ def display_detailed_sync_results(knowledge: SyncReport):
 
 async def run_sync(verbose: bool = False, watch: bool = False, console_status: bool = False):
     """Run sync operation."""
+    import time
+    start_time = time.time()
+
+    logger.info("Sync command started", 
+               watch_mode=watch, 
+               verbose=verbose, 
+               directory=str(config.home))
 
     sync_service = await get_sync_service()
 
     # Start watching if requested
     if watch:
+        logger.info("Starting watch service after initial sync")
         watch_service = WatchService(
             sync_service=sync_service,
             file_service=sync_service.entity_service.file_service,
             config=config,
         )
+        
         # full sync
         await sync_service.sync(config.home)
+        
         # watch changes
         await watch_service.run()  # pragma: no cover
     else:
         # one time sync
+        logger.info("Running one-time sync")
         knowledge_changes = await sync_service.sync(config.home)
+        
+        # Log results
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.info("Sync command completed", 
+                   total_changes=knowledge_changes.total,
+                   new_files=len(knowledge_changes.new),
+                   modified_files=len(knowledge_changes.modified),
+                   deleted_files=len(knowledge_changes.deleted),
+                   moved_files=len(knowledge_changes.moves),
+                   duration_ms=duration_ms)
+        
         # Display results
         if verbose:
             display_detailed_sync_results(knowledge_changes)
@@ -196,7 +218,11 @@ def sync(
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
-            logger.exception("Sync failed", e)
+            logger.exception("Sync command failed",
+                           error=str(e),
+                           error_type=type(e).__name__,
+                           watch_mode=watch,
+                           directory=str(config.home))
             typer.echo(f"Error during sync: {e}", err=True)
             raise typer.Exit(1)
         raise

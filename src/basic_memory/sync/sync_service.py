@@ -192,29 +192,48 @@ class SyncService:
         """Sync a single file."""
 
         try:
+            logger.debug("Syncing file", 
+                        path=path, 
+                        is_new=new, 
+                        is_markdown=self.file_service.is_markdown(path))
+                        
             if self.file_service.is_markdown(path):
                 entity, checksum = await self.sync_markdown_file(path, new)
             else:
                 entity, checksum = await self.sync_regular_file(path, new)
+                
             await self.search_service.index_entity(entity)
+            
+            logger.debug("File sync completed", 
+                        path=path, 
+                        entity_id=entity.id, 
+                        checksum=checksum)
             return entity, checksum
 
         except Exception as e:  # pragma: no cover
-            logger.exception(f"Failed to sync {path}: {e}")
+            logger.exception("Failed to sync file", 
+                           path=path, 
+                           error=str(e))
             return None, None  # pyright: ignore
 
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
-        """Sync a markdown file with full proces    sing."""
+        """Sync a markdown file with full processing."""
 
         # Parse markdown first to get any existing permalink
+        logger.debug("Parsing markdown file", path=path)
         entity_markdown = await self.entity_parser.parse_file(path)
 
         # Resolve permalink - this handles all the cases including conflicts
+        initial_permalink = entity_markdown.frontmatter.permalink
         permalink = await self.entity_service.resolve_permalink(path, markdown=entity_markdown)
 
         # If permalink changed, update the file
         if permalink != entity_markdown.frontmatter.permalink:
-            logger.info(f"Updating permalink in {path}: {permalink}")
+            logger.info("Updating permalink", 
+                       path=path, 
+                       old_permalink=entity_markdown.frontmatter.permalink, 
+                       new_permalink=permalink)
+                       
             entity_markdown.frontmatter.metadata["permalink"] = permalink
             checksum = await self.file_service.update_frontmatter(path, {"permalink": permalink})
         else:
@@ -223,12 +242,18 @@ class SyncService:
         # if the file is new, create an entity
         if new:
             # Create entity with final permalink
-            logger.debug(f"Creating new entity from markdown: {path}")
+            logger.debug("Creating new entity from markdown", 
+                        path=path, 
+                        permalink=permalink)
+                        
             await self.entity_service.create_entity_from_markdown(Path(path), entity_markdown)
 
         # otherwise we need to update the entity and observations
         else:
-            logger.debug(f"Updating entity from markdown: {path}")
+            logger.debug("Updating entity from markdown", 
+                        path=path, 
+                        permalink=permalink)
+                        
             await self.entity_service.update_entity_and_observations(Path(path), entity_markdown)
 
         # Update relations and search index
@@ -236,6 +261,13 @@ class SyncService:
 
         # set checksum
         await self.entity_repository.update(entity.id, {"checksum": checksum})
+        
+        logger.debug("Markdown sync completed", 
+                    path=path, 
+                    entity_id=entity.id,
+                    observation_count=len(entity.observations),
+                    relation_count=len(entity.relations))
+                    
         return entity, checksum
 
     async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Entity, str]:
@@ -332,15 +364,26 @@ class SyncService:
         """Try to resolve any unresolved relations"""
 
         unresolved_relations = await self.relation_repository.find_unresolved_relations()
-        logger.debug(f"Attempting to resolve {len(unresolved_relations)} forward references")
+        
+        logger.info("Resolving forward references", 
+                   count=len(unresolved_relations))
+                   
         for relation in unresolved_relations:
+            logger.debug("Attempting to resolve relation", 
+                        relation_id=relation.id,
+                        from_id=relation.from_id,
+                        to_name=relation.to_name)
+                        
             resolved_entity = await self.entity_service.link_resolver.resolve_link(relation.to_name)
 
             # ignore reference to self
             if resolved_entity and resolved_entity.id != relation.from_id:
-                logger.debug(
-                    f"Resolved forward reference: {relation.to_name} -> {resolved_entity.title}"
-                )
+                logger.debug("Resolved forward reference", 
+                            relation_id=relation.id,
+                            from_id=relation.from_id,
+                            to_name=relation.to_name,
+                            resolved_id=resolved_entity.id,
+                            resolved_title=resolved_entity.title)
                 try:
                     await self.relation_repository.update(
                         relation.id,
@@ -350,7 +393,10 @@ class SyncService:
                         },
                     )
                 except IntegrityError:  # pragma: no cover
-                    logger.debug(f"Ignoring duplicate relation {relation}")
+                    logger.debug("Ignoring duplicate relation", 
+                                relation_id=relation.id,
+                                from_id=relation.from_id,
+                                to_name=relation.to_name)
 
                 # update search index
                 await self.search_service.index_entity(resolved_entity)
@@ -365,8 +411,11 @@ class SyncService:
         Returns:
             ScanResult containing found files and any errors
         """
+        import time
+        start_time = time.time()
 
-        logger.debug(f"Scanning directory: {directory}")
+        logger.debug("Scanning directory", 
+                    directory=str(directory))
         result = ScanResult()
 
         for root, dirnames, filenames in os.walk(str(directory)):
@@ -383,6 +432,15 @@ class SyncService:
                 checksum = await self.file_service.compute_checksum(rel_path)
                 result.files[rel_path] = checksum
                 result.checksums[checksum] = rel_path
-                logger.debug(f"Found file: {rel_path} with checksum: {checksum}")
+                
+                logger.debug("Found file", 
+                            path=rel_path, 
+                            checksum=checksum)
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.debug("Directory scan completed", 
+                   directory=str(directory), 
+                   files_found=len(result.files),
+                   duration_ms=duration_ms)
 
         return result
