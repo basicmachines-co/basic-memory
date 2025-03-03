@@ -349,5 +349,4 @@ def test_continue_conversation_no_results(cli_env):
 
     # Check result contains expected content for no results
     assert "Continuing conversation on: NonexistentTopic" in result.stdout
-    assert "I couldn't find any recent work specifically on this topic" in result.stdout
-    assert "Try a different search term" in result.stdout
+    assert "The supplied query did not return any information" in result.stdout

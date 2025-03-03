@@ -80,6 +80,11 @@ class SyncService:
 
     async def sync(self, directory: Path) -> SyncReport:
         """Sync all files with database."""
+        import time
+        start_time = time.time()
+
+        logger.info("Sync operation started", 
+                    directory=str(directory))
 
         with logfire.span(f"sync {directory}", directory=directory):  # pyright: ignore [reportGeneralTypeIssues]
             # initial paths from db to sync
@@ -87,6 +92,11 @@ class SyncService:
             report = await self.scan(directory)
 
             # order of sync matters to resolve relations effectively
+            logger.info("Sync changes detected", 
+                       new_files=len(report.new),
+                       modified_files=len(report.modified),
+                       deleted_files=len(report.deleted),
+                       moved_files=len(report.moves))
 
             # sync moves first
             for old_path, new_path in report.moves.items():
@@ -94,6 +104,10 @@ class SyncService:
                 # it will show up in the move and modified lists, so handle it in modified
                 if new_path in report.modified:
                     report.modified.remove(new_path)
+                    logger.debug("File marked as moved and modified", 
+                               old_path=old_path, 
+                               new_path=new_path,
+                               action="processing as modified")
                 else:
                     await self.handle_move(old_path, new_path)
 
@@ -109,6 +123,13 @@ class SyncService:
                 await self.sync_file(path, new=False)
 
             await self.resolve_relations()
+            
+            duration_ms = int((time.time() - start_time) * 1000)
+            logger.info("Sync operation completed", 
+                       directory=str(directory),
+                       total_changes=report.total,
+                       duration_ms=duration_ms)
+            
             return report
 
     async def scan(self, directory):
@@ -261,7 +282,10 @@ class SyncService:
         # First get entity to get permalink before deletion
         entity = await self.entity_repository.get_by_file_path(file_path)
         if entity:
-            logger.debug(f"Deleting entity and cleaning up search index: {file_path}")
+            logger.info("Deleting entity", 
+                       file_path=file_path,
+                       entity_id=entity.id,
+                       permalink=entity.permalink)
 
             # Delete from db (this cascades to observations/relations)
             await self.entity_service.delete_entity_by_file_path(file_path)
@@ -272,7 +296,12 @@ class SyncService:
                 + [o.permalink for o in entity.observations]
                 + [r.permalink for r in entity.relations]
             )
-            logger.debug(f"Deleting from search index: {permalinks}")
+            
+            logger.debug("Cleaning up search index", 
+                        entity_id=entity.id,
+                        file_path=file_path,
+                        index_entries=len(permalinks))
+                        
             for permalink in permalinks:
                 if permalink:
                     await self.search_service.delete_by_permalink(permalink)
@@ -280,12 +309,22 @@ class SyncService:
                     await self.search_service.delete_by_entity_id(entity.id)
 
     async def handle_move(self, old_path, new_path):
-        logger.debug(f"Moving entity: {old_path} -> {new_path}")
+        logger.info("Moving entity", 
+                   old_path=old_path, 
+                   new_path=new_path)
+        
         entity = await self.entity_repository.get_by_file_path(old_path)
         if entity:
             # Update file_path but keep the same permalink for link stability
             updated = await self.entity_repository.update(entity.id, {"file_path": new_path})
             assert updated is not None, "entity should be updated"
+            
+            logger.debug("Entity path updated", 
+                        entity_id=entity.id,
+                        permalink=entity.permalink,
+                        old_path=old_path,
+                        new_path=new_path)
+                        
             # update search index
             await self.search_service.index_entity(updated)
 

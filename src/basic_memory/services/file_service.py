@@ -60,7 +60,9 @@ class FileService:
         Returns:
             Raw content string without metadata sections
         """
-        logger.debug(f"Reading entity with permalink: {entity.permalink}")
+        logger.debug("Reading entity content", 
+                    entity_id=entity.id,
+                    permalink=entity.permalink)
 
         file_path = self.get_entity_path(entity)
         markdown = await self.markdown_processor.read_file(file_path)
@@ -126,15 +128,25 @@ class FileService:
             await file_utils.ensure_directory(full_path.parent)
 
             # Write content atomically
+            logger.info("Writing file", 
+                       operation="write_file",
+                       path=str(full_path),
+                       content_length=len(content),
+                       is_markdown=full_path.suffix.lower() == '.md')
+            
             await file_utils.write_file_atomic(full_path, content)
 
             # Compute and return checksum
             checksum = await file_utils.compute_checksum(content)
-            logger.debug(f"wrote file: {full_path}, checksum: {checksum}")
+            logger.debug("File write completed", 
+                        path=str(full_path), 
+                        checksum=checksum)
             return checksum
 
         except Exception as e:
-            logger.error(f"Failed to write file {full_path}: {e}")
+            logger.exception("File write error",
+                           path=str(full_path),
+                           error=str(e))
             raise FileOperationError(f"Failed to write file: {e}")
 
     # TODO remove read_file
@@ -157,13 +169,23 @@ class FileService:
         full_path = path if path.is_absolute() else self.base_path / path
 
         try:
+            logger.debug("Reading file", 
+                        operation="read_file",
+                        path=str(full_path))
+                        
             content = full_path.read_text()
             checksum = await file_utils.compute_checksum(content)
-            logger.debug(f"read file: {full_path}, checksum: {checksum}")
+            
+            logger.debug("File read completed", 
+                        path=str(full_path),
+                        checksum=checksum,
+                        content_length=len(content))
             return content, checksum
 
         except Exception as e:
-            logger.error(f"Failed to read file {full_path}: {e}")
+            logger.exception("File read error",
+                           path=str(full_path),
+                           error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")
 
     async def delete_file(self, path: Union[Path, str]) -> None:

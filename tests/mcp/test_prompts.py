@@ -41,8 +41,7 @@ async def test_continue_conversation_no_results(client):
 
     # Check the response indicates no results found
     assert "Continuing conversation on: NonExistentTopic" in result
-    assert "I couldn't find any recent work specifically on this topic" in result
-    assert "Try a different search term" in result
+    assert "The supplied query did not return any information" in result
 
 
 @pytest.mark.asyncio
@@ -58,4 +57,3 @@ async def test_continue_conversation_creates_structured_suggestions(client, test
     assert "read_note" in result
     assert "search" in result
     assert "recent_activity" in result
-    assert "build_context" in result

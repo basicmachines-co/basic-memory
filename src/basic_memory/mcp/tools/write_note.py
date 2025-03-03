@@ -58,7 +58,11 @@ async def write_note(
         - Tags if present
     """
     with logfire.span("Writing note", title=title, folder=folder):  # pyright: ignore [reportGeneralTypeIssues]
-        logger.info(f"Writing note folder:'{folder}' title: '{title}'")
+        logger.info("MCP tool call", 
+                    tool="write_note", 
+                    folder=folder, 
+                    title=title, 
+                    tags=tags)
 
         # Create the entity request
         metadata = {"tags": [f"#{tag}" for tag in tags]} if tags else None
@@ -72,7 +76,7 @@ async def write_note(
         )
 
         # Create or update via knowledge API
-        logger.info(f"Creating {entity.permalink}")
+        logger.debug("Creating entity via API", permalink=entity.permalink)
         url = f"/knowledge/entities/{entity.permalink}"
         response = await call_put(client, url, json=entity.model_dump())
         result = EntityResponse.model_validate(response.json())
@@ -84,8 +88,9 @@ async def write_note(
             f"permalink: {result.permalink}",
         ]
 
+        # Count observations by category
+        categories = {}
         if result.observations:
-            categories = {}
             for obs in result.observations:
                 categories[obs.category] = categories.get(obs.category, 0) + 1
 
@@ -93,6 +98,9 @@ async def write_note(
             for category, count in sorted(categories.items()):
                 summary.append(f"- {category}: {count}")
 
+        # Count resolved/unresolved relations
+        unresolved = 0
+        resolved = 0
         if result.relations:
             unresolved = sum(1 for r in result.relations if not r.to_id)
             resolved = len(result.relations) - unresolved
@@ -105,5 +113,16 @@ async def write_note(
 
         if tags:
             summary.append(f"\n## Tags\n- {', '.join(tags)}")
+
+        # Log the response with structured data
+        logger.info("MCP tool response", 
+                    tool="write_note", 
+                    action=action,
+                    permalink=result.permalink, 
+                    observations_count=len(result.observations),
+                    relations_count=len(result.relations),
+                    resolved_relations=resolved,
+                    unresolved_relations=unresolved,
+                    status_code=response.status_code)
 
         return "\n".join(summary)
