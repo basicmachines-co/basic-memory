@@ -179,7 +179,7 @@ class SearchService:
         Each type gets its own row in the search index with appropriate metadata.
         """
 
-        if entity.permalink is None:
+        if entity.permalink is None:  # pragma: no cover
             logger.error("Missing permalink for markdown entity", 
                        entity_id=entity.id,
                        title=entity.title,
@@ -201,7 +201,7 @@ class SearchService:
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
-        if entity.permalink is None:
+        if entity.permalink is None:  # pragma: no cover
             logger.error("Missing permalink for markdown entity", 
                        entity_id=entity.id,
                        title=entity.title,

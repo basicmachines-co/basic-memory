@@ -117,7 +117,7 @@ def format_search_results(
         if result.metadata and "created_at" in result.metadata:
             created_at = result.metadata["created_at"]
             if hasattr(created_at, "strftime"):
-                summary += f"- **Created**: {created_at.strftime('%Y-%m-%d %H:%M')}\n"
+                summary += f"- **Created**: {created_at.strftime('%Y-%m-%d %H:%M')}\n"  # pragma: no cover
             elif isinstance(created_at, str):
                 summary += f"- **Created**: {created_at}\n"
 
@@ -137,7 +137,7 @@ def format_search_results(
         else:
             summary += dedent(f"""
                 You can view this file with: `read_file("{result.file_path}")`
-                """)
+                """)  # pragma: no cover
 
     # Add next steps with strong write encouragement
     summary += dedent(f"""

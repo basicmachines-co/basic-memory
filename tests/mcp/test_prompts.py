@@ -3,6 +3,9 @@
 import pytest
 
 from basic_memory.mcp.prompts.continue_conversation import continue_conversation
+from basic_memory.mcp.prompts.search import search_prompt, format_search_results
+from basic_memory.mcp.prompts.recent_activity import recent_activity_prompt
+from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItemType
 
 
 @pytest.mark.asyncio
@@ -57,3 +60,154 @@ async def test_continue_conversation_creates_structured_suggestions(client, test
     assert "read_note" in result
     assert "search" in result
     assert "recent_activity" in result
+
+
+# Search prompt tests
+
+@pytest.mark.asyncio
+async def test_search_prompt_with_results(client, test_graph):
+    """Test search_prompt with a query that returns results."""
+    # Call the function with a query that should match existing content
+    result = await search_prompt("Root")
+
+    # Check the response contains expected content
+    assert "Search Results for: \"Root\"" in result
+    assert "I found " in result
+    assert "You can view this content with: `read_note" in result
+    assert "Synthesize and Capture Knowledge" in result
+
+
+@pytest.mark.asyncio
+async def test_search_prompt_with_timeframe(client, test_graph):
+    """Test search_prompt with a timeframe."""
+    # Call the function with a query and timeframe
+    result = await search_prompt("Root", timeframe="1w")
+
+    # Check the response includes timeframe information
+    assert "Search Results for: \"Root\" (after 1w)" in result
+    assert "I found " in result
+
+
+@pytest.mark.asyncio
+async def test_search_prompt_no_results(client):
+    """Test search_prompt when no results are found."""
+    # Call with a query that won't match anything
+    result = await search_prompt("XYZ123NonExistentQuery")
+
+    # Check the response indicates no results found
+    assert "Search Results for: \"XYZ123NonExistentQuery\"" in result
+    assert "I couldn't find any results for this query" in result
+    assert "Opportunity to Capture Knowledge" in result
+    assert "write_note" in result
+
+
+@pytest.mark.asyncio
+async def test_format_search_results_with_results():
+    """Test format_search_results with search results."""
+    # Create a mock SearchResponse with results
+    search_response = SearchResponse(
+        results=[
+            SearchResult(
+                entity="test-entity",
+                type=SearchItemType.ENTITY,
+                title="Test Result",
+                permalink="test-result",
+                file_path="test_result.md",
+                content="This is test content",
+                score=0.95,
+                metadata={"created_at": "2023-01-01"}
+            )
+        ],
+        current_page=1,
+        page_size=10
+    )
+
+    # Format the results
+    result = format_search_results("test query", search_response)
+
+    # Check the formatted output
+    assert "Search Results for: \"test query\"" in result
+    assert "I found 1 results" in result
+    assert "Test Result" in result
+    assert "This is test content" in result
+
+
+@pytest.mark.asyncio
+async def test_format_search_results_no_results():
+    """Test format_search_results with no search results."""
+    # Create a mock SearchResponse with no results
+    search_response = SearchResponse(
+        results=[], 
+        current_page=1, 
+        page_size=10
+    )
+
+    # Format the results
+    result = format_search_results("empty query", search_response)
+
+    # Check the formatted output
+    assert "Search Results for: \"empty query\"" in result
+    assert "I couldn't find any results for this query" in result
+    assert "Opportunity to Capture Knowledge" in result
+
+
+# Test utils
+
+def test_prompt_context_with_file_path_no_permalink():
+    """Test format_prompt_context with items that have file_path but no permalink."""
+    from basic_memory.mcp.prompts.utils import format_prompt_context, PromptContext, PromptContextItem
+    from basic_memory.schemas.memory import EntitySummary
+    from basic_memory.schemas.base import TimeFrame
+    
+    # Create a mock context with a file that has no permalink (like a binary file)
+    test_entity = EntitySummary(
+        id="1",
+        type="file",
+        title="Test File",
+        permalink=None,  # No permalink
+        file_path="test_file.pdf",
+        created_at="2023-01-01",
+        updated_at="2023-01-01",
+    )
+    
+    context = PromptContext(
+        topic="Test Topic",
+        timeframe="1d",
+        results=[
+            PromptContextItem(
+                primary_results=[test_entity],
+                related_results=[test_entity],  # Also use as related
+            )
+        ]
+    )
+    
+    # Format the context
+    result = format_prompt_context(context)
+    
+    # Check that file_path is used when permalink is missing
+    assert "test_file.pdf" in result
+    assert "read_file" in result
+
+
+# Recent activity prompt tests
+
+@pytest.mark.asyncio
+async def test_recent_activity_prompt(client, test_graph):
+    """Test recent_activity_prompt."""
+    # Call the function
+    result = await recent_activity_prompt(timeframe="1w")
+
+    # Check the response contains expected content
+    assert "Recent Activity" in result
+    assert "Opportunity to Capture Activity Summary" in result
+    assert "write_note" in result
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_prompt_with_custom_timeframe(client, test_graph):
+    """Test recent_activity_prompt with custom timeframe."""
+    # Call the function with a custom timeframe
+    result = await recent_activity_prompt(timeframe="1d")
+
+    # Check the response includes the custom timeframe
+    assert "Recent Activity from (1d)" in result

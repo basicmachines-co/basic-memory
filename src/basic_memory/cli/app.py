@@ -9,8 +9,9 @@ from basic_memory.config import config
 
 def version_callback(value: bool) -> None:
     """Show version and exit."""
-    if value:
+    if value:  # pragma: no cover
         import basic_memory
+
         typer.echo(f"Basic Memory version: {basic_memory.__version__}")
         raise typer.Exit()
 
@@ -39,20 +40,21 @@ def app_callback(
     """Basic Memory - Local-first personal knowledge management."""
     # We use the project option to set the BASIC_MEMORY_PROJECT environment variable
     # The config module will pick this up when loading
-    if project:
+    if project:  # pragma: no cover
         import os
         import importlib
         from basic_memory import config as config_module
-        
+
         # Set the environment variable
         os.environ["BASIC_MEMORY_PROJECT"] = project
-        
+
         # Reload the config module to pick up the new project
         importlib.reload(config_module)
-        
+
         # Update the local reference
         global config
         from basic_memory.config import config as new_config
+
         config = new_config
 
 

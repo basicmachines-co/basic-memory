@@ -24,17 +24,10 @@ class PathLike(Protocol):
     def __str__(self) -> str: ...
 
 
-# Define a custom type for file paths
-def validate_path(v: Union[str, Path]) -> Path:
-    """Convert a string or Path to a Path object."""
-    if isinstance(v, str):
-        return Path(v)
-    return v
 
 
 # In type annotations, use Union[Path, str] instead of FilePath for now
 # This preserves compatibility with existing code while we migrate
-# FilePath = Annotated[Path, AfterValidator(validate_path)]
 FilePath = Union[Path, str]
 
 # Disable the "Queue is full" warning

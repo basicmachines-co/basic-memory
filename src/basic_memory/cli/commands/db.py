@@ -12,13 +12,13 @@ from basic_memory.cli.app import app
 
 @app.command()
 def reset(
-    reindex: bool = typer.Option(False, "--reindex", help="Rebuild indices from filesystem"),
+    reindex: bool = typer.Option(False, "--reindex", help="Rebuild db index from filesystem"),
 ):  # pragma: no cover
     """Reset database (drop all tables and recreate)."""
-    with logfire.span("reset"):  # pyright: ignore [reportGeneralTypeIssues]
+    with logfire.span("db reset"):  # pyright: ignore [reportGeneralTypeIssues]
         if typer.confirm("This will delete all data in your db. Are you sure?"):
             logger.info("Resetting database...")
-            asyncio.run(migrations.reset_database())
+            migrations.reset_database()
 
             if reindex:
                 # Import and run sync

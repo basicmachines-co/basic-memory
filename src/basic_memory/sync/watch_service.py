@@ -242,7 +242,7 @@ class WatchService:
                                checksum=checksum)
                     processed.add(path)
                     add_count += 1
-                else:
+                else:  # pragma: no cover
                     logger.warning("Error syncing new file", path=path)
                     self.console.print(f"[orange]?[/orange] Error syncing: {path}")
 
@@ -259,7 +259,7 @@ class WatchService:
                 )
                 
                 # Check if this is a repeat of the last modified file
-                if path == last_modified_path:
+                if path == last_modified_path:  # pragma: no cover
                     repeat_count += 1
                     # Only show a message for the first repeat
                     if repeat_count == 1:

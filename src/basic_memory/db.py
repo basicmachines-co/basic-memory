@@ -91,11 +91,11 @@ async def get_or_create_db(
     if _engine is None:
         logger.error("Failed to create database engine", db_path=str(db_path))
         raise RuntimeError("Database engine initialization failed")
-    
+
     if _session_maker is None:
         logger.error("Failed to create session maker", db_path=str(db_path))
         raise RuntimeError("Session maker initialization failed")
-        
+
     return _engine, _session_maker
 
 
@@ -130,14 +130,14 @@ async def engine_session_factory(
         _session_maker = async_sessionmaker(_engine, expire_on_commit=False)
 
         # Verify that engine and session maker are initialized
-        if _engine is None:
+        if _engine is None:  # pragma: no cover
             logger.error("Database engine is None in engine_session_factory")
             raise RuntimeError("Database engine initialization failed")
-            
-        if _session_maker is None:
+
+        if _session_maker is None:  # pragma: no cover
             logger.error("Session maker is None in engine_session_factory")
             raise RuntimeError("Session maker initialization failed")
-            
+
         yield _engine, _session_maker
     finally:
         if _engine:

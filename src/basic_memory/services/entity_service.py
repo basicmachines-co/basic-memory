@@ -171,11 +171,13 @@ class EntityService(BaseService[EntityModel]):
                 entity = await self.get_by_permalink(permalink_or_id)
             else:
                 entities = await self.get_entities_by_id([permalink_or_id])
-                if len(entities) != 1:
-                    logger.error("Entity lookup error", 
-                               entity_id=permalink_or_id,
-                               found_count=len(entities))
-                    raise ValueError(f"Expected 1 entity with ID {permalink_or_id}, got {len(entities)}")
+                if len(entities) != 1:  # pragma: no cover
+                    logger.error(
+                        "Entity lookup error", entity_id=permalink_or_id, found_count=len(entities)
+                    )
+                    raise ValueError(
+                        f"Expected 1 entity with ID {permalink_or_id}, got {len(entities)}"
+                    )
                 entity = entities[0]
 
             # Delete file first

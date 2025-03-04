@@ -70,11 +70,15 @@ class Repository[T: Base]:
 
             # Query within same session
             found = await self.select_by_id(session, model.id)  # pyright: ignore [reportAttributeAccessIssue]
-            if found is None:
-                logger.error("Failed to retrieve model after add", 
-                           model_type=self.Model.__name__, 
-                           model_id=model.id)
-                raise ValueError(f"Can't find {self.Model.__name__} with ID {model.id} after session.add")
+            if found is None:  # pragma: no cover
+                logger.error(
+                    "Failed to retrieve model after add",
+                    model_type=self.Model.__name__,
+                    model_id=model.id,
+                )
+                raise ValueError(
+                    f"Can't find {self.Model.__name__} with ID {model.id} after session.add"
+                )
             return found
 
     async def add_all(self, models: List[T]) -> Sequence[T]:
@@ -156,11 +160,15 @@ class Repository[T: Base]:
             await session.flush()
 
             return_instance = await self.select_by_id(session, model.id)  # pyright: ignore [reportAttributeAccessIssue]
-            if return_instance is None:
-                logger.error("Failed to retrieve model after create", 
-                           model_type=self.Model.__name__, 
-                           model_id=model.id)
-                raise ValueError(f"Can't find {self.Model.__name__} with ID {model.id} after session.add")
+            if return_instance is None:  # pragma: no cover
+                logger.error(
+                    "Failed to retrieve model after create",
+                    model_type=self.Model.__name__,
+                    model_id=model.id,
+                )
+                raise ValueError(
+                    f"Can't find {self.Model.__name__} with ID {model.id} after session.add"
+                )
             return return_instance
 
     async def create_all(self, data_list: List[dict]) -> Sequence[T]:

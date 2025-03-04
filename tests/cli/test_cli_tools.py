@@ -337,7 +337,6 @@ def test_continue_conversation(cli_env, setup_test_note):
     assert "read_note" in result.stdout
     assert permalink in result.stdout
 
-
 def test_continue_conversation_no_results(cli_env):
     """Test continue_conversation command with no results."""
     # Run the CLI command with a nonexistent topic
@@ -350,3 +349,4 @@ def test_continue_conversation_no_results(cli_env):
     # Check result contains expected content for no results
     assert "Continuing conversation on: NonexistentTopic" in result.stdout
     assert "The supplied query did not return any information" in result.stdout
+    
