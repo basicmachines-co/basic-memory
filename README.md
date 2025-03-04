@@ -356,6 +356,24 @@ for OS X):
 }
 ```
 
+If you want to use a specific project (see [Multiple Projects](#multiple-projects) below), update your Claude Desktop config:
+
+```json
+{
+  "mcpServers": {
+    "basic-memory": {
+      "command": "uvx",
+      "args": [
+        "basic-memory",
+        "mcp",
+        "--project",
+        "your-project-name"
+      ]
+    }
+  }
+}
+```
+
 2. Sync your knowledge:
 
 ```bash
@@ -386,6 +404,54 @@ canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 "Read my notes on the authentication system"
 "What have I been working on in the past week?"
 ```
+
+## Multiple Projects
+
+Basic Memory supports managing multiple separate knowledge bases through projects. This feature allows you to maintain separate knowledge graphs for different purposes (e.g., personal notes, work projects, research topics).
+
+### Managing Projects
+
+```bash
+# List all configured projects
+basic-memory project list
+
+# Add a new project
+basic-memory project add work ~/work-basic-memory
+
+# Set the default project
+basic-memory project default work
+
+# Remove a project (doesn't delete files)
+basic-memory project remove personal
+
+# Show current project
+basic-memory project current
+```
+
+### Using Projects in Commands
+
+All commands support the `--project` flag to specify which project to use:
+
+```bash
+# Sync a specific project
+basic-memory --project=work sync
+
+# Run MCP server for a specific project
+basic-memory --project=personal mcp
+```
+
+You can also set the `BASIC_MEMORY_PROJECT` environment variable:
+
+```bash
+BASIC_MEMORY_PROJECT=work basic-memory sync
+```
+
+### Project Isolation
+
+Each project maintains:
+- Its own collection of markdown files in the specified directory
+- A separate SQLite database for that project
+- Complete knowledge graph isolation from other projects
 
 ## Design Philosophy
 

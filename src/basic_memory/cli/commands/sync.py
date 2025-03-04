@@ -93,8 +93,10 @@ def group_issues_by_directory(issues: List[ValidationIssue]) -> Dict[str, List[V
 def display_sync_summary(knowledge: SyncReport):
     """Display a one-line summary of sync changes."""
     total_changes = knowledge.total
+    project_name = config.project
+    
     if total_changes == 0:
-        console.print("[green]Everything up to date[/green]")
+        console.print(f"[green]Project '{project_name}': Everything up to date[/green]")
         return
 
     # Format as: "Synced X files (A new, B modified, C moved, D deleted)"
@@ -113,16 +115,18 @@ def display_sync_summary(knowledge: SyncReport):
     if del_count:
         changes.append(f"[red]{del_count} deleted[/red]")
 
-    console.print(f"Synced {total_changes} files ({', '.join(changes)})")
+    console.print(f"Project '{project_name}': Synced {total_changes} files ({', '.join(changes)})")
 
 
 def display_detailed_sync_results(knowledge: SyncReport):
     """Display detailed sync results with trees."""
+    project_name = config.project
+    
     if knowledge.total == 0:
-        console.print("\n[green]Everything up to date[/green]")
+        console.print(f"\n[green]Project '{project_name}': Everything up to date[/green]")
         return
 
-    console.print("\n[bold]Sync Results[/bold]")
+    console.print(f"\n[bold]Sync Results for Project '{project_name}'[/bold]")
 
     if knowledge.total > 0:
         knowledge_tree = Tree("[bold]Knowledge Files[/bold]")
@@ -154,6 +158,7 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
     start_time = time.time()
 
     logger.info("Sync command started", 
+               project=config.project,
                watch_mode=watch, 
                verbose=verbose, 
                directory=str(config.home))
@@ -182,6 +187,7 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
         # Log results
         duration_ms = int((time.time() - start_time) * 1000)
         logger.info("Sync command completed", 
+                   project=config.project,
                    total_changes=knowledge_changes.total,
                    new_files=len(knowledge_changes.new),
                    modified_files=len(knowledge_changes.modified),
@@ -213,12 +219,18 @@ def sync(
 ) -> None:
     """Sync knowledge files with the database."""
     try:
+        # Show which project we're syncing
+        if not watch:  # Don't show in watch mode as it would break the UI
+            typer.echo(f"Syncing project: {config.project}")
+            typer.echo(f"Project path: {config.home}")
+        
         # Run sync
         asyncio.run(run_sync(verbose=verbose, watch=watch))
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Sync command failed",
+                           project=config.project,
                            error=str(e),
                            error_type=type(e).__name__,
                            watch_mode=watch,

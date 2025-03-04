@@ -1,6 +1,9 @@
 """MCP server command."""
 
+import typer
 from loguru import logger
+
+import basic_memory
 from basic_memory.cli.app import app
 from basic_memory.config import config
 
@@ -15,6 +18,13 @@ import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
 def mcp():  # pragma: no cover
     """Run the MCP server for Claude Desktop integration."""
     home_dir = config.home
+    project_name = config.project
+    
+    typer.echo(f"Starting MCP server for project: {project_name}")
+    typer.echo(f"Project path: {home_dir}")
+    
     logger.info(f"Starting Basic Memory MCP server {basic_memory.__version__}")
-    logger.info(f"Home directory: {home_dir}")
+    logger.info(f"Project: {project_name}")
+    logger.info(f"Project directory: {home_dir}")
+    
     mcp_server.run()
