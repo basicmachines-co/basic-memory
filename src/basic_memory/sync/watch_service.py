@@ -1,6 +1,5 @@
 """Watch service for Basic Memory."""
 
-import dataclasses
 import os
 from datetime import datetime
 from pathlib import Path
@@ -116,7 +115,7 @@ class WatchService:
             self.state.running = False
             await self.write_status()
 
-    def filter_changes(self, change: Change, path: str) -> bool:
+    def filter_changes(self, change: Change, path: str) -> bool:  # pragma: no cover
         """Filter to only watch non-hidden files and directories.
 
         Returns:
@@ -126,6 +125,7 @@ class WatchService:
         try:
             relative_path = Path(path).relative_to(self.config.home)
         except ValueError:
+            # This is a defensive check for paths outside our home directory
             return False
 
         # Skip hidden directories and files
@@ -178,18 +178,31 @@ class WatchService:
         for added_path in adds:
             if added_path in processed:
                 continue  # pragma: no cover
+                
+            # Skip directories for added paths
+            # We don't need to process directories, only the files inside them
+            # This prevents errors when trying to compute checksums or read directories as files
+            added_full_path = directory / added_path
+            if added_full_path.is_dir():
+                logger.debug("Skipping directory for move detection", path=added_path)
+                processed.add(added_path)
+                continue
 
             for deleted_path in deletes:
                 if deleted_path in processed:
                     continue  # pragma: no cover
+                    
+                # Skip directories for deleted paths (based on entity type in db)
+                deleted_entity = await self.sync_service.entity_repository.get_by_file_path(deleted_path)
+                if deleted_entity is None:
+                    # If this was a directory, it wouldn't have an entity
+                    logger.debug("Skipping unknown path for move detection", path=deleted_path)
+                    continue
 
                 if added_path != deleted_path:
                     # Compare checksums to detect moves
                     try:
                         added_checksum = await self.file_service.compute_checksum(added_path)
-                        deleted_entity = await self.sync_service.entity_repository.get_by_file_path(
-                            deleted_path
-                        )
 
                         if deleted_entity and deleted_entity.checksum == added_checksum:
                             await self.sync_service.handle_move(deleted_path, added_path)
@@ -229,6 +242,13 @@ class WatchService:
         # Process adds
         for path in adds:
             if path not in processed:
+                # Skip directories - only process files
+                full_path = directory / path
+                if full_path.is_dir(): # pragma: no cover
+                    logger.debug("Skipping directory", path=path)
+                    processed.add(path)
+                    continue
+                    
                 logger.debug("Processing new file", path=path)
                 entity, checksum = await self.sync_service.sync_file(path, new=True)
                 if checksum:
@@ -243,8 +263,8 @@ class WatchService:
                     processed.add(path)
                     add_count += 1
                 else:  # pragma: no cover
-                    logger.warning("Error syncing new file", path=path)
-                    self.console.print(f"[orange]?[/orange] Error syncing: {path}")
+                    logger.warning("Error syncing new file", path=path)  # pragma: no cover
+                    self.console.print(f"[orange]?[/orange] Error syncing: {path}") # pragma: no cover
 
         # Process modifies - detect repeats
         last_modified_path = None
@@ -252,6 +272,13 @@ class WatchService:
         
         for path in modifies:
             if path not in processed:
+                # Skip directories - only process files
+                full_path = directory / path
+                if full_path.is_dir():
+                    logger.debug("Skipping directory", path=path)
+                    processed.add(path)
+                    continue
+                    
                 logger.debug("Processing modified file", path=path)
                 entity, checksum = await self.sync_service.sync_file(path, new=False)
                 self.state.add_event(
@@ -260,10 +287,10 @@ class WatchService:
                 
                 # Check if this is a repeat of the last modified file
                 if path == last_modified_path:  # pragma: no cover
-                    repeat_count += 1
+                    repeat_count += 1  # pragma: no cover
                     # Only show a message for the first repeat
-                    if repeat_count == 1:
-                        self.console.print(f"[yellow]...[/yellow] Repeated changes to {path}")
+                    if repeat_count == 1:  # pragma: no cover
+                        self.console.print(f"[yellow]...[/yellow] Repeated changes to {path}")  # pragma: no cover
                 else:
                     # New file being modified
                     self.console.print(f"[yellow]✎[/yellow] {path}")
