@@ -19,12 +19,10 @@ def mcp():  # pragma: no cover
     """Run the MCP server for Claude Desktop integration."""
     home_dir = config.home
     project_name = config.project
-    
-    typer.echo(f"Starting MCP server for project: {project_name}")
-    typer.echo(f"Project path: {home_dir}")
-    
+        
     logger.info(f"Starting Basic Memory MCP server {basic_memory.__version__}")
     logger.info(f"Project: {project_name}")
     logger.info(f"Project directory: {home_dir}")
     
     mcp_server.run()
+
