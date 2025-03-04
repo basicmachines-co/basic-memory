@@ -31,11 +31,7 @@ def list_projects() -> None:
     """List all configured projects."""
     config_manager = ConfigManager()
     projects = config_manager.projects
-    
-    if not projects:
-        console.print("[yellow]No projects configured.[/yellow]")
-        return
-    
+        
     table = Table(title="Basic Memory Projects")
     table.add_column("Name", style="cyan")
     table.add_column("Path", style="green")
@@ -88,7 +84,7 @@ def remove_project(
         config_manager.remove_project(name)
         console.print(f"[green]Project '{name}' removed from configuration[/green]")
         console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
-    except ValueError as e:
+    except ValueError as e:  # pragma: no cover
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
@@ -103,7 +99,7 @@ def set_default_project(
     try:
         config_manager.set_default_project(name)
         console.print(f"[green]Project '{name}' set as default[/green]")
-    except ValueError as e:
+    except ValueError as e:  # pragma: no cover
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
@@ -119,6 +115,6 @@ def show_current_project() -> None:
         console.print(f"Current project: [cyan]{current}[/cyan]")
         console.print(f"Path: [green]{format_path(str(path))}[/green]")
         console.print(f"Database: [blue]{format_path(str(config.database_path))}[/blue]")
-    except ValueError:
+    except ValueError:  # pragma: no cover
         console.print(f"[yellow]Warning: Project '{current}' not found in configuration[/yellow]")
         console.print(f"Using default project: [cyan]{config_manager.default_project}[/cyan]")

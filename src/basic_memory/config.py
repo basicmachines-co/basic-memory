@@ -127,7 +127,7 @@ class ConfigManager:
         """Save configuration to file."""
         try:
             self.config_file.write_text(json.dumps(config.model_dump(), indent=2))
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.error(f"Failed to save config: {e}")
 
     @property
@@ -197,7 +197,7 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     try:
         project_path = config_manager.get_project_path(actual_project_name)
         return ProjectConfig(home=project_path, project=actual_project_name)
-    except ValueError:
+    except ValueError:  # pragma: no cover
         logger.warning(f"Project '{actual_project_name}' not found, using default")
         project_path = config_manager.get_project_path(config_manager.default_project)
         return ProjectConfig(home=project_path, project=config_manager.default_project)

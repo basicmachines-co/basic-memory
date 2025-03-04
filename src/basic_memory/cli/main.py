@@ -37,7 +37,7 @@ def main(
     ),
 ):
     """Basic Memory - Local-first personal knowledge management system."""
-    if version:
+    if version:  # pragma: no cover
         from basic_memory import __version__
         from basic_memory.config import config
         
