@@ -1,13 +1,12 @@
 """Database management commands."""
 
-import asyncio
-
 import logfire
 import typer
 from loguru import logger
 
 from basic_memory.alembic import migrations
 from basic_memory.cli.app import app
+
 
 @logfire.instrument()
 @app.command()

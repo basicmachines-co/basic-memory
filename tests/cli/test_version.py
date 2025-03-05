@@ -1,6 +1,5 @@
 """Tests for CLI sync command."""
 
-
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app

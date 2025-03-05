@@ -2,6 +2,7 @@
 
 # Suppress logfire warnings
 import os
+
 os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
 
 from contextlib import asynccontextmanager
@@ -53,6 +54,6 @@ async def exception_handler(request, exc):  # pragma: no cover
         client=request.client.host if request.client else None,
         path=request.url.path,
         error_type=type(exc).__name__,
-        error=str(exc)
+        error=str(exc),
     )
     return await http_exception_handler(request, HTTPException(status_code=500, detail=str(exc)))

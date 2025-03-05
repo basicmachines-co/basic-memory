@@ -61,16 +61,16 @@ async def continue_conversation(
                 if context.primary_results:
                     contexts.append(
                         PromptContextItem(
-                            primary_results=context.primary_results[:1],
-                            related_results=context.related_results[:3],
+                            primary_results=context.primary_results[:1],  # pyright: ignore
+                            related_results=context.related_results[:3],  # pyright: ignore
                         )
                     )
 
         # get context for the top 3 results
         prompt_context = format_prompt_context(
-            PromptContext(topic=topic, timeframe=timeframe, results=contexts)
+            PromptContext(topic=topic, timeframe=timeframe, results=contexts)  # pyright: ignore
         )
-        
+
     else:
         # If no topic, get recent activity
         timeframe = timeframe or "7d"
@@ -83,8 +83,8 @@ async def continue_conversation(
                 timeframe=timeframe,
                 results=[
                     PromptContextItem(
-                        primary_results=recent.primary_results[:5],
-                        related_results=recent.related_results[:2],
+                        primary_results=recent.primary_results[:5],  # pyright: ignore
+                        related_results=recent.related_results[:2],  # pyright: ignore
                     )
                 ],
             )

@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-from typing import Dict
 
 import typer
 from rich.console import Console
@@ -31,21 +30,21 @@ def list_projects() -> None:
     """List all configured projects."""
     config_manager = ConfigManager()
     projects = config_manager.projects
-        
+
     table = Table(title="Basic Memory Projects")
     table.add_column("Name", style="cyan")
     table.add_column("Path", style="green")
     table.add_column("Default", style="yellow")
     table.add_column("Active", style="magenta")
-    
+
     default_project = config_manager.default_project
     active_project = config.project
-    
+
     for name, path in projects.items():
         is_default = "✓" if name == default_project else ""
         is_active = "✓" if name == active_project else ""
         table.add_row(name, format_path(path), is_default, is_active)
-    
+
     console.print(table)
 
 
@@ -56,17 +55,17 @@ def add_project(
 ) -> None:
     """Add a new project."""
     config_manager = ConfigManager()
-    
+
     try:
         # Resolve to absolute path
         resolved_path = os.path.abspath(os.path.expanduser(path))
         config_manager.add_project(name, resolved_path)
         console.print(f"[green]Project '{name}' added at {format_path(resolved_path)}[/green]")
-        
+
         # Display usage hint
         console.print("\nTo use this project:")
         console.print(f"  basic-memory --project={name} <command>")
-        console.print(f"  # or")
+        console.print("  # or")
         console.print(f"  basic-memory project default {name}")
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -79,7 +78,7 @@ def remove_project(
 ) -> None:
     """Remove a project from configuration."""
     config_manager = ConfigManager()
-    
+
     try:
         config_manager.remove_project(name)
         console.print(f"[green]Project '{name}' removed from configuration[/green]")
@@ -95,7 +94,7 @@ def set_default_project(
 ) -> None:
     """Set the default project."""
     config_manager = ConfigManager()
-    
+
     try:
         config_manager.set_default_project(name)
         console.print(f"[green]Project '{name}' set as default[/green]")
@@ -109,7 +108,7 @@ def show_current_project() -> None:
     """Show the current project."""
     config_manager = ConfigManager()
     current = os.environ.get("BASIC_MEMORY_PROJECT", config_manager.default_project)
-    
+
     try:
         path = config_manager.get_project_path(current)
         console.print(f"Current project: [cyan]{current}[/cyan]")

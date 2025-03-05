@@ -3,7 +3,7 @@
 import mimetypes
 from os import stat_result
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 from loguru import logger
 
@@ -61,9 +61,7 @@ class FileService:
         Returns:
             Raw content string without metadata sections
         """
-        logger.debug("Reading entity content", 
-                    entity_id=entity.id,
-                    permalink=entity.permalink)
+        logger.debug("Reading entity content", entity_id=entity.id, permalink=entity.permalink)
 
         file_path = self.get_entity_path(entity)
         markdown = await self.markdown_processor.read_file(file_path)
@@ -98,15 +96,13 @@ class FileService:
         try:
             # Convert string to Path if needed
             path_obj = Path(path) if isinstance(path, str) else path
-            
+
             if path_obj.is_absolute():
                 return path_obj.exists()
             else:
                 return (self.base_path / path_obj).exists()
         except Exception as e:
-            logger.error("Failed to check file existence", 
-                       path=str(path), 
-                       error=str(e))
+            logger.error("Failed to check file existence", path=str(path), error=str(e))
             raise FileOperationError(f"Failed to check file existence: {e}")
 
     async def write_file(self, path: FilePath, content: str) -> str:
@@ -134,25 +130,23 @@ class FileService:
             await file_utils.ensure_directory(full_path.parent)
 
             # Write content atomically
-            logger.info("Writing file", 
-                       operation="write_file",
-                       path=str(full_path),
-                       content_length=len(content),
-                       is_markdown=full_path.suffix.lower() == '.md')
-            
+            logger.info(
+                "Writing file",
+                operation="write_file",
+                path=str(full_path),
+                content_length=len(content),
+                is_markdown=full_path.suffix.lower() == ".md",
+            )
+
             await file_utils.write_file_atomic(full_path, content)
 
             # Compute and return checksum
             checksum = await file_utils.compute_checksum(content)
-            logger.debug("File write completed", 
-                        path=str(full_path), 
-                        checksum=checksum)
+            logger.debug("File write completed", path=str(full_path), checksum=checksum)
             return checksum
 
         except Exception as e:
-            logger.exception("File write error",
-                           path=str(full_path),
-                           error=str(e))
+            logger.exception("File write error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to write file: {e}")
 
     # TODO remove read_file
@@ -176,23 +170,21 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            logger.debug("Reading file", 
-                        operation="read_file",
-                        path=str(full_path))
-                        
+            logger.debug("Reading file", operation="read_file", path=str(full_path))
+
             content = full_path.read_text()
             checksum = await file_utils.compute_checksum(content)
-            
-            logger.debug("File read completed", 
-                        path=str(full_path),
-                        checksum=checksum,
-                        content_length=len(content))
+
+            logger.debug(
+                "File read completed",
+                path=str(full_path),
+                checksum=checksum,
+                content_length=len(content),
+            )
             return content, checksum
 
         except Exception as e:
-            logger.exception("File read error",
-                           path=str(full_path),
-                           error=str(e))
+            logger.exception("File read error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")
 
     async def delete_file(self, path: FilePath) -> None:
@@ -212,11 +204,11 @@ class FileService:
     async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
         """
         Update frontmatter fields in a file while preserving all content.
-        
+
         Args:
             path: Path to the file (Path or string)
             updates: Dictionary of frontmatter fields to update
-            
+
         Returns:
             Checksum of updated file
         """
@@ -227,20 +219,20 @@ class FileService:
 
     async def compute_checksum(self, path: FilePath) -> str:
         """Compute checksum for a file.
-        
+
         Args:
             path: Path to the file (Path or string)
-            
+
         Returns:
             Checksum of the file content
-            
+
         Raises:
             FileError: If checksum computation fails
         """
         # Convert string to Path if needed
         path_obj = Path(path) if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
-        
+
         try:
             if self.is_markdown(path):
                 # read str
@@ -251,17 +243,15 @@ class FileService:
             return await file_utils.compute_checksum(content)
 
         except Exception as e:  # pragma: no cover
-            logger.error("Failed to compute checksum", 
-                       path=str(full_path), 
-                       error=str(e))
+            logger.error("Failed to compute checksum", path=str(full_path), error=str(e))
             raise FileError(f"Failed to compute checksum for {path}: {e}")
 
     def file_stats(self, path: FilePath) -> stat_result:
         """Return file stats for a given path.
-        
+
         Args:
             path: Path to the file (Path or string)
-            
+
         Returns:
             File statistics
         """
@@ -273,10 +263,10 @@ class FileService:
 
     def content_type(self, path: FilePath) -> str:
         """Return content_type for a given path.
-        
+
         Args:
             path: Path to the file (Path or string)
-            
+
         Returns:
             MIME type of the file
         """
@@ -295,10 +285,10 @@ class FileService:
 
     def is_markdown(self, path: FilePath) -> bool:
         """Check if a file is a markdown file.
-        
+
         Args:
             path: Path to the file (Path or string)
-            
+
         Returns:
             True if the file is a markdown file, False otherwise
         """

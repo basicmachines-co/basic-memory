@@ -58,11 +58,7 @@ async def write_note(
         - Relation counts (resolved/unresolved)
         - Tags if present
     """
-    logger.info("MCP tool call", 
-                tool="write_note", 
-                folder=folder, 
-                title=title, 
-                tags=tags)
+    logger.info("MCP tool call", tool="write_note", folder=folder, title=title, tags=tags)
 
     # Create the entity request
     metadata = {"tags": [f"#{tag}" for tag in tags]} if tags else None
@@ -115,14 +111,16 @@ async def write_note(
         summary.append(f"\n## Tags\n- {', '.join(tags)}")
 
     # Log the response with structured data
-    logger.info("MCP tool response", 
-                tool="write_note", 
-                action=action,
-                permalink=result.permalink, 
-                observations_count=len(result.observations),
-                relations_count=len(result.relations),
-                resolved_relations=resolved,
-                unresolved_relations=unresolved,
-                status_code=response.status_code)
+    logger.info(
+        "MCP tool response",
+        tool="write_note",
+        action=action,
+        permalink=result.permalink,
+        observations_count=len(result.observations),
+        relations_count=len(result.relations),
+        resolved_relations=resolved,
+        unresolved_relations=unresolved,
+        status_code=response.status_code,
+    )
 
     return "\n".join(summary)

@@ -2,7 +2,7 @@
 
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Union
 
 import yaml
 from loguru import logger
@@ -65,9 +65,7 @@ async def ensure_directory(path: FilePath) -> None:
         path_obj = Path(path) if isinstance(path, str) else path
         path_obj.mkdir(parents=True, exist_ok=True)
     except Exception as e:  # pragma: no cover
-        logger.error("Failed to create directory", 
-                   path=str(path), 
-                   error=str(e))
+        logger.error("Failed to create directory", path=str(path), error=str(e))
         raise FileWriteError(f"Failed to create directory {path}: {e}")
 
 
@@ -85,18 +83,14 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     # Convert string to Path if needed
     path_obj = Path(path) if isinstance(path, str) else path
     temp_path = path_obj.with_suffix(".tmp")
-    
+
     try:
         temp_path.write_text(content)
         temp_path.replace(path_obj)
-        logger.debug("Wrote file atomically", 
-                   path=str(path_obj), 
-                   content_length=len(content))
+        logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
         temp_path.unlink(missing_ok=True)
-        logger.error("Failed to write file", 
-                   path=str(path_obj), 
-                   error=str(e))
+        logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
 
@@ -207,7 +201,7 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
     try:
         # Convert string to Path if needed
         path_obj = Path(path) if isinstance(path, str) else path
-        
+
         # Read current content
         content = path_obj.read_text()
 
@@ -224,15 +218,15 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         yaml_fm = yaml.dump(new_fm, sort_keys=False)
         final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
 
-        logger.debug("Updating frontmatter", 
-                   path=str(path_obj), 
-                   update_keys=list(updates.keys()))
-                   
+        logger.debug("Updating frontmatter", path=str(path_obj), update_keys=list(updates.keys()))
+
         await write_file_atomic(path_obj, final_content)
         return await compute_checksum(final_content)
 
     except Exception as e:  # pragma: no cover
-        logger.error("Failed to update frontmatter", 
-                   path=str(path) if isinstance(path, (str, Path)) else "<unknown>", 
-                   error=str(e))
+        logger.error(
+            "Failed to update frontmatter",
+            path=str(path) if isinstance(path, (str, Path)) else "<unknown>",
+            error=str(e),
+        )
         raise FileError(f"Failed to update frontmatter: {e}")

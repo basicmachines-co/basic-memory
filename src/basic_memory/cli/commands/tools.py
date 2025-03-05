@@ -1,6 +1,7 @@
 """CLI tool commands for Basic Memory."""
 
 import asyncio
+import sys
 from typing import Optional, List, Annotated
 
 import typer
@@ -34,13 +35,63 @@ app.add_typer(tool_app, name="tools", help="Direct access to MCP tools via CLI")
 @tool_app.command()
 def write_note(
     title: Annotated[str, typer.Option(help="The title of the note")],
-    content: Annotated[str, typer.Option(help="The content of the note")],
     folder: Annotated[str, typer.Option(help="The folder to create the note in")],
+    content: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The content of the note. If not provided, content will be read from stdin. This allows piping content from other commands, e.g.: cat file.md | basic-memory tools write-note"
+        ),
+    ] = None,
     tags: Annotated[
         Optional[List[str]], typer.Option(help="A list of tags to apply to the note")
     ] = None,
 ):
+    """Create or update a markdown note. Content can be provided as an argument or read from stdin.
+
+    Content can be provided in two ways:
+    1. Using the --content parameter
+    2. Piping content through stdin (if --content is not provided)
+
+    Examples:
+
+    # Using content parameter
+    basic-memory tools write-note --title "My Note" --folder "notes" --content "Note content"
+
+    # Using stdin pipe
+    echo "# My Note Content" | basic-memory tools write-note --title "My Note" --folder "notes"
+
+    # Using heredoc
+    cat << EOF | basic-memory tools write-note --title "My Note" --folder "notes"
+    # My Document
+
+    This is my document content.
+
+    - Point 1
+    - Point 2
+    EOF
+
+    # Reading from a file
+    cat document.md | basic-memory tools write-note --title "Document" --folder "docs"
+    """
     try:
+        # If content is not provided, read from stdin
+        if content is None:
+            # Check if we're getting data from a pipe or redirect
+            if not sys.stdin.isatty():
+                content = sys.stdin.read()
+            else:  # pragma: no cover
+                # If stdin is a terminal (no pipe/redirect), inform the user
+                typer.echo(
+                    "No content provided. Please provide content via --content or by piping to stdin.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+
+        # Also check for empty content
+        if content is not None and not content.strip():
+            typer.echo("Empty content provided. Please provide non-empty content.", err=True)
+            raise typer.Exit(1)
+
         note = asyncio.run(mcp_write_note(title, content, folder, tags))
         rprint(note)
     except Exception as e:  # pragma: no cover
@@ -181,6 +232,7 @@ def continue_conversation(
             typer.echo(f"Error continuing conversation: {e}", err=True)
             raise typer.Exit(1)
         raise
+
 
 # @tool_app.command(name="show-recent-activity")
 # def show_recent_activity(

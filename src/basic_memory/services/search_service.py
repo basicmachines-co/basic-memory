@@ -180,11 +180,15 @@ class SearchService:
         """
 
         if entity.permalink is None:  # pragma: no cover
-            logger.error("Missing permalink for markdown entity", 
-                       entity_id=entity.id,
-                       title=entity.title,
-                       file_path=entity.file_path)
-            raise ValueError(f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})")
+            logger.error(
+                "Missing permalink for markdown entity",
+                entity_id=entity.id,
+                title=entity.title,
+                file_path=entity.file_path,
+            )
+            raise ValueError(
+                f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})"
+            )
 
         content_stems = []
         content_snippet = ""
@@ -202,11 +206,15 @@ class SearchService:
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
         if entity.permalink is None:  # pragma: no cover
-            logger.error("Missing permalink for markdown entity", 
-                       entity_id=entity.id,
-                       title=entity.title,
-                       file_path=entity.file_path)
-            raise ValueError(f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})")
+            logger.error(
+                "Missing permalink for markdown entity",
+                entity_id=entity.id,
+                title=entity.title,
+                file_path=entity.file_path,
+            )
+            raise ValueError(
+                f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})"
+            )
 
         # Index entity
         await self.repository.index_item(

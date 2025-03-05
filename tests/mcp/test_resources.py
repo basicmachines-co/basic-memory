@@ -4,7 +4,6 @@ from basic_memory.mcp.prompts.ai_assistant_guide import ai_assistant_guide
 import pytest
 
 
-
 @pytest.mark.asyncio
 async def test_ai_assistant_guide_exists(app):
     """Test that the canvas spec resource exists and returns content."""

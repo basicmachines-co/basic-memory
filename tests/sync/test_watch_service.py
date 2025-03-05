@@ -76,7 +76,7 @@ async def test_handle_file_add(watch_service, test_config):
     # empty dir is ignored
     empty_dir = project_dir / "empty_dir"
     empty_dir.mkdir()
-    
+
     # Setup changes
     new_file = project_dir / "new_note.md"
     changes = {(Change.added, str(empty_dir)), (Change.added, str(new_file))}
@@ -375,15 +375,14 @@ Test content for rapid moves
 async def test_handle_directory_rename(watch_service, test_config):
     """Test handling directory rename operations - regression test for the bug where directories
     were being processed as files, causing errors."""
-    import os
-    from unittest.mock import AsyncMock, patch
-    
+    from unittest.mock import AsyncMock
+
     project_dir = test_config.home
 
     # Create a directory with a file inside
     old_dir_path = project_dir / "old_dir"
     old_dir_path.mkdir(parents=True, exist_ok=True)
-    
+
     file_in_dir = old_dir_path / "test_file.md"
     content = """---
 type: knowledge
@@ -392,42 +391,42 @@ type: knowledge
 This is a test file in a directory
 """
     await create_test_file(file_in_dir, content)
-    
+
     # Initial sync to add the file to the database
     await watch_service.sync_service.sync(project_dir, show_progress=False)
-    
+
     # Rename the directory
     new_dir_path = project_dir / "new_dir"
     old_dir_path.rename(new_dir_path)
-    
+
     # Setup changes that simulate directory rename
     # When a directory is renamed, watchfiles reports it as deleted and added
     changes = {
         (Change.deleted, str(old_dir_path)),
         (Change.added, str(new_dir_path)),
     }
-    
+
     # Create a mocked version of sync_file to track calls
     original_sync_file = watch_service.sync_service.sync_file
     mock_sync_file = AsyncMock(side_effect=original_sync_file)
     watch_service.sync_service.sync_file = mock_sync_file
-    
+
     # Handle changes - this should not throw an exception
     await watch_service.handle_changes(project_dir, changes)
-    
+
     # Check if our mock was called with any directory paths
     for call in mock_sync_file.call_args_list:
         args, kwargs = call
         path = args[0]
         full_path = project_dir / path
         assert not full_path.is_dir(), f"sync_file should not be called with directory path: {path}"
-    
+
     # The file path should be untouched since we're ignoring directory events
     # We'd need a separate event for the file itself to be updated
     old_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
         "old_dir/test_file.md"
     )
-    
+
     # The original entity should still exist since we only renamed the directory
     # but didn't process updates to the file itself
     assert old_entity is not None

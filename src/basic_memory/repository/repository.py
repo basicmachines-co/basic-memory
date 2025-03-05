@@ -74,10 +74,10 @@ class Repository[T: Base]:
                 logger.error(
                     "Failed to retrieve model after add",
                     model_type=self.Model.__name__,
-                    model_id=model.id,
+                    model_id=model.id,  # pyright: ignore
                 )
                 raise ValueError(
-                    f"Can't find {self.Model.__name__} with ID {model.id} after session.add"
+                    f"Can't find {self.Model.__name__} with ID {model.id} after session.add"  # pyright: ignore
                 )
             return found
 
@@ -164,10 +164,10 @@ class Repository[T: Base]:
                 logger.error(
                     "Failed to retrieve model after create",
                     model_type=self.Model.__name__,
-                    model_id=model.id,
+                    model_id=model.id,  # pyright: ignore
                 )
                 raise ValueError(
-                    f"Can't find {self.Model.__name__} with ID {model.id} after session.add"
+                    f"Can't find {self.Model.__name__} with ID {model.id} after session.add"  # pyright: ignore
                 )
             return return_instance
 

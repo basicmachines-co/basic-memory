@@ -80,15 +80,17 @@ class WatchService:
 
     async def run(self):  # pragma: no cover
         """Watch for file changes and sync them"""
-        logger.info("Watch service started", 
-                   directory=str(self.config.home), 
-                   debounce_ms=self.config.sync_delay,
-                   pid=os.getpid())
-                   
+        logger.info(
+            "Watch service started",
+            directory=str(self.config.home),
+            debounce_ms=self.config.sync_delay,
+            pid=os.getpid(),
+        )
+
         self.state.running = True
         self.state.start_time = datetime.now()
         await self.write_status()
-        
+
         try:
             async for changes in awatch(
                 self.config.home,
@@ -99,19 +101,19 @@ class WatchService:
                 await self.handle_changes(self.config.home, changes)
 
         except Exception as e:
-            logger.exception("Watch service error", 
-                           error=str(e),
-                           directory=str(self.config.home))
-                           
+            logger.exception("Watch service error", error=str(e), directory=str(self.config.home))
+
             self.state.record_error(str(e))
             await self.write_status()
             raise
-            
+
         finally:
-            logger.info("Watch service stopped", 
-                       directory=str(self.config.home),
-                       runtime_seconds=int((datetime.now() - self.state.start_time).total_seconds()))
-                       
+            logger.info(
+                "Watch service stopped",
+                directory=str(self.config.home),
+                runtime_seconds=int((datetime.now() - self.state.start_time).total_seconds()),
+            )
+
             self.state.running = False
             await self.write_status()
 
@@ -144,12 +146,10 @@ class WatchService:
         """Process a batch of file changes"""
         import time
         from typing import List, Set
-        
+
         start_time = time.time()
-        
-        logger.info("Processing file changes", 
-                   change_count=len(changes), 
-                   directory=str(directory))
+
+        logger.info("Processing file changes", change_count=len(changes), directory=str(directory))
 
         # Group changes by type
         adds: List[str] = []
@@ -165,11 +165,10 @@ class WatchService:
                 deletes.append(relative_path)
             elif change == Change.modified:
                 modifies.append(relative_path)
-                
-        logger.debug("Grouped file changes", 
-                    added=len(adds), 
-                    deleted=len(deletes), 
-                    modified=len(modifies))
+
+        logger.debug(
+            "Grouped file changes", added=len(adds), deleted=len(deletes), modified=len(modifies)
+        )
 
         # Track processed files to avoid duplicates
         processed: Set[str] = set()
@@ -178,7 +177,7 @@ class WatchService:
         for added_path in adds:
             if added_path in processed:
                 continue  # pragma: no cover
-                
+
             # Skip directories for added paths
             # We don't need to process directories, only the files inside them
             # This prevents errors when trying to compute checksums or read directories as files
@@ -191,9 +190,11 @@ class WatchService:
             for deleted_path in deletes:
                 if deleted_path in processed:
                     continue  # pragma: no cover
-                    
+
                 # Skip directories for deleted paths (based on entity type in db)
-                deleted_entity = await self.sync_service.entity_repository.get_by_file_path(deleted_path)
+                deleted_entity = await self.sync_service.entity_repository.get_by_file_path(
+                    deleted_path
+                )
                 if deleted_entity is None:
                     # If this was a directory, it wouldn't have an entity
                     logger.debug("Skipping unknown path for move detection", path=deleted_path)
@@ -211,24 +212,24 @@ class WatchService:
                                 action="moved",
                                 status="success",
                             )
-                            self.console.print(
-                                f"[blue]→[/blue] {deleted_path} → {added_path}"
-                            )
+                            self.console.print(f"[blue]→[/blue] {deleted_path} → {added_path}")
                             processed.add(added_path)
                             processed.add(deleted_path)
                             break
                     except Exception as e:  # pragma: no cover
-                        logger.warning("Error checking for move", 
-                                      old_path=deleted_path,
-                                      new_path=added_path,
-                                      error=str(e))
+                        logger.warning(
+                            "Error checking for move",
+                            old_path=deleted_path,
+                            new_path=added_path,
+                            error=str(e),
+                        )
 
         # Handle remaining changes - group them by type for concise output
         moved_count = len([p for p in processed if p in deletes or p in adds])
         delete_count = 0
         add_count = 0
         modify_count = 0
-        
+
         # Process deletes
         for path in deletes:
             if path not in processed:
@@ -244,11 +245,11 @@ class WatchService:
             if path not in processed:
                 # Skip directories - only process files
                 full_path = directory / path
-                if full_path.is_dir(): # pragma: no cover
+                if full_path.is_dir():  # pragma: no cover
                     logger.debug("Skipping directory", path=path)
                     processed.add(path)
                     continue
-                    
+
                 logger.debug("Processing new file", path=path)
                 entity, checksum = await self.sync_service.sync_file(path, new=True)
                 if checksum:
@@ -256,20 +257,24 @@ class WatchService:
                         path=path, action="new", status="success", checksum=checksum
                     )
                     self.console.print(f"[green]✓[/green] {path}")
-                    logger.debug("Added file processed", 
-                               path=path, 
-                               entity_id=entity.id if entity else None,
-                               checksum=checksum)
+                    logger.debug(
+                        "Added file processed",
+                        path=path,
+                        entity_id=entity.id if entity else None,
+                        checksum=checksum,
+                    )
                     processed.add(path)
                     add_count += 1
                 else:  # pragma: no cover
                     logger.warning("Error syncing new file", path=path)  # pragma: no cover
-                    self.console.print(f"[orange]?[/orange] Error syncing: {path}") # pragma: no cover
+                    self.console.print(
+                        f"[orange]?[/orange] Error syncing: {path}"
+                    )  # pragma: no cover
 
         # Process modifies - detect repeats
         last_modified_path = None
         repeat_count = 0
-        
+
         for path in modifies:
             if path not in processed:
                 # Skip directories - only process files
@@ -278,54 +283,60 @@ class WatchService:
                     logger.debug("Skipping directory", path=path)
                     processed.add(path)
                     continue
-                    
+
                 logger.debug("Processing modified file", path=path)
                 entity, checksum = await self.sync_service.sync_file(path, new=False)
                 self.state.add_event(
                     path=path, action="modified", status="success", checksum=checksum
                 )
-                
+
                 # Check if this is a repeat of the last modified file
                 if path == last_modified_path:  # pragma: no cover
                     repeat_count += 1  # pragma: no cover
                     # Only show a message for the first repeat
                     if repeat_count == 1:  # pragma: no cover
-                        self.console.print(f"[yellow]...[/yellow] Repeated changes to {path}")  # pragma: no cover
+                        self.console.print(
+                            f"[yellow]...[/yellow] Repeated changes to {path}"
+                        )  # pragma: no cover
                 else:
                     # New file being modified
                     self.console.print(f"[yellow]✎[/yellow] {path}")
                     last_modified_path = path
                     repeat_count = 0
                     modify_count += 1
-                
-                logger.debug("Modified file processed", 
-                           path=path, 
-                           entity_id=entity.id if entity else None,
-                           checksum=checksum)
+
+                logger.debug(
+                    "Modified file processed",
+                    path=path,
+                    entity_id=entity.id if entity else None,
+                    checksum=checksum,
+                )
                 processed.add(path)
 
         # Add a concise summary instead of a divider
         if processed:
-            changes = []
+            changes = []  # pyright: ignore
             if add_count > 0:
-                changes.append(f"[green]{add_count} added[/green]")
+                changes.append(f"[green]{add_count} added[/green]")  # pyright: ignore
             if modify_count > 0:
-                changes.append(f"[yellow]{modify_count} modified[/yellow]")
+                changes.append(f"[yellow]{modify_count} modified[/yellow]")  # pyright: ignore
             if moved_count > 0:
-                changes.append(f"[blue]{moved_count} moved[/blue]")
+                changes.append(f"[blue]{moved_count} moved[/blue]")  # pyright: ignore
             if delete_count > 0:
-                changes.append(f"[red]{delete_count} deleted[/red]")
-                
+                changes.append(f"[red]{delete_count} deleted[/red]")  # pyright: ignore
+
             if changes:
-                self.console.print(f"{', '.join(changes)}", style="dim")
+                self.console.print(f"{', '.join(changes)}", style="dim")  # pyright: ignore
 
         duration_ms = int((time.time() - start_time) * 1000)
         self.state.last_scan = datetime.now()
         self.state.synced_files += len(processed)
-        
-        logger.info("File change processing completed", 
-                   processed_files=len(processed),
-                   total_synced_files=self.state.synced_files,
-                   duration_ms=duration_ms)
-                   
+
+        logger.info(
+            "File change processing completed",
+            processed_files=len(processed),
+            total_synced_files=self.state.synced_files,
+            duration_ms=duration_ms,
+        )
+
         await self.write_status()

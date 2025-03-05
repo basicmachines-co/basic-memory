@@ -141,8 +141,9 @@ async def test_write_note_update_existing(app):
 
     # Try reading it back
     content = await read_note("test/test-note")
-    assert dedent(
-        """
+    assert (
+        dedent(
+            """
         ---
         title: Test Note
         type: note
@@ -154,7 +155,10 @@ async def test_write_note_update_existing(app):
         
         # Test
         This is an updated note
-        """).strip() == content
+        """
+        ).strip()
+        == content
+    )
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,5 @@
 """Functions for managing database migrations."""
 
-import asyncio
 from pathlib import Path
 from loguru import logger
 from alembic.config import Config

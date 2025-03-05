@@ -376,8 +376,7 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
 
 @pytest.mark.asyncio
 async def test_create_with_content(entity_service: EntityService, file_service: FileService):
-    
-    # contains frontmatter 
+    # contains frontmatter
     content = dedent(
         """
         ---
@@ -394,7 +393,8 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
         
         ## Common Commands
         See the [[Git Cheat Sheet]] for reference.
-        """)
+        """
+    )
 
     # Create test entity
     entity, created = await entity_service.create_or_update_entity(
@@ -518,7 +518,8 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
         
         ## Common Commands
         See the [[Git Cheat Sheet]] for reference.
-        """).strip()
+        """
+    ).strip()
 
     # Create test entity
     entity, created = await entity_service.create_or_update_entity(

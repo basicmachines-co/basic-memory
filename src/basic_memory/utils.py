@@ -2,28 +2,27 @@
 
 # Set environment variable before importing logfire to suppress warnings
 import os
+
 os.environ["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
 
 import logging
 import re
 import sys
 from pathlib import Path
-from typing import Annotated, Optional, Protocol, Union, runtime_checkable
+from typing import Optional, Protocol, Union, runtime_checkable
 
 from loguru import logger
-from pydantic import AfterValidator
 from unidecode import unidecode
 
-import basic_memory 
+import basic_memory
 import logfire
 
 
 @runtime_checkable
 class PathLike(Protocol):
     """Protocol for objects that can be used as paths."""
+
     def __str__(self) -> str: ...
-
-
 
 
 # In type annotations, use Union[Path, str] instead of FilePath for now
@@ -92,7 +91,7 @@ def setup_logging(
 ) -> None:  # pragma: no cover
     """
     Configure logging for the application.
-    
+
     Args:
         env: The environment name (dev, test, prod)
         home_dir: The root directory for the application
@@ -157,7 +156,7 @@ def setup_logging(
         "logfire.instrumentor": logging.ERROR,
         "opentelemetry.sdk.metrics._internal.instrument": logging.ERROR,
     }
-    
+
     # Set log levels for noisy loggers
     for logger_name, level in noisy_loggers.items():
         logging.getLogger(logger_name).setLevel(level)

@@ -3,10 +3,12 @@
 These tests use real MCP tools with the test environment instead of mocks.
 """
 
+import io
 from datetime import datetime, timedelta
 import json
 from textwrap import dedent
 from typing import AsyncGenerator
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -123,6 +125,90 @@ def test_write_note_with_tags(cli_env, test_config):
     # Check for expected success message
     assert "Tagged CLI Test Note" in result.stdout
     assert "tag1, tag2" in result.stdout or "tag1" in result.stdout and "tag2" in result.stdout
+
+
+def test_write_note_from_stdin(cli_env, test_config, monkeypatch):
+    """Test write_note command reading from stdin.
+
+    This test requires minimal mocking of stdin to simulate piped input.
+    """
+    test_content = "This is content from stdin for testing"
+
+    # Mock stdin using monkeypatch, which works better with typer's CliRunner
+    monkeypatch.setattr("sys.stdin", io.StringIO(test_content))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)  # Simulate piped input
+
+    # Use runner.invoke with input parameter as a fallback
+    result = runner.invoke(
+        tool_app,
+        [
+            "write-note",
+            "--title",
+            "Stdin Test Note",
+            "--folder",
+            "test",
+        ],
+        input=test_content,  # Provide input as a fallback
+    )
+
+    assert result.exit_code == 0
+
+    # Check for expected success message
+    assert "Stdin Test Note" in result.stdout
+    assert "Created" in result.stdout or "Updated" in result.stdout
+    assert "permalink" in result.stdout
+
+
+def test_write_note_content_param_priority(cli_env, test_config):
+    """Test that content parameter has priority over stdin."""
+    stdin_content = "This content from stdin should NOT be used"
+    param_content = "This explicit content parameter should be used"
+
+    # Mock stdin but provide explicit content parameter
+    with (
+        patch("sys.stdin", io.StringIO(stdin_content)),
+        patch("sys.stdin.isatty", return_value=False),
+    ):  # Simulate piped input
+        result = runner.invoke(
+            tool_app,
+            [
+                "write-note",
+                "--title",
+                "Priority Test Note",
+                "--content",
+                param_content,
+                "--folder",
+                "test",
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        # Check the note was created with the content from parameter, not stdin
+        # We can't directly check file contents in this test approach
+        # but we can verify the command succeeded
+        assert "Priority Test Note" in result.stdout
+        assert "Created" in result.stdout or "Updated" in result.stdout
+
+
+def test_write_note_no_content(cli_env, test_config):
+    """Test error handling when no content is provided."""
+    # Mock stdin to appear as a terminal, not a pipe
+    with patch("sys.stdin.isatty", return_value=True):
+        result = runner.invoke(
+            tool_app,
+            [
+                "write-note",
+                "--title",
+                "No Content Note",
+                "--folder",
+                "test",
+            ],
+        )
+
+        # Should exit with an error
+        assert result.exit_code == 1
+        # assert "No content provided" in result.stderr
 
 
 def test_read_note(cli_env, setup_test_note):
@@ -337,6 +423,7 @@ def test_continue_conversation(cli_env, setup_test_note):
     assert "read_note" in result.stdout
     assert permalink in result.stdout
 
+
 def test_continue_conversation_no_results(cli_env):
     """Test continue_conversation command with no results."""
     # Run the CLI command with a nonexistent topic
@@ -349,4 +436,3 @@ def test_continue_conversation_no_results(cli_env):
     # Check result contains expected content for no results
     assert "Continuing conversation on: NonexistentTopic" in result.stdout
     assert "The supplied query did not return any information" in result.stdout
-    

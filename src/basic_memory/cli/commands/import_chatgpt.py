@@ -227,7 +227,6 @@ def import_chatgpt(
     After importing, run 'basic-memory sync' to index the new files.
     """
 
-    
     try:
         if conversations_json:
             if not conversations_json.exists():
@@ -239,9 +238,7 @@ def import_chatgpt(
 
             # Process the file
             base_path = config.home / folder
-            console.print(
-                f"\nImporting chats from {conversations_json}...writing to {base_path}"
-            )
+            console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
             results = asyncio.run(
                 process_chatgpt_json(conversations_json, folder, markdown_processor)
             )

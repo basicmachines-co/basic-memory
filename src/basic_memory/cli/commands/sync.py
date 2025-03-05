@@ -94,7 +94,7 @@ def display_sync_summary(knowledge: SyncReport):
     """Display a one-line summary of sync changes."""
     total_changes = knowledge.total
     project_name = config.project
-    
+
     if total_changes == 0:
         console.print(f"[green]Project '{project_name}': Everything up to date[/green]")
         return
@@ -121,7 +121,7 @@ def display_sync_summary(knowledge: SyncReport):
 def display_detailed_sync_results(knowledge: SyncReport):
     """Display detailed sync results with trees."""
     project_name = config.project
-    
+
     if knowledge.total == 0:
         console.print(f"\n[green]Project '{project_name}': Everything up to date[/green]")
         return
@@ -155,13 +155,16 @@ def display_detailed_sync_results(knowledge: SyncReport):
 async def run_sync(verbose: bool = False, watch: bool = False, console_status: bool = False):
     """Run sync operation."""
     import time
+
     start_time = time.time()
 
-    logger.info("Sync command started", 
-               project=config.project,
-               watch_mode=watch, 
-               verbose=verbose, 
-               directory=str(config.home))
+    logger.info(
+        "Sync command started",
+        project=config.project,
+        watch_mode=watch,
+        verbose=verbose,
+        directory=str(config.home),
+    )
 
     sync_service = await get_sync_service()
 
@@ -173,29 +176,31 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
             file_service=sync_service.entity_service.file_service,
             config=config,
         )
-        
+
         # full sync - no progress bars in watch mode
         await sync_service.sync(config.home, show_progress=False)
-        
+
         # watch changes
         await watch_service.run()  # pragma: no cover
     else:
-        # one time sync - use progress bars for better UX 
+        # one time sync - use progress bars for better UX
         logger.info("Running one-time sync")
         knowledge_changes = await sync_service.sync(config.home, show_progress=True)
-        
+
         # Log results
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.info("Sync command completed", 
-                   project=config.project,
-                   total_changes=knowledge_changes.total,
-                   new_files=len(knowledge_changes.new),
-                   modified_files=len(knowledge_changes.modified),
-                   deleted_files=len(knowledge_changes.deleted),
-                   moved_files=len(knowledge_changes.moves),
-                   duration_ms=duration_ms)
-        
-        # Display results 
+        logger.info(
+            "Sync command completed",
+            project=config.project,
+            total_changes=knowledge_changes.total,
+            new_files=len(knowledge_changes.new),
+            modified_files=len(knowledge_changes.modified),
+            deleted_files=len(knowledge_changes.deleted),
+            moved_files=len(knowledge_changes.moves),
+            duration_ms=duration_ms,
+        )
+
+        # Display results
         if verbose:
             display_detailed_sync_results(knowledge_changes)
         else:
@@ -223,18 +228,20 @@ def sync(
         if not watch:  # Don't show in watch mode as it would break the UI
             typer.echo(f"Syncing project: {config.project}")
             typer.echo(f"Project path: {config.home}")
-        
+
         # Run sync
         asyncio.run(run_sync(verbose=verbose, watch=watch))
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
-            logger.exception("Sync command failed",
-                           project=config.project,
-                           error=str(e),
-                           error_type=type(e).__name__,
-                           watch_mode=watch,
-                           directory=str(config.home))
+            logger.exception(
+                "Sync command failed",
+                project=config.project,
+                error=str(e),
+                error_type=type(e).__name__,
+                watch_mode=watch,
+                directory=str(config.home),
+            )
             typer.echo(f"Error during sync: {e}", err=True)
             raise typer.Exit(1)
         raise

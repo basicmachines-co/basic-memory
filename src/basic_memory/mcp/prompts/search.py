@@ -117,7 +117,9 @@ def format_search_results(
         if result.metadata and "created_at" in result.metadata:
             created_at = result.metadata["created_at"]
             if hasattr(created_at, "strftime"):
-                summary += f"- **Created**: {created_at.strftime('%Y-%m-%d %H:%M')}\n"  # pragma: no cover
+                summary += (
+                    f"- **Created**: {created_at.strftime('%Y-%m-%d %H:%M')}\n"  # pragma: no cover
+                )
             elif isinstance(created_at, str):
                 summary += f"- **Created**: {created_at}\n"
 

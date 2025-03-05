@@ -3,7 +3,7 @@
 These prompts help users see what has changed in their knowledge base recently.
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 from loguru import logger
 import logfire
@@ -11,7 +11,7 @@ from pydantic import Field
 
 from basic_memory.mcp.prompts.utils import format_prompt_context, PromptContext, PromptContextItem
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.recent_activity import recent_activity as recent_activity_tool, recent_activity
+from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.search import SearchItemType
 
@@ -40,9 +40,7 @@ async def recent_activity_prompt(
     """
     logger.info(f"Getting recent activity, timeframe: {timeframe}")
 
-    recent = await recent_activity(
-        timeframe=timeframe, type=[SearchItemType.ENTITY]
-    )
+    recent = await recent_activity(timeframe=timeframe, type=[SearchItemType.ENTITY])
 
     prompt_context = format_prompt_context(
         PromptContext(

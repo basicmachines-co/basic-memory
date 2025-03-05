@@ -33,10 +33,9 @@ async def create_entity(
     search_service: SearchServiceDep,
 ) -> EntityResponse:
     """Create an entity."""
-    logger.info("API request", 
-                endpoint="create_entity", 
-                entity_type=data.entity_type,
-                title=data.title)
+    logger.info(
+        "API request", endpoint="create_entity", entity_type=data.entity_type, title=data.title
+    )
 
     entity = await entity_service.create_entity(data)
 
@@ -44,11 +43,13 @@ async def create_entity(
     await search_service.index_entity(entity, background_tasks=background_tasks)
     result = EntityResponse.model_validate(entity)
 
-    logger.info("API response", 
-                endpoint="create_entity", 
-                title=result.title,
-                permalink=result.permalink,
-                status_code=201)
+    logger.info(
+        "API response",
+        endpoint="create_entity",
+        title=result.title,
+        permalink=result.permalink,
+        status_code=201,
+    )
     return result
 
 
@@ -62,19 +63,23 @@ async def create_or_update_entity(
     search_service: SearchServiceDep,
 ) -> EntityResponse:
     """Create or update an entity. If entity exists, it will be updated, otherwise created."""
-    logger.info("API request", 
-                endpoint="create_or_update_entity", 
-                permalink=permalink,
-                entity_type=data.entity_type,
-                title=data.title)
+    logger.info(
+        "API request",
+        endpoint="create_or_update_entity",
+        permalink=permalink,
+        entity_type=data.entity_type,
+        title=data.title,
+    )
 
     # Validate permalink matches
     if data.permalink != permalink:
-        logger.warning("API validation error", 
-                       endpoint="create_or_update_entity",
-                       permalink=permalink,
-                       data_permalink=data.permalink,
-                       error="Permalink mismatch")
+        logger.warning(
+            "API validation error",
+            endpoint="create_or_update_entity",
+            permalink=permalink,
+            data_permalink=data.permalink,
+            error="Permalink mismatch",
+        )
         raise HTTPException(status_code=400, detail="Entity permalink must match URL path")
 
     # Try create_or_update operation
@@ -85,12 +90,14 @@ async def create_or_update_entity(
     await search_service.index_entity(entity, background_tasks=background_tasks)
     result = EntityResponse.model_validate(entity)
 
-    logger.info("API response", 
-                endpoint="create_or_update_entity", 
-                title=result.title,
-                permalink=result.permalink,
-                created=created,
-                status_code=response.status_code)
+    logger.info(
+        "API response",
+        endpoint="create_or_update_entity",
+        title=result.title,
+        permalink=result.permalink,
+        created=created,
+        status_code=response.status_code,
+    )
     return result
 
 
