@@ -206,7 +206,7 @@ class SearchRepository:
             OFFSET :offset
         """
 
-        logger.debug(f"Search {sql} params: {params}")
+        logger.trace(f"Search {sql} params: {params}")
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(text(sql), params)
             rows = result.fetchall()

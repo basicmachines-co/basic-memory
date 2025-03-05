@@ -59,6 +59,7 @@ class SearchQuery(BaseModel):
         return (
             self.permalink is None
             and self.permalink_match is None
+            and self.title is None
             and self.text is None
             and self.after_date is None
             and self.types is None
