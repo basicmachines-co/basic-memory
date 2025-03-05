@@ -9,6 +9,7 @@ from basic_memory.schemas import DeleteEntitiesResponse
 
 
 @mcp.tool(description="Delete a note by title or permalink")
+@logfire.instrument(extract_args=False)
 async def delete_note(identifier: str) -> bool:
     """Delete a note from the knowledge base.
 
@@ -25,7 +26,6 @@ async def delete_note(identifier: str) -> bool:
         # Delete by permalink
         delete_note("notes/project-planning")
     """
-    with logfire.span("Deleting note", identifier=identifier):  # pyright: ignore [reportGeneralTypeIssues]
-        response = await call_delete(client, f"/knowledge/entities/{identifier}")
-        result = DeleteEntitiesResponse.model_validate(response.json())
-        return result.deleted
+    response = await call_delete(client, f"/knowledge/entities/{identifier}")
+    result = DeleteEntitiesResponse.model_validate(response.json())
+    return result.deleted

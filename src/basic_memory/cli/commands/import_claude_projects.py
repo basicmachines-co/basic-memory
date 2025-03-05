@@ -144,6 +144,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 
 @claude_app.command(name="projects", help="Import projects from Claude.ai.")
+@logfire.instrument(extract_args=False)
 def import_projects(
     projects_json: Annotated[Path, typer.Argument(..., help="Path to projects.json file")] = Path(
         "projects.json"
@@ -161,36 +162,35 @@ def import_projects(
 
     After importing, run 'basic-memory sync' to index the new files.
     """
-    with logfire.span("import claude projects"):  # pyright: ignore [reportGeneralTypeIssues]
-        try:
-            if projects_json:
-                if not projects_json.exists():
-                    typer.echo(f"Error: File not found: {projects_json}", err=True)
-                    raise typer.Exit(1)
+    try:
+        if projects_json:
+            if not projects_json.exists():
+                typer.echo(f"Error: File not found: {projects_json}", err=True)
+                raise typer.Exit(1)
 
-                # Get markdown processor
-                markdown_processor = asyncio.run(get_markdown_processor())
+            # Get markdown processor
+            markdown_processor = asyncio.run(get_markdown_processor())
 
-                # Process the file
-                base_path = config.home / base_folder if base_folder else config.home
-                console.print(f"\nImporting projects from {projects_json}...writing to {base_path}")
-                results = asyncio.run(
-                    process_projects_json(projects_json, base_path, markdown_processor)
+            # Process the file
+            base_path = config.home / base_folder if base_folder else config.home
+            console.print(f"\nImporting projects from {projects_json}...writing to {base_path}")
+            results = asyncio.run(
+                process_projects_json(projects_json, base_path, markdown_processor)
+            )
+
+            # Show results
+            console.print(
+                Panel(
+                    f"[green]Import complete![/green]\n\n"
+                    f"Imported {results['documents']} project documents\n"
+                    f"Imported {results['prompts']} prompt templates",
+                    expand=False,
                 )
+            )
 
-                # Show results
-                console.print(
-                    Panel(
-                        f"[green]Import complete![/green]\n\n"
-                        f"Imported {results['documents']} project documents\n"
-                        f"Imported {results['prompts']} prompt templates",
-                        expand=False,
-                    )
-                )
+        console.print("\nRun 'basic-memory sync' to index the new files.")
 
-            console.print("\nRun 'basic-memory sync' to index the new files.")
-
-        except Exception as e:
-            logger.error("Import failed")
-            typer.echo(f"Error during import: {e}", err=True)
-            raise typer.Exit(1)
+    except Exception as e:
+        logger.error("Import failed")
+        typer.echo(f"Error during import: {e}", err=True)
+        raise typer.Exit(1)

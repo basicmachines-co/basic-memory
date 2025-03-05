@@ -12,6 +12,7 @@ from basic_memory.schemas.memory import memory_url_path
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
 )
+@logfire.instrument(extract_args=False)
 async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
     """Read a markdown note from the knowledge base.
 
@@ -45,16 +46,15 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
         # Read with pagination
         read_note("Project Updates", page=2, page_size=5)
     """
-    with logfire.span("Reading note", identifier=identifier):  # pyright: ignore [reportGeneralTypeIssues]
-        # Get the file via REST API
-        entity_path = memory_url_path(identifier)
-        path = f"/resource/{entity_path}"
-        logger.info(f"Reading note from URL: {path}")
+    # Get the file via REST API
+    entity_path = memory_url_path(identifier)
+    path = f"/resource/{entity_path}"
+    logger.info(f"Reading note from URL: {path}")
 
-        response = await call_get(client, path, params={"page": page, "page_size": page_size})
+    response = await call_get(client, path, params={"page": page, "page_size": page_size})
 
-        # Just return the content as a string
-        if response.status_code == 200:
-            return response.text
-        else:
-            return f"Error: Could not find entity at {identifier}"
+    # Just return the content as a string
+    if response.status_code == 200:
+        return response.text
+    else:
+        return f"Error: Could not find entity at {identifier}"

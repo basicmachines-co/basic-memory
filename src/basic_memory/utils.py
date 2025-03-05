@@ -107,16 +107,15 @@ def setup_logging(
     if log_file and env != "test":
         try:
             # Only configure logfire if API key is set - avoids interactive prompts
-            if "LOGFIRE_API_KEY" in os.environ:
+            if "LOGFIRE_TOKEN" in os.environ:
                 # Configure logfire with code source info
                 logfire.configure(
                     code_source=logfire.CodeSource(
                         repository="https://github.com/basicmachines-co/basic-memory",
-                        revision=basic_memory.__version__,
+                        revision=f"v{basic_memory.__version__}" if env != "dev" else "HEAD",
                     ),
                     environment=env,
                     console=False,
-                    ignore_no_config=True,  # Extra safety to prevent warnings
                 )
                 logger.configure(handlers=[logfire.loguru_handler()])
 
@@ -131,7 +130,7 @@ def setup_logging(
         logger.add(
             str(log_path),
             level=log_level,
-            rotation="100 MB",
+            rotation="10 MB",
             retention="10 days",
             backtrace=True,
             diagnose=True,

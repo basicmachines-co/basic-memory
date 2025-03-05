@@ -130,15 +130,15 @@ async def run_status(sync_service: SyncService, verbose: bool = False):
 
 
 @app.command()
+@logfire.instrument(extract_args=False)
 def status(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed file information"),
 ):
     """Show sync status between files and database."""
-    with logfire.span("status"):  # pyright: ignore [reportGeneralTypeIssues]
-        try:
-            sync_service = asyncio.run(get_sync_service())
-            asyncio.run(run_status(sync_service, verbose))  # pragma: no cover
-        except Exception as e:
-            logger.exception(f"Error checking status: {e}")
-            typer.echo(f"Error checking status: {e}", err=True)
-            raise typer.Exit(code=1)  # pragma: no cover
+    try:
+        sync_service = asyncio.run(get_sync_service())
+        asyncio.run(run_status(sync_service, verbose))  # pragma: no cover
+    except Exception as e:
+        logger.exception(f"Error checking status: {e}")
+        typer.echo(f"Error checking status: {e}", err=True)
+        raise typer.Exit(code=1)  # pragma: no cover

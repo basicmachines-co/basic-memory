@@ -161,6 +161,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 
 @claude_app.command(name="conversations", help="Import chat conversations from Claude.ai.")
+@logfire.instrument(extract_args=False)
 def import_claude(
     conversations_json: Annotated[
         Path, typer.Argument(..., help="Path to conversations.json file")
@@ -179,35 +180,34 @@ def import_claude(
     After importing, run 'basic-memory sync' to index the new files.
     """
 
-    with logfire.span("import claude conversations"):  # pyright: ignore [reportGeneralTypeIssues]
-        try:
-            if not conversations_json.exists():
-                typer.echo(f"Error: File not found: {conversations_json}", err=True)
-                raise typer.Exit(1)
-
-            # Get markdown processor
-            markdown_processor = asyncio.run(get_markdown_processor())
-
-            # Process the file
-            base_path = config.home / folder
-            console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
-            results = asyncio.run(
-                process_conversations_json(conversations_json, base_path, markdown_processor)
-            )
-
-            # Show results
-            console.print(
-                Panel(
-                    f"[green]Import complete![/green]\n\n"
-                    f"Imported {results['conversations']} conversations\n"
-                    f"Containing {results['messages']} messages",
-                    expand=False,
-                )
-            )
-
-            console.print("\nRun 'basic-memory sync' to index the new files.")
-
-        except Exception as e:
-            logger.error("Import failed")
-            typer.echo(f"Error during import: {e}", err=True)
+    try:
+        if not conversations_json.exists():
+            typer.echo(f"Error: File not found: {conversations_json}", err=True)
             raise typer.Exit(1)
+
+        # Get markdown processor
+        markdown_processor = asyncio.run(get_markdown_processor())
+
+        # Process the file
+        base_path = config.home / folder
+        console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
+        results = asyncio.run(
+            process_conversations_json(conversations_json, base_path, markdown_processor)
+        )
+
+        # Show results
+        console.print(
+            Panel(
+                f"[green]Import complete![/green]\n\n"
+                f"Imported {results['conversations']} conversations\n"
+                f"Containing {results['messages']} messages",
+                expand=False,
+            )
+        )
+
+        console.print("\nRun 'basic-memory sync' to index the new files.")
+
+    except Exception as e:
+        logger.error("Import failed")
+        typer.echo(f"Error during import: {e}", err=True)
+        raise typer.Exit(1)

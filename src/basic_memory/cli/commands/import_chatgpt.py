@@ -208,6 +208,7 @@ async def get_markdown_processor() -> MarkdownProcessor:
 
 
 @import_app.command(name="chatgpt", help="Import conversations from ChatGPT JSON export.")
+@logfire.instrument(extract_args=False)
 def import_chatgpt(
     conversations_json: Annotated[
         Path, typer.Argument(help="Path to ChatGPT conversations.json file")
@@ -226,38 +227,38 @@ def import_chatgpt(
     After importing, run 'basic-memory sync' to index the new files.
     """
 
-    with logfire.span("import chatgpt"):  # pyright: ignore [reportGeneralTypeIssues]
-        try:
-            if conversations_json:
-                if not conversations_json.exists():
-                    typer.echo(f"Error: File not found: {conversations_json}", err=True)
-                    raise typer.Exit(1)
+    
+    try:
+        if conversations_json:
+            if not conversations_json.exists():
+                typer.echo(f"Error: File not found: {conversations_json}", err=True)
+                raise typer.Exit(1)
 
-                # Get markdown processor
-                markdown_processor = asyncio.run(get_markdown_processor())
+            # Get markdown processor
+            markdown_processor = asyncio.run(get_markdown_processor())
 
-                # Process the file
-                base_path = config.home / folder
-                console.print(
-                    f"\nImporting chats from {conversations_json}...writing to {base_path}"
+            # Process the file
+            base_path = config.home / folder
+            console.print(
+                f"\nImporting chats from {conversations_json}...writing to {base_path}"
+            )
+            results = asyncio.run(
+                process_chatgpt_json(conversations_json, folder, markdown_processor)
+            )
+
+            # Show results
+            console.print(
+                Panel(
+                    f"[green]Import complete![/green]\n\n"
+                    f"Imported {results['conversations']} conversations\n"
+                    f"Containing {results['messages']} messages",
+                    expand=False,
                 )
-                results = asyncio.run(
-                    process_chatgpt_json(conversations_json, folder, markdown_processor)
-                )
+            )
 
-                # Show results
-                console.print(
-                    Panel(
-                        f"[green]Import complete![/green]\n\n"
-                        f"Imported {results['conversations']} conversations\n"
-                        f"Containing {results['messages']} messages",
-                        expand=False,
-                    )
-                )
+        console.print("\nRun 'basic-memory sync' to index the new files.")
 
-            console.print("\nRun 'basic-memory sync' to index the new files.")
-
-        except Exception as e:
-            logger.error("Import failed")
-            typer.echo(f"Error during import: {e}", err=True)
-            raise typer.Exit(1)
+    except Exception as e:
+        logger.error("Import failed")
+        typer.echo(f"Error during import: {e}", err=True)
+        raise typer.Exit(1)

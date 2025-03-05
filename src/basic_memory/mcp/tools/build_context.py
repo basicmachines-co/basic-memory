@@ -17,6 +17,7 @@ from basic_memory.schemas.memory import (
 from basic_memory.schemas.base import TimeFrame
 
 
+@logfire.instrument(extract_args=False)
 @mcp.tool(
     description="""Build context from a memory:// URI to continue conversations naturally.
     
@@ -70,18 +71,17 @@ async def build_context(
         # Research the history of a feature
         build_context("memory://features/knowledge-graph", timeframe="3 months ago")
     """
-    with logfire.span("Building context", url=url, depth=depth, timeframe=timeframe):  # pyright: ignore [reportGeneralTypeIssues]
-        logger.info(f"Building context from {url}")
-        url = normalize_memory_url(url)
-        response = await call_get(
-            client,
-            f"/memory/{memory_url_path(url)}",
-            params={
-                "depth": depth,
-                "timeframe": timeframe,
-                "page": page,
-                "page_size": page_size,
-                "max_related": max_related,
-            },
-        )
-        return GraphContext.model_validate(response.json())
+    logger.info(f"Building context from {url}")
+    url = normalize_memory_url(url)
+    response = await call_get(
+        client,
+        f"/memory/{memory_url_path(url)}",
+        params={
+            "depth": depth,
+            "timeframe": timeframe,
+            "page": page,
+            "page_size": page_size,
+            "max_related": max_related,
+        },
+    )
+    return GraphContext.model_validate(response.json())

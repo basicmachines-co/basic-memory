@@ -80,6 +80,7 @@ class SyncService:
         self.search_service = search_service
         self.file_service = file_service
 
+    @logfire.instrument(extract_args=False)
     async def sync(self, directory: Path, show_progress: bool = True) -> SyncReport:
         """Sync all files with database."""
         import time
@@ -92,125 +93,124 @@ class SyncService:
         logger.info("Sync operation started", 
                     directory=str(directory))
 
-        with logfire.span(f"sync {directory}", directory=directory):  # pyright: ignore [reportGeneralTypeIssues]
-            # initial paths from db to sync
-            # path -> checksum
-            if show_progress:
-                from rich.console import Console
-                console = Console()
-                console.print(f"Scanning directory: {directory}")
-                
-            report = await self.scan(directory)
+        # initial paths from db to sync
+        # path -> checksum
+        if show_progress:
+            from rich.console import Console
+            console = Console()
+            console.print(f"Scanning directory: {directory}")
             
-            # Initialize progress tracking if requested
-            if show_progress and report.total > 0:
-                progress = Progress(
-                    TextColumn("[bold blue]{task.description}"),
-                    BarColumn(),
-                    TaskProgressColumn(),
-                    console=console,
-                    expand=True
-                )
+        report = await self.scan(directory)
+        
+        # Initialize progress tracking if requested
+        if show_progress and report.total > 0:
+            progress = Progress(
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                console=console,
+                expand=True
+            )
 
-            # order of sync matters to resolve relations effectively
-            logger.info("Sync changes detected", 
-                       new_files=len(report.new),
-                       modified_files=len(report.modified),
-                       deleted_files=len(report.deleted),
-                       moved_files=len(report.moves))
+        # order of sync matters to resolve relations effectively
+        logger.info("Sync changes detected", 
+                   new_files=len(report.new),
+                   modified_files=len(report.modified),
+                   deleted_files=len(report.deleted),
+                   moved_files=len(report.moves))
 
-            if show_progress and report.total > 0:
-                with progress:
-                    # Track each category separately
-                    move_task = None
-                    if report.moves:  # pragma: no cover
-                        move_task = progress.add_task("[blue]Moving files...", total=len(report.moves))
+        if show_progress and report.total > 0:
+            with progress:
+                # Track each category separately
+                move_task = None
+                if report.moves:  # pragma: no cover
+                    move_task = progress.add_task("[blue]Moving files...", total=len(report.moves))
+                
+                delete_task = None  
+                if report.deleted:  # pragma: no cover
+                    delete_task = progress.add_task("[red]Deleting files...", total=len(report.deleted))
                     
-                    delete_task = None  
-                    if report.deleted:  # pragma: no cover
-                        delete_task = progress.add_task("[red]Deleting files...", total=len(report.deleted))
-                        
-                    new_task = None
-                    if report.new:
-                        new_task = progress.add_task("[green]Adding new files...", total=len(report.new))
-                        
-                    modify_task = None
-                    if report.modified:  # pragma: no cover
-                        modify_task = progress.add_task("[yellow]Updating modified files...", total=len(report.modified))
+                new_task = None
+                if report.new:
+                    new_task = progress.add_task("[green]Adding new files...", total=len(report.new))
                     
-                    # sync moves first
-                    for i, (old_path, new_path) in enumerate(report.moves.items()):
-                        # in the case where a file has been deleted and replaced by another file
-                        # it will show up in the move and modified lists, so handle it in modified
-                        if new_path in report.modified:  # pragma: no cover
-                            report.modified.remove(new_path)
-                            logger.debug("File marked as moved and modified", 
-                                       old_path=old_path, 
-                                       new_path=new_path,
-                                       action="processing as modified")
-                        else:  # pragma: no cover
-                            await self.handle_move(old_path, new_path)
-                        
-                        if move_task is not None:  # pragma: no cover
-                            progress.update(move_task, advance=1)
-
-                    # deleted next
-                    for i, path in enumerate(report.deleted):  # pragma: no cover
-                        await self.handle_delete(path)
-                        if delete_task is not None:  # pragma: no cover
-                            progress.update(delete_task, advance=1)
-
-                    # then new and modified
-                    for i, path in enumerate(report.new):
-                        await self.sync_file(path, new=True)
-                        if new_task is not None:
-                            progress.update(new_task, advance=1)
-
-                    for i, path in enumerate(report.modified):  # pragma: no cover
-                        await self.sync_file(path, new=False)
-                        if modify_task is not None:  # pragma: no cover
-                            progress.update(modify_task, advance=1)
-
-                    # Final step - resolving relations
-                    if report.total > 0:
-                        relation_task = progress.add_task("[cyan]Resolving relations...", total=1)
-                        await self.resolve_relations()
-                        progress.update(relation_task, advance=1)
-            else:
-                # No progress display - proceed with normal sync
+                modify_task = None
+                if report.modified:  # pragma: no cover
+                    modify_task = progress.add_task("[yellow]Updating modified files...", total=len(report.modified))
+                
                 # sync moves first
-                for old_path, new_path in report.moves.items():
+                for i, (old_path, new_path) in enumerate(report.moves.items()):
                     # in the case where a file has been deleted and replaced by another file
                     # it will show up in the move and modified lists, so handle it in modified
-                    if new_path in report.modified:
+                    if new_path in report.modified:  # pragma: no cover
                         report.modified.remove(new_path)
                         logger.debug("File marked as moved and modified", 
                                    old_path=old_path, 
                                    new_path=new_path,
                                    action="processing as modified")
-                    else:
+                    else:  # pragma: no cover
                         await self.handle_move(old_path, new_path)
+                    
+                    if move_task is not None:  # pragma: no cover
+                        progress.update(move_task, advance=1)
 
                 # deleted next
-                for path in report.deleted:
+                for i, path in enumerate(report.deleted):  # pragma: no cover
                     await self.handle_delete(path)
+                    if delete_task is not None:  # pragma: no cover
+                        progress.update(delete_task, advance=1)
 
                 # then new and modified
-                for path in report.new:
+                for i, path in enumerate(report.new):
                     await self.sync_file(path, new=True)
+                    if new_task is not None:
+                        progress.update(new_task, advance=1)
 
-                for path in report.modified:
+                for i, path in enumerate(report.modified):  # pragma: no cover
                     await self.sync_file(path, new=False)
+                    if modify_task is not None:  # pragma: no cover
+                        progress.update(modify_task, advance=1)
 
-                await self.resolve_relations()
-            
-            duration_ms = int((time.time() - start_time) * 1000)
-            logger.info("Sync operation completed", 
-                       directory=str(directory),
-                       total_changes=report.total,
-                       duration_ms=duration_ms)
-            
-            return report
+                # Final step - resolving relations
+                if report.total > 0:
+                    relation_task = progress.add_task("[cyan]Resolving relations...", total=1)
+                    await self.resolve_relations()
+                    progress.update(relation_task, advance=1)
+        else:
+            # No progress display - proceed with normal sync
+            # sync moves first
+            for old_path, new_path in report.moves.items():
+                # in the case where a file has been deleted and replaced by another file
+                # it will show up in the move and modified lists, so handle it in modified
+                if new_path in report.modified:
+                    report.modified.remove(new_path)
+                    logger.debug("File marked as moved and modified", 
+                               old_path=old_path, 
+                               new_path=new_path,
+                               action="processing as modified")
+                else:
+                    await self.handle_move(old_path, new_path)
+
+            # deleted next
+            for path in report.deleted:
+                await self.handle_delete(path)
+
+            # then new and modified
+            for path in report.new:
+                await self.sync_file(path, new=True)
+
+            for path in report.modified:
+                await self.sync_file(path, new=False)
+
+            await self.resolve_relations()
+        
+        duration_ms = int((time.time() - start_time) * 1000)
+        logger.info("Sync operation completed", 
+                   directory=str(directory),
+                   total_changes=report.total,
+                   duration_ms=duration_ms)
+        
+        return report
 
     async def scan(self, directory):
         """Scan directory for changes compared to database state."""

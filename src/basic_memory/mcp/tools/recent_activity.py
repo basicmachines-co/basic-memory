@@ -25,6 +25,7 @@ from basic_memory.schemas.search import SearchItemType
     Or standard formats like "7d"
     """,
 )
+@logfire.instrument(extract_args=False)
 async def recent_activity(
     type: Optional[List[SearchItemType]] = None,
     depth: Optional[int] = 1,
@@ -74,29 +75,28 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
-    with logfire.span("Getting recent activity", type=type, depth=depth, timeframe=timeframe):  # pyright: ignore [reportGeneralTypeIssues]
-        logger.info(
-            f"Getting recent activity from type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
-        )
-        params = {
-            "page": page,
-            "page_size": page_size,
-            "max_related": max_related,
-        }
-        if depth:
-            params["depth"] = depth
-        if timeframe:
-            params["timeframe"] = timeframe  # pyright: ignore
+    logger.info(
+        f"Getting recent activity from type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
+    )
+    params = {
+        "page": page,
+        "page_size": page_size,
+        "max_related": max_related,
+    }
+    if depth:
+        params["depth"] = depth
+    if timeframe:
+        params["timeframe"] = timeframe  # pyright: ignore
 
-        # send enum values if we have an enum, else send string value
-        if type:
-            params["type"] = [  # pyright: ignore
-                type.value if isinstance(type, SearchItemType) else type for type in type
-            ]
+    # send enum values if we have an enum, else send string value
+    if type:
+        params["type"] = [  # pyright: ignore
+            type.value if isinstance(type, SearchItemType) else type for type in type
+        ]
 
-        response = await call_get(
-            client,
-            "/memory/recent",
-            params=params,
-        )
-        return GraphContext.model_validate(response.json())
+    response = await call_get(
+        client,
+        "/memory/recent",
+        params=params,
+    )
+    return GraphContext.model_validate(response.json())

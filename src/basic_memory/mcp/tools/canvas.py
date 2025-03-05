@@ -17,6 +17,7 @@ from basic_memory.mcp.tools.utils import call_put
 @mcp.tool(
     description="Create an Obsidian canvas file to visualize concepts and connections.",
 )
+@logfire.instrument(extract_args=False)
 async def canvas(
     nodes: List[Dict[str, Any]],
     edges: List[Dict[str, Any]],
@@ -73,27 +74,26 @@ async def canvas(
     }
     ```
     """
-    with logfire.span("Creating canvas", folder=folder, title=title):  # type: ignore
-        # Ensure path has .canvas extension
-        file_title = title if title.endswith(".canvas") else f"{title}.canvas"
-        file_path = f"{folder}/{file_title}"
+    # Ensure path has .canvas extension
+    file_title = title if title.endswith(".canvas") else f"{title}.canvas"
+    file_path = f"{folder}/{file_title}"
 
-        # Create canvas data structure
-        canvas_data = {"nodes": nodes, "edges": edges}
+    # Create canvas data structure
+    canvas_data = {"nodes": nodes, "edges": edges}
 
-        # Convert to JSON
-        canvas_json = json.dumps(canvas_data, indent=2)
+    # Convert to JSON
+    canvas_json = json.dumps(canvas_data, indent=2)
 
-        # Write the file using the resource API
-        logger.info(f"Creating canvas file: {file_path}")
-        response = await call_put(client, f"/resource/{file_path}", json=canvas_json)
+    # Write the file using the resource API
+    logger.info(f"Creating canvas file: {file_path}")
+    response = await call_put(client, f"/resource/{file_path}", json=canvas_json)
 
-        # Parse response
-        result = response.json()
-        logger.debug(result)
+    # Parse response
+    result = response.json()
+    logger.debug(result)
 
-        # Build summary
-        action = "Created" if response.status_code == 201 else "Updated"
-        summary = [f"# {action}: {file_path}", "\nThe canvas is ready to open in Obsidian."]
+    # Build summary
+    action = "Created" if response.status_code == 201 else "Updated"
+    summary = [f"# {action}: {file_path}", "\nThe canvas is ready to open in Obsidian."]
 
-        return "\n".join(summary)
+    return "\n".join(summary)

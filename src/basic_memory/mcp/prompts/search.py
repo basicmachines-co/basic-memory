@@ -20,6 +20,7 @@ from basic_memory.schemas.base import TimeFrame
     name="Search Knowledge Base",
     description="Search across all content in basic-memory",
 )
+@logfire.instrument(extract_args=False)
 async def search_prompt(
     query: str,
     timeframe: Annotated[
@@ -39,11 +40,10 @@ async def search_prompt(
     Returns:
         Formatted search results with context
     """
-    with logfire.span("Searching knowledge base", query=query, timeframe=timeframe):  # pyright: ignore
-        logger.info(f"Searching knowledge base, query: {query}, timeframe: {timeframe}")
+    logger.info(f"Searching knowledge base, query: {query}, timeframe: {timeframe}")
 
-        search_results = await search_tool(SearchQuery(text=query, after_date=timeframe))
-        return format_search_results(query, search_results, timeframe)
+    search_results = await search_tool(SearchQuery(text=query, after_date=timeframe))
+    return format_search_results(query, search_results, timeframe)
 
 
 def format_search_results(

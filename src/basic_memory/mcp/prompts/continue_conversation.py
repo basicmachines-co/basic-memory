@@ -25,6 +25,7 @@ from basic_memory.schemas.search import SearchQuery, SearchItemType
     name="Continue Conversation",
     description="Continue a previous conversation",
 )
+@logfire.instrument(extract_args=False)
 async def continue_conversation(
     topic: Annotated[Optional[str], Field(description="Topic or keyword to search for")] = None,
     timeframe: Annotated[
@@ -44,70 +45,69 @@ async def continue_conversation(
     Returns:
         Context from previous sessions on this topic
     """
-    with logfire.span("Continuing session", topic=topic, timeframe=timeframe):  # pyright: ignore
-        logger.info(f"Continuing session, topic: {topic}, timeframe: {timeframe}")
+    logger.info(f"Continuing session, topic: {topic}, timeframe: {timeframe}")
 
-        # If topic provided, search for it
-        if topic:
-            search_results = await search(
-                SearchQuery(text=topic, after_date=timeframe, types=[SearchItemType.ENTITY])
-            )
+    # If topic provided, search for it
+    if topic:
+        search_results = await search(
+            SearchQuery(text=topic, after_date=timeframe, types=[SearchItemType.ENTITY])
+        )
 
-            # Build context from results
-            contexts = []
-            for result in search_results.results:
-                if hasattr(result, "permalink") and result.permalink:
-                    context: GraphContext = await build_context(f"memory://{result.permalink}")
-                    if context.primary_results:
-                        contexts.append(
-                            PromptContextItem(
-                                primary_results=context.primary_results[:1],
-                                related_results=context.related_results[:3],
-                            )
-                        )
-
-            # get context for the top 3 results
-            prompt_context = format_prompt_context(
-                PromptContext(topic=topic, timeframe=timeframe, results=contexts)
-            )
-            
-        else:
-            # If no topic, get recent activity
-            timeframe = timeframe or "7d"
-            recent: GraphContext = await recent_activity(
-                timeframe=timeframe, type=[SearchItemType.ENTITY]
-            )
-            prompt_context = format_prompt_context(
-                PromptContext(
-                    topic=f"Recent Activity from ({timeframe})",
-                    timeframe=timeframe,
-                    results=[
+        # Build context from results
+        contexts = []
+        for result in search_results.results:
+            if hasattr(result, "permalink") and result.permalink:
+                context: GraphContext = await build_context(f"memory://{result.permalink}")
+                if context.primary_results:
+                    contexts.append(
                         PromptContextItem(
-                            primary_results=recent.primary_results[:5],
-                            related_results=recent.related_results[:2],
+                            primary_results=context.primary_results[:1],
+                            related_results=context.related_results[:3],
                         )
-                    ],
-                )
+                    )
+
+        # get context for the top 3 results
+        prompt_context = format_prompt_context(
+            PromptContext(topic=topic, timeframe=timeframe, results=contexts)
+        )
+        
+    else:
+        # If no topic, get recent activity
+        timeframe = timeframe or "7d"
+        recent: GraphContext = await recent_activity(
+            timeframe=timeframe, type=[SearchItemType.ENTITY]
+        )
+        prompt_context = format_prompt_context(
+            PromptContext(
+                topic=f"Recent Activity from ({timeframe})",
+                timeframe=timeframe,
+                results=[
+                    PromptContextItem(
+                        primary_results=recent.primary_results[:5],
+                        related_results=recent.related_results[:2],
+                    )
+                ],
             )
+        )
 
-        # Add next steps with strong encouragement to write
-        next_steps = dedent(f"""
-            ## Next Steps
+    # Add next steps with strong encouragement to write
+    next_steps = dedent(f"""
+        ## Next Steps
 
-            You can:
-            - Explore more with: `search({{"text": "{topic}"}})`
-            - See what's changed: `recent_activity(timeframe="{timeframe or "7d"}")`
-            - **Record new learnings or decisions from this conversation:** `write_note(title="[Create a meaningful title]", content="[Content with observations and relations]")`
-            
-            ## Knowledge Capture Recommendation
-            
-            As you continue this conversation, **actively look for opportunities to:**
-            1. Record key information, decisions, or insights that emerge
-            2. Link new knowledge to existing topics 
-            3. Suggest capturing important context when appropriate
-            4. Create forward references to topics that might be created later
-            
-            Remember that capturing knowledge during conversations is one of the most valuable aspects of Basic Memory.
-            """)
+        You can:
+        - Explore more with: `search({{"text": "{topic}"}})`
+        - See what's changed: `recent_activity(timeframe="{timeframe or "7d"}")`
+        - **Record new learnings or decisions from this conversation:** `write_note(title="[Create a meaningful title]", content="[Content with observations and relations]")`
+        
+        ## Knowledge Capture Recommendation
+        
+        As you continue this conversation, **actively look for opportunities to:**
+        1. Record key information, decisions, or insights that emerge
+        2. Link new knowledge to existing topics 
+        3. Suggest capturing important context when appropriate
+        4. Create forward references to topics that might be created later
+        
+        Remember that capturing knowledge during conversations is one of the most valuable aspects of Basic Memory.
+        """)
 
-        return prompt_context + next_steps
+    return prompt_context + next_steps
