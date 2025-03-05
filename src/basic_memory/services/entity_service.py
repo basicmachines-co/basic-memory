@@ -144,7 +144,7 @@ class EntityService(BaseService[EntityModel]):
         post = await schema_to_markdown(schema)
 
         # write file
-        final_content = frontmatter.dumps(post)
+        final_content = frontmatter.dumps(post, sort_keys=False)
         checksum = await self.file_service.write_file(file_path, final_content)
 
         # parse entity from file

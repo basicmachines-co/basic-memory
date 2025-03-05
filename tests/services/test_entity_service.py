@@ -1,6 +1,7 @@
 """Tests for EntityService."""
 
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 import yaml
@@ -375,21 +376,25 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
 
 @pytest.mark.asyncio
 async def test_create_with_content(entity_service: EntityService, file_service: FileService):
-    content = """---
-permalink: git-workflow-guide
----
-# Git Workflow Guide
+    
+    # contains frontmatter 
+    content = dedent(
+        """
+        ---
+        permalink: git-workflow-guide
+        ---
+        # Git Workflow Guide
+                
+        A guide to our [[Git]] workflow. This uses some ideas from [[Trunk Based Development]].
         
-A guide to our [[Git]] workflow. This uses some ideas from [[Trunk Based Development]].
-
-## Best Practices
-Use branches effectively:
-- [design] Keep feature branches short-lived #git #workflow (Reduces merge conflicts)
-- implements [[Branch Strategy]] (Our standard workflow)
-
-## Common Commands
-See the [[Git Cheat Sheet]] for reference.
-"""
+        ## Best Practices
+        Use branches effectively:
+        - [design] Keep feature branches short-lived #git #workflow (Reduces merge conflicts)
+        - implements [[Branch Strategy]] (Our standard workflow)
+        
+        ## Common Commands
+        See the [[Git Cheat Sheet]] for reference.
+        """)
 
     # Create test entity
     entity, created = await entity_service.create_or_update_entity(
@@ -428,20 +433,29 @@ See the [[Git Cheat Sheet]] for reference.
     file_path = file_service.get_entity_path(entity)
     file_content, _ = await file_service.read_file(file_path)
 
-    # assert content is in file
-    assert content.strip() in file_content
+    # assert file
+    # note the permalink value is corrected
+    expected = dedent("""
+        ---
+        title: Git Workflow Guide
+        type: test
+        permalink: test/git-workflow-guide
+        ---
+        
+        # Git Workflow Guide
+                
+        A guide to our [[Git]] workflow. This uses some ideas from [[Trunk Based Development]].
+        
+        ## Best Practices
+        Use branches effectively:
+        - [design] Keep feature branches short-lived #git #workflow (Reduces merge conflicts)
+        - implements [[Branch Strategy]] (Our standard workflow)
+        
+        ## Common Commands
+        See the [[Git Cheat Sheet]] for reference.
 
-    # assert frontmatter
-    assert (
-        """
----
-title: Git Workflow Guide
-type: test
-permalink: test/git-workflow-guide
----    
-    """.strip()
-        in file_content
-    )
+        """).strip()
+    assert expected == file_content
 
 
 @pytest.mark.asyncio
@@ -469,21 +483,42 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
     file_content, _ = await file_service.read_file(file_path)
 
     # assert content is in file
-    assert content.strip() in file_content
+    assert (
+        dedent(
+            """
+            ---
+            title: Git Workflow Guide
+            type: test
+            permalink: test/git-workflow-guide
+            ---
+            
+            # Git Workflow Guide
+            """
+        ).strip()
+        == file_content
+    )
 
     # now update the content
-    update_content = """# Git Workflow Guide
-
-A guide to our [[Git]] workflow. This uses some ideas from [[Trunk Based Development]].
-
-## Best Practices
-Use branches effectively:
-- [design] Keep feature branches short-lived #git #workflow (Reduces merge conflicts)
-- implements [[Branch Strategy]] (Our standard workflow)
-
-## Common Commands
-See the [[Git Cheat Sheet]] for reference.
-"""
+    update_content = dedent(
+        """
+        ---
+        title: Git Workflow Guide
+        type: test
+        permalink: test/git-workflow-guide
+        ---
+        
+        # Git Workflow Guide
+        
+        A guide to our [[Git]] workflow. This uses some ideas from [[Trunk Based Development]].
+        
+        ## Best Practices
+        Use branches effectively:
+        - [design] Keep feature branches short-lived #git #workflow (Reduces merge conflicts)
+        - implements [[Branch Strategy]] (Our standard workflow)
+        
+        ## Common Commands
+        See the [[Git Cheat Sheet]] for reference.
+        """).strip()
 
     # Create test entity
     entity, created = await entity_service.create_or_update_entity(
@@ -520,4 +555,4 @@ See the [[Git Cheat Sheet]] for reference.
     file_content, _ = await file_service.read_file(file_path)
 
     # assert content is in file
-    assert update_content.strip() in file_content
+    assert update_content.strip() == file_content

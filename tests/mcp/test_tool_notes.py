@@ -130,7 +130,7 @@ async def test_write_note_update_existing(app):
     )
     assert (
         dedent("""
-        # Updated test/Test Note.md (131b5662)
+        # Updated test/Test Note.md (a8eb4d44)
         permalink: test/test-note
         
         ## Tags
@@ -141,22 +141,20 @@ async def test_write_note_update_existing(app):
 
     # Try reading it back
     content = await read_note("test/test-note")
-    assert (
+    assert dedent(
         """
----
-permalink: test/test-note
-tags:
-- '#test'
-- '#documentation'
-title: Test Note
-type: note
----
-
-# Test
-This is an updated note
-""".strip()
-        in content
-    )
+        ---
+        title: Test Note
+        type: note
+        permalink: test/test-note
+        tags:
+        - '#test'
+        - '#documentation'
+        ---
+        
+        # Test
+        This is an updated note
+        """).strip() == content
 
 
 @pytest.mark.asyncio
