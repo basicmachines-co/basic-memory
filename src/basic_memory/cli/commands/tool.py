@@ -29,7 +29,7 @@ from basic_memory.schemas.memory import MemoryUrl
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 
 tool_app = typer.Typer()
-app.add_typer(tool_app, name="tools", help="Direct access to MCP tools via CLI")
+app.add_typer(tool_app, name="tool", help="Direct access to MCP tools via CLI")
 
 
 @tool_app.command()

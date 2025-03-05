@@ -13,7 +13,7 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     import_claude_conversations,
     import_claude_projects,
     import_chatgpt,
-    tools,
+    tool,
     project,
 )
 
@@ -23,7 +23,7 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
 def main(
     ctx: typer.Context,
     project: str = typer.Option(  # noqa
-        None,
+        "main",
         "--project",
         "-p",
         help="Specify which project to use",

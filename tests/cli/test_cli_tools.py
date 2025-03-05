@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
 from typer.testing import CliRunner
 
-from basic_memory.cli.commands.tools import tool_app
+from basic_memory.cli.commands.tool import tool_app
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_project_config, get_engine_factory
