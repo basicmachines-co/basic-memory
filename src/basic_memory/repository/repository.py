@@ -29,10 +29,11 @@ class Repository[T: Base]:
 
     def __init__(self, session_maker: async_sessionmaker[AsyncSession], Model: Type[T]):
         self.session_maker = session_maker
-        self.Model = Model
-        self.mapper = inspect(self.Model).mapper
-        self.primary_key: Column[Any] = self.mapper.primary_key[0]
-        self.valid_columns = [column.key for column in self.mapper.columns]
+        if Model:
+            self.Model = Model
+            self.mapper = inspect(self.Model).mapper
+            self.primary_key: Column[Any] = self.mapper.primary_key[0]
+            self.valid_columns = [column.key for column in self.mapper.columns]
 
     def get_model_data(self, entity_data):
         model_data = {

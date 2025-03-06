@@ -37,6 +37,13 @@ from basic_memory.schemas.response import (
     DeleteEntitiesResponse,
 )
 
+from basic_memory.schemas.project_info import (
+    ProjectStatistics,
+    ActivityMetrics,
+    SystemStatus,
+    ProjectInfoResponse,
+)
+
 # For convenient imports, export all models
 __all__ = [
     # Base
@@ -59,4 +66,9 @@ __all__ = [
     "DeleteEntitiesResponse",
     # Delete Operations
     "DeleteEntitiesRequest",
+    # Project Info
+    "ProjectStatistics",
+    "ActivityMetrics",
+    "SystemStatus",
+    "ProjectInfoResponse",
 ]

@@ -15,6 +15,8 @@ from basic_memory.config import ProjectConfig
 from basic_memory.services.file_service import FileService
 from basic_memory.sync.sync_service import SyncService
 
+WATCH_STATUS_JSON = "watch-status.json"
+
 
 class WatchEvent(BaseModel):
     timestamp: datetime
@@ -74,7 +76,7 @@ class WatchService:
         self.file_service = file_service
         self.config = config
         self.state = WatchServiceState()
-        self.status_path = config.home / ".basic-memory" / "watch-status.json"
+        self.status_path = config.home / ".basic-memory" / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self.console = Console()
 

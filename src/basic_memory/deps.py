@@ -16,6 +16,7 @@ from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.project_info_repository import ProjectInfoRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.services import (
@@ -106,6 +107,15 @@ async def get_search_repository(
 
 SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]
 
+
+def get_project_info_repository(
+    session_maker: SessionMakerDep,
+):
+    """Dependency for StatsRepository."""
+    return ProjectInfoRepository(session_maker)
+
+
+ProjectInfoRepositoryDep = Annotated[ProjectInfoRepository, Depends(get_project_info_repository)]
 
 ## services
 

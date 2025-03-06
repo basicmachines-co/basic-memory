@@ -14,7 +14,7 @@ from loguru import logger
 
 from basic_memory import db
 from basic_memory.config import config as app_config
-from basic_memory.api.routers import knowledge, search, memory, resource
+from basic_memory.api.routers import knowledge, search, memory, resource, project_info
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app.include_router(knowledge.router)
 app.include_router(search.router)
 app.include_router(memory.router)
 app.include_router(resource.router)
+app.include_router(project_info.router)
 
 
 @app.exception_handler(Exception)
