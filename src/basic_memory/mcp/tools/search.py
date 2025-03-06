@@ -23,6 +23,7 @@ async def search(query: SearchQuery, page: int = 1, page_size: int = 10) -> Sear
     Args:
         query: SearchQuery object with search parameters including:
             - text: Full-text search (e.g., "project planning")
+              Supports boolean operators: AND, OR, NOT and parentheses for grouping
             - title: Search only in titles (e.g., "Meeting notes")
             - permalink: Exact permalink match (e.g., "docs/meeting-notes")
             - permalink_match: Pattern matching for permalinks (e.g., "docs/*-notes")
@@ -33,21 +34,23 @@ async def search(query: SearchQuery, page: int = 1, page_size: int = 10) -> Sear
         page_size: The number of results to return per page (default 10)
 
     Returns:
-        SearchResponse with:
-            - results: List of matching SearchResult objects with:
-                - id: Internal ID
-                - title: Document/entity title
-                - type: Content type (entity, observation, relation)
-                - score: Relevance score (higher = more relevant)
-                - permalink: Permalink for accessing the content
-                - file_path: File path on disk
-                - metadata: Additional metadata about the result
-            - current_page: Current page number
-            - page_size: Number of results per page
+        SearchResponse with results and pagination info
 
     Examples:
         # Basic text search
         results = await search(SearchQuery(text="project planning"))
+
+        # Boolean AND search (both terms must be present)
+        results = await search(SearchQuery(text="project AND planning"))
+
+        # Boolean OR search (either term can be present)
+        results = await search(SearchQuery(text="project OR meeting"))
+
+        # Boolean NOT search (exclude terms)
+        results = await search(SearchQuery(text="project NOT meeting"))
+
+        # Boolean search with grouping
+        results = await search(SearchQuery(text="(project OR planning) AND notes"))
 
         # Search with type filter
         results = await search(SearchQuery(

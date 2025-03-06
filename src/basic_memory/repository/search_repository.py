@@ -94,8 +94,14 @@ class SearchRepository:
         For FTS5:
         - Special characters and phrases need to be quoted
         - Terms with spaces or special chars need quotes
+        - Boolean operators (AND, OR, NOT) and parentheses are preserved
         """
         if "*" in term:
+            return term
+
+        # Check for boolean operators - if present, return the term as is
+        boolean_operators = [" AND ", " OR ", " NOT ", "(", ")"]
+        if any(op in f" {term} " for op in boolean_operators):
             return term
 
         # List of special characters that need quoting (excluding *)
@@ -130,9 +136,20 @@ class SearchRepository:
 
         # Handle text search for title and content
         if search_text:
-            search_text = self._prepare_search_term(search_text.strip())
-            params["text"] = search_text
-            conditions.append("(title MATCH :text OR content_stems MATCH :text)")
+            has_boolean = any(
+                op in f" {search_text} " for op in [" AND ", " OR ", " NOT ", "(", ")"]
+            )
+
+            if has_boolean:
+                # If boolean operators are present, use the raw query
+                # No need to prepare it, FTS5 will understand the operators
+                params["text"] = search_text
+                conditions.append("(title MATCH :text OR content_stems MATCH :text)")
+            else:
+                # Standard search with term preparation
+                processed_text = self._prepare_search_term(search_text.strip())
+                params["text"] = processed_text
+                conditions.append("(title MATCH :text OR content_stems MATCH :text)")
 
         # Handle title match search
         if title:
