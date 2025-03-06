@@ -94,12 +94,3 @@ class SearchResponse(BaseModel):
     current_page: int
     page_size: int
 
-
-# Schema for future advanced search endpoint
-class AdvancedSearchQuery(BaseModel):
-    """Advanced full-text search with explicit FTS5 syntax."""
-
-    query: str  # Raw FTS5 query (e.g., "foo AND bar")
-    types: Optional[List[SearchItemType]] = None
-    entity_types: Optional[List[str]] = None
-    after_date: Optional[Union[datetime, str]] = None
