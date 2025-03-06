@@ -7,8 +7,12 @@ from PIL import Image as PILImage
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import read_file, write_note
-from basic_memory.mcp.tools.read_file import calculate_target_params, resize_image, optimize_image
+from basic_memory.mcp.tools import read_content, write_note
+from basic_memory.mcp.tools.read_content import (
+    calculate_target_params,
+    resize_image,
+    optimize_image,
+)
 
 
 @pytest.mark.asyncio
@@ -30,7 +34,7 @@ async def test_read_file_text_file(app, synced_files):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_file("test/text-resource")
+    response = await read_content("test/text-resource")
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -51,7 +55,7 @@ async def test_read_file_image_file(app, synced_files):
     image_path = synced_files["image"].name
 
     # Read it as a resource
-    response = await read_file(image_path)
+    response = await read_content(image_path)
 
     assert response["type"] == "image"
     assert response["source"]["type"] == "base64"
@@ -79,7 +83,7 @@ async def test_read_file_pdf_file(app, synced_files):
     pdf_path = synced_files["pdf"].name
 
     # Read it as a resource
-    response = await read_file(pdf_path)
+    response = await read_content(pdf_path)
 
     assert response["type"] == "document"
     assert response["source"]["type"] == "base64"
@@ -95,7 +99,7 @@ async def test_read_file_pdf_file(app, synced_files):
 async def test_read_file_not_found(app):
     """Test trying to read a non-existent"""
     with pytest.raises(ToolError, match="Resource not found"):
-        await read_file("does-not-exist")
+        await read_content("does-not-exist")
 
 
 @pytest.mark.asyncio
@@ -110,7 +114,7 @@ async def test_read_file_memory_url(app, synced_files):
 
     # Read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    response = await read_file(memory_url)
+    response = await read_content(memory_url)
 
     assert response["type"] == "text"
     assert "Testing memory:// URL handling for resources" in response["text"]
@@ -174,7 +178,7 @@ async def test_image_conversion(app, synced_files):
     image_path = synced_files["image"].name
 
     # Test reading the resource
-    response = await read_file(image_path)
+    response = await read_content(image_path)
 
     assert response["type"] == "image"
     assert response["source"]["media_type"] == "image/jpeg"
