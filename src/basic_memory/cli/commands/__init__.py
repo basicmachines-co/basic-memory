@@ -12,6 +12,6 @@ __all__ = [
     "import_claude_conversations",
     "import_claude_projects",
     "import_chatgpt",
-    "tool.py",
+    "tool",
     "project",
 ]

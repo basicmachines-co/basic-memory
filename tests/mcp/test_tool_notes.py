@@ -3,7 +3,6 @@
 from textwrap import dedent
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import write_note, read_note, delete_note
 
@@ -154,7 +153,6 @@ async def test_write_note_update_existing(app):
     )
 
 
-
 @pytest.mark.asyncio
 async def test_delete_note_existing(app):
     """Test deleting a new note.
@@ -231,4 +229,3 @@ async def test_write_note_verbose(app):
         """).strip()
         in result
     )
-

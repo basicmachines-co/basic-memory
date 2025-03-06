@@ -3,7 +3,6 @@
 from textwrap import dedent
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import write_note, read_note
 
@@ -31,6 +30,7 @@ async def mock_search():
         # Default to empty results
         mock.return_value = SearchResponse(results=[], current_page=1, page_size=1)
         yield mock
+
 
 @pytest.mark.asyncio
 async def test_read_note_by_title(app):
