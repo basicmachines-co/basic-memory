@@ -131,3 +131,41 @@ of using AI just for code generation, we've developed a true collaborative workf
 
 This approach has allowed us to tackle more complex challenges and build a more robust system than either humans or AI
 could achieve independently.
+
+## GitHub Integration
+
+Basic Memory has taken AI-Human collaboration to the next level by integrating Claude directly into the development workflow through GitHub:
+
+### GitHub MCP Tools
+
+Using the GitHub Model Context Protocol server, Claude can now:
+
+- **Repository Management**:
+  - View repository files and structure
+  - Read file contents
+  - Create new branches
+  - Create and update files
+
+- **Issue Management**:
+  - Create new issues
+  - Comment on existing issues
+  - Close and update issues
+  - Search across issues
+
+- **Pull Request Workflow**:
+  - Create pull requests
+  - Review code changes
+  - Add comments to PRs
+
+This integration enables Claude to participate as a full team member in the development process, not just as a code generation tool. Claude's GitHub account ([bm-claudeai](https://github.com/bm-claudeai)) is a member of the Basic Machines organization with direct contributor access to the codebase.
+
+### Collaborative Development Process
+
+With GitHub integration, the development workflow includes:
+
+1. **Direct code review** - Claude can analyze PRs and provide detailed feedback
+2. **Contribution tracking** - All of Claude's contributions are properly attributed in the Git history
+3. **Branch management** - Claude can create feature branches for implementations
+4. **Documentation maintenance** - Claude can keep documentation updated as the code evolves
+
+This level of integration represents a new paradigm in AI-human collaboration, where the AI assistant becomes a full-fledged team member rather than just a tool for generating code snippets.
