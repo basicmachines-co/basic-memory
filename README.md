@@ -50,7 +50,7 @@ You can view shared context via files in `~/basic-memory` (default directory loc
 
 ### Alternative Installation via Smithery
 
-For a simpler installation experience, you can use [Smithery](https://smithery.ai/server/@basicmachines-co/basic-memory) to automatically configure Basic Memory for Claude Desktop:
+You can use [Smithery](https://smithery.ai/server/@basicmachines-co/basic-memory) to automatically configure Basic Memory for Claude Desktop:
 
 ```bash
 npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
