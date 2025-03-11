@@ -5,6 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://github.com/basicmachines-co/basic-memory/workflows/Tests/badge.svg)](https://github.com/basicmachines-co/basic-memory/actions)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
 
 Basic Memory lets you build persistent knowledge through natural conversations with Large Language Models (LLMs) like
 Claude, while keeping everything in simple Markdown files on your computer. It uses the Model Context Protocol (MCP) to
@@ -47,7 +48,19 @@ uv install basic-memory
 
 You can view shared context via files in `~/basic-memory` (default directory location).
 
-You can also install the cli tools to sync files or manage projects.
+### Alternative Installation via Smithery
+
+For a simpler installation experience, you can use [Smithery](https://smithery.ai/server/@basicmachines-co/basic-memory) to automatically configure Basic Memory for Claude Desktop:
+
+```bash
+npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
+```
+
+This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. The Smithery server hosts the MCP server component, while your data remains stored locally as Markdown files.
+
+### CLI Tools
+
+You can also install the CLI tools to sync files or manage projects.
 
 ```bash 
 uv tool install basic-memory
