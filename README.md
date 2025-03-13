@@ -1,11 +1,17 @@
-# Basic Memory
-
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![PyPI version](https://badge.fury.io/py/basic-memory.svg)](https://badge.fury.io/py/basic-memory)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://github.com/basicmachines-co/basic-memory/workflows/Tests/badge.svg)](https://github.com/basicmachines-co/basic-memory/actions)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
+
+## Glama.ai
+
+<a href="https://glama.ai/mcp/servers/o90kttu9ym">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/o90kttu9ym/badge" alt="basic-memory MCP server" />
+</a>
+
+# Basic Memory
 
 Basic Memory lets you build persistent knowledge through natural conversations with Large Language Models (LLMs) like
 Claude, while keeping everything in simple Markdown files on your computer. It uses the Model Context Protocol (MCP) to
@@ -24,7 +30,7 @@ incorporate human edits made directly to knowledge files.
 
 ```bash
 # Install with uv (recommended)
-uv install basic-memory
+uv tool install basic-memory
 
 # Configure Claude Desktop (edit ~/Library/Application Support/Claude/claude_desktop_config.json)
 # Add this to your config:
@@ -50,13 +56,15 @@ You can view shared context via files in `~/basic-memory` (default directory loc
 
 ### Alternative Installation via Smithery
 
-You can use [Smithery](https://smithery.ai/server/@basicmachines-co/basic-memory) to automatically configure Basic Memory for Claude Desktop:
+You can use [Smithery](https://smithery.ai/server/@basicmachines-co/basic-memory) to automatically configure Basic
+Memory for Claude Desktop:
 
 ```bash
 npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
 ```
 
-This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. The Smithery server hosts the MCP server component, while your data remains stored locally as Markdown files.
+This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. The
+Smithery server hosts the MCP server component, while your data remains stored locally as Markdown files.
 
 ### CLI Tools
 
@@ -85,7 +93,7 @@ basic-memory project list
 └────────┴──────────────────────────────────────────────────┴─────────┴────────┘
 ```
 
-Basic Memory will write notes in Markdown format. Open you project directory in your text editor to view project files
+Basic Memory will write notes in Markdown format. Open your project directory in your text editor to view project files
 while you have conversations with an LLM.
 
 ## Why Basic Memory?
@@ -219,7 +227,7 @@ Following relation 'requires [[Proper Grinding Technique]]':
 Each related document can lead to more context, building a rich semantic understanding of your knowledge base. All of
 this context comes from standard Markdown files that both humans and LLMs can read and write.
 
-Every time the LLM writes notes,they are saved in local Markdown files that you can:
+Every time the LLM writes notes, they are saved in local Markdown files that you can:
 
 - Edit in any text editor
 - Version via git
@@ -260,7 +268,7 @@ permalink: <a uri slug>
 
 Observations are facts about a topic.
 They can be added by creating a Markdown list with a special format that can reference a `category`, `tags` using a
-"#" charactor, and an optional `context`.
+"#" character, and an optional `context`.
 
 Observation Markdown format:
 
