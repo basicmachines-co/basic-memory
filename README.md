@@ -7,6 +7,10 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
 
+<a href="https://glama.ai/mcp/servers/o90kttu9ym">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/o90kttu9ym/badge" alt="basic-memory MCP server" />
+</a>
+
 Basic Memory lets you build persistent knowledge through natural conversations with Large Language Models (LLMs) like
 Claude, while keeping everything in simple Markdown files on your computer. It uses the Model Context Protocol (MCP) to
 enable any compatible LLM to read and write to your local knowledge base.
@@ -85,7 +89,7 @@ basic-memory project list
 └────────┴──────────────────────────────────────────────────┴─────────┴────────┘
 ```
 
-Basic Memory will write notes in Markdown format. Open you project directory in your text editor to view project files
+Basic Memory will write notes in Markdown format. Open your project directory in your text editor to view project files
 while you have conversations with an LLM.
 
 ## Why Basic Memory?
@@ -219,7 +223,7 @@ Following relation 'requires [[Proper Grinding Technique]]':
 Each related document can lead to more context, building a rich semantic understanding of your knowledge base. All of
 this context comes from standard Markdown files that both humans and LLMs can read and write.
 
-Every time the LLM writes notes,they are saved in local Markdown files that you can:
+Every time the LLM writes notes, they are saved in local Markdown files that you can:
 
 - Edit in any text editor
 - Version via git
@@ -260,7 +264,7 @@ permalink: <a uri slug>
 
 Observations are facts about a topic.
 They can be added by creating a Markdown list with a special format that can reference a `category`, `tags` using a
-"#" charactor, and an optional `context`.
+"#" character, and an optional `context`.
 
 Observation Markdown format:
 
