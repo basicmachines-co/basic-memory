@@ -5,15 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set
 
+from basic_memory.config import ProjectConfig
+from basic_memory.services.file_service import FileService
+from basic_memory.sync.sync_service import SyncService
 from loguru import logger
 from pydantic import BaseModel
 from rich.console import Console
 from watchfiles import awatch
 from watchfiles.main import FileChange, Change
-
-from basic_memory.config import ProjectConfig
-from basic_memory.services.file_service import FileService
-from basic_memory.sync.sync_service import SyncService
 
 WATCH_STATUS_JSON = "watch-status.json"
 
@@ -138,6 +137,10 @@ class WatchService:
             if part.startswith("."):
                 return False
 
+        # Skip temp files used in atomic operations
+        if path.endswith(".tmp"):
+            return False
+
         return True
 
     async def write_status(self):
@@ -161,6 +164,11 @@ class WatchService:
         for change, path in changes:
             # convert to relative path
             relative_path = str(Path(path).relative_to(directory))
+
+            # Skip .tmp files - they're temporary and shouldn't be synced
+            if relative_path.endswith(".tmp"):
+                continue
+
             if change == Change.added:
                 adds.append(relative_path)
             elif change == Change.deleted:
@@ -184,8 +192,8 @@ class WatchService:
             # We don't need to process directories, only the files inside them
             # This prevents errors when trying to compute checksums or read directories as files
             added_full_path = directory / added_path
-            if added_full_path.is_dir():
-                logger.debug("Skipping directory for move detection", path=added_path)
+            if not added_full_path.exists() or added_full_path.is_dir():
+                logger.debug("Skipping non-existent or directory path", path=added_path)
                 processed.add(added_path)
                 continue
 
@@ -247,10 +255,12 @@ class WatchService:
             if path not in processed:
                 # Skip directories - only process files
                 full_path = directory / path
-                if full_path.is_dir():  # pragma: no cover
-                    logger.debug("Skipping directory", path=path)
-                    processed.add(path)
-                    continue
+                if not full_path.exists() or full_path.is_dir():
+                    logger.debug(
+                        "Skipping non-existent or directory path", path=path
+                    )  # pragma: no cover
+                    processed.add(path)  # pragma: no cover
+                    continue  # pragma: no cover
 
                 logger.debug("Processing new file", path=path)
                 entity, checksum = await self.sync_service.sync_file(path, new=True)
@@ -281,8 +291,8 @@ class WatchService:
             if path not in processed:
                 # Skip directories - only process files
                 full_path = directory / path
-                if full_path.is_dir():
-                    logger.debug("Skipping directory", path=path)
+                if not full_path.exists() or full_path.is_dir():
+                    logger.debug("Skipping non-existent or directory path", path=path)
                     processed.add(path)
                     continue
 
