@@ -85,7 +85,7 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     temp_path = path_obj.with_suffix(".tmp")
 
     try:
-        temp_path.write_text(content)
+        temp_path.write_text(content, encoding="utf-8")
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
@@ -203,7 +203,7 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         path_obj = Path(path) if isinstance(path, str) else path
 
         # Read current content
-        content = path_obj.read_text()
+        content = path_obj.read_text(encoding="utf-8")
 
         # Parse current frontmatter
         current_fm = {}
@@ -215,7 +215,7 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         new_fm = {**current_fm, **updates}
 
         # Write new file with updated frontmatter
-        yaml_fm = yaml.dump(new_fm, sort_keys=False)
+        yaml_fm = yaml.dump(new_fm, sort_keys=False, allow_unicode=True)
         final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
 
         logger.debug("Updating frontmatter", path=str(path_obj), update_keys=list(updates.keys()))

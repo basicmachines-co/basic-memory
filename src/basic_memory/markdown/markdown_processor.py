@@ -83,7 +83,7 @@ class MarkdownProcessor:
         """
         # Dirty check if needed
         if expected_checksum is not None:
-            current_content = path.read_text()
+            current_content = path.read_text(encoding="utf-8")
             current_checksum = await file_utils.compute_checksum(current_content)
             if current_checksum != expected_checksum:
                 raise DirtyFileError(f"File {path} has been modified")

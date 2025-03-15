@@ -5,12 +5,11 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
+import basic_memory
+from basic_memory.utils import setup_logging
 from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-import basic_memory
-from basic_memory.utils import setup_logging
 
 DATABASE_NAME = "memory.db"
 DATA_DIR_NAME = ".basic-memory"
@@ -111,7 +110,7 @@ class ConfigManager:
         """Load configuration from file or create default."""
         if self.config_file.exists():
             try:
-                data = json.loads(self.config_file.read_text())
+                data = json.loads(self.config_file.read_text(encoding="utf-8"))
                 return BasicMemoryConfig(**data)
             except Exception as e:
                 logger.error(f"Failed to load config: {e}")

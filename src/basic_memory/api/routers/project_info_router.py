@@ -3,9 +3,6 @@
 import json
 from datetime import datetime
 
-from fastapi import APIRouter
-from sqlalchemy import text
-
 from basic_memory.config import config, config_manager
 from basic_memory.deps import (
     ProjectInfoRepositoryDep,
@@ -18,6 +15,8 @@ from basic_memory.schemas import (
     SystemStatus,
 )
 from basic_memory.sync.watch_service import WATCH_STATUS_JSON
+from fastapi import APIRouter
+from sqlalchemy import text
 
 router = APIRouter(prefix="/stats", tags=["statistics"])
 
@@ -262,7 +261,7 @@ async def get_system_status() -> SystemStatus:
     watch_status_path = config.home / ".basic-memory" / WATCH_STATUS_JSON
     if watch_status_path.exists():
         try:
-            watch_status = json.loads(watch_status_path.read_text())
+            watch_status = json.loads(watch_status_path.read_text(encoding="utf-8"))
         except Exception:  # pragma: no cover
             pass
 

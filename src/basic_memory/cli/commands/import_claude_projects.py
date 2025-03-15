@@ -6,15 +6,14 @@ from pathlib import Path
 from typing import Dict, Any, Annotated, Optional
 
 import typer
-from loguru import logger
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-
 from basic_memory.cli.app import claude_app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter
+from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 console = Console()
 
@@ -103,7 +102,7 @@ async def process_projects_json(
         read_task = progress.add_task("Reading project data...", total=None)
 
         # Read project data
-        data = json.loads(json_path.read_text())
+        data = json.loads(json_path.read_text(encoding="utf-8"))
         progress.update(read_task, total=len(data))
 
         # Track import counts

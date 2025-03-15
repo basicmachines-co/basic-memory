@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from loguru import logger
-
 from basic_memory.mcp.server import mcp
+from loguru import logger
 
 
 @mcp.resource(
@@ -20,7 +19,9 @@ def ai_assistant_guide() -> str:
         A focused guide on Basic Memory usage.
     """
     logger.info("Loading AI assistant guide resource")
-    guide_doc = Path(__file__).parent.parent.parent.parent.parent / "static" / "ai_assistant_guide.md"
-    content = guide_doc.read_text()
+    guide_doc = (
+        Path(__file__).parent.parent.parent.parent.parent / "static" / "ai_assistant_guide.md"
+    )
+    content = guide_doc.read_text(encoding="utf-8")
     logger.info(f"Loaded AI assistant guide ({len(content)} chars)")
     return content

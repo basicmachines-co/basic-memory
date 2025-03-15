@@ -5,8 +5,6 @@ from os import stat_result
 from pathlib import Path
 from typing import Any, Dict, Tuple, Union
 
-from loguru import logger
-
 from basic_memory import file_utils
 from basic_memory.file_utils import FileError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -14,6 +12,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.utils import FilePath
+from loguru import logger
 
 
 class FileService:
@@ -171,8 +170,7 @@ class FileService:
 
         try:
             logger.debug("Reading file", operation="read_file", path=str(full_path))
-
-            content = full_path.read_text()
+            content = full_path.read_text(encoding="utf-8")
             checksum = await file_utils.compute_checksum(content)
 
             logger.debug(
@@ -236,7 +234,7 @@ class FileService:
         try:
             if self.is_markdown(path):
                 # read str
-                content = full_path.read_text()
+                content = full_path.read_text(encoding="utf-8")
             else:
                 # read bytes
                 content = full_path.read_bytes()

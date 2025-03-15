@@ -7,15 +7,14 @@ from pathlib import Path
 from typing import Dict, Any, List, Annotated
 
 import typer
-from loguru import logger
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
-
 from basic_memory.cli.app import claude_app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter
+from loguru import logger
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 
 console = Console()
 
@@ -124,7 +123,7 @@ async def process_conversations_json(
         read_task = progress.add_task("Reading chat data...", total=None)
 
         # Read chat data - handle array of arrays format
-        data = json.loads(json_path.read_text())
+        data = json.loads(json_path.read_text(encoding="utf-8"))
         conversations = [chat for chat in data]
         progress.update(read_task, total=len(conversations))
 
