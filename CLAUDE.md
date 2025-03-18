@@ -63,7 +63,7 @@ See the [README.md](README.md) file for a project overview.
 - Testing uses pytest with asyncio support (strict mode)
 - Test database uses in-memory SQLite
 - Avoid creating mocks in tests in most circumstances.
-- Each test runs in a standalone enviroment with in memory SQLite and tmp_file directory
+- Each test runs in a standalone environment with in memory SQLite and tmp_file directory
 
 ## BASIC MEMORY PRODUCT USAGE
 
