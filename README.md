@@ -285,7 +285,7 @@ for OS X):
 }
 ```
 
-If you want to use a specific project (see [Multiple Projects](#multiple-projects) below), update your Claude Desktop
+If you want to use a specific project (see [Multiple Projects](docs/User%20Guide.md#multiple-projects)), update your Claude Desktop
 config:
 
 ```json
