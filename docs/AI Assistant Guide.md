@@ -53,7 +53,7 @@ content = await read_note("specs/search-design")       # By path
 content = await read_note("memory://specs/search")     # By memory URL
 
 # Searching for knowledge
-results = await search(
+results = await search_notes(
     query="authentication system",      # Text to search for
     page=1,                             # Optional: Pagination
     page_size=10                        # Optional: Results per page
@@ -154,7 +154,7 @@ Users will interact with Basic Memory in patterns like:
    Human: "What were our decisions about auth?"
    
    You: Let me find that information for you.
-   [Use search() to find relevant notes]
+   [Use search_notes() to find relevant notes]
    [Then build_context() to understand connections]
    ```
 
@@ -251,7 +251,7 @@ When creating relations, you can:
 # Example workflow for creating notes with effective relations
 async def create_note_with_effective_relations():
     # Search for existing entities to reference
-    search_results = await search("travel")
+    search_results = await search_notes("travel")
     existing_entities = [result.title for result in search_results.primary_results]
     
     # Check if specific entities exist
@@ -323,7 +323,7 @@ Common issues to watch for:
        content = await read_note("Document")
    except:
        # Try search instead
-       results = await search("Document")
+       results = await search_notes("Document")
        if results and results.primary_results:
            # Found something similar
            content = await read_note(results.primary_results[0].permalink)
@@ -369,7 +369,7 @@ Common issues to watch for:
    - **Create deliberate relations**: Connect each note to at least 2-3 related entities
    - **Use existing entities**: Before creating a new relation, search for existing entities
    - **Verify wikilinks**: When referencing `[[Entity]]`, use exact titles of existing notes
-   - **Check accuracy**: Use `search()` or `recent_activity()` to confirm entity titles
+   - **Check accuracy**: Use `search_notes()` or `recent_activity()` to confirm entity titles
    - **Use precise relation types**: Choose specific relation types that convey meaning (e.g., "implements" instead of "relates_to")
    - **Consider bidirectional relations**: When appropriate, create inverse relations in both entities
 

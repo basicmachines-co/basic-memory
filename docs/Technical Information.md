@@ -196,7 +196,7 @@ flowchart TD
     end
     
     BMCP <-->|"write_note() read_note()"| KnowledgeFiles
-    BMCP <-->|"search() build_context()"| KnowledgeIndex
+    BMCP <-->|"search_notes() build_context()"| KnowledgeIndex
     KnowledgeFiles <-.->|Sync Process| KnowledgeIndex
     KnowledgeFiles <-->|Direct Editing| Editors((Text Editors & Git))
     

@@ -285,7 +285,8 @@ for OS X):
 }
 ```
 
-If you want to use a specific project (see [Multiple Projects](docs/User%20Guide.md#multiple-projects)), update your Claude Desktop
+If you want to use a specific project (see [Multiple Projects](docs/User%20Guide.md#multiple-projects)), update your
+Claude Desktop
 config:
 
 ```json
@@ -320,7 +321,7 @@ basic-memory sync --watch
 write_note(title, content, folder, tags) - Create or update notes
 read_note(identifier, page, page_size) - Read notes by title or permalink
 build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
-search(query, page, page_size) - Search across your knowledge base
+search_notes(query, page, page_size) - Search across your knowledge base
 recent_activity(type, depth, timeframe) - Find recently updated information
 canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 ```

@@ -107,7 +107,7 @@ See the [README.md](README.md) file for a project overview.
       1d", "1 week")
 
   **Search & Discovery:**
-    - `search(query, page, page_size)` - Full-text search across all content with filtering options
+    - `search_notes(query, page, page_size)` - Full-text search across all content with filtering options
 
   **Visualization:**
     - `canvas(nodes, edges, title, folder)` - Generate Obsidian canvas files for knowledge graph visualization
@@ -115,7 +115,7 @@ See the [README.md](README.md) file for a project overview.
 - MCP Prompts for better AI interaction:
     - `ai_assistant_guide()` - Guidance on effectively using Basic Memory tools for AI assistants
     - `continue_conversation(topic, timeframe)` - Continue previous conversations with relevant historical context
-    - `search(query, after_date)` - Search with detailed, formatted results for better context understanding
+    - `search_notes(query, after_date)` - Search with detailed, formatted results for better context understanding
     - `recent_activity(timeframe)` - View recently changed items with formatted output
     - `json_canvas_spec()` - Full JSON Canvas specification for Obsidian visualization
 
