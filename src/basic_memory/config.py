@@ -5,11 +5,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
-import basic_memory
-from basic_memory.utils import setup_logging
 from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+import basic_memory
+from basic_memory.utils import setup_logging
 
 DATABASE_NAME = "memory.db"
 DATA_DIR_NAME = ".basic-memory"
@@ -213,11 +214,45 @@ user_home = Path.home()
 log_dir = user_home / DATA_DIR_NAME
 log_dir.mkdir(parents=True, exist_ok=True)
 
-setup_logging(
-    env=config.env,
-    home_dir=user_home,  # Use user home for logs
-    log_level=config.log_level,
-    log_file=f"{DATA_DIR_NAME}/basic-memory.log",
-    console=False,
-)
-logger.info(f"Starting Basic Memory {basic_memory.__version__} (Project: {config.project})")
+
+def get_process_name():  # pragma: no cover
+    """
+    get the type of process for logging
+    """
+    import sys
+
+    if "sync" in sys.argv:
+        return "sync"
+    elif "mcp" in sys.argv:
+        return "mcp"
+    else:
+        return "cli"
+
+
+process_name = get_process_name()
+
+# Global flag to track if logging has been set up
+_LOGGING_SETUP = False
+
+def setup_basic_memory_logging():  # pragma: no cover
+    """Set up logging for basic-memory, ensuring it only happens once."""
+    global _LOGGING_SETUP
+    if _LOGGING_SETUP:
+        # We can't log before logging is set up
+        # print("Skipping duplicate logging setup")
+        return
+
+    setup_logging(
+        env=config.env,
+        home_dir=user_home,  # Use user home for logs
+        log_level=config.log_level,
+        log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",
+        console=False,
+    )
+
+    logger.info(f"Starting Basic Memory {basic_memory.__version__} (Project: {config.project})")
+    _LOGGING_SETUP = True
+
+
+# Set up logging
+setup_basic_memory_logging()
