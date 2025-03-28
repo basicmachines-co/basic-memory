@@ -1,7 +1,8 @@
 version = 1
+revision = 1
 requires-python = ">=3.12.1"
 resolution-markers = [
-    "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (platform_machine == 'aarch64' and sys_platform != 'linux') or (platform_machine == 'armv7l' and sys_platform != 'linux') or (platform_machine == 'i686' and sys_platform != 'linux') or (platform_machine == 'ppc64le' and sys_platform != 'linux') or (platform_machine == 's390x' and sys_platform != 'linux') or (platform_machine == 'x86_64' and sys_platform != 'linux')",
+    "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or sys_platform != 'linux'",
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
     "platform_machine == 'i686' and sys_platform == 'linux'",
     "platform_machine == 'aarch64' and sys_platform == 'linux'",
@@ -70,7 +71,7 @@ wheels = [
 
 [[package]]
 name = "basic-memory"
-version = "0.10.0"
+version = "0.10.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -170,7 +171,7 @@ name = "cffi"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (platform_machine == 'aarch64' and sys_platform != 'linux') or (platform_machine == 'armv7l' and sys_platform != 'linux') or (platform_machine == 'i686' and sys_platform != 'linux') or (platform_machine == 'ppc64le' and sys_platform != 'linux') or (platform_machine == 's390x' and sys_platform != 'linux') or (platform_machine == 'x86_64' and sys_platform != 'linux')" },
+    { name = "pycparser", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or sys_platform != 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fc/97/c783634659c2920c3fc70419e3af40972dbaf758daa229a7d6ea6135c90d/cffi-1.17.1.tar.gz", hash = "sha256:1c39c6016c32bc48dd54561950ebd6836e1670f2ae46128f67cf49e789c52824", size = 516621 }
 wheels = [
@@ -185,7 +186,7 @@ name = "click"
 version = "8.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "platform_system == 'Windows'" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b9/2e/0090cbf739cee7d23781ad4b89a9894a41538e4fcf4c31dcdd705b78eb8b/click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a", size = 226593 }
 wheels = [
@@ -309,8 +310,8 @@ name = "dmgbuild"
 version = "1.6.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ds-store", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (platform_machine == 'aarch64' and sys_platform != 'linux') or (platform_machine == 'armv7l' and sys_platform != 'linux') or (platform_machine == 'i686' and sys_platform != 'linux') or (platform_machine == 'ppc64le' and sys_platform != 'linux') or (platform_machine == 's390x' and sys_platform != 'linux') or (platform_machine == 'x86_64' and sys_platform != 'linux')" },
-    { name = "mac-alias", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (platform_machine == 'aarch64' and sys_platform != 'linux') or (platform_machine == 'armv7l' and sys_platform != 'linux') or (platform_machine == 'i686' and sys_platform != 'linux') or (platform_machine == 'ppc64le' and sys_platform != 'linux') or (platform_machine == 's390x' and sys_platform != 'linux') or (platform_machine == 'x86_64' and sys_platform != 'linux')" },
+    { name = "ds-store", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or sys_platform != 'linux'" },
+    { name = "mac-alias", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or sys_platform != 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/16/93/b9702c68d5dedfd6b91c76268a89091ff681b8e3b9a026e7919b6ab730a4/dmgbuild-1.6.5.tar.gz", hash = "sha256:c5cbeec574bad84a324348aa7c36d4aada04568c99fb104dec18d22ba3259f45", size = 36848 }
 wheels = [
@@ -331,7 +332,7 @@ name = "ds-store"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "mac-alias", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or (platform_machine == 'aarch64' and sys_platform != 'linux') or (platform_machine == 'armv7l' and sys_platform != 'linux') or (platform_machine == 'i686' and sys_platform != 'linux') or (platform_machine == 'ppc64le' and sys_platform != 'linux') or (platform_machine == 's390x' and sys_platform != 'linux') or (platform_machine == 'x86_64' and sys_platform != 'linux')" },
+    { name = "mac-alias", marker = "(platform_machine != 'aarch64' and platform_machine != 'armv7l' and platform_machine != 'i686' and platform_machine != 'ppc64le' and platform_machine != 's390x' and platform_machine != 'x86_64') or sys_platform != 'linux'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/7c/36/902259bf7ddb142dd91cf7a9794aa15e1a8ab985974f90375e5d3463b441/ds_store-1.3.1.tar.gz", hash = "sha256:c27d413caf13c19acb85d75da4752673f1f38267f9eb6ba81b3b5aa99c2d207c", size = 27052 }
 wheels = [
@@ -818,7 +819,7 @@ email = [
     { name = "email-validator" },
 ]
 timezone = [
-    { name = "tzdata", marker = "platform_system == 'Windows'" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [[package]]
@@ -1308,7 +1309,7 @@ name = "tzlocal"
 version = "5.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "tzdata", marker = "platform_system == 'Windows'" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761 }
 wheels = [

@@ -14,7 +14,7 @@ from basic_memory.mcp.prompts.utils import format_prompt_context, PromptContext,
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
-from basic_memory.mcp.tools.search import search
+from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import GraphContext
 from basic_memory.schemas.search import SearchQuery, SearchItemType
@@ -47,7 +47,7 @@ async def continue_conversation(
 
     # If topic provided, search for it
     if topic:
-        search_results = await search(
+        search_results = await search_notes(
             SearchQuery(text=topic, after_date=timeframe, types=[SearchItemType.ENTITY])
         )
 
@@ -93,7 +93,7 @@ async def continue_conversation(
         ## Next Steps
 
         You can:
-        - Explore more with: `search({{"text": "{topic}"}})`
+        - Explore more with: `search_notes({{"text": "{topic}"}})`
         - See what's changed: `recent_activity(timeframe="{timeframe or "7d"}")`
         - **Record new learnings or decisions from this conversation:** `write_note(title="[Create a meaningful title]", content="[Content with observations and relations]")`
         

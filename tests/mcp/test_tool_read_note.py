@@ -26,7 +26,7 @@ async def mock_call_get():
 @pytest_asyncio.fixture
 async def mock_search():
     """Mock for search tool."""
-    with patch("basic_memory.mcp.tools.read_note.search") as mock:
+    with patch("basic_memory.mcp.tools.read_note.search_notes") as mock:
         # Default to empty results
         mock.return_value = SearchResponse(results=[], current_page=1, page_size=1)
         yield mock

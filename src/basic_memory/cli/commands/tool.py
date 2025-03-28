@@ -12,7 +12,7 @@ from basic_memory.cli.app import app
 from basic_memory.mcp.tools import build_context as mcp_build_context
 from basic_memory.mcp.tools import read_note as mcp_read_note
 from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
-from basic_memory.mcp.tools import search as mcp_search
+from basic_memory.mcp.tools import search_notes as mcp_search
 from basic_memory.mcp.tools import write_note as mcp_write_note
 
 # Import prompts
@@ -180,8 +180,8 @@ def recent_activity(
         raise
 
 
-@tool_app.command()
-def search(
+@tool_app.command("search-notes")
+def search_notes(
     query: str,
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,

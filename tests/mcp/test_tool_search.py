@@ -4,7 +4,7 @@ import pytest
 from datetime import datetime, timedelta
 
 from basic_memory.mcp.tools import write_note
-from basic_memory.mcp.tools.search import search
+from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 
 
@@ -22,7 +22,7 @@ async def test_search_basic(client):
 
     # Search for it
     query = SearchQuery(text="searchable")
-    response = await search(query)
+    response = await search_notes(query)
 
     # Verify results
     assert len(response.results) > 0
@@ -43,7 +43,7 @@ async def test_search_pagination(client):
 
     # Search for it
     query = SearchQuery(text="searchable")
-    response = await search(query, page=1, page_size=1)
+    response = await search_notes(query, page=1, page_size=1)
 
     # Verify results
     assert len(response.results) == 1
@@ -62,7 +62,7 @@ async def test_search_with_type_filter(client):
 
     # Search with type filter
     query = SearchQuery(text="type", types=[SearchItemType.ENTITY])
-    response = await search(query)
+    response = await search_notes(query)
 
     # Verify all results are entities
     assert all(r.type == "entity" for r in response.results)
@@ -81,7 +81,7 @@ async def test_search_with_date_filter(client):
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
     query = SearchQuery(text="recent", after_date=one_hour_ago)
-    response = await search(query)
+    response = await search_notes(query)
 
     # Verify we get results within timeframe
     assert len(response.results) > 0

@@ -10,7 +10,7 @@ from loguru import logger
 from pydantic import Field
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.search import search as search_tool
+from basic_memory.mcp.tools.search import search_notes as search_tool
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.search import SearchQuery, SearchResponse
 
@@ -144,9 +144,9 @@ def format_search_results(
         ## Next Steps
         
         You can:
-        - Refine your search: `search("{query} AND additional_term")`
-        - Exclude terms: `search("{query} NOT exclude_term")`
-        - View more results: `search("{query}", after_date=None)`
+        - Refine your search: `search_notes("{query} AND additional_term")`
+        - Exclude terms: `search_notes("{query} NOT exclude_term")`
+        - View more results: `search_notes("{query}", after_date=None)`
         - Check recent activity: `recent_activity()`
         
         ## Synthesize and Capture Knowledge

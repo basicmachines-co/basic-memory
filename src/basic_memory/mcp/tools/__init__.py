@@ -12,7 +12,7 @@ from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
-from basic_memory.mcp.tools.search import search
+from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.canvas import canvas
 
 __all__ = [
@@ -22,6 +22,6 @@ __all__ = [
     "read_content",
     "read_note",
     "recent_activity",
-    "search",
+    "search_notes",
     "write_note",
 ]

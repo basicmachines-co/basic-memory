@@ -211,7 +211,7 @@ def test_search_basic(cli_env, setup_test_note):
     """Test basic search command."""
     result = runner.invoke(
         tool_app,
-        ["search", "test observation"],
+        ["search-notes", "test observation"],
     )
     assert result.exit_code == 0
 
@@ -235,7 +235,7 @@ def test_search_permalink(cli_env, setup_test_note):
 
     result = runner.invoke(
         tool_app,
-        ["search", permalink, "--permalink"],
+        ["search-notes", permalink, "--permalink"],
     )
     assert result.exit_code == 0
 

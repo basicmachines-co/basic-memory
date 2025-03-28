@@ -6,7 +6,7 @@ from loguru import logger
 
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.search import search
+from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.schemas.search import SearchQuery
@@ -63,7 +63,7 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
 
     # Fallback 1: Try title search via API
     logger.info(f"Search title for: {identifier}")
-    title_results = await search(SearchQuery(title=identifier))
+    title_results = await search_notes(SearchQuery(title=identifier))
 
     if title_results and title_results.results:
         result = title_results.results[0]  # Get the first/best match
@@ -87,7 +87,7 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
 
     # Fallback 2: Text search as a last resort
     logger.info(f"Title search failed, trying text search for: {identifier}")
-    text_results = await search(SearchQuery(text=identifier))
+    text_results = await search_notes(SearchQuery(text=identifier))
 
     # We didn't find a direct match, construct a helpful error message
     if not text_results or not text_results.results:
