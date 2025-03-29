@@ -40,6 +40,7 @@ Documentation = "https://github.com/basicmachines-co/basic-memory#readme"
 
 [project.scripts]
 basic-memory = "basic_memory.cli.main:app"
+bm = "basic_memory.cli.main:app"
 
 [build-system]
 requires = ["hatchling"]
