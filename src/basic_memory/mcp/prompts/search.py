@@ -40,7 +40,7 @@ async def search_prompt(
     """
     logger.info(f"Searching knowledge base, query: {query}, timeframe: {timeframe}")
 
-    search_results = await search_tool(SearchQuery(text=query, after_date=timeframe))
+    search_results = await search_tool(query=query, after_date=timeframe)
     return format_search_results(query, search_results, timeframe)
 
 

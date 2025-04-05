@@ -21,8 +21,7 @@ async def test_search_basic(client):
     assert result
 
     # Search for it
-    query = SearchQuery(text="searchable")
-    response = await search_notes(query)
+    response = await search_notes(query="searchable")
 
     # Verify results
     assert len(response.results) > 0
@@ -42,8 +41,7 @@ async def test_search_pagination(client):
     assert result
 
     # Search for it
-    query = SearchQuery(text="searchable")
-    response = await search_notes(query, page=1, page_size=1)
+    response = await search_notes(query="searchable", page=1, page_size=1)
 
     # Verify results
     assert len(response.results) == 1
@@ -61,8 +59,7 @@ async def test_search_with_type_filter(client):
     )
 
     # Search with type filter
-    query = SearchQuery(text="type", types=[SearchItemType.ENTITY])
-    response = await search_notes(query)
+    response = await search_notes(query="type", types=["entity"])
 
     # Verify all results are entities
     assert all(r.type == "entity" for r in response.results)
@@ -80,8 +77,7 @@ async def test_search_with_date_filter(client):
 
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
-    query = SearchQuery(text="recent", after_date=one_hour_ago)
-    response = await search_notes(query)
+    response = await search_notes(query="recent", after_date=one_hour_ago.isoformat())
 
     # Verify we get results within timeframe
     assert len(response.results) > 0

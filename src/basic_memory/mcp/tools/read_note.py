@@ -63,7 +63,7 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
 
     # Fallback 1: Try title search via API
     logger.info(f"Search title for: {identifier}")
-    title_results = await search_notes(SearchQuery(title=identifier))
+    title_results = await search_notes(query=identifier, search_type="title")
 
     if title_results and title_results.results:
         result = title_results.results[0]  # Get the first/best match
@@ -87,7 +87,7 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
 
     # Fallback 2: Text search as a last resort
     logger.info(f"Title search failed, trying text search for: {identifier}")
-    text_results = await search_notes(SearchQuery(text=identifier))
+    text_results = await search_notes(query=identifier, search_type="text")
 
     # We didn't find a direct match, construct a helpful error message
     if not text_results or not text_results.results:
