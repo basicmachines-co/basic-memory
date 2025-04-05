@@ -362,18 +362,25 @@ class SyncService:
         # Update relations and search index
         entity = await self.entity_service.update_entity_relations(path, entity_markdown)
 
+        # After updating relations, we need to compute the checksum again
+        # This is necessary for files with wikilinks to ensure consistent checksums
+        # after relation processing is complete
+        final_checksum = await self.file_service.compute_checksum(path)
+        
         # set checksum
-        await self.entity_repository.update(entity.id, {"checksum": checksum})
-
+        await self.entity_repository.update(entity.id, {"checksum": final_checksum})
+        
         logger.debug(
             "Markdown sync completed",
             path=path,
             entity_id=entity.id,
             observation_count=len(entity.observations),
             relation_count=len(entity.relations),
+            checksum=final_checksum,
         )
-
-        return entity, checksum
+        
+        # Return the final checksum to ensure everything is consistent
+        return entity, final_checksum
 
     async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a non-markdown file with basic tracking.
