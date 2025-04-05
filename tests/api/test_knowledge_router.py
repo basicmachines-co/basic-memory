@@ -251,7 +251,7 @@ async def test_entity_indexing(client: AsyncClient):
 
     # Verify it's searchable
     search_response = await client.post(
-        "/search/", json={"text": "search", "types": [SearchItemType.ENTITY.value]}
+        "/search/", json={"text": "search", "entity_types": [SearchItemType.ENTITY.value]}
     )
     assert search_response.status_code == 200
     search_result = SearchResponse.model_validate(search_response.json())
@@ -279,7 +279,7 @@ async def test_entity_delete_indexing(client: AsyncClient):
 
     # Verify it's initially searchable
     search_response = await client.post(
-        "/search/", json={"text": "delete", "types": [SearchItemType.ENTITY.value]}
+        "/search/", json={"text": "delete", "entity_types": [SearchItemType.ENTITY.value]}
     )
     search_result = SearchResponse.model_validate(search_response.json())
     assert len(search_result.results) == 1
@@ -475,7 +475,7 @@ async def test_update_entity_search_index(client: AsyncClient):
 
     # Search should find new content
     search_response = await client.post(
-        "/search/", json={"text": "sphinx marker", "types": [SearchItemType.ENTITY.value]}
+        "/search/", json={"text": "sphinx marker", "entity_types": [SearchItemType.ENTITY.value]}
     )
     results = search_response.json()["results"]
     assert len(results) == 1

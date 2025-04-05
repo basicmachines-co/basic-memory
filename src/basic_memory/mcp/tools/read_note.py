@@ -9,7 +9,6 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.memory import memory_url_path
-from basic_memory.schemas.search import SearchQuery
 
 
 @mcp.tool(

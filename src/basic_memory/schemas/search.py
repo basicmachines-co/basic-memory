@@ -49,8 +49,8 @@ class SearchQuery(BaseModel):
     title: Optional[str] = None  # title only search
 
     # Optional filters
-    types: Optional[List[SearchItemType]] = None  # Filter by item type
-    entity_types: Optional[List[str]] = None  # Filter by entity type
+    types: Optional[List[str]] = None  # Filter by type
+    entity_types: Optional[List[SearchItemType]] = None  # Filter by entity type
     after_date: Optional[Union[datetime, str]] = None  # Time-based filter
 
     @field_validator("after_date")

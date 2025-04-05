@@ -5,19 +5,19 @@ providing context from previous interactions to maintain continuity.
 """
 
 from textwrap import dedent
-from typing import Optional, Annotated
+from typing import Annotated, Optional
 
 from loguru import logger
 from pydantic import Field
 
-from basic_memory.mcp.prompts.utils import format_prompt_context, PromptContext, PromptContextItem
+from basic_memory.mcp.prompts.utils import PromptContext, PromptContextItem, format_prompt_context
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import GraphContext
-from basic_memory.schemas.search import SearchQuery, SearchItemType
+from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.prompt(
@@ -48,7 +48,7 @@ async def continue_conversation(
     # If topic provided, search for it
     if topic:
         search_results = await search_notes(
-            SearchQuery(text=topic, after_date=timeframe, types=[SearchItemType.ENTITY])
+            query=topic, after_date=timeframe, entity_types=[SearchItemType.ENTITY]
         )
 
         # Build context from results

@@ -48,11 +48,11 @@ async def test_search_basic_pagination(client, indexed_entity):
 
 
 @pytest.mark.asyncio
-async def test_search_with_type_filter(client, indexed_entity):
+async def test_search_with_entity_type_filter(client, indexed_entity):
     """Test search with type filter."""
     # Should find with correct type
     response = await client.post(
-        "/search/", json={"text": "test", "types": [SearchItemType.ENTITY.value]}
+        "/search/", json={"text": "test", "entity_types": [SearchItemType.ENTITY.value]}
     )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
@@ -60,7 +60,7 @@ async def test_search_with_type_filter(client, indexed_entity):
 
     # Should find with relation type
     response = await client.post(
-        "/search/", json={"text": "test", "types": [SearchItemType.RELATION.value]}
+        "/search/", json={"text": "test", "entity_types": [SearchItemType.RELATION.value]}
     )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
@@ -68,16 +68,16 @@ async def test_search_with_type_filter(client, indexed_entity):
 
 
 @pytest.mark.asyncio
-async def test_search_with_entity_type_filter(client, indexed_entity):
+async def test_search_with_type_filter(client, indexed_entity):
     """Test search with entity type filter."""
     # Should find with correct entity type
-    response = await client.post("/search/", json={"text": "test", "entity_types": ["test"]})
+    response = await client.post("/search/", json={"text": "test", "types": ["test"]})
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 1
 
     # Should not find with wrong entity type
-    response = await client.post("/search/", json={"text": "test", "entity_types": ["note"]})
+    response = await client.post("/search/", json={"text": "test", "types": ["note"]})
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 0
@@ -153,8 +153,8 @@ async def test_multiple_filters(client, indexed_entity):
         "/search/",
         json={
             "text": "test",
-            "types": [SearchItemType.ENTITY.value],
-            "entity_types": ["test"],
+            "entity_types": [SearchItemType.ENTITY.value],
+            "types": ["test"],
             "after_date": datetime(2020, 1, 1, tzinfo=timezone.utc).isoformat(),
         },
     )

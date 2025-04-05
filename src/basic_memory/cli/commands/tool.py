@@ -2,31 +2,29 @@
 
 import asyncio
 import sys
-from typing import Optional, List, Annotated
+from typing import Annotated, List, Optional
 
 import typer
 from loguru import logger
 from rich import print as rprint
 
 from basic_memory.cli.app import app
-from basic_memory.mcp.tools import build_context as mcp_build_context
-from basic_memory.mcp.tools import read_note as mcp_read_note
-from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
-from basic_memory.mcp.tools import search_notes as mcp_search
-from basic_memory.mcp.tools import write_note as mcp_write_note
 
 # Import prompts
 from basic_memory.mcp.prompts.continue_conversation import (
     continue_conversation as mcp_continue_conversation,
 )
-
 from basic_memory.mcp.prompts.recent_activity import (
     recent_activity_prompt as recent_activity_prompt,
 )
-
+from basic_memory.mcp.tools import build_context as mcp_build_context
+from basic_memory.mcp.tools import read_note as mcp_read_note
+from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
+from basic_memory.mcp.tools import search_notes as mcp_search
+from basic_memory.mcp.tools import write_note as mcp_write_note
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import MemoryUrl
-from basic_memory.schemas.search import SearchQuery, SearchItemType
+from basic_memory.schemas.search import SearchItemType
 
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
@@ -198,13 +196,28 @@ def search_notes(
         raise typer.Abort()
 
     try:
-        search_query = SearchQuery(
-            permalink_match=query if permalink else None,
-            text=query if not (permalink or title) else None,
-            title=query if title else None,
-            after_date=after_date,
+        if permalink and title:  # pragma: no cover
+            typer.echo(
+                "Use either --permalink or --title, not both. Exiting.",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        # set search type
+        search_type = ("permalink" if permalink else None,)
+        search_type = ("permalink_match" if permalink and "*" in query else None,)
+        search_type = ("title" if title else None,)
+        search_type = "text" if search_type is None else search_type
+
+        results = asyncio.run(
+            mcp_search(
+                query,
+                search_type=search_type,
+                page=page,
+                after_date=after_date,
+                page_size=page_size,
+            )
         )
-        results = asyncio.run(mcp_search(query=search_query, page=page, page_size=page_size))
         # Use json module for more controlled serialization
         import json
 

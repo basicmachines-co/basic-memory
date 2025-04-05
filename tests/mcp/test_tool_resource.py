@@ -41,6 +41,7 @@ async def test_read_file_text_file(app, synced_files):
     assert response["content_type"].startswith("text/")
     assert response["encoding"] == "utf-8"
 
+
 @pytest.mark.asyncio
 async def test_read_content_file_path(app, synced_files):
     """Test reading a text file.

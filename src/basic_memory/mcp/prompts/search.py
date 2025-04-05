@@ -12,7 +12,7 @@ from pydantic import Field
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes as search_tool
 from basic_memory.schemas.base import TimeFrame
-from basic_memory.schemas.search import SearchQuery, SearchResponse
+from basic_memory.schemas.search import SearchResponse
 
 
 @mcp.prompt(

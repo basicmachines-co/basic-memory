@@ -75,7 +75,7 @@ async def test_search_permalink_wildcard2(search_service, test_graph):
 async def test_search_text(search_service, test_graph):
     """Full-text search"""
     results = await search_service.search(
-        SearchQuery(text="Root Entity", types=[SearchItemType.ENTITY])
+        SearchQuery(text="Root Entity", entity_types=[SearchItemType.ENTITY])
     )
     assert len(results) >= 1
     assert results[0].permalink == "test/root"
@@ -84,7 +84,9 @@ async def test_search_text(search_service, test_graph):
 @pytest.mark.asyncio
 async def test_search_title(search_service, test_graph):
     """Title only search"""
-    results = await search_service.search(SearchQuery(title="Root", types=[SearchItemType.ENTITY]))
+    results = await search_service.search(
+        SearchQuery(title="Root", entity_types=[SearchItemType.ENTITY])
+    )
     assert len(results) >= 1
     assert results[0].permalink == "test/root"
 
@@ -140,7 +142,7 @@ async def test_filters(search_service, test_graph):
     """Test search filters."""
     # Combined filters
     results = await search_service.search(
-        SearchQuery(text="Deep", types=[SearchItemType.ENTITY], entity_types=["deep"])
+        SearchQuery(text="Deep", entity_types=[SearchItemType.ENTITY], types=["deep"])
     )
     assert len(results) == 1
     for r in results:
@@ -179,13 +181,18 @@ async def test_search_type(search_service, test_graph):
     """Test search filters."""
 
     # Should find only type
-    results = await search_service.search(SearchQuery(types=[SearchItemType.ENTITY]))
+    results = await search_service.search(SearchQuery(types=["test"]))
     assert len(results) > 0
     for r in results:
         assert r.type == SearchItemType.ENTITY
 
-    # Should find only types passed in
-    results = await search_service.search(SearchQuery(types=[SearchItemType.ENTITY]))
+
+@pytest.mark.asyncio
+async def test_search_entity_type(search_service, test_graph):
+    """Test search filters."""
+
+    # Should find only type
+    results = await search_service.search(SearchQuery(entity_types=[SearchItemType.ENTITY]))
     assert len(results) > 0
     for r in results:
         assert r.type == SearchItemType.ENTITY

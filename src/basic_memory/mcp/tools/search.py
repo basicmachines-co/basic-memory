@@ -1,20 +1,21 @@
 """Search tools for Basic Memory MCP server."""
 
-from typing import Optional, List
+from typing import List, Optional
+
 from loguru import logger
 
+from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
-from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchItemType
-from basic_memory.mcp.async_client import client
+from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
 
 @mcp.tool(
     description="Search across all content in the knowledge base.",
 )
 async def search_notes(
-    query: str, 
-    page: int = 1, 
+    query: str,
+    page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
     types: Optional[List[str]] = None,
@@ -31,9 +32,9 @@ async def search_notes(
         query: The search query string
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
-        search_type: Type of search to perform, one of: "text", "title", "permalink", "permalink_match" (default: "text")
-        types: Optional list of content types to search (e.g., ["entity", "observation"])
-        entity_types: Optional list of entity types to filter by (e.g., ["note", "person"])
+        search_type: Type of search to perform, one of: "text", "title", "permalink" (default: "text")
+        types: Optional list of note types to search (e.g., ["note", "person"])
+        entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d")
 
     Returns:
@@ -61,6 +62,12 @@ async def search_notes(
             types=["entity"],
         )
 
+        # Search with entity type filter, e.g., note vs
+        results = await search_notes(
+            query="meeting notes",
+            types=["entity"],
+        )
+
         # Search for recent content
         results = await search_notes(
             query="bug report",
@@ -70,32 +77,32 @@ async def search_notes(
         # Pattern matching on permalinks
         results = await search_notes(
             query="docs/meeting-*",
-            search_type="permalink_match"
+            search_type="permalink"
         )
     """
     # Create a SearchQuery object based on the parameters
     search_query = SearchQuery()
-    
+
     # Set the appropriate search field based on search_type
     if search_type == "text":
         search_query.text = query
     elif search_type == "title":
         search_query.title = query
+    elif search_type == "permalink" and "*" in query:
+        search_query.permalink_match = query
     elif search_type == "permalink":
         search_query.permalink = query
-    elif search_type == "permalink_match":
-        search_query.permalink_match = query
     else:
         search_query.text = query  # Default to text search
-    
+
     # Add optional filters if provided
-    if types:
-        search_query.types = [SearchItemType(t) for t in types]
     if entity_types:
-        search_query.entity_types = entity_types
+        search_query.entity_types = [SearchItemType(t) for t in entity_types]
+    if types:
+        search_query.types = types
     if after_date:
         search_query.after_date = after_date
-    
+
     logger.info(f"Searching for {search_query}")
     response = await call_post(
         client,
