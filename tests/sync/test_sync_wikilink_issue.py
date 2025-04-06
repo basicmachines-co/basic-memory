@@ -49,7 +49,7 @@ type: note
 This is the target file.
 """
     target_file_path = project_dir / "another_file.md"
-    await create_test_file(target_file_path, content)
+    await create_test_file(target_file_path, target_content)
 
     # Sync again after adding target file
     report3 = await sync_service.sync(test_config.home, show_progress=False)

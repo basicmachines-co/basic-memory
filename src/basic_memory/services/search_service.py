@@ -193,7 +193,7 @@ class SearchService:
 
         if entity.permalink:
             content_stems.extend(self._generate_variants(entity.permalink))
-        
+
         content_stems.extend(self._generate_variants(entity.file_path))
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())

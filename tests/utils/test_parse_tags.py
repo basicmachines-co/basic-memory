@@ -32,9 +32,7 @@ from basic_memory.utils import parse_tags
         (" #tag1 , ##tag2 ", ["tag1", "tag2"]),
     ],
 )
-def test_parse_tags(
-    input_tags: Union[List[str], str, None], expected: List[str]
-) -> None:
+def test_parse_tags(input_tags: Union[List[str], str, None], expected: List[str]) -> None:
     """Test tag parsing with various input formats."""
     result = parse_tags(input_tags)
     assert result == expected
@@ -42,6 +40,7 @@ def test_parse_tags(
 
 def test_parse_tags_special_case() -> None:
     """Test parsing from non-string, non-list types."""
+
     # Test with custom object that has __str__ method
     class TagObject:
         def __str__(self) -> str:

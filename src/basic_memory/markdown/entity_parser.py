@@ -94,15 +94,18 @@ class EntityParser:
 
         # TODO move to api endpoint to check if absolute path was requested
         # Check if the path is already absolute
-        if isinstance(path, Path) and path.is_absolute() or (isinstance(path, str) and Path(path).is_absolute()):
+        if (
+            isinstance(path, Path)
+            and path.is_absolute()
+            or (isinstance(path, str) and Path(path).is_absolute())
+        ):
             absolute_path = Path(path)
         else:
             absolute_path = self.base_path / path
-            
+
         # Parse frontmatter and content using python-frontmatter
         file_content = absolute_path.read_text()
         return await self.parse_file_content(absolute_path, file_content)
-
 
     async def parse_file_content(self, absolute_path, file_content):
         post = frontmatter.loads(file_content)

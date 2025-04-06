@@ -234,13 +234,13 @@ async def test_parse_file_with_absolute_path(test_config, entity_parser):
     # Create a test file in the project directory
     test_file = test_config.home / "absolute_path_test.md"
     test_file.write_text(content)
-    
+
     # Get the absolute path to the test file
     absolute_path = test_file.resolve()
-    
+
     # Parse the file using the absolute path
     entity = await entity_parser.parse_file(absolute_path)
-    
+
     # Verify the file was parsed correctly
     assert entity.frontmatter.permalink == "absolute_path_test"
     assert "Absolute Path Test" in entity.content

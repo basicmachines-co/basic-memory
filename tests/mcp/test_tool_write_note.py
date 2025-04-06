@@ -312,8 +312,7 @@ async def test_write_note_preserves_custom_metadata(app, test_config):
     )
 
     # Verify the update was successful
-    assert ("Updated note\n"
-            "file_path: test/Custom Metadata Note.md") in result
+    assert ("Updated note\nfile_path: test/Custom Metadata Note.md") in result
 
     # Read the note back and check if custom frontmatter is preserved
     content = await read_note("test/custom-metadata-note")

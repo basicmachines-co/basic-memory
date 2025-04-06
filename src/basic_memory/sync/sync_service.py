@@ -488,16 +488,17 @@ class SyncService:
 
             # If configured, also update permalink to match new path
             if self.config.update_permalinks_on_move:
-                
                 # generate new permalink value
                 new_permalink = await self.entity_service.resolve_permalink(new_path)
-                
+
                 # write to file and get new checksum
-                new_checksum = await self.file_service.update_frontmatter(new_path, {"permalink": new_permalink})
-                
+                new_checksum = await self.file_service.update_frontmatter(
+                    new_path, {"permalink": new_permalink}
+                )
+
                 updates["permalink"] = new_permalink
                 updates["checksum"] = new_checksum
-                
+
                 logger.info(
                     "Updating permalink on move",
                     old_permalink=entity.permalink,

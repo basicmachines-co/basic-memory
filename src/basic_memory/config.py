@@ -42,7 +42,7 @@ class ProjectConfig(BaseSettings):
 
     update_permalinks_on_move: bool = Field(
         default=False,
-        description="Whether to update permalinks when files are moved or renamed. default (False)"
+        description="Whether to update permalinks when files are moved or renamed. default (False)",
     )
 
     model_config = SettingsConfigDict(

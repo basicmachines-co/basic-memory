@@ -138,9 +138,9 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
 
     Returns:
         A list of tag strings, or an empty list if no tags
-    
+
     Note:
-        This function strips leading '#' characters from tags to prevent 
+        This function strips leading '#' characters from tags to prevent
         their accumulation when tags are processed multiple times.
     """
     if tags is None:
@@ -149,12 +149,12 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     # Process list of tags
     if isinstance(tags, list):
         # First strip whitespace, then strip leading '#' characters to prevent accumulation
-        return [tag.strip().lstrip('#') for tag in tags if tag and tag.strip()]
+        return [tag.strip().lstrip("#") for tag in tags if tag and tag.strip()]
 
     # Process comma-separated string of tags
     if isinstance(tags, str):
         # Split by comma, strip whitespace, then strip leading '#' characters
-        return [tag.strip().lstrip('#') for tag in tags.split(",") if tag and tag.strip()]
+        return [tag.strip().lstrip("#") for tag in tags.split(",") if tag and tag.strip()]
 
     # For any other type, try to convert to string and parse
     try:  # pragma: no cover

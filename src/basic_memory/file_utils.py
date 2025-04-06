@@ -106,7 +106,7 @@ def has_frontmatter(content: str) -> bool:
     """
     if not content:
         return False
-    
+
     content = content.strip()
     if not content.startswith("---"):
         return False
