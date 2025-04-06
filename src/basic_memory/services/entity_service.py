@@ -110,10 +110,9 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
             )
 
-        # Get unique permalink if schema contains a permalink value
-        if schema.permalink:
-            permalink = await self.resolve_permalink(schema.permalink or file_path)
-            schema._permalink = permalink
+        # Get unique permalink
+        permalink = await self.resolve_permalink(schema.permalink or file_path)
+        schema._permalink = permalink
 
         post = await schema_to_markdown(schema)
 
@@ -233,12 +232,6 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
         model = entity_model_from_markdown(file_path, markdown)
-
-        # Only create permalink if file has explicit frontmatter
-        has_explicit_frontmatter = bool(markdown.frontmatter.metadata) and len(markdown.frontmatter.metadata) > 0
-        if not has_explicit_frontmatter:
-            model.permalink = None
-            logger.debug(f"Skipping permalink generation for file without frontmatter: {file_path}")
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None

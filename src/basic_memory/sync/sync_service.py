@@ -12,6 +12,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import config
+from basic_memory.file_utils import has_frontmatter
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -330,36 +331,40 @@ class SyncService:
         """
         # Parse markdown first to get any existing permalink
         logger.debug("Parsing markdown file", path=path)
+        
+        file_path = self.entity_parser.base_path / path
+        file_content = file_path.read_text()
+        file_contains_frontmatter = has_frontmatter(file_content)
+        
+        # entity markdown will always contain front matter, so it can be used up create/update the entity
         entity_markdown = await self.entity_parser.parse_file(path)
 
-        # Resolve permalink - this handles all the cases including conflicts
-        permalink = await self.entity_service.resolve_permalink(path, markdown=entity_markdown)
-
-        # If permalink changed, update the file
-        if permalink != entity_markdown.frontmatter.permalink:
-            logger.info(
-                "Updating permalink",
-                path=path,
-                old_permalink=entity_markdown.frontmatter.permalink,
-                new_permalink=permalink,
-            )
-
-            entity_markdown.frontmatter.metadata["permalink"] = permalink
-            checksum = await self.file_service.update_frontmatter(path, {"permalink": permalink})
-        else:
-            checksum = await self.file_service.compute_checksum(path)
+        # if the file contains frontmatter, resolve a permalink
+        if file_contains_frontmatter:
+            # Resolve permalink - this handles all the cases including conflicts
+            permalink = await self.entity_service.resolve_permalink(path, markdown=entity_markdown)
+    
+            # If permalink changed, update the file
+            if permalink != entity_markdown.frontmatter.permalink:
+                logger.info(
+                    "Updating permalink",
+                    path=path,
+                    old_permalink=entity_markdown.frontmatter.permalink,
+                    new_permalink=permalink,
+                )
+    
+                entity_markdown.frontmatter.metadata["permalink"] = permalink
+                await self.file_service.update_frontmatter(path, {"permalink": permalink})
 
         # if the file is new, create an entity
         if new:
             # Create entity with final permalink
-            logger.debug("Creating new entity from markdown", path=path, permalink=permalink)
-
+            logger.debug("Creating new entity from markdown", path=path)
             await self.entity_service.create_entity_from_markdown(Path(path), entity_markdown)
 
         # otherwise we need to update the entity and observations
         else:
-            logger.debug("Updating entity from markdown", path=path, permalink=permalink)
-
+            logger.debug("Updating entity from markdown", path=path)
             await self.entity_service.update_entity_and_observations(Path(path), entity_markdown)
 
         # Update relations and search index

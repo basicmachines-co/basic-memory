@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
@@ -763,8 +764,28 @@ async def test_sync_permalink_resolved_on_update(
 
     one_file = project_dir / "one.md"
     two_file = project_dir / "two.md"
-    await create_test_file(one_file)
-    await create_test_file(two_file)
+    await create_test_file(
+        one_file,
+        content=dedent(
+            """
+            ---
+            permalink: one
+            ---
+            test content
+            """
+            ),
+    )
+    await create_test_file(
+        two_file,
+        content=dedent(
+            """
+            ---
+            permalink: two
+            ---
+            test content
+            """
+            ),
+    )
 
     # Run sync
     await sync_service.sync(test_config.home, show_progress=False)
@@ -816,6 +837,26 @@ test content
     # Should have deduplicated permalink
     new_file_content, _ = await file_service.read_file(new_file)
     assert "permalink: one-1" in new_file_content
+
+
+@pytest.mark.asyncio
+async def test_sync_permalink_not_created_if_no_frontmatter(
+    sync_service: SyncService,
+    test_config: ProjectConfig,
+    file_service: FileService,
+):
+    """Test that sync resolves permalink conflicts on update."""
+    project_dir = test_config.home
+
+    file = project_dir / "one.md"
+    await create_test_file(file)
+
+    # Run sync
+    await sync_service.sync(test_config.home, show_progress=False)
+
+    # Check permalink not created
+    file_content, _ = await file_service.read_file(file)
+    assert "permalink:" not in file_content
 
 
 @pytest.mark.asyncio

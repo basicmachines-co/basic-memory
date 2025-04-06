@@ -181,17 +181,6 @@ class SearchService:
         Each type gets its own row in the search index with appropriate metadata.
         """
 
-        if entity.permalink is None:  # pragma: no cover
-            logger.error(
-                "Missing permalink for markdown entity",
-                entity_id=entity.id,
-                title=entity.title,
-                file_path=entity.file_path,
-            )
-            raise ValueError(
-                f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})"
-            )
-
         content_stems = []
         content_snippet = ""
         title_variants = self._generate_variants(entity.title)
@@ -202,21 +191,12 @@ class SearchService:
             content_stems.append(content)
             content_snippet = f"{content[:250]}"
 
-        content_stems.extend(self._generate_variants(entity.permalink))
+        if entity.permalink:
+            content_stems.extend(self._generate_variants(entity.permalink))
+        
         content_stems.extend(self._generate_variants(entity.file_path))
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
-
-        if entity.permalink is None:  # pragma: no cover
-            logger.error(
-                "Missing permalink for markdown entity",
-                entity_id=entity.id,
-                title=entity.title,
-                file_path=entity.file_path,
-            )
-            raise ValueError(
-                f"Entity permalink should not be None for markdown entity: {entity.id} ({entity.title})"
-            )
 
         # Index entity
         await self.repository.index_item(
