@@ -70,6 +70,7 @@ async def get_sync_service():  # pragma: no cover
 
     # Create sync service
     sync_service = SyncService(
+        config=config,
         entity_service=entity_service,
         entity_parser=entity_parser,
         entity_repository=entity_repository,

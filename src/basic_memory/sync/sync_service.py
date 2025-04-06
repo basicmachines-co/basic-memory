@@ -11,7 +11,7 @@ from typing import Dict, Optional, Set, Tuple
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from basic_memory.config import config
+from basic_memory.config import ProjectConfig
 from basic_memory.file_utils import has_frontmatter
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
@@ -20,8 +20,6 @@ from basic_memory.services import EntityService, FileService
 from basic_memory.services.search_service import SearchService
 import time
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
-
-from basic_memory.utils import generate_permalink
 
 
 @dataclass
@@ -69,6 +67,7 @@ class SyncService:
 
     def __init__(
         self,
+        config: ProjectConfig,
         entity_service: EntityService,
         entity_parser: EntityParser,
         entity_repository: EntityRepository,
@@ -76,6 +75,7 @@ class SyncService:
         search_service: SearchService,
         file_service: FileService,
     ):
+        self.config = config
         self.entity_service = entity_service
         self.entity_parser = entity_parser
         self.entity_repository = entity_repository
@@ -331,11 +331,11 @@ class SyncService:
         """
         # Parse markdown first to get any existing permalink
         logger.debug("Parsing markdown file", path=path)
-        
+
         file_path = self.entity_parser.base_path / path
         file_content = file_path.read_text()
         file_contains_frontmatter = has_frontmatter(file_content)
-        
+
         # entity markdown will always contain front matter, so it can be used up create/update the entity
         entity_markdown = await self.entity_parser.parse_file(path)
 
@@ -343,7 +343,7 @@ class SyncService:
         if file_contains_frontmatter:
             # Resolve permalink - this handles all the cases including conflicts
             permalink = await self.entity_service.resolve_permalink(path, markdown=entity_markdown)
-    
+
             # If permalink changed, update the file
             if permalink != entity_markdown.frontmatter.permalink:
                 logger.info(
@@ -352,7 +352,7 @@ class SyncService:
                     old_permalink=entity_markdown.frontmatter.permalink,
                     new_permalink=permalink,
                 )
-    
+
                 entity_markdown.frontmatter.metadata["permalink"] = permalink
                 await self.file_service.update_frontmatter(path, {"permalink": permalink})
 
@@ -374,10 +374,10 @@ class SyncService:
         # This is necessary for files with wikilinks to ensure consistent checksums
         # after relation processing is complete
         final_checksum = await self.file_service.compute_checksum(path)
-        
+
         # set checksum
         await self.entity_repository.update(entity.id, {"checksum": final_checksum})
-        
+
         logger.debug(
             "Markdown sync completed",
             path=path,
@@ -386,7 +386,7 @@ class SyncService:
             relation_count=len(entity.relations),
             checksum=final_checksum,
         )
-        
+
         # Return the final checksum to ensure everything is consistent
         return entity, final_checksum
 
@@ -487,13 +487,22 @@ class SyncService:
             updates = {"file_path": new_path}
 
             # If configured, also update permalink to match new path
-            if config.update_permalinks_on_move:
-                new_permalink = self.entity_service.resolve_permalink(new_path)
+            if self.config.update_permalinks_on_move:
+                
+                # generate new permalink value
+                new_permalink = await self.entity_service.resolve_permalink(new_path)
+                
+                # write to file and get new checksum
+                new_checksum = await self.file_service.update_frontmatter(new_path, {"permalink": new_permalink})
+                
                 updates["permalink"] = new_permalink
+                updates["checksum"] = new_checksum
+                
                 logger.info(
                     "Updating permalink on move",
                     old_permalink=entity.permalink,
-                    new_permalink=new_permalink
+                    new_permalink=new_permalink,
+                    new_checksum=new_checksum,
                 )
 
             updated = await self.entity_repository.update(entity.id, updates)

@@ -1,14 +1,14 @@
 """Common test fixtures."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 from typing import AsyncGenerator
-from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig
@@ -140,6 +140,7 @@ def entity_parser(test_config):
 
 @pytest_asyncio.fixture
 async def sync_service(
+    test_config: ProjectConfig,
     entity_service: EntityService,
     entity_parser: EntityParser,
     entity_repository: EntityRepository,
@@ -149,6 +150,7 @@ async def sync_service(
 ) -> SyncService:
     """Create sync service for testing."""
     return SyncService(
+        config=test_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
         relation_repository=relation_repository,

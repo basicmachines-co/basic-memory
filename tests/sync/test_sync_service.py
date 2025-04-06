@@ -6,6 +6,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+import pytest_asyncio
 
 from basic_memory.config import ProjectConfig
 from basic_memory.models import Entity
@@ -773,7 +774,7 @@ async def test_sync_permalink_resolved_on_update(
             ---
             test content
             """
-            ),
+        ),
     )
     await create_test_file(
         two_file,
@@ -784,7 +785,7 @@ async def test_sync_permalink_resolved_on_update(
             ---
             test content
             """
-            ),
+        ),
     )
 
     # Run sync
@@ -859,49 +860,62 @@ async def test_sync_permalink_not_created_if_no_frontmatter(
     assert "permalink:" not in file_content
 
 
+@pytest_asyncio.fixture
+def test_config_update_permamlinks_on_move(tmp_path) -> ProjectConfig:
+    """Test configuration using in-memory DB."""
+    config = ProjectConfig(
+        project="test-project",
+        update_permalinks_on_move=True,
+    )
+    config.home = tmp_path
+
+    (tmp_path / config.home.name).mkdir(parents=True, exist_ok=True)
+    return config
+
+
 @pytest.mark.asyncio
-async def test_sync_duplicate_observations(
+async def test_sync_permalink_updated_on_move(
+    test_config_update_permamlinks_on_move: ProjectConfig,
     sync_service: SyncService,
-    test_config: ProjectConfig,
     file_service: FileService,
 ):
-    """Test that sync resolves permalink conflicts on update."""
+    """Test that we update a permalink on a file move if set in config ."""
+    test_config = test_config_update_permamlinks_on_move
     project_dir = test_config.home
+    sync_service.config = test_config
 
-    content = """
----
-title: a note
-type: note
-tags: []
----
+    # Create initial file
+    content = dedent(
+        """
+        ---
+        type: knowledge
+        ---
+        # Test Move
+        Content for move test
+        """
+    )
 
-test content
+    old_path = project_dir / "old" / "test_move.md"
+    old_path.parent.mkdir(parents=True)
+    await create_test_file(old_path, content)
 
-- [note] one observation
-"""
-
-    note_file = project_dir / "note.md"
-    await create_test_file(note_file, content)
-
-    # Run sync
+    # Initial sync
     await sync_service.sync(test_config.home, show_progress=False)
 
-    # Check permalinks
-    file_one_content, _ = await file_service.read_file(note_file)
-    assert (
-        """---
-title: a note
-type: note
-tags: []
-permalink: note
----
+    # verify permalink
+    old_content, _ = await file_service.read_file(old_path)
+    assert "permalink: old/test-move" in old_content
 
-test content
+    # Move the file
+    new_path = project_dir / "new" / "moved_file.md"
+    new_path.parent.mkdir(parents=True)
+    old_path.rename(new_path)
 
-- [note] one observation
-""".strip()
-        == file_one_content
-    )
+    # Sync again
+    await sync_service.sync(test_config.home, show_progress=False)
+
+    file_content, _ = await file_service.read_file(new_path)
+    assert "permalink: new/moved-file" in file_content
 
 
 @pytest.mark.asyncio
