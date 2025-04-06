@@ -315,7 +315,7 @@ class EntityService(BaseService[EntityModel]):
             except IntegrityError:
                 # Unique constraint violation - relation already exists
                 logger.debug(
-                    f"Skipping duplicate relation {rel.type} from {db_entity.permalink} target: {rel.target}, type: {rel.type}"
+                    f"Skipping duplicate relation {rel.type} from {db_entity.permalink} target: {rel.target}"
                 )
                 continue
 
