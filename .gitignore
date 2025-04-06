@@ -48,3 +48,7 @@ ENV/
 /docs/.obsidian/
 /examples/.obsidian/
 /examples/.basic-memory/
+
+
+# claude action
+claude-output
