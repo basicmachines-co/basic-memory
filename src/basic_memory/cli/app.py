@@ -58,9 +58,6 @@ def app_callback(
         config = new_config
 
 
-# Run database migrations
-asyncio.run(db.run_migrations(config))
-
 # Register sub-command groups
 import_app = typer.Typer(help="Import data from various sources")
 app.add_typer(import_app, name="import")
