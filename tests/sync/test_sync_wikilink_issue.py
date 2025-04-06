@@ -1,0 +1,62 @@
+"""Test for issue #72 - notes with wikilinks staying in modified status."""
+
+import pytest
+from pathlib import Path
+
+from basic_memory.sync.sync_service import SyncService
+
+
+async def create_test_file(path: Path, content: str) -> None:
+    """Create a test file with given content."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+
+@pytest.mark.asyncio
+async def test_wikilink_modified_status_issue(sync_service: SyncService, test_config):
+    """Test that files with wikilinks don't remain in modified status after sync."""
+    project_dir = test_config.home
+
+    # Create a file with a wikilink
+    content = """---
+title: Test Wikilink
+type: note
+---
+# Test File
+
+This file contains a wikilink to [[another-file]].
+"""
+    test_file_path = project_dir / "test_wikilink.md"
+    await create_test_file(test_file_path, content)
+
+    # Initial sync
+    report1 = await sync_service.sync(test_config.home, show_progress=False)
+    assert "test_wikilink.md" in report1.new
+    assert "test_wikilink.md" not in report1.modified
+
+    # Sync again without changing the file - should not be modified
+    report2 = await sync_service.sync(test_config.home, show_progress=False)
+    assert "test_wikilink.md" not in report2.new
+    assert "test_wikilink.md" not in report2.modified
+
+    # Create the target file
+    target_content = """---
+title: Another File
+type: note
+---
+# Another File
+
+This is the target file.
+"""
+    target_file_path = project_dir / "another_file.md"
+    await create_test_file(target_file_path, content)
+
+    # Sync again after adding target file
+    report3 = await sync_service.sync(test_config.home, show_progress=False)
+    assert "another_file.md" in report3.new
+    assert "test_wikilink.md" not in report3.modified
+
+    # Sync one more time - both files should now be stable
+    report4 = await sync_service.sync(test_config.home, show_progress=False)
+    assert "test_wikilink.md" not in report4.modified
+    assert "another_file.md" not in report4.modified
