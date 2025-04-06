@@ -14,9 +14,7 @@ from basic_memory.config import config_manager
 from basic_memory.sync import SyncService, WatchService
 
 
-async def run_background_sync(
-    sync_service: SyncService, watch_service: WatchService
-):  # pragma: no cover
+async def run_background_sync(sync_service: SyncService, watch_service: WatchService): # pragma: no cover
     logger.info(f"Starting watch service to sync file changes in dir: {project_config.home}")
     # full sync
     await sync_service.sync(project_config.home, show_progress=False)
@@ -33,9 +31,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     # app config
     basic_memory_config = config_manager.load_config()
     logger.info(f"Sync changes enabled: {basic_memory_config.sync_changes}")
-    logger.info(
-        f"Update permalinks on move enabled: {basic_memory_config.update_permalinks_on_move}"
-    )
+    logger.info(f"Update permalinks on move enabled: {basic_memory_config.update_permalinks_on_move}")
 
     watch_task = None
     if basic_memory_config.sync_changes:
@@ -51,6 +47,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         watch_task = asyncio.create_task(run_background_sync(sync_service, watch_service))
     else:
         logger.info("Sync changes disabled. Skipping watch service.")
+
 
     # proceed with startup
     yield
