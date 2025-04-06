@@ -8,7 +8,7 @@ on:
 
 jobs:
   claude-integration:
-    uses: basicmachines-co/claude-code-github-action/.github/workflows/claude-full.yml@v0.10.0
+    uses: basicmachines-co/claude-code-github-action/.github/workflows/claude-full.yml@v0.11.0
     with:
       issue-label: 'claude-fix'  # Optional: customize the trigger label
     secrets:
