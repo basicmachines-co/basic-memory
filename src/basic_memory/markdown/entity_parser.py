@@ -92,7 +92,12 @@ class EntityParser:
     async def parse_file(self, path: Path | str) -> EntityMarkdown:
         """Parse markdown file into EntityMarkdown."""
 
-        absolute_path = self.base_path / path
+        # Check if the path is already absolute
+        if isinstance(path, Path) and path.is_absolute() or (isinstance(path, str) and Path(path).is_absolute()):
+            absolute_path = Path(path)
+        else:
+            absolute_path = self.base_path / path
+            
         # Parse frontmatter and content using python-frontmatter
         post = frontmatter.load(str(absolute_path))
 
