@@ -1,10 +1,6 @@
-import asyncio
 from typing import Optional
 
 import typer
-
-from basic_memory import db
-from basic_memory.config import config
 
 
 def version_callback(value: bool) -> None:

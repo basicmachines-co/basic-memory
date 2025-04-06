@@ -1,5 +1,7 @@
 """Main CLI entry point for basic-memory."""  # pragma: no cover
 
+import asyncio
+
 import typer
 
 from basic_memory.cli.app import app  # pragma: no cover
@@ -17,6 +19,8 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     sync,
     tool,
 )
+from basic_memory.config import config
+from basic_memory.db import run_migrations as db_run_migrations
 
 
 # Version command
@@ -56,9 +60,8 @@ def main(
 
 
 if __name__ == "__main__":  # pragma: no cover
-
     # Run database migrations
-    asyncio.run(db.run_migrations(config))
+    asyncio.run(db_run_migrations(config))
 
     # start the app
     app()
