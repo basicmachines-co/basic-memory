@@ -146,7 +146,9 @@ async def engine_session_factory(
             _session_maker = None
 
 
-async def run_migrations(app_config: ProjectConfig, database_type=DatabaseType.FILESYSTEM):
+async def run_migrations(
+    app_config: ProjectConfig, database_type=DatabaseType.FILESYSTEM
+):  # pragma: no cover
     """Run any pending alembic migrations."""
     logger.info("Running database migrations...")
     try:

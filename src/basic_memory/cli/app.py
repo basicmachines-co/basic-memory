@@ -1,10 +1,6 @@
-import asyncio
 from typing import Optional
 
 import typer
-
-from basic_memory import db
-from basic_memory.config import config
 
 
 def version_callback(value: bool) -> None:
@@ -57,9 +53,6 @@ def app_callback(
 
         config = new_config
 
-
-# Run database migrations
-asyncio.run(db.run_migrations(config))
 
 # Register sub-command groups
 import_app = typer.Typer(help="Import data from various sources")

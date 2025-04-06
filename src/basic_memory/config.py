@@ -38,8 +38,7 @@ class ProjectConfig(BaseSettings):
         default=500, description="Milliseconds to wait after changes before syncing", gt=0
     )
 
-    log_level: str = "DEBUG"
-
+    # update permalinks on move
     update_permalinks_on_move: bool = Field(
         default=False,
         description="Whether to update permalinks when files are moved or renamed. default (False)",
@@ -80,6 +79,18 @@ class BasicMemoryConfig(BaseSettings):
     default_project: str = Field(
         default="main",
         description="Name of the default project to use",
+    )
+
+    log_level: str = "INFO"
+
+    update_permalinks_on_move: bool = Field(
+        default=False,
+        description="Whether to update permalinks when files are moved or renamed. default (False)",
+    )
+
+    sync_changes: bool = Field(
+        default=True,
+        description="Whether to sync changes in real time. default (True)",
     )
 
     model_config = SettingsConfigDict(
@@ -199,9 +210,14 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
         "BASIC_MEMORY_PROJECT", project_name or config_manager.default_project
     )
 
+    update_permalinks_on_move = config_manager.load_config().update_permalinks_on_move
     try:
         project_path = config_manager.get_project_path(actual_project_name)
-        return ProjectConfig(home=project_path, project=actual_project_name)
+        return ProjectConfig(
+            home=project_path,
+            project=actual_project_name,
+            update_permalinks_on_move=update_permalinks_on_move,
+        )
     except ValueError:  # pragma: no cover
         logger.warning(f"Project '{actual_project_name}' not found, using default")
         project_path = config_manager.get_project_path(config_manager.default_project)
@@ -230,8 +246,10 @@ def get_process_name():  # pragma: no cover
         return "sync"
     elif "mcp" in sys.argv:
         return "mcp"
-    else:
+    elif "cli" in sys.argv:
         return "cli"
+    else:
+        return "api"
 
 
 process_name = get_process_name()
@@ -251,7 +269,7 @@ def setup_basic_memory_logging():  # pragma: no cover
     setup_logging(
         env=config.env,
         home_dir=user_home,  # Use user home for logs
-        log_level=config.log_level,
+        log_level=config_manager.load_config().log_level,
         log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",
         console=False,
     )
