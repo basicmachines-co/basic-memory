@@ -43,6 +43,33 @@ async def test_read_file_text_file(app, synced_files):
 
 
 @pytest.mark.asyncio
+async def test_read_content_file_path(app, synced_files):
+    """Test reading a text file.
+
+    Should:
+    - Correctly identify text content
+    - Return the content as text
+    - Include correct metadata
+    """
+    # First create a text file via notes
+    result = await write_note(
+        title="Text Resource",
+        folder="test",
+        content="This is a test text resource",
+        tags=["test", "resource"],
+    )
+    assert result is not None
+
+    # Now read it as a resource
+    response = await read_content("test/Text Resource.md")
+
+    assert response["type"] == "text"
+    assert "This is a test text resource" in response["text"]
+    assert response["content_type"].startswith("text/")
+    assert response["encoding"] == "utf-8"
+
+
+@pytest.mark.asyncio
 async def test_read_file_image_file(app, synced_files):
     """Test reading an image file.
 

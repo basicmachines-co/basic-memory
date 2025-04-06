@@ -46,10 +46,17 @@ class LinkResolver:
             logger.debug(f"Found title match: {entity.title}")
             return entity
 
+        # 3. Try file path
+        found_path = await self.entity_repository.get_by_file_path(clean_text)
+        if found_path:
+            logger.debug(f"Found entity with path: {found_path.file_path}")
+            return found_path
+
+        # search if indicated
         if use_search and "*" not in clean_text:
             # 3. Fall back to search for fuzzy matching on title
             results = await self.search_service.search(
-                query=SearchQuery(title=clean_text, types=[SearchItemType.ENTITY]),
+                query=SearchQuery(title=clean_text, entity_types=[SearchItemType.ENTITY]),
             )
 
             if results:
