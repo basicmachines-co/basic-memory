@@ -32,12 +32,12 @@ def test_search_filters():
     """Test search result filtering."""
     query = SearchQuery(
         text="search",
-        types=[SearchItemType.ENTITY],
-        entity_types=["component"],
+        entity_types=[SearchItemType.ENTITY],
+        types=["component"],
         after_date=datetime(2024, 1, 1),
     )
-    assert query.types == [SearchItemType.ENTITY]
-    assert query.entity_types == ["component"]
+    assert query.entity_types == [SearchItemType.ENTITY]
+    assert query.types == ["component"]
     assert query.after_date == "2024-01-01T00:00:00"
 
 

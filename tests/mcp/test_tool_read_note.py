@@ -201,7 +201,8 @@ async def test_read_note_title_search_fallback(mock_call_get, mock_search):
 
     # Verify title search was used
     mock_search.assert_called_once()
-    assert mock_search.call_args[0][0].title == "Test Note"
+    assert mock_search.call_args[1]["query"] == "Test Note"
+    assert mock_search.call_args[1]["search_type"] == "title"
 
     # Verify second lookup was used
     assert mock_call_get.call_count == 2
@@ -254,8 +255,10 @@ async def test_read_note_text_search_fallback(mock_call_get, mock_search):
 
     # Verify both search types were used
     assert mock_search.call_count == 2
-    assert mock_search.call_args_list[0][0][0].title == "some query"  # Title search
-    assert mock_search.call_args_list[1][0][0].text == "some query"  # Text search
+    assert mock_search.call_args_list[0][1]["query"] == "some query"  # Title search
+    assert mock_search.call_args_list[0][1]["search_type"] == "title"
+    assert mock_search.call_args_list[1][1]["query"] == "some query"  # Text search
+    assert mock_search.call_args_list[1][1]["search_type"] == "text"
 
     # Verify result contains helpful information
     assert "Note Not Found" in result
