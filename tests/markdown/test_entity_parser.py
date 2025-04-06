@@ -217,6 +217,37 @@ def test_parse_empty_content():
     assert len(result.relations) == 0
 
 
+@pytest.mark.asyncio
+async def test_parse_file_with_absolute_path(test_config, entity_parser):
+    """Test parsing a file with an absolute path."""
+    content = dedent("""
+        ---
+        type: component
+        permalink: absolute_path_test
+        ---
+
+        # Absolute Path Test
+        
+        A file with an absolute path.
+        """)
+
+    # Create a test file in the project directory
+    test_file = test_config.home / "absolute_path_test.md"
+    test_file.write_text(content)
+    
+    # Get the absolute path to the test file
+    absolute_path = test_file.resolve()
+    
+    # Parse the file using the absolute path
+    entity = await entity_parser.parse_file(absolute_path)
+    
+    # Verify the file was parsed correctly
+    assert entity.frontmatter.permalink == "absolute_path_test"
+    assert "Absolute Path Test" in entity.content
+    assert entity.created is not None
+    assert entity.modified is not None
+
+
 # @pytest.mark.asyncio
 # async def test_parse_file_invalid_yaml(test_config, entity_parser):
 #     """Test parsing file with invalid YAML frontmatter."""
