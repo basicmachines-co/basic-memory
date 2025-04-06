@@ -330,3 +330,50 @@ async def test_write_note_preserves_custom_metadata(app, test_config):
     # And tags should be updated
     assert "'#test'" in content
     assert "'#updated'" in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_preserves_content_frontmatter(app):
+    """Test creating a new note."""
+    await write_note(
+        title="Test Note",
+        folder="test",
+        content=dedent(
+            """
+            ---
+            title: Test Note
+            type: note
+            version: 1.0 
+            author: name
+            ---
+            # Test
+            
+            This is a test note
+            """
+        ),
+        tags=["test", "documentation"],
+    )
+
+    # Try reading it back via permalink
+    content = await read_note("test/test-note")
+    assert (
+        dedent(
+            """
+            ---
+            title: Test Note
+            type: note
+            permalink: test/test-note
+            version: 1.0
+            author: name
+            tags:
+            - '#test'
+            - '#documentation'
+            ---
+            
+            # Test
+            
+            This is a test note
+            """
+        ).strip()
+        in content
+    )
