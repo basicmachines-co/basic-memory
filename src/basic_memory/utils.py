@@ -148,13 +148,13 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
 
     # Process list of tags
     if isinstance(tags, list):
-        # Strip leading '#' characters from each tag to prevent accumulation
-        return [tag.lstrip('#').strip() for tag in tags if tag and tag.strip()]
+        # First strip whitespace, then strip leading '#' characters to prevent accumulation
+        return [tag.strip().lstrip('#') for tag in tags if tag and tag.strip()]
 
     # Process comma-separated string of tags
     if isinstance(tags, str):
-        # Split by comma and strip leading '#' characters
-        return [tag.lstrip('#').strip() for tag in tags.split(",") if tag and tag.strip()]
+        # Split by comma, strip whitespace, then strip leading '#' characters
+        return [tag.strip().lstrip('#') for tag in tags.split(",") if tag and tag.strip()]
 
     # For any other type, try to convert to string and parse
     try:  # pragma: no cover
