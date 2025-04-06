@@ -88,8 +88,10 @@ async def write_note(
     # Format semantic summary based on status code
     action = "Created" if response.status_code == 201 else "Updated"
     summary = [
-        f"# {action} {result.file_path} ({result.checksum[:8] if result.checksum else 'unknown'})",
+        f"# {action} note",
+        f"file_path: {result.file_path}",
         f"permalink: {result.permalink}",
+        f"checksum: {result.checksum[:8]}",
     ]
 
     # Count observations by category

@@ -26,8 +26,10 @@ async def test_write_note(app):
     assert result
     assert (
         dedent("""
-        # Created test/Test Note.md (159f2168)
+        # Created note
+        file_path: test/Test Note.md
         permalink: test/test-note
+        checksum: 159f2168
         
         ## Tags
         - test, documentation
@@ -63,8 +65,10 @@ async def test_write_note_no_tags(app):
     assert result
     assert (
         dedent("""
-        # Created test/Simple Note.md (9a1ff079)
+        # Created note
+        file_path: test/Simple Note.md
         permalink: test/simple-note
+        checksum: 9a1ff079
         """).strip()
         in result
     )
@@ -104,8 +108,10 @@ async def test_write_note_update_existing(app):
     assert result  # Got a valid permalink
     assert (
         dedent("""
-        # Created test/Test Note.md (159f2168)
+        # Created note
+        file_path: test/Test Note.md
         permalink: test/test-note
+        checksum: 159f2168
         
         ## Tags
         - test, documentation
@@ -121,8 +127,10 @@ async def test_write_note_update_existing(app):
     )
     assert (
         dedent("""
-        # Updated test/Test Note.md (a8eb4d44)
+        # Updated note
+        file_path: test/Test Note.md
         permalink: test/test-note
+        checksum: a8eb4d44
         
         ## Tags
         - test, documentation
@@ -235,8 +243,10 @@ async def test_write_note_verbose(app):
 
     assert (
         dedent("""
-        # Created test/Test Note.md (06873a7a)
+        # Created note
+        file_path: test/Test Note.md
         permalink: test/test-note
+        checksum: 06873a7a
         
         ## Observations
         - note: 1
@@ -302,7 +312,8 @@ async def test_write_note_preserves_custom_metadata(app, test_config):
     )
 
     # Verify the update was successful
-    assert "Updated test/Custom Metadata Note.md" in result
+    assert ("Updated note\n"
+            "file_path: test/Custom Metadata Note.md") in result
 
     # Read the note back and check if custom frontmatter is preserved
     content = await read_note("test/custom-metadata-note")

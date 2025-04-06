@@ -51,8 +51,10 @@ async def test_note_unicode_content(app):
 
     assert (
         dedent("""
-        # Created test/Unicode Test.md (272389cd)
+        # Created note
+        file_path: test/Unicode Test.md
         permalink: test/unicode-test
+        checksum: 272389cd
         """).strip()
         in result
     )

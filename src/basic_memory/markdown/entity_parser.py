@@ -105,7 +105,7 @@ class EntityParser:
         file_stats = absolute_path.stat()
 
         metadata = post.metadata
-        metadata["title"] = post.metadata.get("title", absolute_path.name)
+        metadata["title"] = post.metadata.get("title", absolute_path.stem)
         metadata["type"] = post.metadata.get("type", "note")
         tags = parse_tags(post.metadata.get("tags", []))  # pyright: ignore
         if tags:

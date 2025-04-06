@@ -1,24 +1,24 @@
 """Service for managing entities in the database."""
 
 from pathlib import Path
-from typing import Sequence, List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import frontmatter
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.markdown import EntityMarkdown
+from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
-from basic_memory.models import Entity as EntityModel, Observation, Relation
+from basic_memory.models import Entity as EntityModel
+from basic_memory.models import Observation, Relation
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
-from basic_memory.services.exceptions import EntityNotFoundError, EntityCreationError
-from basic_memory.services import FileService
-from basic_memory.services import BaseService
+from basic_memory.services import BaseService, FileService
+from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.link_resolver import LinkResolver
-from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.utils import generate_permalink
 
 
@@ -89,7 +89,7 @@ class EntityService(BaseService[EntityModel]):
         logger.debug(f"Creating or updating entity: {schema}")
 
         # Try to find existing entity using smart resolution
-        existing = await self.link_resolver.resolve_link(schema.permalink)
+        existing = await self.link_resolver.resolve_link(schema.permalink or schema.file_path)
 
         if existing:
             logger.debug(f"Found existing entity: {existing.permalink}")
@@ -100,7 +100,7 @@ class EntityService(BaseService[EntityModel]):
 
     async def create_entity(self, schema: EntitySchema) -> EntityModel:
         """Create a new entity and write to filesystem."""
-        logger.debug(f"Creating entity: {schema.permalink}")
+        logger.debug(f"Creating entity: {schema.title}")
 
         # Get file path and ensure it's a Path object
         file_path = Path(schema.file_path)
@@ -110,9 +110,10 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
             )
 
-        # Get unique permalink
-        permalink = await self.resolve_permalink(schema.permalink or file_path)
-        schema._permalink = permalink
+        # Get unique permalink if schema contains a permalink value
+        if schema.permalink:
+            permalink = await self.resolve_permalink(schema.permalink or file_path)
+            schema._permalink = permalink
 
         post = await schema_to_markdown(schema)
 
@@ -230,8 +231,14 @@ class EntityService(BaseService[EntityModel]):
         Creates the entity with null checksum to indicate sync not complete.
         Relations will be added in second pass.
         """
-        logger.debug(f"Creating entity: {markdown.frontmatter.title}")
+        logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
         model = entity_model_from_markdown(file_path, markdown)
+
+        # Only create permalink if file has explicit frontmatter
+        has_explicit_frontmatter = bool(markdown.frontmatter.metadata) and len(markdown.frontmatter.metadata) > 0
+        if not has_explicit_frontmatter:
+            model.permalink = None
+            logger.debug(f"Skipping permalink generation for file without frontmatter: {file_path}")
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None

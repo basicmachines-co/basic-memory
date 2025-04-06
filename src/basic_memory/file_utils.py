@@ -104,6 +104,9 @@ def has_frontmatter(content: str) -> bool:
     Returns:
         True if content has valid frontmatter markers (---), False otherwise
     """
+    if not content:
+        return False
+    
     content = content.strip()
     if not content.startswith("---"):
         return False

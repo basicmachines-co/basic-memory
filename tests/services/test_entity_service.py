@@ -6,12 +6,14 @@ from textwrap import dedent
 import pytest
 import yaml
 
+from basic_memory.config import ProjectConfig
+from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService
-from basic_memory.services.exceptions import EntityNotFoundError, EntityCreationError
+from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.utils import generate_permalink
 
 
@@ -261,7 +263,7 @@ async def test_get_entities_by_permalinks(entity_service: EntityService):
 
 
 @pytest.mark.asyncio
-async def test_oget_entities_empty_input(entity_service: EntityService):
+async def test_get_entities_empty_input(entity_service: EntityService):
     """Test opening nodes with empty path ID list."""
     found = await entity_service.get_entities_by_permalinks([])
     assert len(found) == 0
@@ -557,3 +559,33 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
 
     # assert content is in file
     assert update_content.strip() == file_content
+
+
+@pytest.mark.asyncio
+async def test_create_with_no_frontmatter(
+    test_config: ProjectConfig,
+    entity_parser: EntityParser,
+    entity_service: EntityService,
+    file_service: FileService,
+):
+    # contains no frontmatter
+    content = "# Git Workflow Guide"
+    file_path = Path("test/Git Workflow Guide.md")
+    full_path = test_config.home / file_path
+
+    await file_service.write_file(Path(full_path), content)
+
+    entity_markdown = await entity_parser.parse_file(full_path)
+    created = await entity_service.create_entity_from_markdown(file_path, entity_markdown)
+    file_content, _ = await file_service.read_file(created.file_path)
+
+    assert str(file_path) == str(created.file_path)
+    assert created.title == "Git Workflow Guide"
+    assert created.entity_type == "note"
+    assert created.permalink is None
+
+    # assert file
+    expected = dedent("""
+        # Git Workflow Guide
+        """).strip()
+    assert expected == file_content

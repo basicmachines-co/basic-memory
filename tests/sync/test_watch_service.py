@@ -96,7 +96,7 @@ Test content
     # Verify
     entity = await watch_service.sync_service.entity_repository.get_by_file_path("new_note.md")
     assert entity is not None
-    assert entity.title == "new_note.md"
+    assert entity.title == "new_note"
 
     # Check event was recorded
     events = [e for e in watch_service.state.recent_events if e.action == "new"]

@@ -11,6 +11,7 @@ from typing import Dict, Optional, Set, Tuple
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from basic_memory.config import config
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -18,6 +19,8 @@ from basic_memory.services import EntityService, FileService
 from basic_memory.services.search_service import SearchService
 import time
 from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
+
+from basic_memory.utils import generate_permalink
 
 
 @dataclass
@@ -475,8 +478,20 @@ class SyncService:
 
         entity = await self.entity_repository.get_by_file_path(old_path)
         if entity:
-            # Update file_path but keep the same permalink for link stability
-            updated = await self.entity_repository.update(entity.id, {"file_path": new_path})
+            # Update file_path in all cases
+            updates = {"file_path": new_path}
+
+            # If configured, also update permalink to match new path
+            if config.update_permalinks_on_move:
+                new_permalink = self.entity_service.resolve_permalink(new_path)
+                updates["permalink"] = new_permalink
+                logger.info(
+                    "Updating permalink on move",
+                    old_permalink=entity.permalink,
+                    new_permalink=new_permalink
+                )
+
+            updated = await self.entity_repository.update(entity.id, updates)
 
             if updated is None:  # pragma: no cover
                 logger.error(

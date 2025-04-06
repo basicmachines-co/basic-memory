@@ -1,14 +1,14 @@
 """Utilities for converting between markdown and entity models."""
 
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 from frontmatter import Post
 
 from basic_memory.file_utils import has_frontmatter, remove_frontmatter
 from basic_memory.markdown import EntityMarkdown
-from basic_memory.models import Entity, Observation as ObservationModel
-from basic_memory.utils import generate_permalink
+from basic_memory.models import Entity
+from basic_memory.models import Observation as ObservationModel
 
 
 def entity_model_from_markdown(
@@ -32,16 +32,13 @@ def entity_model_from_markdown(
     if not markdown.created or not markdown.modified:  # pragma: no cover
         raise ValueError("Both created and modified dates are required in markdown")
 
-    # Generate permalink if not provided
-    permalink = markdown.frontmatter.permalink or generate_permalink(file_path)
-
     # Create or update entity
     model = entity or Entity()
 
     # Update basic fields
     model.title = markdown.frontmatter.title
     model.entity_type = markdown.frontmatter.type
-    model.permalink = permalink
+    model.permalink = markdown.frontmatter.permalink
     model.file_path = str(file_path)
     model.content_type = "text/markdown"
     model.created_at = markdown.created
@@ -87,12 +84,17 @@ async def schema_to_markdown(schema: Any) -> Post:
     for field in ["type", "title", "permalink"]:
         frontmatter_metadata.pop(field, None)
 
-    # Create Post with ordered fields
+    # Create Post with fields ordered by insert order
     post = Post(
         content,
         title=schema.title,
         type=schema.entity_type,
-        permalink=schema.permalink,
-        **frontmatter_metadata,
     )
+    # set the permalink if passed in
+    if schema.permalink:
+        post.metadata["permalink"] = schema.permalink
+
+    if frontmatter_metadata:
+        post.metadata.update(frontmatter_metadata)
+
     return post

@@ -40,6 +40,11 @@ class ProjectConfig(BaseSettings):
 
     log_level: str = "DEBUG"
 
+    update_permalinks_on_move: bool = Field(
+        default=False,
+        description="Whether to update permalinks when files are moved or renamed. default (False)"
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
