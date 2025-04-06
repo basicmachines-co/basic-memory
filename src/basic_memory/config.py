@@ -234,6 +234,7 @@ process_name = get_process_name()
 # Global flag to track if logging has been set up
 _LOGGING_SETUP = False
 
+
 def setup_basic_memory_logging():  # pragma: no cover
     """Set up logging for basic-memory, ensuring it only happens once."""
     global _LOGGING_SETUP

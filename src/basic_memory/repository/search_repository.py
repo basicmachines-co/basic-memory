@@ -4,10 +4,10 @@ import json
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Any, Dict
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
-from sqlalchemy import text, Executable, Result
+from sqlalchemy import Executable, Result, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -123,9 +123,9 @@ class SearchRepository:
         permalink: Optional[str] = None,
         permalink_match: Optional[str] = None,
         title: Optional[str] = None,
-        types: Optional[List[SearchItemType]] = None,
+        types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
-        entity_types: Optional[List[str]] = None,
+        entity_types: Optional[List[SearchItemType]] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -174,15 +174,15 @@ class SearchRepository:
             else:
                 conditions.append("permalink MATCH :permalink")
 
-        # Handle type filter
-        if types:
-            type_list = ", ".join(f"'{t.value}'" for t in types)
-            conditions.append(f"type IN ({type_list})")
-
         # Handle entity type filter
         if entity_types:
-            entity_type_list = ", ".join(f"'{t}'" for t in entity_types)
-            conditions.append(f"json_extract(metadata, '$.entity_type') IN ({entity_type_list})")
+            type_list = ", ".join(f"'{t.value}'" for t in entity_types)
+            conditions.append(f"type IN ({type_list})")
+
+        # Handle type filter
+        if types:
+            type_list = ", ".join(f"'{t}'" for t in types)
+            conditions.append(f"json_extract(metadata, '$.entity_type') IN ({type_list})")
 
         # Handle date filter using datetime() for proper comparison
         if after_date:

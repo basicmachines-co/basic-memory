@@ -5,6 +5,12 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  # pull_request_target runs on the BASE of the PR, not the merge result.
+  # It has write permissions and access to secrets.
+  # It's useful for PRs from forks or automated PRs but requires careful use for security reasons.
+  # See: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
+  pull_request_target:
+    branches: [ "main" ]
 
 jobs:
   test:
