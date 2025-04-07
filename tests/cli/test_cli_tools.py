@@ -4,7 +4,6 @@ These tests use real MCP tools with the test environment instead of mocks.
 """
 
 # Import for testing
-import asyncio
 
 import io
 from datetime import datetime, timedelta
@@ -419,10 +418,10 @@ def test_continue_conversation_no_results(cli_env):
 def test_ensure_migrations_functionality(mock_initialize_database, test_config, monkeypatch):
     """Test the database initialization functionality."""
     from basic_memory.services.initialization import ensure_initialization
-    
+
     # Call the function
     ensure_initialization(test_config)
-    
+
     # The underlying asyncio.run should call our mocked function
     mock_initialize_database.assert_called_once()
 
@@ -431,11 +430,11 @@ def test_ensure_migrations_functionality(mock_initialize_database, test_config, 
 def test_ensure_migrations_handles_errors(mock_initialize_database, test_config, monkeypatch):
     """Test that initialization handles errors gracefully."""
     from basic_memory.services.initialization import ensure_initialization
-    
+
     # Configure mock to raise an exception
     mock_initialize_database.side_effect = Exception("Test error")
-    
+
     # Call the function - should not raise exception
     ensure_initialization(test_config)
-    
+
     # We're just making sure it doesn't crash by calling it

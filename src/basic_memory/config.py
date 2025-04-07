@@ -35,7 +35,7 @@ class ProjectConfig(BaseSettings):
 
     # Watch service configuration
     sync_delay: int = Field(
-        default=500, description="Milliseconds to wait after changes before syncing", gt=0
+        default=1000, description="Milliseconds to wait after changes before syncing", gt=0
     )
 
     # update permalinks on move
@@ -274,7 +274,7 @@ def setup_basic_memory_logging():  # pragma: no cover
         console=False,
     )
 
-    logger.info(f"Starting Basic Memory {basic_memory.__version__} (Project: {config.project})")
+    logger.info(f"Basic Memory {basic_memory.__version__} (Project: {config.project})")
     _LOGGING_SETUP = True
 
 

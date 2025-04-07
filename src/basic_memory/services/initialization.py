@@ -5,13 +5,13 @@ to ensure consistent application startup across all entry points.
 """
 
 import asyncio
-from typing import Optional, Tuple
+from typing import Optional
 
 from loguru import logger
 
 from basic_memory import db
 from basic_memory.config import ProjectConfig, config_manager
-from basic_memory.sync import SyncService, WatchService
+from basic_memory.sync import WatchService
 
 # Import this inside functions to avoid circular imports
 # from basic_memory.cli.commands.sync import get_sync_service
@@ -36,7 +36,7 @@ async def initialize_database(app_config: ProjectConfig) -> None:
 
 async def initialize_file_sync(
     app_config: ProjectConfig,
-) -> Tuple[Optional[SyncService], Optional[WatchService], Optional[asyncio.Task]]:
+) -> asyncio.Task:
     """Initialize file synchronization services.
 
     Args:
@@ -47,66 +47,61 @@ async def initialize_file_sync(
         or (None, None, None) if sync is disabled
     """
     # Load app configuration
-    basic_memory_config = config_manager.load_config()
-    logger.info(f"Sync changes enabled: {basic_memory_config.sync_changes}")
-    logger.info(
-        f"Update permalinks on move enabled: {basic_memory_config.update_permalinks_on_move}"
+    # Import here to avoid circular imports
+    from basic_memory.cli.commands.sync import get_sync_service
+
+    # Initialize sync service
+    sync_service = await get_sync_service()
+
+    # Initialize watch service
+    watch_service = WatchService(
+        sync_service=sync_service,
+        file_service=sync_service.entity_service.file_service,
+        config=app_config,
+        quiet=True,
     )
 
-    if not basic_memory_config.sync_changes:
-        logger.info("Sync changes disabled. Skipping watch service.")
-        return None, None, None
-
-    try:
-        # Import here to avoid circular imports
-        from basic_memory.cli.commands.sync import get_sync_service
-
-        # Initialize sync service
-        sync_service = await get_sync_service()
-
-        # Initialize watch service
-        watch_service = WatchService(
-            sync_service=sync_service,
-            file_service=sync_service.entity_service.file_service,
-            config=app_config,
-        )
+    # Create the background task for running sync
+    async def run_background_sync():  # pragma: no cover
+        # Run initial full sync
+        await sync_service.sync(app_config.home)
+        logger.info("Sync completed successfully")
 
         # Start background sync task
         logger.info(f"Starting watch service to sync file changes in dir: {app_config.home}")
 
-        # Create the background task for running sync
-        async def run_background_sync():
-            # Run initial full sync
-            await sync_service.sync(app_config.home, show_progress=False)
-            # Start watching for changes
-            await watch_service.run()
+        # Start watching for changes
+        await watch_service.run()
 
-        watch_task = asyncio.create_task(run_background_sync())
-
-        return sync_service, watch_service, watch_task
-    except Exception as e:
-        logger.error(f"Error initializing file sync: {e}")
-        return None, None, None
+    watch_task = asyncio.create_task(run_background_sync())
+    logger.info("Watch service started")
+    return watch_task
 
 
 async def initialize_app(
     app_config: ProjectConfig,
-) -> Tuple[Optional[SyncService], Optional[WatchService], Optional[asyncio.Task]]:
+) -> Optional[asyncio.Task]:
     """Initialize the Basic Memory application.
 
-    This function handles all initialization steps needed for both API and CLI:
+    This function handles all initialization steps needed for both API and shor lived CLI commands.
+    For long running commands like mcp, a
     - Running database migrations
     - Setting up file synchronization
 
     Args:
         app_config: The Basic Memory project configuration
-
-    Returns:
-        Tuple of (sync_service, watch_service, watch_task) if sync is enabled,
-        or (None, None, None) if sync is disabled or initialization failed
     """
     # Initialize database first
     await initialize_database(app_config)
+
+    basic_memory_config = config_manager.load_config()
+    logger.info(f"Sync changes enabled: {basic_memory_config.sync_changes}")
+    logger.info(
+        f"Update permalinks on move enabled: {basic_memory_config.update_permalinks_on_move}"
+    )
+    if not basic_memory_config.sync_changes:  # pragma: no cover
+        logger.info("Sync changes disabled. Skipping watch service.")
+        return
 
     # Initialize file sync services
     return await initialize_file_sync(app_config)
@@ -116,6 +111,24 @@ def ensure_initialization(app_config: ProjectConfig) -> None:
     """Ensure initialization runs in a synchronous context.
 
     This is a wrapper for the async initialize_app function that can be
+    called from synchronous code like CLI entry points.
+
+    Args:
+        app_config: The Basic Memory project configuration
+    """
+    try:
+        asyncio.run(initialize_app(app_config))
+    except Exception as e:
+        logger.error(f"Error during initialization: {e}")
+        # Continue execution even if initialization fails
+        # The command might still work, or will fail with a
+        # more specific error message
+
+
+def ensure_initialize_database(app_config: ProjectConfig) -> None:
+    """Ensure initialization runs in a synchronous context.
+
+    This is a wrapper for the async initialize_database function that can be
     called from synchronous code like CLI entry points.
 
     Args:

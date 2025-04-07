@@ -351,5 +351,5 @@ def test_files(test_config) -> dict[str, Path]:
 @pytest_asyncio.fixture
 async def synced_files(sync_service, test_config, test_files):
     # Initial sync - should create forward reference
-    await sync_service.sync(test_config.home, show_progress=False)
+    await sync_service.sync(test_config.home)
     return test_files

@@ -1,7 +1,8 @@
 """Test for issue #72 - notes with wikilinks staying in modified status."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from basic_memory.sync.sync_service import SyncService
 
@@ -30,12 +31,12 @@ This file contains a wikilink to [[another-file]].
     await create_test_file(test_file_path, content)
 
     # Initial sync
-    report1 = await sync_service.sync(test_config.home, show_progress=False)
+    report1 = await sync_service.sync(test_config.home)
     assert "test_wikilink.md" in report1.new
     assert "test_wikilink.md" not in report1.modified
 
     # Sync again without changing the file - should not be modified
-    report2 = await sync_service.sync(test_config.home, show_progress=False)
+    report2 = await sync_service.sync(test_config.home)
     assert "test_wikilink.md" not in report2.new
     assert "test_wikilink.md" not in report2.modified
 
@@ -52,11 +53,11 @@ This is the target file.
     await create_test_file(target_file_path, target_content)
 
     # Sync again after adding target file
-    report3 = await sync_service.sync(test_config.home, show_progress=False)
+    report3 = await sync_service.sync(test_config.home)
     assert "another_file.md" in report3.new
     assert "test_wikilink.md" not in report3.modified
 
     # Sync one more time - both files should now be stable
-    report4 = await sync_service.sync(test_config.home, show_progress=False)
+    report4 = await sync_service.sync(test_config.home)
     assert "test_wikilink.md" not in report4.modified
     assert "another_file.md" not in report4.modified

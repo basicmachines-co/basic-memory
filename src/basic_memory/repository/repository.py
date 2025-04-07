@@ -137,8 +137,6 @@ class Repository[T: Base]:
 
     async def find_one(self, query: Select[tuple[T]]) -> Optional[T]:
         """Execute a query and retrieve a single record."""
-        logger.debug(f"Finding one {self.Model.__name__} with query: {query}")
-
         # add in load options
         query = query.options(*self.get_load_options())
         result = await self.execute_query(query)
@@ -270,11 +268,9 @@ class Repository[T: Base]:
         """Execute a query asynchronously."""
 
         query = query.options(*self.get_load_options()) if use_query_options else query
-
         logger.debug(f"Executing query: {query}")
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(query)
-            logger.debug("Query executed successfully")
             return result
 
     def get_load_options(self) -> List[LoaderOption]:

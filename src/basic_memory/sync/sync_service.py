@@ -19,7 +19,6 @@ from basic_memory.repository import EntityRepository, RelationRepository
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.search_service import SearchService
 import time
-from rich.progress import Progress, TextColumn, BarColumn, TaskProgressColumn
 
 
 @dataclass
@@ -83,145 +82,51 @@ class SyncService:
         self.search_service = search_service
         self.file_service = file_service
 
-    async def sync(self, directory: Path, show_progress: bool = True) -> SyncReport:
+    async def sync(self, directory: Path) -> SyncReport:
         """Sync all files with database."""
 
         start_time = time.time()
-        console = None
-        progress = None  # Will be initialized if show_progress is True
-
-        logger.info("Sync operation started", directory=str(directory))
+        logger.info(f"Sync operation started for directory: {directory}")
 
         # initial paths from db to sync
         # path -> checksum
-        if show_progress:
-            from rich.console import Console
-
-            console = Console()
-            console.print(f"Scanning directory: {directory}")
-
         report = await self.scan(directory)
 
         # Initialize progress tracking if requested
-        if show_progress and report.total > 0:
-            progress = Progress(
-                TextColumn("[bold blue]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                console=console,
-                expand=True,
-            )
-
         # order of sync matters to resolve relations effectively
         logger.info(
-            "Sync changes detected",
-            new_files=len(report.new),
-            modified_files=len(report.modified),
-            deleted_files=len(report.deleted),
-            moved_files=len(report.moves),
+            f"Sync changes detected: new_files={len(report.new)}, modified_files={len(report.modified)}, "
+            + f"deleted_files={len(report.deleted)}, moved_files={len(report.moves)}"
         )
 
-        if show_progress and report.total > 0:
-            with progress:  # pyright: ignore
-                # Track each category separately
-                move_task = None
-                if report.moves:  # pragma: no cover
-                    move_task = progress.add_task("[blue]Moving files...", total=len(report.moves))  # pyright: ignore
-
-            delete_task = None
-            if report.deleted:  # pragma: no cover
-                delete_task = progress.add_task(  # pyright: ignore
-                    "[red]Deleting files...", total=len(report.deleted)
+        # sync moves first
+        for old_path, new_path in report.moves.items():
+            # in the case where a file has been deleted and replaced by another file
+            # it will show up in the move and modified lists, so handle it in modified
+            if new_path in report.modified:
+                report.modified.remove(new_path)
+                logger.debug(
+                    f"File marked as moved and modified: old_path={old_path}, new_path={new_path}"
                 )
+            else:
+                await self.handle_move(old_path, new_path)
 
-            new_task = None
-            if report.new:
-                new_task = progress.add_task(  # pyright: ignore
-                    "[green]Adding new files...", total=len(report.new)
-                )
+        # deleted next
+        for path in report.deleted:
+            await self.handle_delete(path)
 
-            modify_task = None
-            if report.modified:  # pragma: no cover
-                modify_task = progress.add_task(  # pyright: ignore
-                    "[yellow]Updating modified files...", total=len(report.modified)
-                )
+        # then new and modified
+        for path in report.new:
+            await self.sync_file(path, new=True)
 
-            # sync moves first
-            for i, (old_path, new_path) in enumerate(report.moves.items()):
-                # in the case where a file has been deleted and replaced by another file
-                # it will show up in the move and modified lists, so handle it in modified
-                if new_path in report.modified:  # pragma: no cover
-                    report.modified.remove(new_path)
-                    logger.debug(
-                        "File marked as moved and modified",
-                        old_path=old_path,
-                        new_path=new_path,
-                        action="processing as modified",
-                    )
-                else:  # pragma: no cover
-                    await self.handle_move(old_path, new_path)
+        for path in report.modified:
+            await self.sync_file(path, new=False)
 
-                if move_task is not None:  # pragma: no cover
-                    progress.update(move_task, advance=1)  # pyright: ignore
-
-            # deleted next
-            for i, path in enumerate(report.deleted):  # pragma: no cover
-                await self.handle_delete(path)
-                if delete_task is not None:  # pragma: no cover
-                    progress.update(delete_task, advance=1)  # pyright: ignore
-
-            # then new and modified
-            for i, path in enumerate(report.new):
-                await self.sync_file(path, new=True)
-                if new_task is not None:
-                    progress.update(new_task, advance=1)  # pyright: ignore
-
-            for i, path in enumerate(report.modified):  # pragma: no cover
-                await self.sync_file(path, new=False)
-                if modify_task is not None:  # pragma: no cover
-                    progress.update(modify_task, advance=1)  # pyright: ignore
-
-            # Final step - resolving relations
-            if report.total > 0:
-                relation_task = progress.add_task("[cyan]Resolving relations...", total=1)  # pyright: ignore
-                await self.resolve_relations()
-                progress.update(relation_task, advance=1)  # pyright: ignore
-        else:
-            # No progress display - proceed with normal sync
-            # sync moves first
-            for old_path, new_path in report.moves.items():
-                # in the case where a file has been deleted and replaced by another file
-                # it will show up in the move and modified lists, so handle it in modified
-                if new_path in report.modified:
-                    report.modified.remove(new_path)
-                    logger.debug(
-                        "File marked as moved and modified",
-                        old_path=old_path,
-                        new_path=new_path,
-                        action="processing as modified",
-                    )
-                else:
-                    await self.handle_move(old_path, new_path)
-
-            # deleted next
-            for path in report.deleted:
-                await self.handle_delete(path)
-
-            # then new and modified
-            for path in report.new:
-                await self.sync_file(path, new=True)
-
-            for path in report.modified:
-                await self.sync_file(path, new=False)
-
-            await self.resolve_relations()
+        await self.resolve_relations()
 
         duration_ms = int((time.time() - start_time) * 1000)
         logger.info(
-            "Sync operation completed",
-            directory=str(directory),
-            total_changes=report.total,
-            duration_ms=duration_ms,
+            f"Sync operation completed: directory={directory}, total_changes={report.total}, duration_ms={duration_ms}"
         )
 
         return report
@@ -230,6 +135,7 @@ class SyncService:
         """Scan directory for changes compared to database state."""
 
         db_paths = await self.get_db_file_state()
+        logger.debug(f"Found {len(db_paths)} db paths")
 
         # Track potentially moved files by checksum
         scan_result = await self.scan_directory(directory)
@@ -280,6 +186,7 @@ class SyncService:
             :param db_records: the data from the db
         """
         db_records = await self.entity_repository.find_all()
+        logger.info(f"Found {len(db_records)} db records")
         return {r.file_path: r.checksum or "" for r in db_records}
 
     async def sync_file(
@@ -296,10 +203,7 @@ class SyncService:
         """
         try:
             logger.debug(
-                "Syncing file",
-                path=path,
-                is_new=new,
-                is_markdown=self.file_service.is_markdown(path),
+                f"Syncing file path={path} is_new={new} is_markdown={self.file_service.is_markdown(path)}"
             )
 
             if self.file_service.is_markdown(path):
@@ -311,7 +215,7 @@ class SyncService:
                 await self.search_service.index_entity(entity)
 
                 logger.debug(
-                    "File sync completed", path=path, entity_id=entity.id, checksum=checksum
+                    f"File sync completed, path={path}, entity_id={entity.id}, checksum={checksum[:8]}"
                 )
             return entity, checksum
 
@@ -330,7 +234,7 @@ class SyncService:
             Tuple of (entity, checksum)
         """
         # Parse markdown first to get any existing permalink
-        logger.debug("Parsing markdown file", path=path)
+        logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
 
         file_path = self.entity_parser.base_path / path
         file_content = file_path.read_text()
@@ -347,10 +251,7 @@ class SyncService:
             # If permalink changed, update the file
             if permalink != entity_markdown.frontmatter.permalink:
                 logger.info(
-                    "Updating permalink",
-                    path=path,
-                    old_permalink=entity_markdown.frontmatter.permalink,
-                    new_permalink=permalink,
+                    f"Updating permalink for path: {path}, old_permalink: {entity_markdown.frontmatter.permalink}, new_permalink: {permalink}"
                 )
 
                 entity_markdown.frontmatter.metadata["permalink"] = permalink
@@ -359,12 +260,12 @@ class SyncService:
         # if the file is new, create an entity
         if new:
             # Create entity with final permalink
-            logger.debug("Creating new entity from markdown", path=path)
+            logger.debug(f"Creating new entity from markdown, path={path}")
             await self.entity_service.create_entity_from_markdown(Path(path), entity_markdown)
 
         # otherwise we need to update the entity and observations
         else:
-            logger.debug("Updating entity from markdown", path=path)
+            logger.debug(f"Updating entity from markdown, path={path}")
             await self.entity_service.update_entity_and_observations(Path(path), entity_markdown)
 
         # Update relations and search index
@@ -379,12 +280,9 @@ class SyncService:
         await self.entity_repository.update(entity.id, {"checksum": final_checksum})
 
         logger.debug(
-            "Markdown sync completed",
-            path=path,
-            entity_id=entity.id,
-            observation_count=len(entity.observations),
-            relation_count=len(entity.relations),
-            checksum=final_checksum,
+            f"Markdown sync completed: path={path}, entity_id={entity.id}, "
+            f"observation_count={len(entity.observations)}, relation_count={len(entity.relations)}, "
+            f"checksum={final_checksum[:8]}"
         )
 
         # Return the final checksum to ensure everything is consistent
@@ -429,7 +327,7 @@ class SyncService:
         else:
             entity = await self.entity_repository.get_by_file_path(path)
             if entity is None:  # pragma: no cover
-                logger.error("Entity not found for existing file", path=path)
+                logger.error(f"Entity not found for existing file, path={path}")
                 raise ValueError(f"Entity not found for existing file: {path}")
 
             updated = await self.entity_repository.update(
@@ -437,7 +335,7 @@ class SyncService:
             )
 
             if updated is None:  # pragma: no cover
-                logger.error("Failed to update entity", entity_id=entity.id, path=path)
+                logger.error(f"Failed to update entity, entity_id={entity.id}, path={path}")
                 raise ValueError(f"Failed to update entity with ID {entity.id}")
 
             return updated, checksum
@@ -449,10 +347,7 @@ class SyncService:
         entity = await self.entity_repository.get_by_file_path(file_path)
         if entity:
             logger.info(
-                "Deleting entity",
-                file_path=file_path,
-                entity_id=entity.id,
-                permalink=entity.permalink,
+                f"Deleting entity with file_path={file_path}, entity_id={entity.id}, permalink={entity.permalink}"
             )
 
             # Delete from db (this cascades to observations/relations)
@@ -466,10 +361,8 @@ class SyncService:
             )
 
             logger.debug(
-                "Cleaning up search index",
-                entity_id=entity.id,
-                file_path=file_path,
-                index_entries=len(permalinks),
+                f"Cleaning up search index for entity_id={entity.id}, file_path={file_path}, "
+                f"index_entries={len(permalinks)}"
             )
 
             for permalink in permalinks:
@@ -479,7 +372,7 @@ class SyncService:
                     await self.search_service.delete_by_entity_id(entity.id)
 
     async def handle_move(self, old_path, new_path):
-        logger.info("Moving entity", old_path=old_path, new_path=new_path)
+        logger.debug("Moving entity", old_path=old_path, new_path=new_path)
 
         entity = await self.entity_repository.get_by_file_path(old_path)
         if entity:
@@ -500,29 +393,28 @@ class SyncService:
                 updates["checksum"] = new_checksum
 
                 logger.info(
-                    "Updating permalink on move",
-                    old_permalink=entity.permalink,
-                    new_permalink=new_permalink,
-                    new_checksum=new_checksum,
+                    f"Updating permalink on move,old_permalink={entity.permalink}"
+                    f"new_permalink={new_permalink}"
+                    f"new_checksum={new_checksum}"
                 )
 
             updated = await self.entity_repository.update(entity.id, updates)
 
             if updated is None:  # pragma: no cover
                 logger.error(
-                    "Failed to update entity path",
-                    entity_id=entity.id,
-                    old_path=old_path,
-                    new_path=new_path,
+                    "Failed to update entity path"
+                    f"entity_id={entity.id}"
+                    f"old_path={old_path}"
+                    f"new_path={new_path}"
                 )
                 raise ValueError(f"Failed to update entity path for ID {entity.id}")
 
             logger.debug(
-                "Entity path updated",
-                entity_id=entity.id,
-                permalink=entity.permalink,
-                old_path=old_path,
-                new_path=new_path,
+                "Entity path updated"
+                f"entity_id={entity.id} "
+                f"permalink={entity.permalink} "
+                f"old_path={old_path} "
+                f"new_path={new_path} "
             )
 
             # update search index
@@ -537,10 +429,10 @@ class SyncService:
 
         for relation in unresolved_relations:
             logger.debug(
-                "Attempting to resolve relation",
-                relation_id=relation.id,
-                from_id=relation.from_id,
-                to_name=relation.to_name,
+                "Attempting to resolve relation "
+                f"relation_id={relation.id} "
+                f"from_id={relation.from_id} "
+                f"to_name={relation.to_name}"
             )
 
             resolved_entity = await self.entity_service.link_resolver.resolve_link(relation.to_name)
@@ -548,12 +440,12 @@ class SyncService:
             # ignore reference to self
             if resolved_entity and resolved_entity.id != relation.from_id:
                 logger.debug(
-                    "Resolved forward reference",
-                    relation_id=relation.id,
-                    from_id=relation.from_id,
-                    to_name=relation.to_name,
-                    resolved_id=resolved_entity.id,
-                    resolved_title=resolved_entity.title,
+                    "Resolved forward reference "
+                    f"relation_id={relation.id} "
+                    f"from_id={relation.from_id} "
+                    f"to_name={relation.to_name} "
+                    f"resolved_id={resolved_entity.id} "
+                    f"resolved_title={resolved_entity.title}",
                 )
                 try:
                     await self.relation_repository.update(
@@ -565,10 +457,10 @@ class SyncService:
                     )
                 except IntegrityError:  # pragma: no cover
                     logger.debug(
-                        "Ignoring duplicate relation",
-                        relation_id=relation.id,
-                        from_id=relation.from_id,
-                        to_name=relation.to_name,
+                        "Ignoring duplicate relation "
+                        f"relation_id={relation.id} "
+                        f"from_id={relation.from_id} "
+                        f"to_name={relation.to_name}"
                     )
 
                 # update search index
@@ -586,7 +478,7 @@ class SyncService:
         """
         start_time = time.time()
 
-        logger.debug("Scanning directory", directory=str(directory))
+        logger.debug(f"Scanning directory {directory}")
         result = ScanResult()
 
         for root, dirnames, filenames in os.walk(str(directory)):
@@ -608,10 +500,10 @@ class SyncService:
 
         duration_ms = int((time.time() - start_time) * 1000)
         logger.debug(
-            "Directory scan completed",
-            directory=str(directory),
-            files_found=len(result.files),
-            duration_ms=duration_ms,
+            f"{directory} scan completed "
+            f"directory={str(directory)} "
+            f"files_found={len(result.files)} "
+            f"duration_ms={duration_ms}"
         )
 
         return result
