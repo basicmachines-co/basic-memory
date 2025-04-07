@@ -125,7 +125,7 @@ Initial content
     await create_test_file(test_file, initial_content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir, show_progress=False)
+    await watch_service.sync_service.sync(project_dir)
 
     # Modify file
     modified_content = """---
@@ -169,7 +169,7 @@ Test content
     await create_test_file(test_file, content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir, show_progress=False)
+    await watch_service.sync_service.sync(project_dir)
 
     # Delete file
     test_file.unlink()
@@ -207,7 +207,7 @@ Test content
     await create_test_file(old_path, content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir, show_progress=False)
+    await watch_service.sync_service.sync(project_dir)
     initial_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
         "old/test_move.md"
     )
@@ -306,7 +306,7 @@ type: knowledge
 Test content for rapid moves
 """
     await create_test_file(original_path, content)
-    await watch_service.sync_service.sync(project_dir, show_progress=False)
+    await watch_service.sync_service.sync(project_dir)
 
     # Perform rapid moves
     temp_path = project_dir / "temp.md"
@@ -393,7 +393,7 @@ This is a test file in a directory
     await create_test_file(file_in_dir, content)
 
     # Initial sync to add the file to the database
-    await watch_service.sync_service.sync(project_dir, show_progress=False)
+    await watch_service.sync_service.sync(project_dir)
 
     # Rename the directory
     new_dir_path = project_dir / "new_dir"

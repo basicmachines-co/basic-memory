@@ -3,7 +3,7 @@
 import pytest
 
 from basic_memory import file_utils
-from basic_memory.file_utils import write_file_atomic, compute_checksum
+from basic_memory.file_utils import compute_checksum, write_file_atomic
 
 
 @pytest.mark.asyncio
@@ -130,7 +130,7 @@ permalink: i18n/utf8-document
     test_file.write_text(utf8_content, encoding="utf-8")
 
     # Sync the file
-    await sync_service.sync(test_config.home, show_progress=False)
+    await sync_service.sync(test_config.home)
 
     # Verify entity was created
     entity = await sync_service.entity_service.get_by_permalink("i18n/utf8-document")

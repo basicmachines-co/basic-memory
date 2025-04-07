@@ -60,7 +60,7 @@ class FileService:
         Returns:
             Raw content string without metadata sections
         """
-        logger.debug("Reading entity content", entity_id=entity.id, permalink=entity.permalink)
+        logger.debug(f"Reading entity content, entity_id={entity.id}, permalink={entity.permalink}")
 
         file_path = self.get_entity_path(entity)
         markdown = await self.markdown_processor.read_file(file_path)

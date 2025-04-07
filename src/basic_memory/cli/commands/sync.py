@@ -179,14 +179,14 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
         )
 
         # full sync - no progress bars in watch mode
-        await sync_service.sync(config.home, show_progress=False)
+        await sync_service.sync(config.home)
 
         # watch changes
         await watch_service.run()  # pragma: no cover
     else:
-        # one time sync - use progress bars for better UX
+        # one time sync
         logger.info("Running one-time sync")
-        knowledge_changes = await sync_service.sync(config.home, show_progress=True)
+        knowledge_changes = await sync_service.sync(config.home)
 
         # Log results
         duration_ms = int((time.time() - start_time) * 1000)
@@ -237,11 +237,11 @@ def sync(
         if not isinstance(e, typer.Exit):
             logger.exception(
                 "Sync command failed",
-                project=config.project,
-                error=str(e),
-                error_type=type(e).__name__,
-                watch_mode=watch,
-                directory=str(config.home),
+                f"project={config.project},"
+                f"error={str(e)},"
+                f"error_type={type(e).__name__},"
+                f"watch_mode={watch},"
+                f"directory={str(config.home)}",
             )
             typer.echo(f"Error during sync: {e}", err=True)
             raise typer.Exit(1)

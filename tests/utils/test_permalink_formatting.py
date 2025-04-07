@@ -1,7 +1,8 @@
 """Test permalink formatting during sync."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
@@ -57,7 +58,7 @@ Testing permalink generation.
         await create_test_file(project_dir / filename, content)
 
     # Run sync
-    await sync_service.sync(test_config.home, show_progress=False)
+    await sync_service.sync(test_config.home)
 
     # Verify permalinks
     for filename, expected_permalink in test_cases:

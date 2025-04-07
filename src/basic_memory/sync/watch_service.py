@@ -70,22 +70,30 @@ class WatchServiceState(BaseModel):
 
 
 class WatchService:
-    def __init__(self, sync_service: SyncService, file_service: FileService, config: ProjectConfig):
+    def __init__(
+        self,
+        sync_service: SyncService,
+        file_service: FileService,
+        config: ProjectConfig,
+        quiet: bool = False,
+    ):
         self.sync_service = sync_service
         self.file_service = file_service
         self.config = config
         self.state = WatchServiceState()
         self.status_path = config.home / ".basic-memory" / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
-        self.console = Console()
+
+        # quiet mode for mcp so it doesn't mess up stdout
+        self.console = Console(quiet=quiet)
 
     async def run(self):  # pragma: no cover
         """Watch for file changes and sync them"""
         logger.info(
             "Watch service started",
-            directory=str(self.config.home),
-            debounce_ms=self.config.sync_delay,
-            pid=os.getpid(),
+            f"directory={str(self.config.home)}",
+            f"debounce_ms={self.config.sync_delay}",
+            f"pid={os.getpid()}",
         )
 
         self.state.running = True
@@ -111,8 +119,8 @@ class WatchService:
         finally:
             logger.info(
                 "Watch service stopped",
-                directory=str(self.config.home),
-                runtime_seconds=int((datetime.now() - self.state.start_time).total_seconds()),
+                f"directory={str(self.config.home)}",
+                f"runtime_seconds={int((datetime.now() - self.state.start_time).total_seconds())}",
             )
 
             self.state.running = False
@@ -154,7 +162,7 @@ class WatchService:
 
         start_time = time.time()
 
-        logger.info("Processing file changes", change_count=len(changes), directory=str(directory))
+        logger.info(f"Processing file changes, change_count={len(changes)}, directory={directory}")
 
         # Group changes by type
         adds: List[str] = []
@@ -177,8 +185,16 @@ class WatchService:
                 modifies.append(relative_path)
 
         logger.debug(
-            "Grouped file changes", added=len(adds), deleted=len(deletes), modified=len(modifies)
+            f"Grouped file changes, added={len(adds)}, deleted={len(deletes)}, modified={len(modifies)}"
         )
+
+        # because of our atomic writes on updates, an add may be an existing file
+        for added_path in adds:  # pragma: no cover TODO add test
+            entity = await self.sync_service.entity_repository.get_by_file_path(added_path)
+            if entity is not None:
+                logger.debug(f"Existing file will be processed as modified, path={added_path}")
+                adds.remove(added_path)
+                modifies.append(added_path)
 
         # Track processed files to avoid duplicates
         processed: Set[str] = set()
@@ -223,15 +239,16 @@ class WatchService:
                                 status="success",
                             )
                             self.console.print(f"[blue]→[/blue] {deleted_path} → {added_path}")
+                            logger.info(f"move: {deleted_path} -> {added_path}")
                             processed.add(added_path)
                             processed.add(deleted_path)
                             break
                     except Exception as e:  # pragma: no cover
                         logger.warning(
                             "Error checking for move",
-                            old_path=deleted_path,
-                            new_path=added_path,
-                            error=str(e),
+                            f"old_path={deleted_path}",
+                            f"new_path={added_path}",
+                            f"error={str(e)}",
                         )
 
         # Handle remaining changes - group them by type for concise output
@@ -247,6 +264,7 @@ class WatchService:
                 await self.sync_service.handle_delete(path)
                 self.state.add_event(path=path, action="deleted", status="success")
                 self.console.print(f"[red]✕[/red] {path}")
+                logger.info(f"deleted: {path}")
                 processed.add(path)
                 delete_count += 1
 
@@ -257,28 +275,27 @@ class WatchService:
                 full_path = directory / path
                 if not full_path.exists() or full_path.is_dir():
                     logger.debug(
-                        "Skipping non-existent or directory path", path=path
+                        f"Skipping non-existent or directory path, path={path}"
                     )  # pragma: no cover
                     processed.add(path)  # pragma: no cover
                     continue  # pragma: no cover
 
-                logger.debug("Processing new file", path=path)
+                logger.debug(f"Processing new file, path={path}")
                 entity, checksum = await self.sync_service.sync_file(path, new=True)
                 if checksum:
                     self.state.add_event(
                         path=path, action="new", status="success", checksum=checksum
                     )
                     self.console.print(f"[green]✓[/green] {path}")
-                    logger.debug(
-                        "Added file processed",
-                        path=path,
-                        entity_id=entity.id if entity else None,
-                        checksum=checksum,
+                    logger.info(
+                        "new file processed",
+                        f"path={path}",
+                        f"checksum={checksum}",
                     )
                     processed.add(path)
                     add_count += 1
                 else:  # pragma: no cover
-                    logger.warning("Error syncing new file", path=path)  # pragma: no cover
+                    logger.warning(f"Error syncing new file, path={path}")  # pragma: no cover
                     self.console.print(
                         f"[orange]?[/orange] Error syncing: {path}"
                     )  # pragma: no cover
@@ -296,7 +313,7 @@ class WatchService:
                     processed.add(path)
                     continue
 
-                logger.debug("Processing modified file", path=path)
+                logger.debug(f"Processing modified file: path={path}")
                 entity, checksum = await self.sync_service.sync_file(path, new=False)
                 self.state.add_event(
                     path=path, action="modified", status="success", checksum=checksum
@@ -311,17 +328,18 @@ class WatchService:
                             f"[yellow]...[/yellow] Repeated changes to {path}"
                         )  # pragma: no cover
                 else:
-                    # New file being modified
+                    # haven't processed this file
                     self.console.print(f"[yellow]✎[/yellow] {path}")
+                    logger.info(f"modified: {path}")
                     last_modified_path = path
                     repeat_count = 0
                     modify_count += 1
 
                 logger.debug(
-                    "Modified file processed",
-                    path=path,
-                    entity_id=entity.id if entity else None,
-                    checksum=checksum,
+                    "Modified file processed, "
+                    f"path={path} "
+                    f"entity_id={entity.id if entity else None} "
+                    f"checksum={checksum}",
                 )
                 processed.add(path)
 
@@ -339,16 +357,17 @@ class WatchService:
 
             if changes:
                 self.console.print(f"{', '.join(changes)}", style="dim")  # pyright: ignore
+                logger.info(f"changes: {len(changes)}")
 
         duration_ms = int((time.time() - start_time) * 1000)
         self.state.last_scan = datetime.now()
         self.state.synced_files += len(processed)
 
         logger.info(
-            "File change processing completed",
-            processed_files=len(processed),
-            total_synced_files=self.state.synced_files,
-            duration_ms=duration_ms,
+            "File change processing completed, "
+            f"processed_files={len(processed)}, "
+            f"total_synced_files={self.state.synced_files}, "
+            f"duration_ms={duration_ms}"
         )
 
         await self.write_status()

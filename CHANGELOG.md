@@ -1,6 +1,15 @@
 # CHANGELOG
 
 
+## v0.12.1 (2025-04-07)
+
+### Bug Fixes
+
+- Run migrations and sync when starting mcp
+  ([#88](https://github.com/basicmachines-co/basic-memory/pull/88),
+  [`78a3412`](https://github.com/basicmachines-co/basic-memory/commit/78a3412bcff83b46e78e26f8b9fce42ed9e05991))
+
+
 ## v0.12.0 (2025-04-06)
 
 ### Bug Fixes
