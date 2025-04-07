@@ -21,19 +21,13 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     tool,
 )
 from basic_memory.config import config
-from basic_memory.db import run_migrations as db_run_migrations
+from basic_memory.services.initialization import ensure_initialization
 
 
 # Helper function to run database migrations
 def ensure_migrations():  # pragma: no cover
     """Ensure database migrations are run before executing commands."""
-    try:
-        logger.info("Running database migrations on startup...")
-        asyncio.run(db_run_migrations(config))
-    except Exception as e:
-        logger.error(f"Error running migrations: {e}")
-        # Continue execution even if migrations fail
-        # The actual command might still work or will fail with a more specific error
+    ensure_initialization(config)
 
 
 # Version command
@@ -77,8 +71,8 @@ def main(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    # Run database migrations
-    asyncio.run(db_run_migrations(config))
+    # Run initialization
+    ensure_initialization(config)
 
     # start the app
     app()

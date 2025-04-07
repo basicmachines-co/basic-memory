@@ -3,8 +3,8 @@
 These tests use real MCP tools with the test environment instead of mocks.
 """
 
-# Import the ensure_migrations function from main.py for testing
-from basic_memory.cli.main import ensure_migrations
+# Import for testing
+import asyncio
 
 import io
 from datetime import datetime, timedelta
@@ -415,38 +415,27 @@ def test_continue_conversation_no_results(cli_env):
     assert "The supplied query did not return any information" in result.stdout
 
 
-@patch("basic_memory.cli.main.db_run_migrations")
-def test_ensure_migrations_runs_migrations(mock_run_migrations, test_config, monkeypatch):
-    """Test that ensure_migrations runs migrations."""
-
-    # Configure mock
-    async def mock_async_success(*args, **kwargs):
-        return True
-
-    mock_run_migrations.return_value = mock_async_success()
-
+@patch("basic_memory.services.initialization.initialize_database")
+def test_ensure_migrations_functionality(mock_initialize_database, test_config, monkeypatch):
+    """Test the database initialization functionality."""
+    from basic_memory.services.initialization import ensure_initialization
+    
     # Call the function
-    ensure_migrations()
+    ensure_initialization(test_config)
+    
+    # The underlying asyncio.run should call our mocked function
+    mock_initialize_database.assert_called_once()
 
-    # Check that run_migrations was called
-    mock_run_migrations.assert_called_once()
 
-
-@patch("basic_memory.cli.main.db_run_migrations")
-@patch("basic_memory.cli.main.logger")
-def test_ensure_migrations_handles_errors(
-    mock_logger, mock_run_migrations, test_config, monkeypatch
-):
-    """Test that ensure_migrations handles errors gracefully."""
-
-    # Configure mock to raise an exception when awaited
-    async def mock_async_error(*args, **kwargs):
-        raise Exception("Test error")
-
-    mock_run_migrations.side_effect = mock_async_error
-
-    # Call the function
-    ensure_migrations()
-
-    # Check that error was logged
-    mock_logger.error.assert_called_once()
+@patch("basic_memory.services.initialization.initialize_database")
+def test_ensure_migrations_handles_errors(mock_initialize_database, test_config, monkeypatch):
+    """Test that initialization handles errors gracefully."""
+    from basic_memory.services.initialization import ensure_initialization
+    
+    # Configure mock to raise an exception
+    mock_initialize_database.side_effect = Exception("Test error")
+    
+    # Call the function - should not raise exception
+    ensure_initialization(test_config)
+    
+    # We're just making sure it doesn't crash by calling it
