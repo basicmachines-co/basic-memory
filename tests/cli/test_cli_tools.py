@@ -2,6 +2,9 @@
 
 These tests use real MCP tools with the test environment instead of mocks.
 """
+# Import the ensure_migrations function from main.py for testing
+import asyncio
+from basic_memory.cli.main import ensure_migrations
 
 import io
 from datetime import datetime, timedelta
@@ -410,3 +413,36 @@ def test_continue_conversation_no_results(cli_env):
     # Check result contains expected content for no results
     assert "Continuing conversation on: NonexistentTopic" in result.stdout
     assert "The supplied query did not return any information" in result.stdout
+
+
+@patch("basic_memory.cli.main.db_run_migrations")
+def test_ensure_migrations_runs_migrations(mock_run_migrations, test_config, monkeypatch):
+    """Test that ensure_migrations runs migrations."""
+    # Configure mock
+    async def mock_async_success(*args, **kwargs):
+        return True
+    
+    mock_run_migrations.return_value = mock_async_success()
+    
+    # Call the function
+    ensure_migrations()
+    
+    # Check that run_migrations was called
+    mock_run_migrations.assert_called_once()
+
+
+@patch("basic_memory.cli.main.db_run_migrations")
+@patch("basic_memory.cli.main.logger")
+def test_ensure_migrations_handles_errors(mock_logger, mock_run_migrations, test_config, monkeypatch):
+    """Test that ensure_migrations handles errors gracefully."""
+    # Configure mock to raise an exception when awaited
+    async def mock_async_error(*args, **kwargs):
+        raise Exception("Test error")
+    
+    mock_run_migrations.side_effect = mock_async_error
+    
+    # Call the function
+    ensure_migrations()
+    
+    # Check that error was logged
+    mock_logger.error.assert_called_once()
