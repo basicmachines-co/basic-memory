@@ -89,22 +89,11 @@ Replace `/absolute/path/to/uvx` with the actual path you found in Step 1.
 
 Close and reopen Claude Desktop for the changes to take effect.
 
-### 3. Start the Sync Service
+### 3. Sync changes in real time
 
-> Note the sync service is optional. You can run it if you want your local change to be available in Claude Desktop
+> **Note**: The service will sync changes from your project directory in real time so they available for the AI assistant. 
 
-Start the sync service to monitor your files for changes:
-
-```bash
-# One-time sync
-basic-memory sync
-
-# For continuous monitoring (recommended)
-basic-memory sync --watch
-```
-
-The `--watch` flag enables automatic detection of file changes, updating your knowledge in real time.
-
+To disable realtime sync, you can update the config. See [[CLI Reference#sync]].
 ### 4. Staying Updated
 
 To update Basic Memory when new versions are released:
@@ -145,8 +134,8 @@ If Claude cannot find Basic Memory tools:
 1. **Check absolute paths**: Ensure you're using complete absolute paths to uvx in the Claude Desktop configuration
 2. **Verify installation**: Run `basic-memory --version` in Terminal to confirm Basic Memory is installed
 3. **Restart applications**: Restart both Terminal and Claude Desktop after making configuration changes
-4. **Check sync status**: Ensure `basic-memory sync --watch` is running
-
+4. **Check sync status**: You can view the sync status by running `basic-memory status
+.
 #### Permission Issues
 
 If you encounter permission errors:
@@ -282,15 +271,15 @@ basic-memory import claude conversations
 basic-memory import chatgpt
 ```
 
-After importing, run `basic-memory sync` to index everything.
+After importing, the changes will be synced. Initial syncs may take a few moments. You can see info about your project by running `basic-memrory project info`.
 
 ## Quick Tips
 
-- Keep `basic-memory sync --watch` running in a terminal window
+- Basic Memory will sync changes from your project in real time.
 - Use special prompts (Continue Conversation, Recent Activity, Search) to start contextual discussions
 - Build connections between notes for a richer knowledge graph
-- Use direct memory:// URLs when you need precise context
-- Use git to version control your knowledge base
+- Use direct `memory://` URLs with a permalink when you need precise context. See [[User Guide#Using memory // URLs]]
+- Use git to version control your knowledge base (git integration is on the roadmap)
 - Review and edit AI-generated notes for accuracy
 
 ## Next Steps

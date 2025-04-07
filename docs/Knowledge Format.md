@@ -144,7 +144,19 @@ permalink: auth-approaches-2024
 ---
 ```
 
-If not specified, one will be generated automatically from the title.
+If not specified, one will be generated automatically from the title, if the note has has a frontmatter section. 
+
+By default a  notes' permalink value will not change if the file is moved. It's a **stable** identifier :). But if you'd rather permalinks are always updated when a file moves, you can set the config setting in the global config. 
+
+The config file for Basic Memory is in the home directory under `.basic-memory/config.json`.
+
+To change the behavior, set the following value:
+```
+ ~/.basic-memory/config.json 
+{
+  "update_permalinks_on_move": true
+}
+```
 
 ### Using memory:// URLs
 
