@@ -29,6 +29,22 @@ Options:
 - `--watch`: Continuously monitor for changes
 - `--verbose`: Show detailed output
 
+**Note**:
+
+As of the v0.12.0 release syncing will occur in real time when the mcp process starts.
+- The real time sync means that it is no longer necessary to run the `basic-memory sync --watch` process in a a terminal to sync changes to the db (so the AI can see them). This will be done automatically.
+
+This behavior can be changed via the config. The config file for Basic Memory is in the home directory under `.basic-memory/config.json`.
+
+To change the properties, set the following values:
+```
+ ~/.basic-memory/config.json 
+{
+  "sync_changes": false,
+}
+```
+
+Thanks for using Basic Memory!
 ### import
 
 Imports external knowledge sources:
