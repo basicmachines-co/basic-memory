@@ -1,6 +1,7 @@
 """Tests for import_memory_json command."""
 
 import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -35,7 +36,7 @@ def sample_entities():
 def sample_json_file(tmp_path, sample_entities):
     """Create a sample memory.json file."""
     json_file = tmp_path / "memory.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         for entity in sample_entities:
             f.write(json.dumps(entity) + "\n")
     return json_file
@@ -55,7 +56,7 @@ async def test_process_memory_json(tmp_path, sample_json_file):
     # Check file was created
     entity_file = tmp_path / "test/test_entity.md"
     assert entity_file.exists()
-    content = entity_file.read_text()
+    content = entity_file.read_text(encoding="utf-8")
     assert "Test observation 1" in content
     assert "Test observation 2" in content
     assert "test_relation [[related_entity]]" in content
@@ -120,7 +121,7 @@ def test_import_json_command_handle_old_format(tmp_path):
     ]
 
     json_file = tmp_path / "old_format.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         for item in old_format:
             f.write(json.dumps(item) + "\n")
 

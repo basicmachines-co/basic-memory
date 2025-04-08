@@ -1,10 +1,11 @@
 """Tests for import_chatgpt command."""
 
 import json
+
 import pytest
 from typer.testing import CliRunner
 
-from basic_memory.cli.app import import_app, app
+from basic_memory.cli.app import app, import_app
 from basic_memory.cli.commands import import_chatgpt
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser, MarkdownProcessor
@@ -144,7 +145,7 @@ def sample_conversation_with_hidden():
 def sample_chatgpt_json(tmp_path, sample_conversation):
     """Create a sample ChatGPT JSON file."""
     json_file = tmp_path / "conversations.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_conversation], f)
     return json_file
 
@@ -167,7 +168,7 @@ async def test_process_chatgpt_json(tmp_path, sample_chatgpt_json):
     assert conv_path.exists()
 
     # Check content formatting
-    content = conv_path.read_text()
+    content = conv_path.read_text(encoding="utf-8")
     assert "# Test Conversation" in content
     assert "### User" in content
     assert "Hello, this is a test message" in content
@@ -183,14 +184,14 @@ async def test_process_code_blocks(tmp_path, sample_conversation_with_code):
 
     # Create test file
     json_file = tmp_path / "code_test.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_conversation_with_code], f)
 
     await import_chatgpt.process_chatgpt_json(json_file, tmp_path, processor)
 
     # Check content
     conv_path = tmp_path / "20250111-code-test.md"
-    content = conv_path.read_text()
+    content = conv_path.read_text(encoding="utf-8")
     assert "```python" in content
     assert "def hello():" in content
     assert "```" in content
@@ -204,7 +205,7 @@ async def test_hidden_messages(tmp_path, sample_conversation_with_hidden):
 
     # Create test file
     json_file = tmp_path / "hidden_test.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_conversation_with_hidden], f)
 
     results = await import_chatgpt.process_chatgpt_json(json_file, tmp_path, processor)
@@ -214,7 +215,7 @@ async def test_hidden_messages(tmp_path, sample_conversation_with_hidden):
 
     # Check content
     conv_path = tmp_path / "20250111-hidden-test.md"
-    content = conv_path.read_text()
+    content = conv_path.read_text(encoding="utf-8")
     assert "Visible message" in content
     assert "Hidden message" not in content
 

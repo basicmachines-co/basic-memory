@@ -144,14 +144,14 @@ async def test_rapid_atomic_writes(watch_service, test_config):
     await asyncio.sleep(0.1)
 
     # Read content to verify
-    content1 = final_path.read_text()
+    content1 = final_path.read_text(encoding="utf-8")
     assert content1 == "First version"
 
     # Simulate the second atomic write
     tmp2_path.rename(final_path)
 
     # Verify content was updated
-    content2 = final_path.read_text()
+    content2 = final_path.read_text(encoding="utf-8")
     assert content2 == "Second version"
 
     # Create a batch of changes that might arrive in mixed order

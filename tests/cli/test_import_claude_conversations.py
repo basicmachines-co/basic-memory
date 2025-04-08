@@ -1,6 +1,7 @@
 """Tests for import_claude command (chat conversations)."""
 
 import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -44,7 +45,7 @@ def sample_conversation():
 def sample_conversations_json(tmp_path, sample_conversation):
     """Create a sample conversations.json file."""
     json_file = tmp_path / "conversations.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_conversation], f)
     return json_file
 
@@ -65,7 +66,7 @@ async def test_process_chat_json(tmp_path, sample_conversations_json):
     # Check conversation file
     conv_path = tmp_path / "20250105-test-conversation.md"
     assert conv_path.exists()
-    content = conv_path.read_text()
+    content = conv_path.read_text(encoding="utf-8")
 
     # Check content formatting
     assert "### Human" in content
@@ -156,7 +157,7 @@ def test_import_conversation_with_attachments(tmp_path):
     }
 
     json_file = tmp_path / "with_attachments.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([conversation], f)
 
     # Set up environment
@@ -168,7 +169,7 @@ def test_import_conversation_with_attachments(tmp_path):
 
     # Check attachment formatting
     conv_path = tmp_path / "conversations/20250105-test-with-attachments.md"
-    content = conv_path.read_text()
+    content = conv_path.read_text(encoding="utf-8")
     assert "**Attachment: test.txt**" in content
     assert "```" in content
     assert "Test file content" in content

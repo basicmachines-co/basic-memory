@@ -1,9 +1,8 @@
 """Service for syncing files between filesystem and database."""
 
 import os
-
-from dataclasses import dataclass
-from dataclasses import field
+import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
@@ -18,7 +17,6 @@ from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, RelationRepository
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.search_service import SearchService
-import time
 
 
 @dataclass
@@ -237,7 +235,7 @@ class SyncService:
         logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
 
         file_path = self.entity_parser.base_path / path
-        file_content = file_path.read_text()
+        file_content = file_path.read_text(encoding="utf-8")
         file_contains_frontmatter = has_frontmatter(file_content)
 
         # entity markdown will always contain front matter, so it can be used up create/update the entity

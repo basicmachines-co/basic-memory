@@ -38,7 +38,7 @@ async def process_memory_json(
         read_task = progress.add_task("Reading memory.json...", total=None)
 
         # First pass - collect entities and relations
-        with open(json_path) as f:
+        with open(json_path, encoding="utf-8") as f:
             lines = f.readlines()
             progress.update(read_task, total=len(lines))
 

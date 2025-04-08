@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from basic_memory.markdown.markdown_processor import MarkdownProcessor, DirtyFileError
+from basic_memory.markdown.markdown_processor import DirtyFileError, MarkdownProcessor
 from basic_memory.markdown.schemas import (
-    EntityMarkdown,
     EntityFrontmatter,
+    EntityMarkdown,
     Observation,
     Relation,
 )
@@ -41,7 +41,7 @@ async def test_write_new_minimal_file(markdown_processor: MarkdownProcessor, tmp
     await markdown_processor.write_file(path, markdown)
 
     # Read back and verify
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
     assert "---" in content  # Has frontmatter
     assert "type: note" in content
     assert "permalink: test" in content
@@ -90,7 +90,7 @@ async def test_write_new_file_with_content(markdown_processor: MarkdownProcessor
     await markdown_processor.write_file(path, markdown)
 
     # Read back and verify
-    content = path.read_text()
+    content = path.read_text(encoding="utf-8")
 
     # Check content preserved exactly
     assert "# Custom Title" in content
@@ -169,7 +169,7 @@ async def test_dirty_file_detection(markdown_processor: MarkdownProcessor, tmp_p
     checksum = await markdown_processor.write_file(path, initial)
 
     # Modify file directly
-    path.write_text(path.read_text() + "\nModified!")
+    path.write_text(path.read_text(encoding="utf-8") + "\nModified!")
 
     # Try to update with old checksum
     update = EntityMarkdown(

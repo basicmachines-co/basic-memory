@@ -44,7 +44,7 @@ def update_claude_config():
 
     # Load existing config or create new
     if config_path.exists():
-        config = json.loads(config_path.read_text())
+        config = json.loads(config_path.read_text(encoding="utf-8"))
     else:
         config = {"mcpServers": {}}
 

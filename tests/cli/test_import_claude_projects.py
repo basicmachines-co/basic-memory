@@ -1,6 +1,7 @@
 """Tests for import_claude_projects command."""
 
 import json
+
 import pytest
 from typer.testing import CliRunner
 
@@ -43,7 +44,7 @@ def sample_project():
 def sample_projects_json(tmp_path, sample_project):
     """Create a sample projects.json file."""
     json_file = tmp_path / "projects.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_project], f)
     return json_file
 
@@ -70,14 +71,14 @@ async def test_process_projects_json(tmp_path, sample_projects_json):
     # Check document files
     doc1 = project_dir / "docs/test-document.md"
     assert doc1.exists()
-    content1 = doc1.read_text()
+    content1 = doc1.read_text(encoding="utf-8")
     assert "# Test Document" in content1
     assert "This is test content" in content1
 
     # Check prompt template
     prompt = project_dir / "prompt-template.md"
     assert prompt.exists()
-    prompt_content = prompt.read_text()
+    prompt_content = prompt.read_text(encoding="utf-8")
     assert "# Test Prompt" in prompt_content
     assert "This is a test prompt" in prompt_content
 
@@ -160,7 +161,7 @@ def test_import_project_without_prompt(tmp_path):
     }
 
     json_file = tmp_path / "no_prompt.json"
-    with open(json_file, "w") as f:
+    with open(json_file, "w", encoding="utf-8") as f:
         json.dump([project], f)
 
     # Set up environment

@@ -104,7 +104,7 @@ class EntityParser:
             absolute_path = self.base_path / path
 
         # Parse frontmatter and content using python-frontmatter
-        file_content = absolute_path.read_text()
+        file_content = absolute_path.read_text(encoding="utf-8")
         return await self.parse_file_content(absolute_path, file_content)
 
     async def parse_file_content(self, absolute_path, file_content):

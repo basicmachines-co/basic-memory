@@ -46,7 +46,7 @@ async def test_create_canvas(app, test_config):
     assert file_path.exists()
 
     # Verify content is correct
-    content = json.loads(file_path.read_text())
+    content = json.loads(file_path.read_text(encoding="utf-8"))
     assert content["nodes"] == nodes
     assert content["edges"] == edges
 
@@ -81,7 +81,7 @@ async def test_create_canvas_with_extension(app, test_config):
     assert file_path.exists()
 
     # Verify content
-    content = json.loads(file_path.read_text())
+    content = json.loads(file_path.read_text(encoding="utf-8"))
     assert content["nodes"] == nodes
 
 
@@ -134,7 +134,7 @@ async def test_update_existing_canvas(app, test_config):
     assert "Updated: visualizations/update-test.canvas" in result
 
     # Verify content was updated
-    content = json.loads(file_path.read_text())
+    content = json.loads(file_path.read_text(encoding="utf-8"))
     assert content["nodes"] == updated_nodes
     assert content["edges"] == updated_edges
 
@@ -252,7 +252,7 @@ async def test_create_canvas_complex_content(app, test_config):
     assert file_path.exists()
 
     # Verify content is correct with all complex structures
-    content = json.loads(file_path.read_text())
+    content = json.loads(file_path.read_text(encoding="utf-8"))
     assert len(content["nodes"]) == 4
     assert len(content["edges"]) == 2
 

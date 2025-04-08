@@ -5,16 +5,16 @@ from pathlib import Path
 import pytest
 
 from basic_memory.file_utils import (
-    compute_checksum,
-    ensure_directory,
-    write_file_atomic,
-    parse_frontmatter,
-    has_frontmatter,
-    remove_frontmatter,
     FileError,
     FileWriteError,
     ParseError,
+    compute_checksum,
+    ensure_directory,
+    has_frontmatter,
+    parse_frontmatter,
+    remove_frontmatter,
     update_frontmatter,
+    write_file_atomic,
 )
 
 
@@ -52,7 +52,7 @@ async def test_write_file_atomic(tmp_path: Path):
 
     await write_file_atomic(test_file, content)
     assert test_file.exists()
-    assert test_file.read_text() == content
+    assert test_file.read_text(encoding="utf-8") == content
 
     # Temp file should be cleaned up
     assert not test_file.with_suffix(".tmp").exists()
@@ -185,7 +185,7 @@ async def test_update_frontmatter(tmp_path: Path):
     checksum = await update_frontmatter(test_file, updates)
 
     # Verify content
-    updated = test_file.read_text()
+    updated = test_file.read_text(encoding="utf-8")
     assert "title: Test" in updated
     assert "type: note" in updated
     assert "Test Content" in updated
@@ -204,13 +204,13 @@ async def test_update_frontmatter(tmp_path: Path):
     assert new_checksum != checksum
 
     # Verify content
-    updated = test_file.read_text()
+    updated = test_file.read_text(encoding="utf-8")
     fm = parse_frontmatter(updated)
     assert fm == {"title": "Test", "type": "doc", "tags": ["test"]}
     assert "Test Content" in updated
 
     # Test 3: Update with empty dict shouldn't change anything
-    checksum_before = await compute_checksum(test_file.read_text())
+    checksum_before = await compute_checksum(test_file.read_text(encoding="utf-8"))
     new_checksum = await update_frontmatter(test_file, {})
     assert new_checksum == checksum_before
 
@@ -229,7 +229,7 @@ More content here"""
     test_file.write_text(content)
     await update_frontmatter(test_file, {"title": "Test"})
 
-    updated = test_file.read_text()
+    updated = test_file.read_text(encoding="utf-8")
     assert remove_frontmatter(updated).strip() == content
 
 

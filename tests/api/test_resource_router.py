@@ -2,9 +2,9 @@
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 from basic_memory.schemas import EntityResponse
 
@@ -346,7 +346,7 @@ async def test_put_resource_new_file(client, test_config, entity_repository, sea
     assert full_path.exists()
 
     # Verify file content
-    file_content = full_path.read_text()
+    file_content = full_path.read_text(encoding="utf-8")
     assert json.loads(file_content) == canvas_data
 
     # Verify entity was created in DB
@@ -420,7 +420,7 @@ async def test_put_resource_update_existing(client, test_config, entity_reposito
     assert response.status_code == 200
 
     # Verify file was updated
-    updated_content = full_path.read_text()
+    updated_content = full_path.read_text(encoding="utf-8")
     assert json.loads(updated_content) == updated_data
 
     # Verify entity was updated
