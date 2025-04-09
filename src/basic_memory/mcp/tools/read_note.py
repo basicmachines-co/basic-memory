@@ -111,7 +111,7 @@ def format_not_found_message(identifier: str) -> str:
         ## Search Instead
         Try searching for related content:
         ```
-        search(query="{identifier}")
+        search_notes(query="{identifier}")
         ```
         
         ## Recent Activity
@@ -172,7 +172,7 @@ def format_related_results(identifier: str, results) -> str:
         ## Search For More Results
         To see more related content:
         ```
-        search(query="{identifier}")
+        search_notes(query="{identifier}")
         ```
         
         ## Create New Note
