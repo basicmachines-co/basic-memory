@@ -333,9 +333,9 @@ config:
       "command": "uvx",
       "args": [
         "basic-memory",
-        "mcp",
         "--project",
-        "your-project-name"
+        "your-project-name",
+        "mcp"
       ]
     }
   }
