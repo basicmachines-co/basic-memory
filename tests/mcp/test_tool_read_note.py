@@ -267,7 +267,7 @@ async def test_read_note_text_search_fallback(mock_call_get, mock_search):
     assert "Related Note 1" in result
     assert "Related Note 2" in result
     assert 'read_note("notes/related-note-1")' in result
-    assert "search(query=" in result
+    assert "search_notes(query=" in result
     assert "write_note(" in result
 
 
