@@ -35,7 +35,7 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
 
     Returns:
         Normalized permalink that matches validation rules. Converts spaces and underscores
-        to hyphens for consistency.
+        to hyphens for consistency. Preserves non-ASCII characters like Chinese.
 
     Examples:
         >>> generate_permalink("docs/My Feature.md")
@@ -44,6 +44,8 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
         'specs/api-v2'
         >>> generate_permalink("design/unified_model_refactor.md")
         'design/unified-model-refactor'
+        >>> generate_permalink("中文/测试文档.md")  
+        '中文/测试文档'
     """
     # Convert Path to string if needed
     path_str = str(file_path)
@@ -51,20 +53,18 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
     # Remove extension
     base = os.path.splitext(path_str)[0]
 
-    # Transliterate unicode to ascii
-    ascii_text = unidecode(base)
-
     # Insert dash between camelCase
-    ascii_text = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", ascii_text)
+    base_with_dashes = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", base)
 
-    # Convert to lowercase
-    lower_text = ascii_text.lower()
+    # Convert ASCII letters to lowercase, preserve non-ASCII characters
+    lower_text = "".join(c.lower() if c.isascii() and c.isalpha() else c for c in base_with_dashes)
 
-    # replace underscores with hyphens
+    # Replace underscores with hyphens
     text_with_hyphens = lower_text.replace("_", "-")
 
-    # Replace remaining invalid chars with hyphens
-    clean_text = re.sub(r"[^a-z0-9/\-]", "-", text_with_hyphens)
+    # Replace spaces and unsafe ASCII characters with hyphens, but preserve non-ASCII characters
+    # Include common Chinese character ranges and other non-ASCII characters
+    clean_text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-]", "-", text_with_hyphens)
 
     # Collapse multiple hyphens
     clean_text = re.sub(r"-+", "-", clean_text)
@@ -72,7 +72,7 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
     # Clean each path segment
     segments = clean_text.split("/")
     clean_segments = [s.strip("-") for s in segments]
-
+    
     return "/".join(clean_segments)
 
 
