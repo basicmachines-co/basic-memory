@@ -1,6 +1,6 @@
 """Recent activity tool for Basic Memory MCP server."""
 
-from typing import Optional, List
+from typing import List, Union
 
 from loguru import logger
 
@@ -14,7 +14,7 @@ from basic_memory.schemas.search import SearchItemType
 
 @mcp.tool(
     description="""Get recent activity from across the knowledge base.
-    
+
     Timeframe supports natural language formats like:
     - "2 days ago"  
     - "last week"
@@ -25,9 +25,9 @@ from basic_memory.schemas.search import SearchItemType
     """,
 )
 async def recent_activity(
-    type: Optional[List[SearchItemType]] = None,
-    depth: Optional[int] = 1,
-    timeframe: Optional[TimeFrame] = "7d",
+    type: Union[str, List[str]] = "",
+    depth: int = 1,
+    timeframe: TimeFrame = "7d",
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
@@ -35,11 +35,14 @@ async def recent_activity(
     """Get recent activity across the knowledge base.
 
     Args:
-        type: Filter by content type(s). Valid options:
-            - ["entity"] for knowledge entities
-            - ["relation"] for connections between entities
-            - ["observation"] for notes and observations
+        type: Filter by content type(s). Can be a string or list of strings.
+            Valid options:
+            - "entity" or ["entity"] for knowledge entities
+            - "relation" or ["relation"] for connections between entities
+            - "observation" or ["observation"] for notes and observations
             Multiple types can be combined: ["entity", "relation"]
+            Case-insensitive: "ENTITY" and "entity" are treated the same.
+            Default is an empty string, which returns all types.
         depth: How many relation hops to traverse (1-3 recommended)
         timeframe: Time window to search. Supports natural language:
             - Relative: "2 days ago", "last week", "yesterday"
@@ -59,14 +62,17 @@ async def recent_activity(
         # Get all entities for the last 10 days (default)
         recent_activity()
 
-        # Get all entities from yesterday
+        # Get all entities from yesterday (string format)
+        recent_activity(type="entity", timeframe="yesterday")
+
+        # Get all entities from yesterday (list format)
         recent_activity(type=["entity"], timeframe="yesterday")
 
         # Get recent relations and observations
         recent_activity(type=["relation", "observation"], timeframe="today")
 
         # Look back further with more context
-        recent_activity(type=["entity"], depth=2, timeframe="2 weeks ago")
+        recent_activity(type="entity", depth=2, timeframe="2 weeks ago")
 
     Notes:
         - Higher depth values (>3) may impact performance with large result sets
@@ -86,11 +92,27 @@ async def recent_activity(
     if timeframe:
         params["timeframe"] = timeframe  # pyright: ignore
 
-    # send enum values if we have an enum, else send string value
+    # Validate and convert type parameter
     if type:
-        params["type"] = [  # pyright: ignore
-            type.value if isinstance(type, SearchItemType) else type for type in type
-        ]
+        # Convert single string to list
+        if isinstance(type, str):
+            type_list = [type]
+        else:
+            type_list = type
+
+        # Validate each type against SearchItemType enum
+        validated_types = []
+        for t in type_list:
+            try:
+                # Try to convert string to enum
+                if isinstance(t, str):
+                    validated_types.append(SearchItemType(t.lower()))
+            except ValueError:
+                valid_types = [t.value for t in SearchItemType]
+                raise ValueError(f"Invalid type: {t}. Valid types are: {valid_types}")
+
+        # Add validated types to params
+        params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
     response = await call_get(
         client,

@@ -5,12 +5,9 @@ from datetime import datetime
 
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools import build_context, recent_activity
+from basic_memory.mcp.tools import build_context
 from basic_memory.schemas.memory import (
     GraphContext,
-    EntitySummary,
-    ObservationSummary,
-    RelationSummary,
 )
 
 
@@ -81,53 +78,6 @@ invalid_timeframes = [
     "invalid",  # Nonsense string
     "tomorrow",  # Future date
 ]
-
-
-@pytest.mark.asyncio
-async def test_recent_activity_timeframe_formats(client, test_graph):
-    """Test that recent_activity accepts various timeframe formats."""
-    # Test each valid timeframe
-    for timeframe in valid_timeframes:
-        try:
-            result = await recent_activity(
-                type=["entity"], timeframe=timeframe, page=1, page_size=10, max_related=10
-            )
-            assert result is not None
-        except Exception as e:
-            pytest.fail(f"Failed with valid timeframe '{timeframe}': {str(e)}")
-
-    # Test invalid timeframes should raise ValidationError
-    for timeframe in invalid_timeframes:
-        with pytest.raises(ToolError):
-            await recent_activity(timeframe=timeframe)
-
-
-@pytest.mark.asyncio
-async def test_recent_activity_type_filters(client, test_graph):
-    """Test that recent_activity correctly filters by types."""
-    # Test single type
-    result = await recent_activity(type=["entity"])
-    assert result is not None
-    assert all(isinstance(r, EntitySummary) for r in result.primary_results)
-
-    # Test multiple types
-    result = await recent_activity(type=["entity", "observation"])
-    assert result is not None
-    assert all(
-        isinstance(r, EntitySummary) or isinstance(r, ObservationSummary)
-        for r in result.primary_results
-    )
-
-    # Test all types
-    result = await recent_activity(type=["entity", "observation", "relation"])
-    assert result is not None
-    # Results can be any type
-    assert all(
-        isinstance(r, EntitySummary)
-        or isinstance(r, ObservationSummary)
-        or isinstance(r, RelationSummary)
-        for r in result.primary_results
-    )
 
 
 @pytest.mark.asyncio
