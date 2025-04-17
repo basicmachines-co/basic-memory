@@ -7,6 +7,7 @@ import pytest
 from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
 from basic_memory.sync.sync_service import SyncService
+from basic_memory.utils import generate_permalink
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -66,3 +67,54 @@ Testing permalink generation.
         assert entity.permalink == expected_permalink, (
             f"File {filename} should have permalink {expected_permalink}"
         )
+
+
+@pytest.mark.parametrize(
+    "input_path, expected",
+    [
+        ("test/Über File.md", "test/uber-file"),
+        ("docs/résumé.md", "docs/resume"),
+        ("notes/Déjà vu.md", "notes/deja-vu"),
+        ("papers/Jürgen's Findings.md", "papers/jurgens-findings"),
+        ("archive/François Müller.md", "archive/francois-muller"),
+        ("research/Søren Kierkegård.md", "research/soren-kierkegard"),
+        ("articles/El Niño.md", "articles/el-nino"),
+    ],
+)
+def test_latin_accents_transliteration(input_path, expected):
+    """Test that Latin letters with accents are properly transliterated."""
+    assert generate_permalink(input_path) == expected
+
+
+@pytest.mark.parametrize(
+    "input_path, expected",
+    [
+        ("中文/测试文档.md", "中文/测试文档"),
+        ("notes/北京市.md", "notes/北京市"),
+        ("research/上海简介.md", "research/上海简介"),
+        ("docs/中文 English Mixed.md", "docs/中文-english-mixed"),
+        ("articles/东京Tokyo混合.md", "articles/东京-tokyo-混合"),
+        ("papers/汉字_underscore_test.md", "papers/汉字-underscore-test"),
+        ("projects/中文CamelCase测试.md", "projects/中文-camel-case-测试"),
+    ],
+)
+def test_chinese_character_preservation(input_path, expected):
+    """Test that Chinese characters are preserved in permalinks."""
+    assert generate_permalink(input_path) == expected
+
+
+@pytest.mark.parametrize(
+    "input_path, expected",
+    [
+        ("mixed/北京Café.md", "mixed/北京-cafe"),
+        ("notes/东京Tōkyō.md", "notes/东京-tokyo"),
+        ("research/München中文.md", "research/munchen-中文"),
+        ("docs/Über测试.md", "docs/uber-测试"),
+        ("complex/北京Beijing上海Shanghai.md", "complex/北京-beijing-上海-shanghai"),
+        ("special/中文!@#$%^&*()_+.md", "special/中文"),
+        ("punctuation/你好，世界!.md", "punctuation/你好世界"),
+    ],
+)
+def test_mixed_character_sets(input_path, expected):
+    """Test handling of mixed character sets and edge cases."""
+    assert generate_permalink(input_path) == expected

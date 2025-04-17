@@ -5,11 +5,11 @@ import os
 import logging
 import re
 import sys
+import unicodedata
 from pathlib import Path
-from typing import Optional, Protocol, Union, runtime_checkable, List
+from typing import Optional, Protocol, Union, runtime_checkable, List, Any
 
 from loguru import logger
-from unidecode import unidecode
 
 
 @runtime_checkable
@@ -27,11 +27,9 @@ FilePath = Union[Path, str]
 logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(logging.ERROR)
 
 
-def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
-    """Generate a stable permalink from a file path.
-
-    Args:
-        file_path: Original file path (str, Path, or PathLike)
+def generate_permalink(file_path: Union[Path, str, Any]) -> str:
+    """
+    Generate a permalink from a file path.
 
     Returns:
         Normalized permalink that matches validation rules. Converts spaces and underscores
@@ -40,11 +38,11 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
     Examples:
         >>> generate_permalink("docs/My Feature.md")
         'docs/my-feature'
-        >>> generate_permalink("specs/API (v2).md")
+        >>> generate_permalink("specs/API_v2.md")
         'specs/api-v2'
         >>> generate_permalink("design/unified_model_refactor.md")
         'design/unified-model-refactor'
-        >>> generate_permalink("中文/测试文档.md")  
+        >>> generate_permalink("中文/测试文档.md")
         '中文/测试文档'
     """
     # Convert Path to string if needed
@@ -53,26 +51,78 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
     # Remove extension
     base = os.path.splitext(path_str)[0]
 
+    # Create a transliteration mapping for specific characters
+    transliteration_map = {
+        "ø": "o",  # Handle Søren -> soren
+        "å": "a",  # Handle Kierkegård -> kierkegard
+        "ü": "u",  # Handle Müller -> muller
+        "é": "e",  # Handle Café -> cafe
+        "è": "e",  # Handle Mère -> mere
+        "ê": "e",  # Handle Fête -> fete
+        "à": "a",  # Handle À la mode -> a la mode
+        "ç": "c",  # Handle Façade -> facade
+        "ñ": "n",  # Handle Niño -> nino
+        "ö": "o",  # Handle Björk -> bjork
+        "ä": "a",  # Handle Häagen -> haagen
+        # Add more mappings as needed
+    }
+
+    # Process character by character, transliterating Latin characters with diacritics
+    result = ""
+    for char in base:
+        # Direct mapping for known characters
+        if char.lower() in transliteration_map:
+            result += transliteration_map[char.lower()]
+        # General case using Unicode normalization
+        elif unicodedata.category(char).startswith("L") and ord(char) > 127:
+            # Decompose the character (e.g., ü -> u + combining diaeresis)
+            decomposed = unicodedata.normalize("NFD", char)
+            # If decomposition produced multiple characters and first one is ASCII
+            if len(decomposed) > 1 and ord(decomposed[0]) < 128:
+                # Keep only the base character
+                result += decomposed[0].lower()
+            else:
+                # For non-Latin scripts like Chinese, preserve the character
+                result += char
+        else:
+            # Add the character as is
+            result += char
+
+    # Handle special punctuation cases for apostrophes
+    result = result.replace("'", "")
+
     # Insert dash between camelCase
-    base_with_dashes = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", base)
+    # This regex finds boundaries between lowercase and uppercase letters
+    result = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", result)
+
+    # Insert dash between Chinese and Latin character boundaries
+    # This is needed for cases like "中文English" -> "中文-english"
+    result = re.sub(r"([\u4e00-\u9fff])([a-zA-Z])", r"\1-\2", result)
+    result = re.sub(r"([a-zA-Z])([\u4e00-\u9fff])", r"\1-\2", result)
 
     # Convert ASCII letters to lowercase, preserve non-ASCII characters
-    lower_text = "".join(c.lower() if c.isascii() and c.isalpha() else c for c in base_with_dashes)
+    lower_text = "".join(c.lower() if c.isascii() and c.isalpha() else c for c in result)
 
     # Replace underscores with hyphens
     text_with_hyphens = lower_text.replace("_", "-")
 
     # Replace spaces and unsafe ASCII characters with hyphens, but preserve non-ASCII characters
     # Include common Chinese character ranges and other non-ASCII characters
-    clean_text = re.sub(r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-]", "-", text_with_hyphens)
+    clean_text = re.sub(
+        r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-]", "-", text_with_hyphens
+    )
 
     # Collapse multiple hyphens
     clean_text = re.sub(r"-+", "-", clean_text)
 
+    # Remove hyphens between adjacent Chinese characters only
+    # This handles cases like "你好-世界" -> "你好世界"
+    clean_text = re.sub(r"([\u4e00-\u9fff])-([\u4e00-\u9fff])", r"\1\2", clean_text)
+
     # Clean each path segment
     segments = clean_text.split("/")
     clean_segments = [s.strip("-") for s in segments]
-    
+
     return "/".join(clean_segments)
 
 
