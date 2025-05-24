@@ -102,5 +102,5 @@ mcp = FastMCP(
     name="Basic Memory",
     log_level="DEBUG",
     auth_server_provider=auth_provider,
-    auth=auth_settings,  # FastMCP expects 'auth' not 'auth_settings'
+    auth=auth_settings,
 )
