@@ -278,3 +278,36 @@ class TestBasicMemoryOAuthProvider:
 
         code = await provider.load_authorization_code(fake_client, "some-code")
         assert code is None
+
+    @pytest.mark.asyncio
+    async def test_expired_access_token_in_memory(self, provider):
+        """Test that expired access tokens in memory are removed."""
+        # Create an expired token directly in memory
+        expired_token_str = "expired-access-token"
+        expired_access_token = BasicMemoryAccessToken(
+            token=expired_token_str,
+            client_id="test-client",
+            scopes=["read"],
+            expires_at=int((datetime.utcnow() - timedelta(minutes=1)).timestamp()),  # Expired
+        )
+        provider.access_tokens[expired_token_str] = expired_access_token
+
+        # Try to load the expired token - should return None and remove from memory
+        result = await provider.load_access_token(expired_token_str)
+        assert result is None
+        assert expired_token_str not in provider.access_tokens
+
+    @pytest.mark.asyncio
+    async def test_jwt_decode_success_path(self, provider):
+        """Test successful JWT decode path when token not in memory."""
+        # Generate a valid JWT token
+        jwt_token = provider._generate_access_token("test-client", ["read", "write"])
+
+        # Make sure it's not in memory cache
+        assert jwt_token not in provider.access_tokens
+
+        # Load the token - should decode successfully
+        result = await provider.load_access_token(jwt_token)
+        assert result is not None
+        assert result.client_id == "test-client"
+        assert result.scopes == ["read", "write"]
