@@ -52,3 +52,4 @@ ENV/
 
 # claude action
 claude-output
+**/.claude/settings.local.json

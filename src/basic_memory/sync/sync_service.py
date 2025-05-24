@@ -10,7 +10,7 @@ from typing import Dict, Optional, Set, Tuple
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from basic_memory.config import ProjectConfig
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import has_frontmatter
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
@@ -64,7 +64,7 @@ class SyncService:
 
     def __init__(
         self,
-        config: ProjectConfig,
+        app_config: BasicMemoryConfig,
         entity_service: EntityService,
         entity_parser: EntityParser,
         entity_repository: EntityRepository,
@@ -72,7 +72,7 @@ class SyncService:
         search_service: SearchService,
         file_service: FileService,
     ):
-        self.config = config
+        self.app_config = app_config
         self.entity_service = entity_service
         self.entity_parser = entity_parser
         self.entity_repository = entity_repository
@@ -133,7 +133,7 @@ class SyncService:
         """Scan directory for changes compared to database state."""
 
         db_paths = await self.get_db_file_state()
-        logger.debug(f"Found {len(db_paths)} db paths")
+        logger.info(f"Scanning directory {directory}. Found {len(db_paths)} db paths")
 
         # Track potentially moved files by checksum
         scan_result = await self.scan_directory(directory)
@@ -173,6 +173,7 @@ class SyncService:
                 # deleted
                 else:
                     report.deleted.add(db_path)
+        logger.info(f"Completed scan for directory {directory}, found {report.total} changes.")
         return report
 
     async def get_db_file_state(self) -> Dict[str, str]:
@@ -218,7 +219,7 @@ class SyncService:
             return entity, checksum
 
         except Exception as e:  # pragma: no cover
-            logger.exception("Failed to sync file", path=path, error=str(e))
+            logger.error(f"Failed to sync file: path={path}, error={str(e)}")
             return None, None
 
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
@@ -378,7 +379,7 @@ class SyncService:
             updates = {"file_path": new_path}
 
             # If configured, also update permalink to match new path
-            if self.config.update_permalinks_on_move:
+            if self.app_config.update_permalinks_on_move:
                 # generate new permalink value
                 new_permalink = await self.entity_service.resolve_permalink(new_path)
 
@@ -426,7 +427,7 @@ class SyncService:
         logger.info("Resolving forward references", count=len(unresolved_relations))
 
         for relation in unresolved_relations:
-            logger.debug(
+            logger.trace(
                 "Attempting to resolve relation "
                 f"relation_id={relation.id} "
                 f"from_id={relation.from_id} "
@@ -494,7 +495,7 @@ class SyncService:
                 result.files[rel_path] = checksum
                 result.checksums[checksum] = rel_path
 
-                logger.debug("Found file", path=rel_path, checksum=checksum)
+                logger.trace(f"Found file, path={rel_path}, checksum={checksum}")
 
         duration_ms = int((time.time() - start_time) * 1000)
         logger.debug(

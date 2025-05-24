@@ -17,15 +17,17 @@ async def test_get_basic_discussion_context(client, test_graph):
     context = await build_context(url="memory://test/root")
 
     assert isinstance(context, GraphContext)
-    assert len(context.primary_results) == 1
-    assert context.primary_results[0].permalink == "test/root"
-    assert len(context.related_results) > 0
+    assert len(context.results) == 1
+    assert context.results[0].primary_result.permalink == "test/root"
+    assert len(context.results[0].related_results) > 0
 
     # Verify metadata
     assert context.metadata.uri == "test/root"
     assert context.metadata.depth == 1  # default depth
     assert context.metadata.timeframe is not None
     assert isinstance(context.metadata.generated_at, datetime)
+    assert context.metadata.primary_count == 1
+    assert context.metadata.related_count > 0
 
 
 @pytest.mark.asyncio
@@ -34,8 +36,8 @@ async def test_get_discussion_context_pattern(client, test_graph):
     context = await build_context(url="memory://test/*", depth=1)
 
     assert isinstance(context, GraphContext)
-    assert len(context.primary_results) > 1  # Should match multiple test/* paths
-    assert all("test/" in e.permalink for e in context.primary_results)
+    assert len(context.results) > 1  # Should match multiple test/* paths
+    assert all("test/" in item.primary_result.permalink for item in context.results)
     assert context.metadata.depth == 1
 
 
@@ -54,7 +56,19 @@ async def test_get_discussion_context_timeframe(client, test_graph):
         timeframe="30d",  # Last 30 days
     )
 
-    assert len(older_context.related_results) >= len(recent_context.related_results)
+    # Calculate total related items
+    total_recent_related = (
+        sum(len(item.related_results) for item in recent_context.results)
+        if recent_context.results
+        else 0
+    )
+    total_older_related = (
+        sum(len(item.related_results) for item in older_context.results)
+        if older_context.results
+        else 0
+    )
+
+    assert total_older_related >= total_recent_related
 
 
 @pytest.mark.asyncio
@@ -63,8 +77,9 @@ async def test_get_discussion_context_not_found(client):
     context = await build_context(url="memory://test/does-not-exist")
 
     assert isinstance(context, GraphContext)
-    assert len(context.primary_results) == 0
-    assert len(context.related_results) == 0
+    assert len(context.results) == 0
+    assert context.metadata.primary_count == 0
+    assert context.metadata.related_count == 0
 
 
 # Test data for different timeframe formats

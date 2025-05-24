@@ -30,6 +30,10 @@ dependencies = [
     "alembic>=1.14.1",
     "qasync>=0.27.1",
     "pillow>=11.1.0",
+    "pybars3>=0.9.7",
+    "fastmcp>=2.3.4",
+    "pyjwt>=2.10.1",
+    "python-dotenv>=1.1.0",
 ]
 
 
@@ -102,6 +106,29 @@ commit_message = "chore(release): {version} [skip ci]"
 
 [tool.coverage.run]
 concurrency = ["thread", "gevent"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+# Exclude specific modules that are difficult to test comprehensively
+omit = [
+    "*/external_auth_provider.py",  # External HTTP calls to OAuth providers
+    "*/supabase_auth_provider.py",  # External HTTP calls to Supabase APIs
+    "*/watch_service.py",           # File system watching - complex integration testing
+    "*/background_sync.py",         # Background processes
+    "*/cli/main.py",               # CLI entry point
+]
 
 [tool.logfire]
 ignore_no_config = true

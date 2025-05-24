@@ -1,4 +1,4 @@
-"""Tests for the stats router API endpoints."""
+"""Tests for the project router API endpoints."""
 
 import json
 from unittest.mock import patch
@@ -7,12 +7,12 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_endpoint(test_graph, client, test_config):
+async def test_get_project_info_endpoint(test_graph, client, test_config, project_url):
     """Test the project-info endpoint returns correctly structured data."""
     # Set up some test data in the database
 
     # Call the endpoint
-    response = await client.get("/stats/project-info")
+    response = await client.get(f"{project_url}/project/info")
 
     # Verify response
     assert response.status_code == 200
@@ -51,10 +51,10 @@ async def test_get_project_info_endpoint(test_graph, client, test_config):
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_content(test_graph, client, test_config):
+async def test_get_project_info_content(test_graph, client, test_config, project_url):
     """Test that project-info contains actual data from the test database."""
     # Call the endpoint
-    response = await client.get("/stats/project-info")
+    response = await client.get(f"{project_url}/project/info")
 
     # Verify response
     assert response.status_code == 200
@@ -77,7 +77,7 @@ async def test_get_project_info_content(test_graph, client, test_config):
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_watch_status(test_graph, client, test_config):
+async def test_get_project_info_watch_status(test_graph, client, test_config, project_url):
     """Test that project-info correctly handles watch status."""
     # Create a mock watch status file
     mock_watch_status = {
@@ -97,7 +97,7 @@ async def test_get_project_info_watch_status(test_graph, client, test_config):
         patch("pathlib.Path.read_text", return_value=json.dumps(mock_watch_status)),
     ):
         # Call the endpoint
-        response = await client.get("/stats/project-info")
+        response = await client.get(f"{project_url}/project/info")
 
         # Verify response
         assert response.status_code == 200
@@ -108,3 +108,43 @@ async def test_get_project_info_watch_status(test_graph, client, test_config):
         assert data["system"]["watch_status"]["running"] is True
         assert data["system"]["watch_status"]["pid"] == 7321
         assert data["system"]["watch_status"]["synced_files"] == 6
+
+
+@pytest.mark.asyncio
+async def test_list_projects_endpoint(test_graph, client, test_config, project_url):
+    """Test the list projects endpoint returns correctly structured data."""
+    # Call the endpoint
+    response = await client.get(f"{project_url}/project/projects")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that the response contains expected fields
+    assert "projects" in data
+    assert "default_project" in data
+    assert "current_project" in data
+
+    # Check that projects is a list
+    assert isinstance(data["projects"], list)
+
+    # There should be at least one project (the test project)
+    assert len(data["projects"]) > 0
+
+    # Verify project item structure
+    if data["projects"]:
+        project = data["projects"][0]
+        assert "name" in project
+        assert "path" in project
+        assert "is_default" in project
+        assert "is_current" in project
+
+        # Current project should be marked
+        current_project = next((p for p in data["projects"] if p["is_current"]), None)
+        assert current_project is not None
+        assert current_project["name"] == data["current_project"]
+
+        # Default project should be marked
+        default_project = next((p for p in data["projects"] if p["is_default"]), None)
+        assert default_project is not None
+        assert default_project["name"] == data["default_project"]

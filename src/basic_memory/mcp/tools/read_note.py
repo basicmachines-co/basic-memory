@@ -4,6 +4,7 @@ from textwrap import dedent
 
 from loguru import logger
 
+from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
@@ -43,9 +44,12 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
         # Read with pagination
         read_note("Project Updates", page=2, page_size=5)
     """
+
+    project_url = get_project_config().project_url
+
     # Get the file via REST API - first try direct permalink lookup
     entity_path = memory_url_path(identifier)
-    path = f"/resource/{entity_path}"
+    path = f"{project_url}/resource/{entity_path}"
     logger.info(f"Attempting to read note from URL: {path}")
 
     try:
@@ -69,7 +73,7 @@ async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
         if result.permalink:
             try:
                 # Try to fetch the content using the found permalink
-                path = f"/resource/{result.permalink}"
+                path = f"{project_url}/resource/{result.permalink}"
                 response = await call_get(
                     client, path, params={"page": page, "page_size": page_size}
                 )

@@ -1,20 +1,20 @@
 """Watch service for Basic Memory."""
 
+import asyncio
 import os
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set
 
-from basic_memory.config import ProjectConfig
-from basic_memory.services.file_service import FileService
-from basic_memory.sync.sync_service import SyncService
+from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
+from basic_memory.models import Project
+from basic_memory.repository import ProjectRepository
 from loguru import logger
 from pydantic import BaseModel
 from rich.console import Console
 from watchfiles import awatch
 from watchfiles.main import FileChange, Change
-
-WATCH_STATUS_JSON = "watch-status.json"
 
 
 class WatchEvent(BaseModel):
@@ -72,16 +72,14 @@ class WatchServiceState(BaseModel):
 class WatchService:
     def __init__(
         self,
-        sync_service: SyncService,
-        file_service: FileService,
-        config: ProjectConfig,
+        app_config: BasicMemoryConfig,
+        project_repository: ProjectRepository,
         quiet: bool = False,
     ):
-        self.sync_service = sync_service
-        self.file_service = file_service
-        self.config = config
+        self.app_config = app_config
+        self.project_repository = project_repository
         self.state = WatchServiceState()
-        self.status_path = config.home / ".basic-memory" / WATCH_STATUS_JSON
+        self.status_path = Path.home() / ".basic-memory" / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
 
         # quiet mode for mcp so it doesn't mess up stdout
@@ -89,10 +87,14 @@ class WatchService:
 
     async def run(self):  # pragma: no cover
         """Watch for file changes and sync them"""
+
+        projects = await self.project_repository.get_active_projects()
+        project_paths = [project.path for project in projects]
+
         logger.info(
             "Watch service started",
-            f"directory={str(self.config.home)}",
-            f"debounce_ms={self.config.sync_delay}",
+            f"directories={project_paths}",
+            f"debounce_ms={self.app_config.sync_delay}",
             f"pid={os.getpid()}",
         )
 
@@ -102,15 +104,30 @@ class WatchService:
 
         try:
             async for changes in awatch(
-                self.config.home,
-                debounce=self.config.sync_delay,
+                *project_paths,
+                debounce=self.app_config.sync_delay,
                 watch_filter=self.filter_changes,
                 recursive=True,
             ):
-                await self.handle_changes(self.config.home, changes)
+                # group changes by project
+                project_changes = defaultdict(list)
+                for change, path in changes:
+                    for project in projects:
+                        if self.is_project_path(project, path):
+                            project_changes[project].append((change, path))
+                            break
+
+                # create coroutines to handle changes
+                change_handlers = [
+                    self.handle_changes(project, changes)  # pyright: ignore
+                    for project, changes in project_changes.items()
+                ]
+
+                # process changes
+                await asyncio.gather(*change_handlers)
 
         except Exception as e:
-            logger.exception("Watch service error", error=str(e), directory=str(self.config.home))
+            logger.exception("Watch service error", error=str(e))
 
             self.state.record_error(str(e))
             await self.write_status()
@@ -119,7 +136,6 @@ class WatchService:
         finally:
             logger.info(
                 "Watch service stopped",
-                f"directory={str(self.config.home)}",
                 f"runtime_seconds={int((datetime.now() - self.state.start_time).total_seconds())}",
             )
 
@@ -132,15 +148,9 @@ class WatchService:
         Returns:
             True if the file should be watched, False if it should be ignored
         """
-        # Skip if path is invalid
-        try:
-            relative_path = Path(path).relative_to(self.config.home)
-        except ValueError:
-            # This is a defensive check for paths outside our home directory
-            return False
 
         # Skip hidden directories and files
-        path_parts = relative_path.parts
+        path_parts = Path(path).parts
         for part in path_parts:
             if part.startswith("."):
                 return False
@@ -155,14 +165,30 @@ class WatchService:
         """Write current state to status file"""
         self.status_path.write_text(WatchServiceState.model_dump_json(self.state, indent=2))
 
-    async def handle_changes(self, directory: Path, changes: Set[FileChange]):
+    def is_project_path(self, project: Project, path):
+        """
+        Checks if path is a subdirectory or file within a project
+        """
+        project_path = Path(project.path).resolve()
+        sub_path = Path(path).resolve()
+        return project_path in sub_path.parents
+
+    async def handle_changes(self, project: Project, changes: Set[FileChange]) -> None:
         """Process a batch of file changes"""
         import time
         from typing import List, Set
 
-        start_time = time.time()
+        # Lazily initialize sync service for project changes
+        from basic_memory.cli.commands.sync import get_sync_service
 
-        logger.info(f"Processing file changes, change_count={len(changes)}, directory={directory}")
+        sync_service = await get_sync_service(project)
+        file_service = sync_service.file_service
+
+        start_time = time.time()
+        directory = Path(project.path).resolve()
+        logger.info(
+            f"Processing project: {project.name} changes, change_count={len(changes)}, directory={directory}"
+        )
 
         # Group changes by type
         adds: List[str] = []
@@ -190,7 +216,7 @@ class WatchService:
 
         # because of our atomic writes on updates, an add may be an existing file
         for added_path in adds:  # pragma: no cover TODO add test
-            entity = await self.sync_service.entity_repository.get_by_file_path(added_path)
+            entity = await sync_service.entity_repository.get_by_file_path(added_path)
             if entity is not None:
                 logger.debug(f"Existing file will be processed as modified, path={added_path}")
                 adds.remove(added_path)
@@ -218,9 +244,7 @@ class WatchService:
                     continue  # pragma: no cover
 
                 # Skip directories for deleted paths (based on entity type in db)
-                deleted_entity = await self.sync_service.entity_repository.get_by_file_path(
-                    deleted_path
-                )
+                deleted_entity = await sync_service.entity_repository.get_by_file_path(deleted_path)
                 if deleted_entity is None:
                     # If this was a directory, it wouldn't have an entity
                     logger.debug("Skipping unknown path for move detection", path=deleted_path)
@@ -229,10 +253,10 @@ class WatchService:
                 if added_path != deleted_path:
                     # Compare checksums to detect moves
                     try:
-                        added_checksum = await self.file_service.compute_checksum(added_path)
+                        added_checksum = await file_service.compute_checksum(added_path)
 
                         if deleted_entity and deleted_entity.checksum == added_checksum:
-                            await self.sync_service.handle_move(deleted_path, added_path)
+                            await sync_service.handle_move(deleted_path, added_path)
                             self.state.add_event(
                                 path=f"{deleted_path} -> {added_path}",
                                 action="moved",
@@ -261,7 +285,7 @@ class WatchService:
         for path in deletes:
             if path not in processed:
                 logger.debug("Processing deleted file", path=path)
-                await self.sync_service.handle_delete(path)
+                await sync_service.handle_delete(path)
                 self.state.add_event(path=path, action="deleted", status="success")
                 self.console.print(f"[red]✕[/red] {path}")
                 logger.info(f"deleted: {path}")
@@ -281,7 +305,7 @@ class WatchService:
                     continue  # pragma: no cover
 
                 logger.debug(f"Processing new file, path={path}")
-                entity, checksum = await self.sync_service.sync_file(path, new=True)
+                entity, checksum = await sync_service.sync_file(path, new=True)
                 if checksum:
                     self.state.add_event(
                         path=path, action="new", status="success", checksum=checksum
@@ -314,7 +338,7 @@ class WatchService:
                     continue
 
                 logger.debug(f"Processing modified file: path={path}")
-                entity, checksum = await self.sync_service.sync_file(path, new=False)
+                entity, checksum = await sync_service.sync_file(path, new=False)
                 self.state.add_event(
                     path=path, action="modified", status="success", checksum=checksum
                 )
@@ -335,7 +359,7 @@ class WatchService:
                     repeat_count = 0
                     modify_count += 1
 
-                logger.debug(
+                logger.debug(  # pragma: no cover
                     "Modified file processed, "
                     f"path={path} "
                     f"entity_id={entity.id if entity else None} "

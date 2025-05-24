@@ -2,6 +2,7 @@
 
 from loguru import logger
 
+from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
@@ -43,9 +44,10 @@ async def project_info() -> ProjectInfoResponse:
         print(f"Basic Memory version: {info.system.version}")
     """
     logger.info("Getting project info")
+    project_url = get_project_config().project_url
 
     # Call the API endpoint
-    response = await call_get(client, "/stats/project-info")
+    response = await call_get(client, f"{project_url}/project/info")
 
     # Convert response to ProjectInfoResponse
     return ProjectInfoResponse.model_validate(response.json())

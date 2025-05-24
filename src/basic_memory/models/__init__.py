@@ -3,12 +3,13 @@
 import basic_memory
 from basic_memory.models.base import Base
 from basic_memory.models.knowledge import Entity, Observation, Relation
-
-SCHEMA_VERSION = basic_memory.__version__ + "-" + "003"
+from basic_memory.models.project import Project
 
 __all__ = [
     "Base",
     "Entity",
     "Observation",
     "Relation",
+    "Project",
+    "basic_memory",
 ]

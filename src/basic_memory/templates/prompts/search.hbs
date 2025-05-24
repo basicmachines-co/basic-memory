@@ -1,0 +1,101 @@
+# Search Results for: "{{ query }}"{{#if timeframe}} (after {{ timeframe }}){{/if}}
+
+This is a memory search session.
+Please use the available basic-memory tools to gather relevant context before responding.
+I found {{ result_count }} result(s) that match your query.
+
+{{#if has_results}}
+Here are the most relevant results:
+
+    {{#each results}}
+        {{#if_cond (lt @index 5)}}
+        {{#dedent}}
+            ## {{math @index "+" 1}}. {{ title }}
+            - **Type**: {{ type.value }}
+            {{#if metadata.created_at}}
+            - **Created**: {{date metadata.created_at "%Y-%m-%d %H:%M"}}
+            {{/if}}
+            - **Relevance Score**: {{round score 2}}
+
+            {{#if content}}
+            - **Excerpt**:
+            {{ content }}
+            {{/if}}
+
+            {{#if permalink}}
+            You can view this content with: `read_note("{{ permalink }}")`
+            Or explore its context with: `build_context("memory://{{ permalink }}")`
+            {{else}}
+            You can view this file with: `read_file("{{ file_path }}")`
+            {{/if}}
+        {{/dedent}}
+        {{/if_cond}}
+    {{/each}}
+
+## Next Steps
+
+You can:
+- Refine your search: `search_notes("{{ query }} AND additional_term")`
+- Exclude terms: `search_notes("{{ query }} NOT exclude_term")`
+- View more results: `search_notes("{{ query }}", after_date=None)`
+- Check recent activity: `recent_activity()`
+
+## Synthesize and Capture Knowledge
+
+Consider creating a new note that synthesizes what you've learned:
+
+```python
+await write_note(
+    title="Synthesis of {{capitalize query}} Information",
+    content='''
+    # Synthesis of {{capitalize query}} Information
+    
+    ## Overview
+    [Synthesis of the search results and your conversation]
+    
+    ## Key Insights
+    [Summary of main points learned from these results]
+    
+    ## Observations
+    - [insight] [Important observation from search results]
+    - [connection] [How this connects to other topics]
+    
+    ## Relations
+    - relates_to [[{{#if results.length}}{{#if results.0.title}}{{results.0.title}}{{else}}Related Topic{{/if}}{{else}}Related Topic{{/if}}]]
+    - extends [[Another Relevant Topic]]
+    '''
+)
+```
+
+Remember that capturing synthesized knowledge is one of the most valuable features of Basic Memory.
+{{else}}
+    I couldn't find any results for this query.
+
+    ## Opportunity to Capture Knowledge!
+
+    This is an excellent opportunity to create new knowledge on this topic. Consider:
+
+    ```python
+    await write_note(
+        title="{{capitalize query}}",
+        content='''
+        # {{capitalize query}}
+
+        ## Overview
+        [Summary of what we've discussed about {{ query }}]
+
+        ## Observations
+        - [category] [First observation about {{ query }}]
+        - [category] [Second observation about {{ query }}]
+
+        ## Relations
+        - relates_to [[Other Relevant Topic]]
+        '''
+    )
+    ```
+
+    ## Other Suggestions
+    - Try a different search term
+    - Broaden your search criteria
+    - Check recent activity with `recent_activity(timeframe="1w")`
+{{/if}}

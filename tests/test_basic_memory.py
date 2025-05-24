@@ -7,7 +7,7 @@ import pytest
 from frontmatter.default_handlers import toml
 
 from basic_memory import __version__
-from basic_memory.config import config
+from basic_memory.config import app_config
 
 
 def read_toml_version(file_path):
@@ -28,20 +28,20 @@ def read_toml_version(file_path):
 
 
 file_path = "pyproject.toml"
-version = read_toml_version(file_path)
 
 
-def test_version():
+def test_version(project_root):
     """Test version is set in project src code and pyproject.toml"""
+    version = read_toml_version(project_root / file_path)
     assert __version__ == version
 
 
 def test_config_env():
     """Test the config env is set to test for pytest"""
-    assert config.env == "test"
+    assert app_config.env == "test"
 
 
 @pytest.mark.asyncio
 async def test_config_env_async():
     """Test the config env is set to test for async pytest"""
-    assert config.env == "test"
+    assert app_config.env == "test"

@@ -30,6 +30,7 @@ async def test_entities(entity_service, file_service):
             title="Core Service",
             entity_type="component",
             folder="components",
+            project=entity_service.repository.project_id,
         )
     )
     e2, _ = await entity_service.create_or_update_entity(
@@ -37,6 +38,7 @@ async def test_entities(entity_service, file_service):
             title="Service Config",
             entity_type="config",
             folder="config",
+            project=entity_service.repository.project_id,
         )
     )
     e3, _ = await entity_service.create_or_update_entity(
@@ -44,6 +46,7 @@ async def test_entities(entity_service, file_service):
             title="Auth Service",
             entity_type="component",
             folder="components",
+            project=entity_service.repository.project_id,
         )
     )
     e4, _ = await entity_service.create_or_update_entity(
@@ -51,6 +54,7 @@ async def test_entities(entity_service, file_service):
             title="Core Features",
             entity_type="specs",
             folder="specs",
+            project=entity_service.repository.project_id,
         )
     )
     e5, _ = await entity_service.create_or_update_entity(
@@ -58,6 +62,7 @@ async def test_entities(entity_service, file_service):
             title="Sub Features 1",
             entity_type="specs",
             folder="specs/subspec",
+            project=entity_service.repository.project_id,
         )
     )
     e6, _ = await entity_service.create_or_update_entity(
@@ -65,6 +70,7 @@ async def test_entities(entity_service, file_service):
             title="Sub Features 2",
             entity_type="specs",
             folder="specs/subspec",
+            project=entity_service.repository.project_id,
         )
     )
 
@@ -77,6 +83,7 @@ async def test_entities(entity_service, file_service):
             file_path="Image.png",
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
+            project_id=entity_service.repository.project_id,
         )
     )
 
@@ -85,6 +92,7 @@ async def test_entities(entity_service, file_service):
             title="Core Service",
             entity_type="component",
             folder="components2",
+            project=entity_service.repository.project_id,
         )
     )
 

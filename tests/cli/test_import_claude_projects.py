@@ -6,9 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands import import_claude_projects
+from basic_memory.cli.commands.import_claude_projects import import_projects  # noqa
 from basic_memory.config import config
-from basic_memory.markdown import EntityParser, MarkdownProcessor
 
 # Set up CLI runner
 runner = CliRunner()
@@ -47,40 +46,6 @@ def sample_projects_json(tmp_path, sample_project):
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_project], f)
     return json_file
-
-
-@pytest.mark.asyncio
-async def test_process_projects_json(tmp_path, sample_projects_json):
-    """Test importing projects from JSON."""
-    entity_parser = EntityParser(tmp_path)
-    processor = MarkdownProcessor(entity_parser)
-
-    results = await import_claude_projects.process_projects_json(
-        sample_projects_json, tmp_path, processor
-    )
-
-    assert results["documents"] == 2
-    assert results["prompts"] == 1
-
-    # Check project directory structure
-    project_dir = tmp_path / "test-project"
-    assert project_dir.exists()
-    assert (project_dir / "docs").exists()
-    assert (project_dir / "prompt-template.md").exists()
-
-    # Check document files
-    doc1 = project_dir / "docs/test-document.md"
-    assert doc1.exists()
-    content1 = doc1.read_text(encoding="utf-8")
-    assert "# Test Document" in content1
-    assert "This is test content" in content1
-
-    # Check prompt template
-    prompt = project_dir / "prompt-template.md"
-    assert prompt.exists()
-    prompt_content = prompt.read_text(encoding="utf-8")
-    assert "# Test Prompt" in prompt_content
-    assert "This is a test prompt" in prompt_content
 
 
 def test_import_projects_command_file_not_found(tmp_path):
@@ -136,7 +101,7 @@ def test_import_projects_with_base_folder(tmp_path, sample_projects_json, monkey
     assert result.exit_code == 0
 
     # Check files in base folder
-    project_dir = tmp_path / base_folder / "test-project"
+    project_dir = tmp_path / base_folder / "Test_Project"
     assert project_dir.exists()
     assert (project_dir / "docs").exists()
     assert (project_dir / "prompt-template.md").exists()

@@ -35,7 +35,7 @@ def format_prompt_context(context: PromptContext) -> str:
     Returns:
         Formatted continuation summary
     """
-    if not context.results:
+    if not context.results:  # pragma: no cover
         return dedent(f"""
             # Continuing conversation on: {context.topic}
 
@@ -138,11 +138,11 @@ def format_prompt_context(context: PromptContext) -> str:
                     - type: **{related.type}**
                     - title: {related.title}
                     """)
-                if related.permalink:
+                if related.permalink:  # pragma: no cover
                     section_content += (
                         f'You can view this document with: `read_note("{related.permalink}")`'
                     )
-                else:
+                else:  # pragma: no cover
                     section_content += (
                         f'You can view this file with: `read_file("{related.file_path}")`'
                     )

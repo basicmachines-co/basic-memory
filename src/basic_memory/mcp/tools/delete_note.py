@@ -1,3 +1,4 @@
+from basic_memory.config import get_project_config
 from basic_memory.mcp.tools.utils import call_delete
 
 
@@ -23,6 +24,8 @@ async def delete_note(identifier: str) -> bool:
         # Delete by permalink
         delete_note("notes/project-planning")
     """
-    response = await call_delete(client, f"/knowledge/entities/{identifier}")
+    project_url = get_project_config().project_url
+
+    response = await call_delete(client, f"{project_url}/knowledge/entities/{identifier}")
     result = DeleteEntitiesResponse.model_validate(response.json())
     return result.deleted

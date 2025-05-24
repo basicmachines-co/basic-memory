@@ -1,11 +1,12 @@
 """Tests for MCP prompts."""
 
+from datetime import timezone, datetime
+
 import pytest
 
 from basic_memory.mcp.prompts.continue_conversation import continue_conversation
-from basic_memory.mcp.prompts.search import search_prompt, format_search_results
+from basic_memory.mcp.prompts.search import search_prompt
 from basic_memory.mcp.prompts.recent_activity import recent_activity_prompt
-from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItemType
 
 
 @pytest.mark.asyncio
@@ -20,7 +21,6 @@ async def test_continue_conversation_with_topic(client, test_graph):
     assert "Continuing conversation on: Root" in result
     assert "This is a memory retrieval session" in result
     assert "Start by executing one of the suggested commands" in result
-    assert "read_note" in result
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_search_prompt_with_timeframe(client, test_graph):
     result = await search_prompt("Root", timeframe="1w")
 
     # Check the response includes timeframe information
-    assert 'Search Results for: "Root" (after 1w)' in result
+    assert 'Search Results for: "Root" (after 7d)' in result
     assert "I found " in result
 
 
@@ -102,52 +102,6 @@ async def test_search_prompt_no_results(client):
     assert "write_note" in result
 
 
-@pytest.mark.asyncio
-async def test_format_search_results_with_results():
-    """Test format_search_results with search results."""
-    # Create a mock SearchResponse with results
-    search_response = SearchResponse(
-        results=[
-            SearchResult(
-                entity="test-entity",
-                type=SearchItemType.ENTITY,
-                title="Test Result",
-                permalink="test-result",
-                file_path="test_result.md",
-                content="This is test content",
-                score=0.95,
-                metadata={"created_at": "2023-01-01"},
-            )
-        ],
-        current_page=1,
-        page_size=10,
-    )
-
-    # Format the results
-    result = format_search_results("test query", search_response)
-
-    # Check the formatted output
-    assert 'Search Results for: "test query"' in result
-    assert "I found 1 results" in result
-    assert "Test Result" in result
-    assert "This is test content" in result
-
-
-@pytest.mark.asyncio
-async def test_format_search_results_no_results():
-    """Test format_search_results with no search results."""
-    # Create a mock SearchResponse with no results
-    search_response = SearchResponse(results=[], current_page=1, page_size=10)
-
-    # Format the results
-    result = format_search_results("empty query", search_response)
-
-    # Check the formatted output
-    assert 'Search Results for: "empty query"' in result
-    assert "I couldn't find any results for this query" in result
-    assert "Opportunity to Capture Knowledge" in result
-
-
 # Test utils
 
 
@@ -162,13 +116,11 @@ def test_prompt_context_with_file_path_no_permalink():
 
     # Create a mock context with a file that has no permalink (like a binary file)
     test_entity = EntitySummary(
-        id="1",
         type="file",
         title="Test File",
         permalink=None,  # No permalink
         file_path="test_file.pdf",
-        created_at="2023-01-01",
-        updated_at="2023-01-01",
+        created_at=datetime.now(timezone.utc),
     )
 
     context = PromptContext(

@@ -11,39 +11,58 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.config import ProjectConfig
+from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.db import DatabaseType
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Base
 from basic_memory.models.knowledge import Entity
+from basic_memory.models.project import Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services import (
     EntityService,
+    ProjectService,
 )
+from basic_memory.services.directory_service import DirectoryService
 from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync.sync_service import SyncService
 from basic_memory.sync.watch_service import WatchService
+from basic_memory.config import app_config as basic_memory_app_config  # noqa: F401
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
+def project_root() -> Path:
+    return Path(__file__).parent.parent
+
+
+@pytest.fixture
+def app_config(test_config: ProjectConfig, monkeypatch) -> BasicMemoryConfig:
+    projects = {test_config.name: str(test_config.home)}
+    app_config = BasicMemoryConfig(env="test", projects=projects, default_project=test_config.name)
+
+    # set the module app_config instance project list
+    basic_memory_app_config.projects = projects
+    basic_memory_app_config.default_project = test_config.name
+
+    return app_config
+
+
+@pytest.fixture
 def test_config(tmp_path) -> ProjectConfig:
     """Test configuration using in-memory DB."""
-    config = ProjectConfig(
-        project="test-project",
-    )
-    config.home = tmp_path
+    config = ProjectConfig(name="test-project", home=tmp_path)
 
     (tmp_path / config.home.name).mkdir(parents=True, exist_ok=True)
     logger.info(f"project config home: {config.home}")
@@ -52,11 +71,11 @@ def test_config(tmp_path) -> ProjectConfig:
 
 @pytest_asyncio.fixture(scope="function")
 async def engine_factory(
-    test_config,
+    app_config,
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
-    """Create engine and session factory using in-memory SQLite database."""
+    """Create an engine and session factory using an in-memory SQLite database."""
     async with db.engine_session_factory(
-        db_path=test_config.database_path, db_type=DatabaseType.MEMORY
+        db_path=app_config.database_path, db_type=DatabaseType.MEMORY
     ) as (engine, session_maker):
         # Create all tables for the DB the engine is connected to
         async with engine.begin() as conn:
@@ -72,26 +91,57 @@ async def session_maker(engine_factory) -> async_sessionmaker[AsyncSession]:
     return session_maker
 
 
+## Repositories
+
+
 @pytest_asyncio.fixture(scope="function")
-async def entity_repository(session_maker: async_sessionmaker[AsyncSession]) -> EntityRepository:
-    """Create an EntityRepository instance."""
-    return EntityRepository(session_maker)
+async def entity_repository(
+    session_maker: async_sessionmaker[AsyncSession], test_project: Project
+) -> EntityRepository:
+    """Create an EntityRepository instance with project context."""
+    return EntityRepository(session_maker, project_id=test_project.id)
 
 
 @pytest_asyncio.fixture(scope="function")
 async def observation_repository(
-    session_maker: async_sessionmaker[AsyncSession],
+    session_maker: async_sessionmaker[AsyncSession], test_project: Project
 ) -> ObservationRepository:
-    """Create an ObservationRepository instance."""
-    return ObservationRepository(session_maker)
+    """Create an ObservationRepository instance with project context."""
+    return ObservationRepository(session_maker, project_id=test_project.id)
 
 
 @pytest_asyncio.fixture(scope="function")
 async def relation_repository(
-    session_maker: async_sessionmaker[AsyncSession],
+    session_maker: async_sessionmaker[AsyncSession], test_project: Project
 ) -> RelationRepository:
-    """Create a RelationRepository instance."""
-    return RelationRepository(session_maker)
+    """Create a RelationRepository instance with project context."""
+    return RelationRepository(session_maker, project_id=test_project.id)
+
+
+@pytest_asyncio.fixture(scope="function")
+async def project_repository(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> ProjectRepository:
+    """Create a ProjectRepository instance."""
+    return ProjectRepository(session_maker)
+
+
+@pytest_asyncio.fixture(scope="function")
+async def test_project(test_config, project_repository: ProjectRepository) -> Project:
+    """Create a test project to be used as context for other repositories."""
+    project_data = {
+        "name": test_config.name,
+        "description": "Project used as context for tests",
+        "path": str(test_config.home),
+        "is_active": True,
+        "is_default": True,  # Explicitly set as the default project
+    }
+    project = await project_repository.create(project_data)
+    logger.info(f"Created test project with permalink: {project.permalink}")
+    return project
+
+
+## Services
 
 
 @pytest_asyncio.fixture
@@ -140,7 +190,7 @@ def entity_parser(test_config):
 
 @pytest_asyncio.fixture
 async def sync_service(
-    test_config: ProjectConfig,
+    app_config: BasicMemoryConfig,
     entity_service: EntityService,
     entity_parser: EntityParser,
     entity_repository: EntityRepository,
@@ -150,7 +200,7 @@ async def sync_service(
 ) -> SyncService:
     """Create sync service for testing."""
     return SyncService(
-        config=test_config,
+        app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
         relation_repository=relation_repository,
@@ -161,9 +211,17 @@ async def sync_service(
 
 
 @pytest_asyncio.fixture
-async def search_repository(session_maker):
-    """Create SearchRepository instance"""
-    return SearchRepository(session_maker)
+async def directory_service(entity_repository, test_config) -> DirectoryService:
+    """Create directory service for testing."""
+    return DirectoryService(
+        entity_repository=entity_repository,
+    )
+
+
+@pytest_asyncio.fixture
+async def search_repository(session_maker, test_project: Project):
+    """Create SearchRepository instance with project context"""
+    return SearchRepository(session_maker, project_id=test_project.id)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -187,6 +245,7 @@ async def search_service(
 async def sample_entity(entity_repository: EntityRepository) -> Entity:
     """Create a sample entity for testing."""
     entity_data = {
+        "project_id": entity_repository.project_id,
         "title": "Test Entity",
         "entity_type": "test",
         "permalink": "test/test-entity",
@@ -199,6 +258,14 @@ async def sample_entity(entity_repository: EntityRepository) -> Entity:
 
 
 @pytest_asyncio.fixture
+async def project_service(
+    project_repository: ProjectRepository,
+) -> ProjectService:
+    """Create ProjectService with repository."""
+    return ProjectService(repository=project_repository)
+
+
+@pytest_asyncio.fixture
 async def full_entity(sample_entity, entity_repository, file_service, entity_service) -> Entity:
     """Create a search test entity."""
 
@@ -208,11 +275,12 @@ async def full_entity(sample_entity, entity_repository, file_service, entity_ser
             title="Search_Entity",
             folder="test",
             entity_type="test",
+            project=entity_repository.project_id,
             content=dedent("""
                 ## Observations
                 - [tech] Tech note
                 - [design] Design note
-                
+
                 ## Relations
                 - out1 [[Test Entity]]
                 - out2 [[Test Entity]]
@@ -239,6 +307,7 @@ async def test_graph(
             title="Deeper Entity",
             entity_type="deeper",
             folder="test",
+            project=entity_repository.project_id,
             content=dedent("""
                 # Deeper Entity
                 """),
@@ -250,6 +319,7 @@ async def test_graph(
             title="Deep Entity",
             entity_type="deep",
             folder="test",
+            project=entity_repository.project_id,
             content=dedent("""
                 # Deep Entity
                 - deeper_connection [[Deeper Entity]]
@@ -262,6 +332,7 @@ async def test_graph(
             title="Connected Entity 2",
             entity_type="test",
             folder="test",
+            project=entity_repository.project_id,
             content=dedent("""
                 # Connected Entity 2
                 - deep_connection [[Deep Entity]]
@@ -274,6 +345,7 @@ async def test_graph(
             title="Connected Entity 1",
             entity_type="test",
             folder="test",
+            project=entity_repository.project_id,
             content=dedent("""
                 # Connected Entity 1
                 - [note] Connected 1 note
@@ -287,6 +359,7 @@ async def test_graph(
             title="Root",
             entity_type="test",
             folder="test",
+            project=entity_repository.project_id,
             content=dedent("""
                 # Root Entity
                 - [note] Root note 1
@@ -314,21 +387,21 @@ async def test_graph(
     }
 
 
-@pytest_asyncio.fixture
-def watch_service(sync_service, file_service, test_config):
-    return WatchService(sync_service=sync_service, file_service=file_service, config=test_config)
+@pytest.fixture
+def watch_service(app_config: BasicMemoryConfig, project_repository) -> WatchService:
+    return WatchService(app_config=app_config, project_repository=project_repository)
 
 
 @pytest.fixture
-def test_files(test_config) -> dict[str, Path]:
+def test_files(test_config, project_root) -> dict[str, Path]:
     """Copy test files into the project directory.
 
     Returns a dict mapping file names to their paths in the project dir.
     """
     # Source files relative to tests directory
     source_files = {
-        "pdf": Path("tests/Non-MarkdownFileSupport.pdf"),
-        "image": Path("tests/Screenshot.png"),
+        "pdf": Path(project_root / "tests/Non-MarkdownFileSupport.pdf"),
+        "image": Path(project_root / "tests/Screenshot.png"),
     }
 
     # Create copies in temp project directory

@@ -100,27 +100,41 @@ class MemoryMetadata(BaseModel):
     uri: Optional[str] = None
     types: Optional[List[SearchItemType]] = None
     depth: int
-    timeframe: str
+    timeframe: Optional[str] = None
     generated_at: datetime
-    total_results: int
-    total_relations: int
+    primary_count: Optional[int] = None  # Changed field name
+    related_count: Optional[int] = None  # Changed field name
+    total_results: Optional[int] = None  # For backward compatibility
+    total_relations: Optional[int] = None
+    total_observations: Optional[int] = None
+
+
+class ContextResult(BaseModel):
+    """Context result containing a primary item with its observations and related items."""
+
+    primary_result: EntitySummary | RelationSummary | ObservationSummary = Field(
+        description="Primary item"
+    )
+
+    observations: Sequence[ObservationSummary] = Field(
+        description="Observations belonging to this entity", default_factory=list
+    )
+
+    related_results: Sequence[EntitySummary | RelationSummary | ObservationSummary] = Field(
+        description="Related items", default_factory=list
+    )
 
 
 class GraphContext(BaseModel):
     """Complete context response."""
 
-    # Direct matches
-    primary_results: Sequence[EntitySummary | RelationSummary | ObservationSummary] = Field(
-        description="results directly matching URI"
-    )
-
-    # Related entities
-    related_results: Sequence[EntitySummary | RelationSummary | ObservationSummary] = Field(
-        description="related results"
+    # hierarchical results
+    results: Sequence[ContextResult] = Field(
+        description="Hierarchical results with related items nested", default_factory=list
     )
 
     # Context metadata
     metadata: MemoryMetadata
 
-    page: int = 1
-    page_size: int = 1
+    page: Optional[int] = None
+    page_size: Optional[int] = None

@@ -14,3 +14,9 @@ class EntityCreationError(Exception):
     """Raised when an entity cannot be created"""
 
     pass
+
+
+class DirectoryOperationError(Exception):
+    """Raised when directory operations fail"""
+
+    pass

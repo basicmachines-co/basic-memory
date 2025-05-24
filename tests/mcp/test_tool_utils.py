@@ -52,7 +52,9 @@ async def test_call_get_error(mock_response):
 async def test_call_post_success(mock_response):
     """Test successful POST request."""
     client = AsyncClient()
-    client.post = lambda *args, **kwargs: AsyncMock(return_value=mock_response())()
+    response = mock_response()
+    response.json = lambda: {"test": "data"}
+    client.post = lambda *args, **kwargs: AsyncMock(return_value=response)()
 
     response = await call_post(client, "http://test.com", json={"test": "data"})
     assert response.status_code == 200
@@ -62,7 +64,10 @@ async def test_call_post_success(mock_response):
 async def test_call_post_error(mock_response):
     """Test POST request with error."""
     client = AsyncClient()
-    client.post = lambda *args, **kwargs: AsyncMock(return_value=mock_response(500))()
+    response = mock_response(500)
+    response.json = lambda: {"test": "error"}
+
+    client.post = lambda *args, **kwargs: AsyncMock(return_value=response)()
 
     with pytest.raises(ToolError) as exc:
         await call_post(client, "http://test.com", json={"test": "data"})
@@ -159,7 +164,10 @@ async def test_get_error_message():
 async def test_call_post_with_json(mock_response):
     """Test POST request with JSON payload."""
     client = AsyncClient()
-    mock_post = AsyncMock(return_value=mock_response())
+    response = mock_response()
+    response.json = lambda: {"test": "data"}
+
+    mock_post = AsyncMock(return_value=response)
     client.post = mock_post
 
     json_data = {"key": "value", "nested": {"test": "data"}}

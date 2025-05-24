@@ -16,8 +16,14 @@ from basic_memory.repository.repository import Repository
 class RelationRepository(Repository[Relation]):
     """Repository for Relation model with memory-specific operations."""
 
-    def __init__(self, session_maker: async_sessionmaker):
-        super().__init__(session_maker, Relation)
+    def __init__(self, session_maker: async_sessionmaker, project_id: int):
+        """Initialize with session maker and project_id filter.
+
+        Args:
+            session_maker: SQLAlchemy session maker
+            project_id: Project ID to filter all operations by
+        """
+        super().__init__(session_maker, Relation, project_id=project_id)
 
     async def find_relation(
         self, from_permalink: str, to_permalink: str, relation_type: str

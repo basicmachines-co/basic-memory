@@ -6,9 +6,8 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
-import pytest_asyncio
 
-from basic_memory.config import ProjectConfig
+from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas.search import SearchQuery
@@ -860,29 +859,23 @@ async def test_sync_permalink_not_created_if_no_frontmatter(
     assert "permalink:" not in file_content
 
 
-@pytest_asyncio.fixture
-def test_config_update_permamlinks_on_move(tmp_path) -> ProjectConfig:
+@pytest.fixture
+def test_config_update_permamlinks_on_move(app_config) -> BasicMemoryConfig:
     """Test configuration using in-memory DB."""
-    config = ProjectConfig(
-        project="test-project",
-        update_permalinks_on_move=True,
-    )
-    config.home = tmp_path
-
-    (tmp_path / config.home.name).mkdir(parents=True, exist_ok=True)
-    return config
+    app_config.update_permalinks_on_move = True
+    return app_config
 
 
 @pytest.mark.asyncio
 async def test_sync_permalink_updated_on_move(
-    test_config_update_permamlinks_on_move: ProjectConfig,
+    test_config_update_permamlinks_on_move: BasicMemoryConfig,
+    test_config: ProjectConfig,
     sync_service: SyncService,
     file_service: FileService,
 ):
     """Test that we update a permalink on a file move if set in config ."""
-    test_config = test_config_update_permamlinks_on_move
     project_dir = test_config.home
-    sync_service.config = test_config
+    sync_service.project_config = test_config
 
     # Create initial file
     content = dedent(

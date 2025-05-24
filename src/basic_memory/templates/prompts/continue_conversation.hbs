@@ -1,0 +1,110 @@
+# Continuing conversation on: {{ topic }}
+
+This is a memory retrieval session. 
+
+Please use the available basic-memory tools to gather relevant context before responding. Start by executing one of the suggested commands below to retrieve content.
+
+> **Knowledge Capture Recommendation:** As you continue this conversation, actively look for opportunities to record new information, decisions, or insights that emerge. Use `write_note()` to document important context.
+
+Here's what I found from previous conversations:
+
+{{#if has_results}}
+{{#each hierarchical_results}}
+<memory>
+--- memory://{{ primary_result.permalink }}
+
+## {{ primary_result.title }}
+- **Type**: {{ primary_result.type }}
+- **Created**: {{date primary_result.created_at "%Y-%m-%d %H:%M"}}
+
+{{#if primary_result.content}}
+**Excerpt**:
+<excerpt>
+{{ primary_result.content }}
+</excerpt>
+{{/if}}
+
+{{#if observations}}
+## Observations
+{{#each observations}}
+<observation>
+- [{{ category }}] {{ content }}
+</observation>
+{{/each}}
+{{/if}}
+
+You can read this document with: `read_note("{{ primary_result.permalink }}")`
+
+{{#if related_results}}
+## Related Context
+
+{{#each related_results}}
+<related>
+- type: **{{ type }}**
+- title: {{ title }}
+
+{{#if permalink}}
+You can view this document with: `read_note("{{ permalink }}")`
+{{else}}
+You can view this file with: `read_file("{{ file_path }}")`
+{{/if}}
+</related>
+{{/each}}
+{{/if}}
+
+</memory>
+{{/each}}
+{{else}}
+The supplied query did not return any information specifically on this topic.
+
+## Opportunity to Capture New Knowledge!
+
+This is an excellent chance to start documenting this topic:
+
+```python
+await write_note(
+    title="{{ topic }}",
+    content=f'''
+# {{ topic }}
+
+## Overview
+[Summary of what we know about {{ topic }}]
+
+## Key Points
+[Main aspects or components of {{ topic }}]
+
+## Observations
+- [category] [First important observation about {{ topic }}]
+- [category] [Second observation about {{ topic }}]
+
+## Relations
+- relates_to [[Related Topic]]
+- part_of [[Broader Context]]
+'''
+)
+```
+
+## Other Options
+
+Please use the available basic-memory tools to gather relevant context before responding.
+You can also:
+- Try a different search term
+- Check recent activity with `recent_activity(timeframe="1w")`
+{{/if}}
+## Next Steps
+<instructions>
+You can:
+- Explore more with: `search_notes("{{ topic }}")`
+- See what's changed: `recent_activity(timeframe="{{default timeframe "7d"}}")`
+- **Record new learnings or decisions from this conversation:** `write_note(folder="[Chose a folder]" title="[Create a meaningful title]", content="[Content with observations and relations]")`
+
+## Knowledge Capture Recommendation
+
+As you continue this conversation, **actively look for opportunities to:**
+1. Record key information, decisions, or insights that emerge
+2. Link new knowledge to existing topics 
+3. Suggest capturing important context when appropriate
+4. Create forward references to topics that might be created later
+
+Remember that capturing knowledge during conversations is one of the most valuable aspects of Basic Memory.
+</instructions>

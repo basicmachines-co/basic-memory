@@ -65,6 +65,7 @@ See the [README.md](README.md) file for a project overview.
 - Test database uses in-memory SQLite
 - Avoid creating mocks in tests in most circumstances.
 - Each test runs in a standalone environment with in memory SQLite and tmp_file directory
+- Do not use mocks in tests if possible. Tests run with an in memory sqlite db, so they are not needed. See fixtures in conftest.py
 
 ## BASIC MEMORY PRODUCT USAGE
 

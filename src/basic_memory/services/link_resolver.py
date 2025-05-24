@@ -28,7 +28,7 @@ class LinkResolver:
 
     async def resolve_link(self, link_text: str, use_search: bool = True) -> Optional[Entity]:
         """Resolve a markdown link to a permalink."""
-        logger.debug(f"Resolving link: {link_text}")
+        logger.trace(f"Resolving link: {link_text}")
 
         # Clean link text and extract any alias
         clean_text, alias = self._normalize_link_text(link_text)
@@ -62,7 +62,7 @@ class LinkResolver:
             if results:
                 # Look for best match
                 best_match = min(results, key=lambda x: x.score)  # pyright: ignore
-                logger.debug(
+                logger.trace(
                     f"Selected best match from {len(results)} results: {best_match.permalink}"
                 )
                 if best_match.permalink:

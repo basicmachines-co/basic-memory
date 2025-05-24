@@ -4,8 +4,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
-
-from basic_memory.config import ProjectConfig
+from basic_memory.config import BasicMemoryConfig
 from alembic import command
 from alembic.config import Config
 
@@ -147,7 +146,7 @@ async def engine_session_factory(
 
 
 async def run_migrations(
-    app_config: ProjectConfig, database_type=DatabaseType.FILESYSTEM
+    app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM
 ):  # pragma: no cover
     """Run any pending alembic migrations."""
     logger.info("Running database migrations...")
@@ -172,7 +171,10 @@ async def run_migrations(
         logger.info("Migrations completed successfully")
 
         _, session_maker = await get_or_create_db(app_config.database_path, database_type)
-        await SearchRepository(session_maker).init_search_index()
+
+        # initialize the search Index schema
+        # the project_id is not used for init_search_index, so we pass a dummy value
+        await SearchRepository(session_maker, 1).init_search_index()
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise

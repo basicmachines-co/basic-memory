@@ -4,6 +4,7 @@ from typing import List, Union
 
 from loguru import logger
 
+from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
@@ -114,9 +115,11 @@ async def recent_activity(
         # Add validated types to params
         params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
+    project_url = get_project_config().project_url
+
     response = await call_get(
         client,
-        "/memory/recent",
+        f"{project_url}/memory/recent",
         params=params,
     )
     return GraphContext.model_validate(response.json())

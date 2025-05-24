@@ -19,9 +19,9 @@ async def indexed_entity(init_search_index, full_entity, search_service):
 
 
 @pytest.mark.asyncio
-async def test_search_basic(client, indexed_entity):
+async def test_search_basic(client, indexed_entity, project_url):
     """Test basic text search."""
-    response = await client.post("/search/", json={"text": "search"})
+    response = await client.post(f"{project_url}/search/", json={"text": "search"})
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 3
@@ -36,9 +36,11 @@ async def test_search_basic(client, indexed_entity):
 
 
 @pytest.mark.asyncio
-async def test_search_basic_pagination(client, indexed_entity):
+async def test_search_basic_pagination(client, indexed_entity, project_url):
     """Test basic text search."""
-    response = await client.post("/search/?page=3&page_size=1", json={"text": "search"})
+    response = await client.post(
+        f"{project_url}/search/?page=3&page_size=1", json={"text": "search"}
+    )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 1
@@ -48,11 +50,12 @@ async def test_search_basic_pagination(client, indexed_entity):
 
 
 @pytest.mark.asyncio
-async def test_search_with_entity_type_filter(client, indexed_entity):
+async def test_search_with_entity_type_filter(client, indexed_entity, project_url):
     """Test search with type filter."""
     # Should find with correct type
     response = await client.post(
-        "/search/", json={"text": "test", "entity_types": [SearchItemType.ENTITY.value]}
+        f"{project_url}/search/",
+        json={"text": "test", "entity_types": [SearchItemType.ENTITY.value]},
     )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
@@ -60,7 +63,8 @@ async def test_search_with_entity_type_filter(client, indexed_entity):
 
     # Should find with relation type
     response = await client.post(
-        "/search/", json={"text": "test", "entity_types": [SearchItemType.RELATION.value]}
+        f"{project_url}/search/",
+        json={"text": "test", "entity_types": [SearchItemType.RELATION.value]},
     )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
@@ -68,28 +72,28 @@ async def test_search_with_entity_type_filter(client, indexed_entity):
 
 
 @pytest.mark.asyncio
-async def test_search_with_type_filter(client, indexed_entity):
+async def test_search_with_type_filter(client, indexed_entity, project_url):
     """Test search with entity type filter."""
     # Should find with correct entity type
-    response = await client.post("/search/", json={"text": "test", "types": ["test"]})
+    response = await client.post(f"{project_url}/search/", json={"text": "test", "types": ["test"]})
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 1
 
     # Should not find with wrong entity type
-    response = await client.post("/search/", json={"text": "test", "types": ["note"]})
+    response = await client.post(f"{project_url}/search/", json={"text": "test", "types": ["note"]})
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 0
 
 
 @pytest.mark.asyncio
-async def test_search_with_date_filter(client, indexed_entity):
+async def test_search_with_date_filter(client, indexed_entity, project_url):
     """Test search with date filter."""
     # Should find with past date
     past_date = datetime(2020, 1, 1, tzinfo=timezone.utc)
     response = await client.post(
-        "/search/", json={"text": "test", "after_date": past_date.isoformat()}
+        f"{project_url}/search/", json={"text": "test", "after_date": past_date.isoformat()}
     )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
@@ -97,7 +101,7 @@ async def test_search_with_date_filter(client, indexed_entity):
     # Should not find with future date
     future_date = datetime(2030, 1, 1, tzinfo=timezone.utc)
     response = await client.post(
-        "/search/", json={"text": "test", "after_date": future_date.isoformat()}
+        f"{project_url}/search/", json={"text": "test", "after_date": future_date.isoformat()}
     )
     assert response.status_code == 200
     search_results = SearchResponse.model_validate(response.json())
@@ -105,16 +109,16 @@ async def test_search_with_date_filter(client, indexed_entity):
 
 
 @pytest.mark.asyncio
-async def test_search_empty(search_service, client):
+async def test_search_empty(search_service, client, project_url):
     """Test search with no matches."""
-    response = await client.post("/search/", json={"text": "nonexistent"})
+    response = await client.post(f"{project_url}/search/", json={"text": "nonexistent"})
     assert response.status_code == 200
     search_result = SearchResponse.model_validate(response.json())
     assert len(search_result.results) == 0
 
 
 @pytest.mark.asyncio
-async def test_reindex(client, search_service, entity_service, session_maker):
+async def test_reindex(client, search_service, entity_service, session_maker, project_url):
     """Test reindex endpoint."""
     # Create test entity and document
     await entity_service.create_entity(
@@ -131,26 +135,26 @@ async def test_reindex(client, search_service, entity_service, session_maker):
         await session.commit()
 
     # Verify nothing is searchable
-    response = await client.post("/search/", json={"text": "test"})
+    response = await client.post(f"{project_url}/search/", json={"text": "test"})
     search_results = SearchResponse.model_validate(response.json())
     assert len(search_results.results) == 0
 
     # Trigger reindex
-    reindex_response = await client.post("/search/reindex")
+    reindex_response = await client.post(f"{project_url}/search/reindex")
     assert reindex_response.status_code == 200
     assert reindex_response.json()["status"] == "ok"
 
     # Verify content is searchable again
-    search_response = await client.post("/search/", json={"text": "test"})
+    search_response = await client.post(f"{project_url}/search/", json={"text": "test"})
     search_results = SearchResponse.model_validate(search_response.json())
     assert len(search_results.results) == 1
 
 
 @pytest.mark.asyncio
-async def test_multiple_filters(client, indexed_entity):
+async def test_multiple_filters(client, indexed_entity, project_url):
     """Test search with multiple filters combined."""
     response = await client.post(
-        "/search/",
+        f"{project_url}/search/",
         json={
             "text": "test",
             "entity_types": [SearchItemType.ENTITY.value],

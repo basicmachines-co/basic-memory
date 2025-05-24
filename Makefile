@@ -41,7 +41,7 @@ format:
 
 # run inspector tool
 run-inspector:
-	uv run mcp dev src/basic_memory/mcp/main.py
+	npx @modelcontextprotocol/inspector
 
 # Build app installer
 installer-mac:

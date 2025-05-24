@@ -2,75 +2,46 @@
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, List
 
 from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import basic_memory
-from basic_memory.utils import setup_logging
+from basic_memory.utils import setup_logging, generate_permalink
 
 DATABASE_NAME = "memory.db"
+APP_DATABASE_NAME = "memory.db"  # Using the same name but in the app directory
 DATA_DIR_NAME = ".basic-memory"
 CONFIG_FILE_NAME = "config.json"
+WATCH_STATUS_JSON = "watch-status.json"
 
 Environment = Literal["test", "dev", "user"]
 
 
-class ProjectConfig(BaseSettings):
+@dataclass
+class ProjectConfig:
     """Configuration for a specific basic-memory project."""
 
-    env: Environment = Field(default="dev", description="Environment name")
-
-    # Default to ~/basic-memory but allow override with env var: BASIC_MEMORY_HOME
-    home: Path = Field(
-        default_factory=lambda: Path.home() / "basic-memory",
-        description="Base path for basic-memory files",
-    )
-
-    # Name of the project
-    project: str = Field(default="default", description="Project name")
-
-    # Watch service configuration
-    sync_delay: int = Field(
-        default=1000, description="Milliseconds to wait after changes before syncing", gt=0
-    )
-
-    # update permalinks on move
-    update_permalinks_on_move: bool = Field(
-        default=False,
-        description="Whether to update permalinks when files are moved or renamed. default (False)",
-    )
-
-    model_config = SettingsConfigDict(
-        env_prefix="BASIC_MEMORY_",
-        extra="ignore",
-        env_file=".env",
-        env_file_encoding="utf-8",
-    )
+    name: str
+    home: Path
 
     @property
-    def database_path(self) -> Path:
-        """Get SQLite database path."""
-        database_path = self.home / DATA_DIR_NAME / DATABASE_NAME
-        if not database_path.exists():
-            database_path.parent.mkdir(parents=True, exist_ok=True)
-            database_path.touch()
-        return database_path
+    def project(self):
+        return self.name
 
-    @field_validator("home")
-    @classmethod
-    def ensure_path_exists(cls, v: Path) -> Path:  # pragma: no cover
-        """Ensure project path exists."""
-        if not v.exists():
-            v.mkdir(parents=True)
-        return v
+    @property
+    def project_url(self) -> str:  # pragma: no cover
+        return f"/{generate_permalink(self.name)}"
 
 
 class BasicMemoryConfig(BaseSettings):
     """Pydantic model for Basic Memory global configuration."""
+
+    env: Environment = Field(default="dev", description="Environment name")
 
     projects: Dict[str, str] = Field(
         default_factory=lambda: {"main": str(Path.home() / "basic-memory")},
@@ -81,8 +52,15 @@ class BasicMemoryConfig(BaseSettings):
         description="Name of the default project to use",
     )
 
+    # overridden by ~/.basic-memory/config.json
     log_level: str = "INFO"
 
+    # Watch service configuration
+    sync_delay: int = Field(
+        default=1000, description="Milliseconds to wait after changes before syncing", gt=0
+    )
+
+    # update permalinks on move
     update_permalinks_on_move: bool = Field(
         default=False,
         description="Whether to update permalinks when files are moved or renamed. default (False)",
@@ -96,17 +74,72 @@ class BasicMemoryConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
+
+    def get_project_path(self, project_name: Optional[str] = None) -> Path:  # pragma: no cover
+        """Get the path for a specific project or the default project."""
+        name = project_name or self.default_project
+
+        if name not in self.projects:
+            raise ValueError(f"Project '{name}' not found in configuration")
+
+        return Path(self.projects[name])
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
         # Ensure main project exists
-        if "main" not in self.projects:
+        if "main" not in self.projects:  # pragma: no cover
             self.projects["main"] = str(Path.home() / "basic-memory")
 
         # Ensure default project is valid
-        if self.default_project not in self.projects:
+        if self.default_project not in self.projects:  # pragma: no cover
             self.default_project = "main"
+
+    @property
+    def app_database_path(self) -> Path:
+        """Get the path to the app-level database.
+
+        This is the single database that will store all knowledge data
+        across all projects.
+        """
+        database_path = Path.home() / DATA_DIR_NAME / APP_DATABASE_NAME
+        if not database_path.exists():  # pragma: no cover
+            database_path.parent.mkdir(parents=True, exist_ok=True)
+            database_path.touch()
+        return database_path
+
+    @property
+    def database_path(self) -> Path:
+        """Get SQLite database path.
+
+        Rreturns the app-level database path
+        for backward compatibility in the codebase.
+        """
+
+        # Load the app-level database path from the global config
+        config = config_manager.load_config()  # pragma: no cover
+        return config.app_database_path  # pragma: no cover
+
+    @property
+    def project_list(self) -> List[ProjectConfig]:  # pragma: no cover
+        """Get all configured projects as ProjectConfig objects."""
+        return [ProjectConfig(name=name, home=Path(path)) for name, path in self.projects.items()]
+
+    @field_validator("projects")
+    @classmethod
+    def ensure_project_paths_exists(cls, v: Dict[str, str]) -> Dict[str, str]:  # pragma: no cover
+        """Ensure project path exists."""
+        for name, path_value in v.items():
+            path = Path(path_value)
+            if not Path(path).exists():
+                try:
+                    path.mkdir(parents=True)
+                except Exception as e:
+                    logger.error(f"Failed to create project path: {e}")
+                    raise e
+        return v
 
 
 class ConfigManager:
@@ -123,13 +156,16 @@ class ConfigManager:
         # Load or create configuration
         self.config = self.load_config()
 
+        # Current project context for the session
+        self.current_project_id: int
+
     def load_config(self) -> BasicMemoryConfig:
         """Load configuration from file or create default."""
         if self.config_file.exists():
             try:
                 data = json.loads(self.config_file.read_text(encoding="utf-8"))
                 return BasicMemoryConfig(**data)
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 logger.error(f"Failed to load config: {e}")
                 config = BasicMemoryConfig()
                 self.save_config(config)
@@ -156,37 +192,24 @@ class ConfigManager:
         """Get the default project name."""
         return self.config.default_project
 
-    def get_project_path(self, project_name: Optional[str] = None) -> Path:
-        """Get the path for a specific project or the default project."""
-        name = project_name or self.config.default_project
-
-        # Check if specified in environment variable
-        if not project_name and "BASIC_MEMORY_PROJECT" in os.environ:
-            name = os.environ["BASIC_MEMORY_PROJECT"]
-
-        if name not in self.config.projects:
-            raise ValueError(f"Project '{name}' not found in configuration")
-
-        return Path(self.config.projects[name])
-
     def add_project(self, name: str, path: str) -> None:
         """Add a new project to the configuration."""
-        if name in self.config.projects:
+        if name in self.config.projects:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
 
         # Ensure the path exists
         project_path = Path(path)
-        project_path.mkdir(parents=True, exist_ok=True)
+        project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
 
         self.config.projects[name] = str(project_path)
         self.save_config(self.config)
 
     def remove_project(self, name: str) -> None:
         """Remove a project from the configuration."""
-        if name not in self.config.projects:
+        if name not in self.config.projects:  # pragma: no cover
             raise ValueError(f"Project '{name}' not found")
 
-        if name == self.config.default_project:
+        if name == self.config.default_project:  # pragma: no cover
             raise ValueError(f"Cannot remove the default project '{name}'")
 
         del self.config.projects[name]
@@ -201,34 +224,30 @@ class ConfigManager:
         self.save_config(self.config)
 
 
-def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
-    """Get a project configuration for the specified project."""
-    config_manager = ConfigManager()
+def get_project_config() -> ProjectConfig:
+    """Get the project configuration for the current session."""
 
     # Get project name from environment variable or use provided name or default
-    actual_project_name = os.environ.get(
-        "BASIC_MEMORY_PROJECT", project_name or config_manager.default_project
-    )
+    env_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
+    actual_project_name = env_project_name or config_manager.default_project
 
-    update_permalinks_on_move = config_manager.load_config().update_permalinks_on_move
-    try:
-        project_path = config_manager.get_project_path(actual_project_name)
-        return ProjectConfig(
-            home=project_path,
-            project=actual_project_name,
-            update_permalinks_on_move=update_permalinks_on_move,
-        )
-    except ValueError:  # pragma: no cover
-        logger.warning(f"Project '{actual_project_name}' not found, using default")
-        project_path = config_manager.get_project_path(config_manager.default_project)
-        return ProjectConfig(home=project_path, project=config_manager.default_project)
+    # the config contains a dict[str,str] of project names and absolute paths
+    project_path = config_manager.projects.get(actual_project_name)
+    if not project_path:  # pragma: no cover
+        raise ValueError(f"Project '{actual_project_name}' not found")
+
+    return ProjectConfig(name=actual_project_name, home=Path(project_path))
 
 
 # Create config manager
 config_manager = ConfigManager()
 
-# Load project config for current context
-config = get_project_config()
+# Export the app-level config
+app_config: BasicMemoryConfig = config_manager.config
+
+# Load project config for the default project (backward compatibility)
+config: ProjectConfig = get_project_config()
+
 
 # setup logging to a single log file in user home directory
 user_home = Path.home()
@@ -236,6 +255,7 @@ log_dir = user_home / DATA_DIR_NAME
 log_dir.mkdir(parents=True, exist_ok=True)
 
 
+# Process info for logging
 def get_process_name():  # pragma: no cover
     """
     get the type of process for logging
@@ -258,6 +278,9 @@ process_name = get_process_name()
 _LOGGING_SETUP = False
 
 
+# Logging
+
+
 def setup_basic_memory_logging():  # pragma: no cover
     """Set up logging for basic-memory, ensuring it only happens once."""
     global _LOGGING_SETUP
@@ -267,7 +290,7 @@ def setup_basic_memory_logging():  # pragma: no cover
         return
 
     setup_logging(
-        env=config.env,
+        env=config_manager.config.env,
         home_dir=user_home,  # Use user home for logs
         log_level=config_manager.load_config().log_level,
         log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",

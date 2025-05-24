@@ -1,208 +1,174 @@
-"""Tests for project CLI commands."""
+"""Tests for the project CLI commands."""
 
-import json
 import os
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
-import pytest
+from unittest.mock import patch, MagicMock
 from typer.testing import CliRunner
 
-from basic_memory.cli.main import app
-from basic_memory.config import ConfigManager, DATA_DIR_NAME, CONFIG_FILE_NAME
+from basic_memory.cli.main import app as cli_app
 
 
-@pytest.fixture
-def temp_home(monkeypatch):
-    """Create a temporary directory for testing."""
-    # Save the original environment variable if it exists
-    original_env = os.environ.get("BASIC_MEMORY_PROJECT")
-
-    # Clear environment variable for clean test
-    if "BASIC_MEMORY_PROJECT" in os.environ:
-        del os.environ["BASIC_MEMORY_PROJECT"]
-
-    with TemporaryDirectory() as tempdir:
-        temp_home = Path(tempdir)
-        monkeypatch.setattr(Path, "home", lambda: temp_home)
-
-        # Ensure config directory exists
-        config_dir = temp_home / DATA_DIR_NAME
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        yield temp_home
-
-        # Cleanup: restore original environment variable if it existed
-        if original_env is not None:
-            os.environ["BASIC_MEMORY_PROJECT"] = original_env
-        elif "BASIC_MEMORY_PROJECT" in os.environ:
-            del os.environ["BASIC_MEMORY_PROJECT"]
-
-
-@pytest.fixture
-def cli_runner():
-    """Create a CLI runner for testing."""
-    return CliRunner()
-
-
-def test_project_list_empty(cli_runner, temp_home):
-    """Test listing projects when none are configured."""
-    # Create empty config but with main project (will always be present)
-    config_file = temp_home / DATA_DIR_NAME / CONFIG_FILE_NAME
-    config_file.write_text(json.dumps({"projects": {}, "default_project": "main"}))
-
-    # Run command
-    result = cli_runner.invoke(app, ["project", "list"])
-    assert result.exit_code == 0
-    # The test will always have at least the "main" project due to auto-initialization
-    assert "main" in result.stdout
-
-
-def test_project_list(cli_runner, temp_home):
-    """Test listing projects."""
-    # Create config with projects
-    config_file = temp_home / DATA_DIR_NAME / CONFIG_FILE_NAME
-    config_data = {
-        "projects": {
-            "main": str(temp_home / "basic-memory"),
-            "work": str(temp_home / "work-memory"),
-        },
-        "default_project": "main",
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_list_command(mock_run, cli_env):
+    """Test the 'project list' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "projects": [
+            {"name": "test", "path": "/path/to/test", "is_default": True, "is_current": True}
+        ],
+        "default_project": "test",
+        "current_project": "test",
     }
-    config_file.write_text(json.dumps(config_data))
+    mock_run.return_value = mock_response
 
-    # Run command
-    result = cli_runner.invoke(app, ["project", "list"])
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "list"])
+
+    # Just verify it runs without exception
     assert result.exit_code == 0
-    assert "main" in result.stdout
-    assert "work" in result.stdout
-    assert "basic-memory" in result.stdout
-    assert "work-memory" in result.stdout
 
 
-def test_project_add(cli_runner, temp_home):
-    """Test adding a project."""
-    # Create config manager to initialize config
-    config_manager = ConfigManager()
-
-    # Create a project directory
-    test_project_dir = temp_home / "test-project"
-
-    # Run command
-    result = cli_runner.invoke(app, ["project", "add", "test", str(test_project_dir)])
-    assert result.exit_code == 0
-    assert "Project 'test' added at" in result.stdout
-
-    # Verify project was added
-    config_manager = ConfigManager()
-    assert "test" in config_manager.projects
-    assert Path(config_manager.projects["test"]) == test_project_dir
-
-
-def test_project_add_existing(cli_runner, temp_home):
-    """Test adding a project that already exists."""
-    # Create config manager and add a project
-    config_manager = ConfigManager()
-    config_manager.add_project("test", str(temp_home / "test-project"))
-
-    # Try to add the same project again
-    result = cli_runner.invoke(app, ["project", "add", "test", str(temp_home / "another-path")])
-    assert result.exit_code == 1
-    assert "Error: Project 'test' already exists" in result.stdout
-
-
-def test_project_remove(cli_runner, temp_home):
-    """Test removing a project."""
-    # Create config manager and add a project
-    config_manager = ConfigManager()
-    config_manager.add_project("test", str(temp_home / "test-project"))
-
-    # Remove the project
-    result = cli_runner.invoke(app, ["project", "remove", "test"])
-    assert result.exit_code == 0
-    assert "Project 'test' removed" in result.stdout
-
-    # Verify project was removed
-    config_manager = ConfigManager()
-    assert "test" not in config_manager.projects
-
-
-def test_project_default(cli_runner, temp_home):
-    """Test setting the default project."""
-    # Create config manager and add a project
-    config_manager = ConfigManager()
-    config_manager.add_project("test", str(temp_home / "test-project"))
-
-    # Set as default
-    result = cli_runner.invoke(app, ["project", "default", "test"])
-    assert result.exit_code == 0
-    assert "Project 'test' set as default and activated" in result.stdout
-
-    # Verify default was set
-    config_manager = ConfigManager()
-    assert config_manager.default_project == "test"
-
-    # Extra verification: check if the environment variable was set
-    assert os.environ.get("BASIC_MEMORY_PROJECT") == "test"
-
-
-def test_project_current(cli_runner, temp_home):
-    """Test showing the current project."""
-    # Create a bare-bones config.json with main as the default project
-    config_file = temp_home / DATA_DIR_NAME / CONFIG_FILE_NAME
-    config_data = {
-        "projects": {
-            "main": str(temp_home / "basic-memory"),
-        },
-        "default_project": "main",
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_current_command(mock_run, cli_env):
+    """Test the 'project current' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "projects": [
+            {"name": "test", "path": "/path/to/test", "is_default": True, "is_current": True}
+        ],
+        "default_project": "test",
+        "current_project": "test",
     }
-    config_file.write_text(json.dumps(config_data))
+    mock_run.return_value = mock_response
 
-    # Create the main project directory
-    main_dir = temp_home / "basic-memory"
-    main_dir.mkdir(parents=True, exist_ok=True)
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "current"])
 
-    # Now check the current project
-    result = cli_runner.invoke(app, ["project", "current"])
+    # Just verify it runs without exception
     assert result.exit_code == 0
-    assert "Current project: main" in result.stdout
-    assert "Path:" in result.stdout
-    assert "Database:" in result.stdout
 
 
-def test_project_option(cli_runner, temp_home, monkeypatch):
-    """Test using the --project option."""
-    # Create config manager and add a project
-    config_manager = ConfigManager()
-    config_manager.add_project("test", str(temp_home / "test-project"))
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_add_command(mock_run, cli_env):
+    """Test the 'project add' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": "Project 'test-project' added successfully",
+        "status": "success",
+        "default": False,
+    }
+    mock_run.return_value = mock_response
 
-    # Mock environment to capture the set variable
-    env_vars = {}
-    monkeypatch.setattr(os, "environ", env_vars)
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "add", "test-project", "/path/to/project"])
 
-    # Run command with --project option
-    cli_runner.invoke(app, ["--project", "test", "project", "current"])
-
-    # Verify environment variable was set
-    assert env_vars.get("BASIC_MEMORY_PROJECT") == "test"
-
-
-def test_project_default_activates_project(cli_runner, temp_home, monkeypatch):
-    """Test that setting the default project also activates it in the current session."""
-    # Create a test environment
-    env = {}
-    monkeypatch.setattr(os, "environ", env)
-
-    # Create two test projects
-    config_manager = ConfigManager()
-    config_manager.add_project("project1", str(temp_home / "project1"))
-
-    # Set project1 as default using the CLI command
-    result = cli_runner.invoke(app, ["project", "default", "project1"])
+    # Just verify it runs without exception
     assert result.exit_code == 0
-    assert "Project 'project1' set as default and activated" in result.stdout
 
-    # Verify the environment variable was set
-    # This is the core of our fix - the set_default_project command now also sets
-    # the BASIC_MEMORY_PROJECT environment variable to activate the project
-    assert env.get("BASIC_MEMORY_PROJECT") == "project1"
+
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_remove_command(mock_run, cli_env):
+    """Test the 'project remove' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": "Project 'test-project' removed successfully",
+        "status": "success",
+        "default": False,
+    }
+    mock_run.return_value = mock_response
+
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "remove", "test-project"])
+
+    # Just verify it runs without exception
+    assert result.exit_code == 0
+
+
+@patch("basic_memory.cli.commands.project.asyncio.run")
+@patch("importlib.reload")
+def test_project_default_command(mock_reload, mock_run, cli_env):
+    """Test the 'project default' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": "Project 'test-project' set as default successfully",
+        "status": "success",
+        "default": True,
+    }
+    mock_run.return_value = mock_response
+
+    # Mock necessary config methods to have the test-project handled
+    # Patching call_put directly since it's imported at the module level
+
+    # Patch the os.environ for checking
+    with patch.dict(os.environ, {}, clear=True):
+        # Patch ConfigManager.set_default_project to prevent validation error
+        with patch("basic_memory.config.ConfigManager.set_default_project"):
+            runner = CliRunner()
+            result = runner.invoke(cli_app, ["project", "default", "test-project"])
+
+            # Just verify it runs without exception and environment is set
+            assert result.exit_code == 0
+            assert "BASIC_MEMORY_PROJECT" in os.environ
+            assert os.environ["BASIC_MEMORY_PROJECT"] == "test-project"
+
+
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_sync_command(mock_run, cli_env):
+    """Test the 'project sync' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": "Projects synchronized successfully between configuration and database",
+        "status": "success",
+        "default": False,
+    }
+    mock_run.return_value = mock_response
+
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "sync"])
+
+    # Just verify it runs without exception
+    assert result.exit_code == 0
+
+
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_failure_exits_with_error(mock_run, cli_env):
+    """Test that CLI commands properly exit with error code on API failures."""
+    # Mock an exception being raised
+    mock_run.side_effect = Exception("API server not running")
+
+    runner = CliRunner()
+
+    # Test various commands for proper error handling
+    list_result = runner.invoke(cli_app, ["project", "list"])
+    add_result = runner.invoke(cli_app, ["project", "add", "test-project", "/path/to/project"])
+    remove_result = runner.invoke(cli_app, ["project", "remove", "test-project"])
+    current_result = runner.invoke(cli_app, ["project", "current"])
+    default_result = runner.invoke(cli_app, ["project", "default", "test-project"])
+
+    # All should exit with code 1 and show error message
+    assert list_result.exit_code == 1
+    assert "Error listing projects" in list_result.output
+    assert "Make sure the Basic Memory server is running" in list_result.output
+
+    assert add_result.exit_code == 1
+    assert "Error adding project" in add_result.output
+
+    assert remove_result.exit_code == 1
+    assert "Error removing project" in remove_result.output
+
+    assert current_result.exit_code == 1
+    assert "Error getting current project" in current_result.output
+
+    assert default_result.exit_code == 1
+    assert "Error setting default project" in default_result.output

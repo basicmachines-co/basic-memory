@@ -18,7 +18,6 @@ from basic_memory.schemas import (
     DeleteEntitiesRequest,
 )
 from basic_memory.schemas.base import Permalink, Entity
-from basic_memory.services.exceptions import EntityNotFoundError
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -80,7 +79,10 @@ async def create_or_update_entity(
             data_permalink=data.permalink,
             error="Permalink mismatch",
         )
-        raise HTTPException(status_code=400, detail="Entity permalink must match URL path")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Entity permalink {data.permalink} must match URL path: '{permalink}'",
+        )
 
     # Try create_or_update operation
     entity, created = await entity_service.create_or_update_entity(data)
@@ -104,25 +106,26 @@ async def create_or_update_entity(
 ## Read endpoints
 
 
-@router.get("/entities/{permalink:path}", response_model=EntityResponse)
+@router.get("/entities/{identifier:path}", response_model=EntityResponse)
 async def get_entity(
     entity_service: EntityServiceDep,
-    permalink: str,
+    link_resolver: LinkResolverDep,
+    identifier: str,
 ) -> EntityResponse:
-    """Get a specific entity by ID.
+    """Get a specific entity by file path or permalink..
 
     Args:
-        permalink: Entity path ID
-        content: If True, include full file content
+        identifier: Entity file path or permalink
         :param entity_service: EntityService
+        :param link_resolver: LinkResolver
     """
-    logger.info(f"request: get_entity with permalink={permalink}")
-    try:
-        entity = await entity_service.get_by_permalink(permalink)
-        result = EntityResponse.model_validate(entity)
-        return result
-    except EntityNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Entity with {permalink} not found")
+    logger.info(f"request: get_entity with identifier={identifier}")
+    entity = await link_resolver.resolve_link(identifier)
+    if not entity:
+        raise HTTPException(status_code=404, detail=f"Entity {identifier} not found")
+
+    result = EntityResponse.model_validate(entity)
+    return result
 
 
 @router.get("/entities", response_model=EntityListResponse)

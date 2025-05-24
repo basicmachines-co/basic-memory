@@ -24,6 +24,7 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
         title="Test Entity",
         folder="",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
 
     # Act
@@ -59,7 +60,13 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
 @pytest.mark.asyncio
 async def test_create_entity_file_exists(entity_service: EntityService, file_service: FileService):
     """Test successful entity creation."""
-    entity_data = EntitySchema(title="Test Entity", folder="", entity_type="test", content="first")
+    entity_data = EntitySchema(
+        title="Test Entity",
+        folder="",
+        entity_type="test",
+        content="first",
+        project=entity_service.repository.project_id,
+    )
 
     # Act
     entity = await entity_service.create_entity(entity_data)
@@ -73,7 +80,13 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
         "---\ntitle: Test Entity\ntype: test\npermalink: test-entity\n---\n\nfirst" == file_content
     )
 
-    entity_data = EntitySchema(title="Test Entity", folder="", entity_type="test", content="second")
+    entity_data = EntitySchema(
+        title="Test Entity",
+        folder="",
+        entity_type="test",
+        content="second",
+        project=entity_service.repository.project_id,
+    )
 
     with pytest.raises(EntityCreationError):
         await entity_service.create_entity(entity_data)
@@ -91,6 +104,7 @@ async def test_create_entity_unique_permalink(
         title="Test Entity",
         folder="test",
         entity_type="test",
+        project=entity_repository.project_id,
     )
 
     entity = await entity_service.create_entity(entity_data)
@@ -123,6 +137,7 @@ async def test_get_by_permalink(entity_service: EntityService):
         title="TestEntity1",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     entity1 = await entity_service.create_entity(entity1_data)
 
@@ -130,6 +145,7 @@ async def test_get_by_permalink(entity_service: EntityService):
         title="TestEntity2",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     entity2 = await entity_service.create_entity(entity2_data)
 
@@ -157,6 +173,7 @@ async def test_get_entity_success(entity_service: EntityService):
         title="TestEntity",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity_data)
 
@@ -175,6 +192,7 @@ async def test_delete_entity_success(entity_service: EntityService):
         title="TestEntity",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity_data)
 
@@ -194,6 +212,7 @@ async def test_delete_entity_by_id(entity_service: EntityService):
         title="TestEntity",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     created = await entity_service.create_entity(entity_data)
 
@@ -227,6 +246,7 @@ async def test_create_entity_with_special_chars(entity_service: EntityService):
         title=name,
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     entity = await entity_service.create_entity(entity_data)
 
@@ -244,11 +264,13 @@ async def test_get_entities_by_permalinks(entity_service: EntityService):
         title="Entity1",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     entity2_data = EntitySchema(
         title="Entity2",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity1_data)
     await entity_service.create_entity(entity2_data)
@@ -277,6 +299,7 @@ async def test_get_entities_some_not_found(entity_service: EntityService):
         title="Entity1",
         folder="test",
         entity_type="test",
+        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity_data)
 
@@ -309,6 +332,7 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
         folder="test",
         entity_type="note",
         entity_metadata={"status": "draft"},
+        project=entity_service.repository.project_id,
     )
 
     entity = await entity_service.create_entity(schema)
@@ -346,6 +370,7 @@ async def test_create_or_update_new(entity_service: EntityService, file_service:
             folder="test",
             entity_type="test",
             entity_metadata={"status": "draft"},
+            project=entity_service.repository.project_id,
         )
     )
     assert entity.title == "test"
@@ -363,6 +388,7 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
             entity_type="test",
             content="Test entity",
             entity_metadata={"status": "final"},
+            project=entity_service.repository.project_id,
         )
     )
 
@@ -405,6 +431,7 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
             folder="test",
             entity_type="test",
             content=content,
+            project=entity_service.repository.project_id,
         )
     )
 
@@ -471,6 +498,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
             entity_type="test",
             folder="test",
             content=content,
+            project=entity_service.repository.project_id,
         )
     )
 
@@ -530,6 +558,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
             folder="test",
             entity_type="test",
             content=update_content,
+            project=entity_service.repository.project_id,
         )
     )
 

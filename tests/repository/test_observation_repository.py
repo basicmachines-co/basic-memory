@@ -8,7 +8,7 @@ import sqlalchemy
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from basic_memory import db
-from basic_memory.models import Entity, Observation
+from basic_memory.models import Entity, Observation, Project
 from basic_memory.repository.observation_repository import ObservationRepository
 
 
@@ -85,11 +85,12 @@ async def test_find_by_context(
 
 
 @pytest.mark.asyncio
-async def test_delete_observations(session_maker: async_sessionmaker, repo):
+async def test_delete_observations(session_maker: async_sessionmaker, repo, test_project: Project):
     """Test deleting observations by entity_id."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
         entity = Entity(
+            project_id=test_project.id,
             title="test_entity",
             entity_type="test",
             permalink="test/test-entity",
@@ -122,11 +123,14 @@ async def test_delete_observations(session_maker: async_sessionmaker, repo):
 
 
 @pytest.mark.asyncio
-async def test_delete_observation_by_id(session_maker: async_sessionmaker, repo):
+async def test_delete_observation_by_id(
+    session_maker: async_sessionmaker, repo, test_project: Project
+):
     """Test deleting a single observation by its ID."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
         entity = Entity(
+            project_id=test_project.id,
             title="test_entity",
             entity_type="test",
             permalink="test/test-entity",
@@ -155,11 +159,14 @@ async def test_delete_observation_by_id(session_maker: async_sessionmaker, repo)
 
 
 @pytest.mark.asyncio
-async def test_delete_observation_by_content(session_maker: async_sessionmaker, repo):
+async def test_delete_observation_by_content(
+    session_maker: async_sessionmaker, repo, test_project: Project
+):
     """Test deleting observations by content."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
         entity = Entity(
+            project_id=test_project.id,
             title="test_entity",
             entity_type="test",
             permalink="test/test-entity",
@@ -193,11 +200,12 @@ async def test_delete_observation_by_content(session_maker: async_sessionmaker, 
 
 
 @pytest.mark.asyncio
-async def test_find_by_category(session_maker: async_sessionmaker, repo):
+async def test_find_by_category(session_maker: async_sessionmaker, repo, test_project: Project):
     """Test finding observations by their category."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
         entity = Entity(
+            project_id=test_project.id,
             title="test_entity",
             entity_type="test",
             permalink="test/test-entity",
@@ -248,11 +256,14 @@ async def test_find_by_category(session_maker: async_sessionmaker, repo):
 
 
 @pytest.mark.asyncio
-async def test_observation_categories(session_maker: async_sessionmaker, repo):
+async def test_observation_categories(
+    session_maker: async_sessionmaker, repo, test_project: Project
+):
     """Test retrieving distinct observation categories."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
         entity = Entity(
+            project_id=test_project.id,
             title="test_entity",
             entity_type="test",
             permalink="test/test-entity",
@@ -310,10 +321,13 @@ async def test_find_by_category_with_empty_db(repo):
 
 
 @pytest.mark.asyncio
-async def test_find_by_category_case_sensitivity(session_maker: async_sessionmaker, repo):
+async def test_find_by_category_case_sensitivity(
+    session_maker: async_sessionmaker, repo, test_project: Project
+):
     """Test how category search handles case sensitivity."""
     async with db.scoped_session(session_maker) as session:
         entity = Entity(
+            project_id=test_project.id,
             title="test_entity",
             entity_type="test",
             permalink="test/test-entity",

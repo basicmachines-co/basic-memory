@@ -9,13 +9,20 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.config import ConfigManager, config
+from basic_memory.config import config
 from basic_memory.mcp.tools.project_info import project_info
 import json
 from datetime import datetime
 
 from rich.panel import Panel
 from rich.tree import Tree
+from basic_memory.mcp.async_client import client
+from basic_memory.mcp.tools.utils import call_get
+from basic_memory.schemas.project_info import ProjectList
+from basic_memory.mcp.tools.utils import call_post
+from basic_memory.schemas.project_info import ProjectStatusResponse
+from basic_memory.mcp.tools.utils import call_delete
+from basic_memory.mcp.tools.utils import call_put
 
 console = Console()
 
@@ -35,48 +42,60 @@ def format_path(path: str) -> str:
 @project_app.command("list")
 def list_projects() -> None:
     """List all configured projects."""
-    config_manager = ConfigManager()
-    projects = config_manager.projects
+    # Use API to list projects
 
-    table = Table(title="Basic Memory Projects")
-    table.add_column("Name", style="cyan")
-    table.add_column("Path", style="green")
-    table.add_column("Default", style="yellow")
-    table.add_column("Active", style="magenta")
+    project_url = config.project_url
 
-    default_project = config_manager.default_project
-    active_project = config.project
+    try:
+        response = asyncio.run(call_get(client, f"{project_url}/project/projects"))
+        result = ProjectList.model_validate(response.json())
 
-    for name, path in projects.items():
-        is_default = "✓" if name == default_project else ""
-        is_active = "✓" if name == active_project else ""
-        table.add_row(name, format_path(path), is_default, is_active)
+        table = Table(title="Basic Memory Projects")
+        table.add_column("Name", style="cyan")
+        table.add_column("Path", style="green")
+        table.add_column("Default", style="yellow")
+        table.add_column("Active", style="magenta")
 
-    console.print(table)
+        for project in result.projects:
+            is_default = "✓" if project.is_default else ""
+            is_active = "✓" if project.is_current else ""
+            table.add_row(project.name, format_path(project.path), is_default, is_active)
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red]Error listing projects: {str(e)}[/red]")
+        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
+        raise typer.Exit(1)
 
 
 @project_app.command("add")
 def add_project(
     name: str = typer.Argument(..., help="Name of the project"),
     path: str = typer.Argument(..., help="Path to the project directory"),
+    set_default: bool = typer.Option(False, "--default", help="Set as default project"),
 ) -> None:
     """Add a new project."""
-    config_manager = ConfigManager()
+    # Resolve to absolute path
+    resolved_path = os.path.abspath(os.path.expanduser(path))
 
     try:
-        # Resolve to absolute path
-        resolved_path = os.path.abspath(os.path.expanduser(path))
-        config_manager.add_project(name, resolved_path)
-        console.print(f"[green]Project '{name}' added at {format_path(resolved_path)}[/green]")
+        project_url = config.project_url
+        data = {"name": name, "path": resolved_path, "set_default": set_default}
 
-        # Display usage hint
-        console.print("\nTo use this project:")
-        console.print(f"  basic-memory --project={name} <command>")
-        console.print("  # or")
-        console.print(f"  basic-memory project default {name}")
-    except ValueError as e:
-        console.print(f"[red]Error: {e}[/red]")
+        response = asyncio.run(call_post(client, f"{project_url}/project/projects", json=data))
+        result = ProjectStatusResponse.model_validate(response.json())
+
+        console.print(f"[green]{result.message}[/green]")
+    except Exception as e:
+        console.print(f"[red]Error adding project: {str(e)}[/red]")
+        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
+
+    # Display usage hint
+    console.print("\nTo use this project:")
+    console.print(f"  basic-memory --project={name} <command>")
+    console.print("  # or")
+    console.print(f"  basic-memory project default {name}")
 
 
 @project_app.command("remove")
@@ -84,15 +103,20 @@ def remove_project(
     name: str = typer.Argument(..., help="Name of the project to remove"),
 ) -> None:
     """Remove a project from configuration."""
-    config_manager = ConfigManager()
-
     try:
-        config_manager.remove_project(name)
-        console.print(f"[green]Project '{name}' removed from configuration[/green]")
-        console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
-    except ValueError as e:  # pragma: no cover
-        console.print(f"[red]Error: {e}[/red]")
+        project_url = config.project_url
+
+        response = asyncio.run(call_delete(client, f"{project_url}/project/projects/{name}"))
+        result = ProjectStatusResponse.model_validate(response.json())
+
+        console.print(f"[green]{result.message}[/green]")
+    except Exception as e:
+        console.print(f"[red]Error removing project: {str(e)}[/red]")
+        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
+
+    # Show this message regardless of method used
+    console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
 
 
 @project_app.command("default")
@@ -100,40 +124,80 @@ def set_default_project(
     name: str = typer.Argument(..., help="Name of the project to set as default"),
 ) -> None:
     """Set the default project and activate it for the current session."""
-    config_manager = ConfigManager()
-
     try:
-        # Set the default project
-        config_manager.set_default_project(name)
+        project_url = config.project_url
 
-        # Also activate it for the current session by setting the environment variable
-        os.environ["BASIC_MEMORY_PROJECT"] = name
+        response = asyncio.run(call_put(client, f"{project_url}/project/projects/{name}/default"))
+        result = ProjectStatusResponse.model_validate(response.json())
 
-        # Reload configuration to apply the change
-        from importlib import reload
-        from basic_memory import config as config_module
-
-        reload(config_module)
-        console.print(f"[green]Project '{name}' set as default and activated[/green]")
-    except ValueError as e:  # pragma: no cover
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[green]{result.message}[/green]")
+    except Exception as e:
+        console.print(f"[red]Error setting default project: {str(e)}[/red]")
+        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
+
+    # Always activate it for the current session
+    os.environ["BASIC_MEMORY_PROJECT"] = name
+
+    # Reload configuration to apply the change
+    from importlib import reload
+    from basic_memory import config as config_module
+
+    reload(config_module)
+
+    console.print("[green]Project activated for current session[/green]")
 
 
 @project_app.command("current")
 def show_current_project() -> None:
     """Show the current project."""
-    config_manager = ConfigManager()
-    current = os.environ.get("BASIC_MEMORY_PROJECT", config_manager.default_project)
+    # Use API to get current project
+
+    project_url = config.project_url
 
     try:
-        path = config_manager.get_project_path(current)
-        console.print(f"Current project: [cyan]{current}[/cyan]")
-        console.print(f"Path: [green]{format_path(str(path))}[/green]")
-        console.print(f"Database: [blue]{format_path(str(config.database_path))}[/blue]")
-    except ValueError:  # pragma: no cover
-        console.print(f"[yellow]Warning: Project '{current}' not found in configuration[/yellow]")
-        console.print(f"Using default project: [cyan]{config_manager.default_project}[/cyan]")
+        response = asyncio.run(call_get(client, f"{project_url}/project/projects"))
+        result = ProjectList.model_validate(response.json())
+
+        # Find the current project from the API response
+        current_project = result.current_project
+        default_project = result.default_project
+
+        # Find the project details in the list
+        for project in result.projects:
+            if project.name == current_project:
+                console.print(f"Current project: [cyan]{project.name}[/cyan]")
+                console.print(f"Path: [green]{format_path(project.path)}[/green]")
+                # Use app_config for database_path, not project config
+                from basic_memory.config import app_config
+
+                console.print(
+                    f"Database: [blue]{format_path(str(app_config.app_database_path))}[/blue]"
+                )
+                console.print(f"Default project: [yellow]{default_project}[/yellow]")
+                break
+    except Exception as e:
+        console.print(f"[red]Error getting current project: {str(e)}[/red]")
+        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
+        raise typer.Exit(1)
+
+
+@project_app.command("sync")
+def synchronize_projects() -> None:
+    """Synchronize projects between configuration file and database."""
+    # Call the API to synchronize projects
+
+    project_url = config.project_url
+
+    try:
+        response = asyncio.run(call_post(client, f"{project_url}/project/sync"))
+        result = ProjectStatusResponse.model_validate(response.json())
+
+        console.print(f"[green]{result.message}[/green]")
+    except Exception as e:  # pragma: no cover
+        console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
+        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
+        raise typer.Exit(1)
 
 
 @project_app.command("info")
@@ -266,9 +330,10 @@ def display_project_info(
             projects_table.add_column("Path", style="cyan")
             projects_table.add_column("Default", style="green")
 
-            for name, path in info.available_projects.items():
+            for name, proj_info in info.available_projects.items():
                 is_default = name == info.default_project
-                projects_table.add_row(name, path, "✓" if is_default else "")
+                project_path = proj_info["path"]
+                projects_table.add_row(name, project_path, "✓" if is_default else "")
 
             console.print(projects_table)
 

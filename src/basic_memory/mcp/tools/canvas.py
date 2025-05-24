@@ -8,6 +8,7 @@ from typing import Dict, List, Any
 
 from loguru import logger
 
+from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
@@ -72,6 +73,8 @@ async def canvas(
     }
     ```
     """
+    project_url = get_project_config().project_url
+
     # Ensure path has .canvas extension
     file_title = title if title.endswith(".canvas") else f"{title}.canvas"
     file_path = f"{folder}/{file_title}"
@@ -84,7 +87,7 @@ async def canvas(
 
     # Write the file using the resource API
     logger.info(f"Creating canvas file: {file_path}")
-    response = await call_put(client, f"/resource/{file_path}", json=canvas_json)
+    response = await call_put(client, f"{project_url}/resource/{file_path}", json=canvas_json)
 
     # Parse response
     result = response.json()

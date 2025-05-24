@@ -267,12 +267,13 @@ def test_build_context(cli_env, setup_test_note):
 
     # Result should be JSON containing our test note
     context_result = json.loads(result.stdout)
-    assert len(context_result["primary_results"]) > 0
+    assert "results" in context_result
+    assert len(context_result["results"]) > 0
 
     # Primary results should include our test note
     found = False
-    for item in context_result["primary_results"]:
-        if item["permalink"] == permalink:
+    for item in context_result["results"]:
+        if item["primary_result"]["permalink"] == permalink:
             found = True
             break
 
@@ -310,10 +311,10 @@ def test_build_context_with_options(cli_env, setup_test_note):
     timeframe = datetime.fromisoformat(context_result["metadata"]["timeframe"])
     assert datetime.now() - timeframe <= timedelta(days=2)  # don't bother about timezones
 
-    # Primary results should include our test note
+    # Results should include our test note
     found = False
-    for item in context_result["primary_results"]:
-        if item["permalink"] == permalink:
+    for item in context_result["results"]:
+        if item["primary_result"]["permalink"] == permalink:
             found = True
             break
 
@@ -334,15 +335,16 @@ def test_recent_activity(cli_env, setup_test_note):
 
     # Result should be JSON containing recent activity
     activity_result = json.loads(result.stdout)
-    assert "primary_results" in activity_result
+    assert "results" in activity_result
     assert "metadata" in activity_result
 
     # Our test note should be in the recent activity
     found = False
-    for item in activity_result["primary_results"]:
-        if "permalink" in item and setup_test_note["permalink"] == item["permalink"]:
-            found = True
-            break
+    for item in activity_result["results"]:
+        if "primary_result" in item and "permalink" in item["primary_result"]:
+            if setup_test_note["permalink"] == item["primary_result"]["permalink"]:
+                found = True
+                break
 
     assert found, "Recent activity did not include the test note"
 
@@ -374,12 +376,12 @@ def test_recent_activity_with_options(cli_env, setup_test_note):
 
     # Check that requested entity types are included
     entity_types = set()
-    for item in activity_result["primary_results"]:
-        if "type" in item:
-            entity_types.add(item["type"])
+    for item in activity_result["results"]:
+        if "primary_result" in item and "type" in item["primary_result"]:
+            entity_types.add(item["primary_result"]["type"])
 
-    # Should find both entity and observation types
-    assert "entity" in entity_types or "observation" in entity_types
+    # Should find entity type since we requested it
+    assert "entity" in entity_types
 
 
 def test_continue_conversation(cli_env, setup_test_note):

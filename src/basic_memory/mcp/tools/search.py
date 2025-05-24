@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from loguru import logger
 
+from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
@@ -103,10 +104,12 @@ async def search_notes(
     if after_date:
         search_query.after_date = after_date
 
+    project_url = get_project_config().project_url
+
     logger.info(f"Searching for {search_query}")
     response = await call_post(
         client,
-        "/search/",
+        f"{project_url}/search/",
         json=search_query.model_dump(),
         params={"page": page, "page_size": page_size},
     )

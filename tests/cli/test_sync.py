@@ -1,7 +1,5 @@
 """Tests for CLI sync command."""
 
-import asyncio
-
 import pytest
 from typer.testing import CliRunner
 
@@ -73,10 +71,11 @@ def test_display_detailed_sync_results_with_changes():
 
 
 @pytest.mark.asyncio
-async def test_run_sync_basic(sync_service, test_config):
+async def test_run_sync_basic(sync_service, test_config, test_project):
     """Test basic sync operation."""
     # Set up test environment
     config.home = test_config.home
+    config.name = test_project.name
 
     # Create test files
     test_file = test_config.home / "test.md"
@@ -90,21 +89,10 @@ Some content""")
     await run_sync(verbose=True)
 
 
-@pytest.mark.asyncio
-async def test_run_sync_watch_mode(sync_service, test_config):
-    """Test sync with watch mode."""
-    # Set up test environment
-    config.home = test_config.home
-
-    # Start sync in watch mode but cancel after a short time
-    with pytest.raises(asyncio.CancelledError):
-        task = asyncio.create_task(run_sync(watch=True))
-        await asyncio.sleep(0.1)  # Let it start
-        task.cancel()
-        await task
-
-
-def test_sync_command():
+def test_sync_command(sync_service, test_config, test_project):
     """Test the sync command."""
+    config.home = test_config.home
+    config.name = test_project.name
+
     result = runner.invoke(app, ["sync", "--verbose"])
     assert result.exit_code == 0

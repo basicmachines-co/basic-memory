@@ -18,9 +18,14 @@ class EntityRepository(Repository[Entity]):
     to strings before passing to repository methods.
     """
 
-    def __init__(self, session_maker: async_sessionmaker[AsyncSession]):
-        """Initialize with session maker."""
-        super().__init__(session_maker, Entity)
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession], project_id: int):
+        """Initialize with session maker and project_id filter.
+
+        Args:
+            session_maker: SQLAlchemy session maker
+            project_id: Project ID to filter all operations by
+        """
+        super().__init__(session_maker, Entity, project_id=project_id)
 
     async def get_by_permalink(self, permalink: str) -> Optional[Entity]:
         """Get entity by permalink.

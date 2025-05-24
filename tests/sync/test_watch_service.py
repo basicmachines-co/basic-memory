@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from watchfiles import Change
 
+from basic_memory.models.project import Project
 from basic_memory.sync.watch_service import WatchService, WatchServiceState
 
 
@@ -69,7 +70,7 @@ async def test_write_status(watch_service):
 
 
 @pytest.mark.asyncio
-async def test_handle_file_add(watch_service, test_config):
+async def test_handle_file_add(watch_service, test_config, test_project, entity_repository):
     """Test handling new file creation."""
     project_dir = test_config.home
 
@@ -91,10 +92,10 @@ Test content
     await create_test_file(new_file, content)
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    entity = await watch_service.sync_service.entity_repository.get_by_file_path("new_note.md")
+    entity = await entity_repository.get_by_file_path("new_note.md")
     assert entity is not None
     assert entity.title == "new_note"
 
@@ -106,7 +107,7 @@ Test content
 
 
 @pytest.mark.asyncio
-async def test_handle_file_modify(watch_service, test_config):
+async def test_handle_file_modify(watch_service, test_config, sync_service, test_project):
     """Test handling file modifications."""
     project_dir = test_config.home
 
@@ -125,7 +126,7 @@ Initial content
     await create_test_file(test_file, initial_content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir)
+    await sync_service.sync(project_dir)
 
     # Modify file
     modified_content = """---
@@ -140,10 +141,10 @@ Modified content
     changes = {(Change.modified, str(empty_dir)), (Change.modified, str(test_file))}
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    entity = await watch_service.sync_service.entity_repository.get_by_file_path("test_note.md")
+    entity = await sync_service.entity_repository.get_by_file_path("test_note.md")
     assert entity is not None
 
     # Check event was recorded
@@ -154,7 +155,7 @@ Modified content
 
 
 @pytest.mark.asyncio
-async def test_handle_file_delete(watch_service, test_config):
+async def test_handle_file_delete(watch_service, test_config, test_project, sync_service):
     """Test handling file deletion."""
     project_dir = test_config.home
 
@@ -169,7 +170,7 @@ Test content
     await create_test_file(test_file, content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir)
+    await sync_service.sync(project_dir)
 
     # Delete file
     test_file.unlink()
@@ -178,10 +179,10 @@ Test content
     changes = {(Change.deleted, str(test_file))}
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    entity = await watch_service.sync_service.entity_repository.get_by_file_path("to_delete.md")
+    entity = await sync_service.entity_repository.get_by_file_path("to_delete.md")
     assert entity is None
 
     # Check event was recorded
@@ -192,7 +193,7 @@ Test content
 
 
 @pytest.mark.asyncio
-async def test_handle_file_move(watch_service, test_config):
+async def test_handle_file_move(watch_service, test_config, test_project, sync_service):
     """Test handling file moves."""
     project_dir = test_config.home
 
@@ -207,10 +208,8 @@ Test content
     await create_test_file(old_path, content)
 
     # Initial sync
-    await watch_service.sync_service.sync(project_dir)
-    initial_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "old/test_move.md"
-    )
+    await sync_service.sync(project_dir)
+    initial_entity = await sync_service.entity_repository.get_by_file_path("old/test_move.md")
 
     # Move file
     new_path = project_dir / "new" / "moved_file.md"
@@ -221,19 +220,15 @@ Test content
     changes = {(Change.deleted, str(old_path)), (Change.added, str(new_path))}
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify
-    moved_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "new/moved_file.md"
-    )
+    moved_entity = await sync_service.entity_repository.get_by_file_path("new/moved_file.md")
     assert moved_entity is not None
     assert moved_entity.id == initial_entity.id  # Same entity, new path
 
     # Original path should no longer exist
-    old_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "old/test_move.md"
-    )
+    old_entity = await sync_service.entity_repository.get_by_file_path("old/test_move.md")
     assert old_entity is None
 
     # Check event was recorded
@@ -244,7 +239,7 @@ Test content
 
 
 @pytest.mark.asyncio
-async def test_handle_concurrent_changes(watch_service, test_config):
+async def test_handle_concurrent_changes(watch_service, test_config, test_project, sync_service):
     """Test handling multiple file changes happening close together."""
     project_dir = test_config.home
 
@@ -276,11 +271,11 @@ async def test_handle_concurrent_changes(watch_service, test_config):
     }
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify both files were processed
-    entity1 = await watch_service.sync_service.entity_repository.get_by_file_path("note1.md")
-    entity2 = await watch_service.sync_service.entity_repository.get_by_file_path("note2.md")
+    entity1 = await sync_service.entity_repository.get_by_file_path("note1.md")
+    entity2 = await sync_service.entity_repository.get_by_file_path("note2.md")
 
     assert entity1 is not None
     assert entity2 is not None
@@ -293,7 +288,7 @@ async def test_handle_concurrent_changes(watch_service, test_config):
 
 
 @pytest.mark.asyncio
-async def test_handle_rapid_move(watch_service, test_config):
+async def test_handle_rapid_move(watch_service, test_config, test_project, sync_service):
     """Test handling rapid move operations."""
     project_dir = test_config.home
 
@@ -306,7 +301,7 @@ type: knowledge
 Test content for rapid moves
 """
     await create_test_file(original_path, content)
-    await watch_service.sync_service.sync(project_dir)
+    await sync_service.sync(project_dir)
 
     # Perform rapid moves
     temp_path = project_dir / "temp.md"
@@ -325,23 +320,21 @@ Test content for rapid moves
     }
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify final state
-    final_entity = await watch_service.sync_service.entity_repository.get_by_file_path("final.md")
+    final_entity = await sync_service.entity_repository.get_by_file_path("final.md")
     assert final_entity is not None
 
     # Intermediate paths should not exist
-    original_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "original.md"
-    )
-    temp_entity = await watch_service.sync_service.entity_repository.get_by_file_path("temp.md")
+    original_entity = await sync_service.entity_repository.get_by_file_path("original.md")
+    temp_entity = await sync_service.entity_repository.get_by_file_path("temp.md")
     assert original_entity is None
     assert temp_entity is None
 
 
 @pytest.mark.asyncio
-async def test_handle_delete_then_add(watch_service, test_config):
+async def test_handle_delete_then_add(watch_service, test_config, test_project, sync_service):
     """Test handling rapid move operations."""
     project_dir = test_config.home
 
@@ -362,17 +355,15 @@ Test content for rapid moves
     }
 
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify final state
-    original_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "original.md"
-    )
+    original_entity = await sync_service.entity_repository.get_by_file_path("original.md")
     assert original_entity is None  # delete event is handled
 
 
 @pytest.mark.asyncio
-async def test_handle_directory_rename(watch_service, test_config):
+async def test_handle_directory_rename(watch_service, test_config, test_project, sync_service):
     """Test handling directory rename operations - regression test for the bug where directories
     were being processed as files, causing errors."""
     from unittest.mock import AsyncMock
@@ -393,7 +384,7 @@ This is a test file in a directory
     await create_test_file(file_in_dir, content)
 
     # Initial sync to add the file to the database
-    await watch_service.sync_service.sync(project_dir)
+    await sync_service.sync(project_dir)
 
     # Rename the directory
     new_dir_path = project_dir / "new_dir"
@@ -407,12 +398,12 @@ This is a test file in a directory
     }
 
     # Create a mocked version of sync_file to track calls
-    original_sync_file = watch_service.sync_service.sync_file
+    original_sync_file = sync_service.sync_file
     mock_sync_file = AsyncMock(side_effect=original_sync_file)
-    watch_service.sync_service.sync_file = mock_sync_file
+    sync_service.sync_file = mock_sync_file
 
     # Handle changes - this should not throw an exception
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Check if our mock was called with any directory paths
     for call in mock_sync_file.call_args_list:
@@ -423,10 +414,37 @@ This is a test file in a directory
 
     # The file path should be untouched since we're ignoring directory events
     # We'd need a separate event for the file itself to be updated
-    old_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "old_dir/test_file.md"
-    )
+    old_entity = await sync_service.entity_repository.get_by_file_path("old_dir/test_file.md")
 
     # The original entity should still exist since we only renamed the directory
     # but didn't process updates to the file itself
     assert old_entity is not None
+
+
+def test_is_project_path(watch_service, tmp_path):
+    """Test the is_project_path method to ensure it correctly identifies paths within a project."""
+    # Create a project at a specific path
+    project_path = tmp_path / "project"
+    project_path.mkdir(parents=True, exist_ok=True)
+
+    # Create a file inside the project
+    file_in_project = project_path / "subdirectory" / "file.md"
+    file_in_project.parent.mkdir(parents=True, exist_ok=True)
+    file_in_project.touch()
+
+    # Create a file outside the project
+    file_outside_project = tmp_path / "outside" / "file.md"
+    file_outside_project.parent.mkdir(parents=True, exist_ok=True)
+    file_outside_project.touch()
+
+    # Create Project object with our path
+    project = Project(id=1, name="test", path=str(project_path), permalink="test")
+
+    # Test a file inside the project
+    assert watch_service.is_project_path(project, file_in_project) is True
+
+    # Test a file outside the project
+    assert watch_service.is_project_path(project, file_outside_project) is False
+
+    # Test the project path itself
+    assert watch_service.is_project_path(project, project_path) is False

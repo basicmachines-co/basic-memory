@@ -44,6 +44,10 @@ from basic_memory.schemas.project_info import (
     ProjectInfoResponse,
 )
 
+from basic_memory.schemas.directory import (
+    DirectoryNode,
+)
+
 # For convenient imports, export all models
 __all__ = [
     # Base
@@ -71,4 +75,6 @@ __all__ = [
     "ActivityMetrics",
     "SystemStatus",
     "ProjectInfoResponse",
+    # Directory
+    "DirectoryNode",
 ]

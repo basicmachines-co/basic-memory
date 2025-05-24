@@ -17,7 +17,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from basic_memory.models.base import Base
-
 from basic_memory.utils import generate_permalink
 
 
@@ -29,6 +28,7 @@ class Entity(Base):
     - Maps to a file on disk
     - Maintains a checksum for change detection
     - Tracks both source file and semantic properties
+    - Belongs to a specific project
     """
 
     __tablename__ = "entity"
@@ -38,12 +38,20 @@ class Entity(Base):
         Index("ix_entity_title", "title"),
         Index("ix_entity_created_at", "created_at"),  # For timeline queries
         Index("ix_entity_updated_at", "updated_at"),  # For timeline queries
-        # Unique index only for markdown files with non-null permalinks
+        Index("ix_entity_project_id", "project_id"),  # For project filtering
+        # Project-specific uniqueness constraints
         Index(
-            "uix_entity_permalink",
+            "uix_entity_permalink_project",
             "permalink",
+            "project_id",
             unique=True,
             sqlite_where=text("content_type = 'text/markdown' AND permalink IS NOT NULL"),
+        ),
+        Index(
+            "uix_entity_file_path_project",
+            "file_path",
+            "project_id",
+            unique=True,
         ),
     )
 
@@ -54,10 +62,13 @@ class Entity(Base):
     entity_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     content_type: Mapped[str] = mapped_column(String)
 
+    # Project reference
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), nullable=False)
+
     # Normalized path for URIs - required for markdown files only
     permalink: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     # Actual filesystem relative path
-    file_path: Mapped[str] = mapped_column(String, unique=True, index=True)
+    file_path: Mapped[str] = mapped_column(String, index=True)
     # checksum of file
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
@@ -66,6 +77,7 @@ class Entity(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime)
 
     # Relationships
+    project = relationship("Project", back_populates="entities")
     observations = relationship(
         "Observation", back_populates="entity", cascade="all, delete-orphan"
     )

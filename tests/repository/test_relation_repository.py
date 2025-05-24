@@ -7,14 +7,15 @@ import pytest_asyncio
 import sqlalchemy
 
 from basic_memory import db
-from basic_memory.models import Entity, Relation
+from basic_memory.models import Entity, Relation, Project
 from basic_memory.repository.relation_repository import RelationRepository
 
 
 @pytest_asyncio.fixture
-async def source_entity(session_maker):
+async def source_entity(session_maker, test_project: Project):
     """Create a source entity for testing relations."""
     entity = Entity(
+        project_id=test_project.id,
         title="test_source",
         entity_type="test",
         permalink="source/test-source",
@@ -30,9 +31,10 @@ async def source_entity(session_maker):
 
 
 @pytest_asyncio.fixture
-async def target_entity(session_maker):
+async def target_entity(session_maker, test_project: Project):
     """Create a target entity for testing relations."""
     entity = Entity(
+        project_id=test_project.id,
         title="test_target",
         entity_type="test",
         permalink="target/test-target",

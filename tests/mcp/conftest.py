@@ -19,8 +19,8 @@ def mcp() -> FastMCP:
     return mcp_server
 
 
-@pytest_asyncio.fixture
-def app(test_config, engine_factory) -> FastAPI:
+@pytest.fixture
+def app(app_config, test_config, engine_factory, monkeypatch) -> FastAPI:
     """Create test FastAPI application."""
     app = fastapi_app
     app.dependency_overrides[get_project_config] = lambda: test_config
@@ -35,7 +35,7 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
-@pytest_asyncio.fixture
+@pytest.fixture
 def test_entity_data():
     """Sample data for creating a test entity."""
     return {

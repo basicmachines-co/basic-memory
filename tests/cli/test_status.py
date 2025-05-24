@@ -17,9 +17,11 @@ from basic_memory.sync.sync_service import SyncReport
 runner = CliRunner()
 
 
-def test_status_command(tmp_path, monkeypatch):
+def test_status_command(tmp_path, app_config, test_config, test_project):
     """Test CLI status command."""
     config.home = tmp_path
+    config.name = test_project.name
+
     # Should exit with code 0
     result = runner.invoke(app, ["status", "--verbose"])
     assert result.exit_code == 0
@@ -41,8 +43,8 @@ async def test_status_command_error(tmp_path, monkeypatch):
 def test_display_changes_no_changes():
     """Test displaying no changes."""
     changes = SyncReport(set(), set(), set(), {}, {})
-    display_changes("Test", changes, verbose=True)
-    display_changes("Test", changes, verbose=False)
+    display_changes("test", "Test", changes, verbose=True)
+    display_changes("test", "Test", changes, verbose=False)
 
 
 def test_display_changes_with_changes():
@@ -54,8 +56,8 @@ def test_display_changes_with_changes():
         moves={"old.md": "new.md"},
         checksums={"dir1/new.md": "abcd1234"},
     )
-    display_changes("Test", changes, verbose=True)
-    display_changes("Test", changes, verbose=False)
+    display_changes("test", "Test", changes, verbose=True)
+    display_changes("test", "Test", changes, verbose=False)
 
 
 def test_build_directory_summary():

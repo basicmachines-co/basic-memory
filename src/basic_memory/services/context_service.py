@@ -1,6 +1,6 @@
 """Service for building rich context from the knowledge graph."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
@@ -8,9 +8,11 @@ from loguru import logger
 from sqlalchemy import text
 
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
+from basic_memory.utils import generate_permalink
 
 
 @dataclass
@@ -31,6 +33,38 @@ class ContextResultRow:
     entity_id: Optional[int] = None
 
 
+@dataclass
+class ContextResultItem:
+    """A hierarchical result containing a primary item with its observations and related items."""
+
+    primary_result: ContextResultRow | SearchIndexRow
+    observations: List[ContextResultRow] = field(default_factory=list)
+    related_results: List[ContextResultRow] = field(default_factory=list)
+
+
+@dataclass
+class ContextMetadata:
+    """Metadata about a context result."""
+
+    uri: Optional[str] = None
+    types: Optional[List[SearchItemType]] = None
+    depth: int = 1
+    timeframe: Optional[str] = None
+    generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    primary_count: int = 0
+    related_count: int = 0
+    total_observations: int = 0
+    total_relations: int = 0
+
+
+@dataclass
+class ContextResult:
+    """Complete context result with metadata."""
+
+    results: List[ContextResultItem] = field(default_factory=list)
+    metadata: ContextMetadata = field(default_factory=ContextMetadata)
+
+
 class ContextService:
     """Service for building rich context from memory:// URIs.
 
@@ -44,9 +78,11 @@ class ContextService:
         self,
         search_repository: SearchRepository,
         entity_repository: EntityRepository,
+        observation_repository: ObservationRepository,
     ):
         self.search_repository = search_repository
         self.entity_repository = entity_repository
+        self.observation_repository = observation_repository
 
     async def build_context(
         self,
@@ -57,7 +93,8 @@ class ContextService:
         limit=10,
         offset=0,
         max_related: int = 10,
-    ):
+        include_observations: bool = True,
+    ) -> ContextResult:
         """Build rich context from a memory:// URI."""
         logger.debug(
             f"Building context for URI: '{memory_url}' depth: '{depth}' since: '{since}' limit: '{limit}' offset: '{offset}'  max_related: '{max_related}'"
@@ -81,7 +118,7 @@ class ContextService:
         else:
             logger.debug(f"Build context for '{types}'")
             primary = await self.search_repository.search(
-                entity_types=types, after_date=since, limit=limit, offset=offset
+                search_item_types=types, after_date=since, limit=limit, offset=offset
             )
 
         # Get type_id pairs for traversal
@@ -94,24 +131,78 @@ class ContextService:
             type_id_pairs, max_depth=depth, since=since, max_results=max_related
         )
         logger.debug(f"Found {len(related)} related results")
-        for r in related:
-            logger.debug(f"Found related {r.type}: {r.permalink}")
 
-        # Build response
-        return {
-            "primary_results": primary,
-            "related_results": related,
-            "metadata": {
-                "uri": memory_url_path(memory_url) if memory_url else None,
-                "types": types if types else None,
-                "depth": depth,
-                "timeframe": since.isoformat() if since else None,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "matched_results": len(primary),
-                "total_results": len(primary) + len(related),
-                "total_relations": sum(1 for r in related if r.type == SearchItemType.RELATION),
-            },
-        }
+        # Collect entity IDs from primary and related results
+        entity_ids = []
+        for result in primary:
+            if result.type == SearchItemType.ENTITY.value:
+                entity_ids.append(result.id)
+
+        for result in related:
+            if result.type == SearchItemType.ENTITY.value:
+                entity_ids.append(result.id)
+
+        # Fetch observations for all entities if requested
+        observations_by_entity = {}
+        if include_observations and entity_ids:
+            # Use our observation repository to get observations for all entities at once
+            observations_by_entity = await self.observation_repository.find_by_entities(entity_ids)
+            logger.debug(f"Found observations for {len(observations_by_entity)} entities")
+
+        # Create metadata dataclass
+        metadata = ContextMetadata(
+            uri=memory_url_path(memory_url) if memory_url else None,
+            types=types,
+            depth=depth,
+            timeframe=since.isoformat() if since else None,
+            primary_count=len(primary),
+            related_count=len(related),
+            total_observations=sum(len(obs) for obs in observations_by_entity.values()),
+            total_relations=sum(1 for r in related if r.type == SearchItemType.RELATION),
+        )
+
+        # Build context results list directly with ContextResultItem objects
+        context_results = []
+
+        # For each primary result
+        for primary_item in primary:
+            # Find all related items with this primary item as root
+            related_to_primary = [r for r in related if r.root_id == primary_item.id]
+
+            # Get observations for this item if it's an entity
+            item_observations = []
+            if primary_item.type == SearchItemType.ENTITY.value and include_observations:
+                # Convert Observation models to ContextResultRows
+                for obs in observations_by_entity.get(primary_item.id, []):
+                    item_observations.append(
+                        ContextResultRow(
+                            type="observation",
+                            id=obs.id,
+                            title=f"{obs.category}: {obs.content[:50]}...",
+                            permalink=generate_permalink(
+                                f"{primary_item.permalink}/observations/{obs.category}/{obs.content}"
+                            ),
+                            file_path=primary_item.file_path,
+                            content=obs.content,
+                            category=obs.category,
+                            entity_id=primary_item.id,
+                            depth=0,
+                            root_id=primary_item.id,
+                            created_at=primary_item.created_at,  # created_at time from entity
+                        )
+                    )
+
+            # Create ContextResultItem directly
+            context_item = ContextResultItem(
+                primary_result=primary_item,
+                observations=item_observations,
+                related_results=related_to_primary,
+            )
+
+            context_results.append(context_item)
+
+        # Return the structured ContextResult
+        return ContextResult(results=context_results, metadata=metadata)
 
     async def find_related(
         self,
@@ -124,7 +215,6 @@ class ContextService:
 
         Uses recursive CTE to find:
         - Connected entities
-        - Their observations
         - Relations that connect them
 
         Note on depth:
@@ -138,105 +228,130 @@ class ContextService:
         if not type_id_pairs:
             return []
 
-        logger.debug(f"Finding connected items for {type_id_pairs} with depth {max_depth}")
+        # Extract entity IDs from type_id_pairs for the optimized query
+        entity_ids = [i for t, i in type_id_pairs if t == "entity"]
 
-        # Build the VALUES clause directly since SQLite doesn't handle parameterized IN well
+        if not entity_ids:
+            logger.debug("No entity IDs found in type_id_pairs")
+            return []
+
+        logger.debug(
+            f"Finding connected items for {len(entity_ids)} entities with depth {max_depth}"
+        )
+
+        # Build the VALUES clause for entity IDs
+        entity_id_values = ", ".join([str(i) for i in entity_ids])
+
+        # For compatibility with the old query, we still need this for filtering
         values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
 
         # Parameters for bindings
         params = {"max_depth": max_depth, "max_results": max_results}
+
+        # Build date and timeframe filters conditionally based on since parameter
         if since:
             params["since_date"] = since.isoformat()  # pyright: ignore
+            date_filter = "AND e.created_at >= :since_date"
+            relation_date_filter = "AND e_from.created_at >= :since_date"
+            timeframe_condition = "AND eg.relation_date >= :since_date"
+        else:
+            date_filter = ""
+            relation_date_filter = ""
+            timeframe_condition = ""
 
-        # Build date filter
-        date_filter = "AND base.created_at >= :since_date" if since else ""
-        r1_date_filter = "AND r.created_at >= :since_date" if since else ""
-        related_date_filter = "AND e.created_at >= :since_date" if since else ""
-
+        # Use a CTE that operates directly on entity and relation tables
+        # This avoids the overhead of the search_index virtual table
         query = text(f"""
-        WITH RECURSIVE context_graph AS (
-            -- Base case: seed items 
+        WITH RECURSIVE entity_graph AS (
+            -- Base case: seed entities
             SELECT 
-                id,
-                type,
-                title, 
-                permalink,
-                file_path,
-                from_id,
-                to_id,
-                relation_type,
-                content_snippet as content,
-                category,
-                entity_id,
+                e.id,
+                'entity' as type,
+                e.title, 
+                e.permalink,
+                e.file_path,
+                NULL as from_id,
+                NULL as to_id,
+                NULL as relation_type,
+                NULL as content,
+                NULL as category,
+                NULL as entity_id,
                 0 as depth,
-                id as root_id,
-                created_at,
-                created_at as relation_date,
+                e.id as root_id,
+                e.created_at,
+                e.created_at as relation_date,
                 0 as is_incoming
-            FROM search_index base
-            WHERE (base.type, base.id) IN ({values})
+            FROM entity e
+            WHERE e.id IN ({entity_id_values})
             {date_filter}
 
-            UNION ALL  -- Allow same paths at different depths
+            UNION ALL
 
-            -- Get relations from current entities 
-            SELECT DISTINCT
+            -- Get relations from current entities
+            SELECT
                 r.id,
-                r.type,
-                r.title,
-                r.permalink,
-                r.file_path,
+                'relation' as type,
+                r.relation_type || ': ' || r.to_name as title,
+                -- Relation model doesn't have permalink column - we'll generate it at runtime
+                '' as permalink,
+                e_from.file_path,
                 r.from_id,
                 r.to_id,
                 r.relation_type,
-                r.content_snippet as content,
-                r.category,
-                r.entity_id,
-                cg.depth + 1,
-                cg.root_id,
-                r.created_at,
-                r.created_at as relation_date,
-                CASE WHEN r.from_id = cg.id THEN 0 ELSE 1 END as is_incoming
-            FROM context_graph cg
-            JOIN search_index r ON (
-                cg.type = 'entity' AND
-                r.type = 'relation' AND 
-                (r.from_id = cg.id OR r.to_id = cg.id)
-                {r1_date_filter}
+                NULL as content,
+                NULL as category,
+                NULL as entity_id,
+                eg.depth + 1,
+                eg.root_id,
+                e_from.created_at, -- Use the from_entity's created_at since relation has no timestamp
+                e_from.created_at as relation_date,
+                CASE WHEN r.from_id = eg.id THEN 0 ELSE 1 END as is_incoming
+            FROM entity_graph eg
+            JOIN relation r ON (
+                eg.type = 'entity' AND
+                (r.from_id = eg.id OR r.to_id = eg.id)
             )
-            WHERE cg.depth < :max_depth
+            JOIN entity e_from ON (
+                r.from_id = e_from.id
+                {relation_date_filter}
+            )
+            WHERE eg.depth < :max_depth
 
             UNION ALL
 
             -- Get entities connected by relations
-            SELECT DISTINCT
+            SELECT
                 e.id,
-                e.type,
+                'entity' as type,
                 e.title,
-                e.permalink,
+                CASE 
+                    WHEN e.permalink IS NULL THEN '' 
+                    ELSE e.permalink 
+                END as permalink,
                 e.file_path,
-                e.from_id,
-                e.to_id,
-                e.relation_type,
-                e.content_snippet as content,
-                e.category,
-                e.entity_id,
-                cg.depth + 1,  -- Increment depth for entities
-                cg.root_id,
+                NULL as from_id,
+                NULL as to_id,
+                NULL as relation_type,
+                NULL as content,
+                NULL as category,
+                NULL as entity_id,
+                eg.depth + 1,
+                eg.root_id,
                 e.created_at,
-                cg.relation_date,
-                cg.is_incoming
-            FROM context_graph cg
-            JOIN search_index e ON (
-                cg.type = 'relation' AND 
-                e.type = 'entity' AND
+                eg.relation_date,
+                eg.is_incoming
+            FROM entity_graph eg
+            JOIN entity e ON (
+                eg.type = 'relation' AND
                 e.id = CASE 
-                    WHEN cg.is_incoming = 0 THEN cg.to_id  -- Fixed entity lookup
-                    ELSE cg.from_id                             
+                    WHEN eg.is_incoming = 0 THEN eg.to_id
+                    ELSE eg.from_id
                 END
-                {related_date_filter}
+                {date_filter}
             )
-            WHERE cg.depth < :max_depth
+            WHERE eg.depth < :max_depth
+            -- Only include entities connected by relations within timeframe if specified
+            {timeframe_condition}
         )
         SELECT DISTINCT 
             type,
@@ -253,12 +368,10 @@ class ContextService:
             MIN(depth) as depth,
             root_id,
             created_at
-        FROM context_graph
+        FROM entity_graph
         WHERE (type, id) NOT IN ({values})
         GROUP BY
-            type, id, title, permalink, from_id, to_id,
-            relation_type, category, entity_id,
-            root_id, created_at
+            type, id
         ORDER BY depth, type, id
         LIMIT :max_results
        """)

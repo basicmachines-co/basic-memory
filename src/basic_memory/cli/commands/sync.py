@@ -16,10 +16,12 @@ from basic_memory.cli.app import app
 from basic_memory.config import config
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
+from basic_memory.models import Project
 from basic_memory.repository import (
     EntityRepository,
     ObservationRepository,
     RelationRepository,
+    ProjectRepository,
 )
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.services import EntityService, FileService
@@ -27,7 +29,7 @@ from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
 from basic_memory.sync.sync_service import SyncReport
-from basic_memory.sync.watch_service import WatchService
+from basic_memory.config import app_config
 
 console = Console()
 
@@ -38,21 +40,22 @@ class ValidationIssue:
     error: str
 
 
-async def get_sync_service():  # pragma: no cover
+async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
     """Get sync service instance with all dependencies."""
     _, session_maker = await db.get_or_create_db(
-        db_path=config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
     )
 
-    entity_parser = EntityParser(config.home)
+    project_path = Path(project.path)
+    entity_parser = EntityParser(project_path)
     markdown_processor = MarkdownProcessor(entity_parser)
-    file_service = FileService(config.home, markdown_processor)
+    file_service = FileService(project_path, markdown_processor)
 
     # Initialize repositories
-    entity_repository = EntityRepository(session_maker)
-    observation_repository = ObservationRepository(session_maker)
-    relation_repository = RelationRepository(session_maker)
-    search_repository = SearchRepository(session_maker)
+    entity_repository = EntityRepository(session_maker, project_id=project.id)
+    observation_repository = ObservationRepository(session_maker, project_id=project.id)
+    relation_repository = RelationRepository(session_maker, project_id=project.id)
+    search_repository = SearchRepository(session_maker, project_id=project.id)
 
     # Initialize services
     search_service = SearchService(search_repository, entity_repository, file_service)
@@ -70,7 +73,7 @@ async def get_sync_service():  # pragma: no cover
 
     # Create sync service
     sync_service = SyncService(
-        config=config,
+        app_config=app_config,
         entity_service=entity_service,
         entity_parser=entity_parser,
         entity_repository=entity_repository,
@@ -153,8 +156,16 @@ def display_detailed_sync_results(knowledge: SyncReport):
         console.print(knowledge_tree)
 
 
-async def run_sync(verbose: bool = False, watch: bool = False, console_status: bool = False):
+async def run_sync(verbose: bool = False):
     """Run sync operation."""
+    _, session_maker = await db.get_or_create_db(
+        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+    )
+    project_repository = ProjectRepository(session_maker)
+    project = await project_repository.get_by_name(config.project)
+    if not project:  # pragma: no cover
+        raise Exception(f"Project '{config.project}' not found")
+
     import time
 
     start_time = time.time()
@@ -162,50 +173,33 @@ async def run_sync(verbose: bool = False, watch: bool = False, console_status: b
     logger.info(
         "Sync command started",
         project=config.project,
-        watch_mode=watch,
         verbose=verbose,
         directory=str(config.home),
     )
 
-    sync_service = await get_sync_service()
+    sync_service = await get_sync_service(project)
 
-    # Start watching if requested
-    if watch:
-        logger.info("Starting watch service after initial sync")
-        watch_service = WatchService(
-            sync_service=sync_service,
-            file_service=sync_service.entity_service.file_service,
-            config=config,
-        )
+    logger.info("Running one-time sync")
+    knowledge_changes = await sync_service.sync(config.home)
 
-        # full sync - no progress bars in watch mode
-        await sync_service.sync(config.home)
+    # Log results
+    duration_ms = int((time.time() - start_time) * 1000)
+    logger.info(
+        "Sync command completed",
+        project=config.project,
+        total_changes=knowledge_changes.total,
+        new_files=len(knowledge_changes.new),
+        modified_files=len(knowledge_changes.modified),
+        deleted_files=len(knowledge_changes.deleted),
+        moved_files=len(knowledge_changes.moves),
+        duration_ms=duration_ms,
+    )
 
-        # watch changes
-        await watch_service.run()  # pragma: no cover
+    # Display results
+    if verbose:
+        display_detailed_sync_results(knowledge_changes)
     else:
-        # one time sync
-        logger.info("Running one-time sync")
-        knowledge_changes = await sync_service.sync(config.home)
-
-        # Log results
-        duration_ms = int((time.time() - start_time) * 1000)
-        logger.info(
-            "Sync command completed",
-            project=config.project,
-            total_changes=knowledge_changes.total,
-            new_files=len(knowledge_changes.new),
-            modified_files=len(knowledge_changes.modified),
-            deleted_files=len(knowledge_changes.deleted),
-            moved_files=len(knowledge_changes.moves),
-            duration_ms=duration_ms,
-        )
-
-        # Display results
-        if verbose:
-            display_detailed_sync_results(knowledge_changes)
-        else:
-            display_sync_summary(knowledge_changes)  # pragma: no cover
+        display_sync_summary(knowledge_changes)  # pragma: no cover
 
 
 @app.command()
@@ -216,22 +210,15 @@ def sync(
         "-v",
         help="Show detailed sync information.",
     ),
-    watch: bool = typer.Option(
-        False,
-        "--watch",
-        "-w",
-        help="Start watching for changes after sync.",
-    ),
 ) -> None:
     """Sync knowledge files with the database."""
     try:
         # Show which project we're syncing
-        if not watch:  # Don't show in watch mode as it would break the UI
-            typer.echo(f"Syncing project: {config.project}")
-            typer.echo(f"Project path: {config.home}")
+        typer.echo(f"Syncing project: {config.project}")
+        typer.echo(f"Project path: {config.home}")
 
         # Run sync
-        asyncio.run(run_sync(verbose=verbose, watch=watch))
+        asyncio.run(run_sync(verbose=verbose))
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -240,7 +227,6 @@ def sync(
                 f"project={config.project},"
                 f"error={str(e)},"
                 f"error_type={type(e).__name__},"
-                f"watch_mode={watch},"
                 f"directory={str(config.home)}",
             )
             typer.echo(f"Error during sync: {e}", err=True)

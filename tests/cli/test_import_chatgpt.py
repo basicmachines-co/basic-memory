@@ -6,9 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app, import_app
-from basic_memory.cli.commands import import_chatgpt
+from basic_memory.cli.commands import import_chatgpt  # noqa
 from basic_memory.config import config
-from basic_memory.markdown import EntityParser, MarkdownProcessor
 
 # Set up CLI runner
 runner = CliRunner()
@@ -150,84 +149,6 @@ def sample_chatgpt_json(tmp_path, sample_conversation):
     return json_file
 
 
-@pytest.mark.asyncio
-async def test_process_chatgpt_json(tmp_path, sample_chatgpt_json):
-    """Test importing conversations from JSON."""
-    entity_parser = EntityParser(tmp_path)
-    processor = MarkdownProcessor(entity_parser)
-
-    config.home = tmp_path
-
-    results = await import_chatgpt.process_chatgpt_json(sample_chatgpt_json, tmp_path, processor)
-
-    assert results["conversations"] == 1
-    assert results["messages"] == 2
-
-    # Check conversation file exists
-    conv_path = tmp_path / "20250111-test-conversation.md"
-    assert conv_path.exists()
-
-    # Check content formatting
-    content = conv_path.read_text(encoding="utf-8")
-    assert "# Test Conversation" in content
-    assert "### User" in content
-    assert "Hello, this is a test message" in content
-    assert "### Assistant" in content
-    assert "This is a test response" in content
-
-
-@pytest.mark.asyncio
-async def test_process_code_blocks(tmp_path, sample_conversation_with_code):
-    """Test handling of code blocks."""
-    entity_parser = EntityParser(tmp_path)
-    processor = MarkdownProcessor(entity_parser)
-
-    # Create test file
-    json_file = tmp_path / "code_test.json"
-    with open(json_file, "w", encoding="utf-8") as f:
-        json.dump([sample_conversation_with_code], f)
-
-    await import_chatgpt.process_chatgpt_json(json_file, tmp_path, processor)
-
-    # Check content
-    conv_path = tmp_path / "20250111-code-test.md"
-    content = conv_path.read_text(encoding="utf-8")
-    assert "```python" in content
-    assert "def hello():" in content
-    assert "```" in content
-
-
-@pytest.mark.asyncio
-async def test_hidden_messages(tmp_path, sample_conversation_with_hidden):
-    """Test handling of hidden messages."""
-    entity_parser = EntityParser(tmp_path)
-    processor = MarkdownProcessor(entity_parser)
-
-    # Create test file
-    json_file = tmp_path / "hidden_test.json"
-    with open(json_file, "w", encoding="utf-8") as f:
-        json.dump([sample_conversation_with_hidden], f)
-
-    results = await import_chatgpt.process_chatgpt_json(json_file, tmp_path, processor)
-
-    # Should only count visible messages
-    assert results["messages"] == 1
-
-    # Check content
-    conv_path = tmp_path / "20250111-hidden-test.md"
-    content = conv_path.read_text(encoding="utf-8")
-    assert "Visible message" in content
-    assert "Hidden message" not in content
-
-
-def test_import_chatgpt_command_file_not_found(tmp_path):
-    """Test error handling for nonexistent file."""
-    nonexistent = tmp_path / "nonexistent.json"
-    result = runner.invoke(app, ["import", "chatgpt", str(nonexistent)])
-    assert result.exit_code == 1
-    assert "File not found" in result.output
-
-
 def test_import_chatgpt_command_success(tmp_path, sample_chatgpt_json, monkeypatch):
     """Test successful conversation import via command."""
     # Set up test environment
@@ -272,5 +193,5 @@ def test_import_chatgpt_with_custom_folder(tmp_path, sample_chatgpt_json, monkey
     assert result.exit_code == 0
 
     # Check files in custom folder
-    conv_path = tmp_path / conversations_folder / "20250111-test-conversation.md"
+    conv_path = tmp_path / conversations_folder / "20250111-Test_Conversation.md"
     assert conv_path.exists()

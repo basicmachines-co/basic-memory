@@ -13,7 +13,7 @@ from basic_memory.models import Base
 # set config.env to "test" for pytest to prevent logging to file in utils.setup_logging()
 os.environ["BASIC_MEMORY_ENV"] = "test"
 
-from basic_memory.config import config as app_config
+from basic_memory.config import app_config
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

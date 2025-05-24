@@ -51,43 +51,51 @@ async def test_recent_activity_type_filters(client, test_graph):
     # Test single string type
     result = await recent_activity(type=SearchItemType.ENTITY)
     assert result is not None
-    assert all(isinstance(r, EntitySummary) for r in result.primary_results)
+    assert len(result.results) > 0
+    assert all(isinstance(item.primary_result, EntitySummary) for item in result.results)
 
     # Test single string type
     result = await recent_activity(type="entity")
     assert result is not None
-    assert all(isinstance(r, EntitySummary) for r in result.primary_results)
+    assert len(result.results) > 0
+    assert all(isinstance(item.primary_result, EntitySummary) for item in result.results)
 
     # Test single type
     result = await recent_activity(type=["entity"])
     assert result is not None
-    assert all(isinstance(r, EntitySummary) for r in result.primary_results)
+    assert len(result.results) > 0
+    assert all(isinstance(item.primary_result, EntitySummary) for item in result.results)
 
     # Test multiple types
     result = await recent_activity(type=["entity", "observation"])
     assert result is not None
+    assert len(result.results) > 0
     assert all(
-        isinstance(r, EntitySummary) or isinstance(r, ObservationSummary)
-        for r in result.primary_results
+        isinstance(item.primary_result, EntitySummary)
+        or isinstance(item.primary_result, ObservationSummary)
+        for item in result.results
     )
 
     # Test multiple types
     result = await recent_activity(type=[SearchItemType.ENTITY, SearchItemType.OBSERVATION])
     assert result is not None
+    assert len(result.results) > 0
     assert all(
-        isinstance(r, EntitySummary) or isinstance(r, ObservationSummary)
-        for r in result.primary_results
+        isinstance(item.primary_result, EntitySummary)
+        or isinstance(item.primary_result, ObservationSummary)
+        for item in result.results
     )
 
     # Test all types
     result = await recent_activity(type=["entity", "observation", "relation"])
     assert result is not None
+    assert len(result.results) > 0
     # Results can be any type
     assert all(
-        isinstance(r, EntitySummary)
-        or isinstance(r, ObservationSummary)
-        or isinstance(r, RelationSummary)
-        for r in result.primary_results
+        isinstance(item.primary_result, EntitySummary)
+        or isinstance(item.primary_result, ObservationSummary)
+        or isinstance(item.primary_result, RelationSummary)
+        for item in result.results
     )
 
 

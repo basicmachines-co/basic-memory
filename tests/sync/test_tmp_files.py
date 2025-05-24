@@ -14,21 +14,21 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 
 
 @pytest.mark.asyncio
-async def test_temp_file_filter(watch_service):
+async def test_temp_file_filter(watch_service, app_config, test_config, test_project):
     """Test that .tmp files are correctly filtered out."""
     # Test filter_changes method directly
-    tmp_path = str(watch_service.config.home / "test.tmp")
-    assert not watch_service.filter_changes(Change.added, tmp_path)
+    tmp_path = Path(test_project.path) / "test.tmp"
+    assert not watch_service.filter_changes(Change.added, str(tmp_path))
 
     # Test with valid file
-    valid_path = str(watch_service.config.home / "test.md")
-    assert watch_service.filter_changes(Change.added, valid_path)
+    valid_path = Path(test_project.path) / "test.md"
+    assert watch_service.filter_changes(Change.added, str(valid_path))
 
 
 @pytest.mark.asyncio
-async def test_handle_tmp_files(watch_service, test_config, monkeypatch):
+async def test_handle_tmp_files(watch_service, test_config, test_project, sync_service):
     """Test handling of .tmp files during sync process."""
-    project_dir = test_config.home
+    project_dir = Path(test_project.path)
 
     # Create a .tmp file - this simulates a file being written with write_file_atomic
     tmp_file = project_dir / "test.tmp"
@@ -44,35 +44,21 @@ async def test_handle_tmp_files(watch_service, test_config, monkeypatch):
         (Change.added, str(final_file)),
     }
 
-    # Track sync_file calls
-    sync_calls = []
-
-    # Mock sync_file to track calls
-    original_sync_file = watch_service.sync_service.sync_file
-
-    async def mock_sync_file(path, new=True):
-        sync_calls.append(path)
-        return await original_sync_file(path, new)
-
-    monkeypatch.setattr(watch_service.sync_service, "sync_file", mock_sync_file)
-
     # Handle changes
-    await watch_service.handle_changes(project_dir, changes)
-
-    # Verify .tmp file was not processed
-    assert "test.tmp" not in sync_calls
-    assert "test.md" in sync_calls
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify only the final file got an entity
-    tmp_entity = await watch_service.sync_service.entity_repository.get_by_file_path("test.tmp")
-    final_entity = await watch_service.sync_service.entity_repository.get_by_file_path("test.md")
+    tmp_entity = await sync_service.entity_repository.get_by_file_path("test.tmp")
+    final_entity = await sync_service.entity_repository.get_by_file_path("test.md")
 
     assert tmp_entity is None, "Temp file should not have an entity"
     assert final_entity is not None, "Final file should have an entity"
 
 
 @pytest.mark.asyncio
-async def test_atomic_write_tmp_file_handling(watch_service, test_config, monkeypatch):
+async def test_atomic_write_tmp_file_handling(
+    watch_service, test_config, test_project, sync_service
+):
     """Test handling of file changes during atomic write operations."""
     project_dir = test_config.home
 
@@ -92,7 +78,7 @@ async def test_atomic_write_tmp_file_handling(watch_service, test_config, monkey
     changes1 = {(Change.added, str(tmp_path))}
 
     # Process first batch
-    await watch_service.handle_changes(project_dir, changes1)
+    await watch_service.handle_changes(test_project, changes1)
 
     # Now "replace" the temp file with the final file
     tmp_path.rename(final_path)
@@ -101,13 +87,11 @@ async def test_atomic_write_tmp_file_handling(watch_service, test_config, monkey
     changes2 = {(Change.deleted, str(tmp_path)), (Change.added, str(final_path))}
 
     # Process second batch
-    await watch_service.handle_changes(project_dir, changes2)
+    await watch_service.handle_changes(test_project, changes2)
 
     # Verify only the final file is in the database
-    tmp_entity = await watch_service.sync_service.entity_repository.get_by_file_path("document.tmp")
-    final_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "document.md"
-    )
+    tmp_entity = await sync_service.entity_repository.get_by_file_path("document.tmp")
+    final_entity = await sync_service.entity_repository.get_by_file_path("document.md")
 
     assert tmp_entity is None, "Temp file should not have an entity"
     assert final_entity is not None, "Final file should have an entity"
@@ -119,9 +103,9 @@ async def test_atomic_write_tmp_file_handling(watch_service, test_config, monkey
 
 
 @pytest.mark.asyncio
-async def test_rapid_atomic_writes(watch_service, test_config):
+async def test_rapid_atomic_writes(watch_service, test_config, test_project, sync_service):
     """Test handling of rapid atomic writes to the same destination."""
-    project_dir = test_config.home
+    project_dir = Path(test_project.path)
 
     # This test simulates multiple rapid atomic writes to the same file:
     # 1. Several .tmp files are created one after another
@@ -165,20 +149,14 @@ async def test_rapid_atomic_writes(watch_service, test_config):
     }
 
     # Process all changes
-    await watch_service.handle_changes(project_dir, changes)
+    await watch_service.handle_changes(test_project, changes)
 
     # Verify only the final file is in the database
-    final_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "document.md"
-    )
+    final_entity = await sync_service.entity_repository.get_by_file_path("document.md")
     assert final_entity is not None
 
     # Also verify no tmp entities were created
-    tmp1_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "document.1.tmp"
-    )
-    tmp2_entity = await watch_service.sync_service.entity_repository.get_by_file_path(
-        "document.2.tmp"
-    )
+    tmp1_entity = await sync_service.entity_repository.get_by_file_path("document.1.tmp")
+    tmp2_entity = await sync_service.entity_repository.get_by_file_path("document.2.tmp")
     assert tmp1_entity is None
     assert tmp2_entity is None

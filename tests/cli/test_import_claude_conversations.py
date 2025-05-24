@@ -6,9 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands import import_claude_conversations as import_claude
+from basic_memory.cli.commands import import_claude_conversations  # noqa
 from basic_memory.config import config
-from basic_memory.markdown import EntityParser, MarkdownProcessor
 
 # Set up CLI runner
 runner = CliRunner()
@@ -48,31 +47,6 @@ def sample_conversations_json(tmp_path, sample_conversation):
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump([sample_conversation], f)
     return json_file
-
-
-@pytest.mark.asyncio
-async def test_process_chat_json(tmp_path, sample_conversations_json):
-    """Test importing conversations from JSON."""
-    entity_parser = EntityParser(tmp_path)
-    processor = MarkdownProcessor(entity_parser)
-
-    results = await import_claude.process_conversations_json(
-        sample_conversations_json, tmp_path, processor
-    )
-
-    assert results["conversations"] == 1
-    assert results["messages"] == 2
-
-    # Check conversation file
-    conv_path = tmp_path / "20250105-test-conversation.md"
-    assert conv_path.exists()
-    content = conv_path.read_text(encoding="utf-8")
-
-    # Check content formatting
-    assert "### Human" in content
-    assert "Hello, this is a test" in content
-    assert "### Assistant" in content
-    assert "Response to test" in content
 
 
 def test_import_conversations_command_file_not_found(tmp_path):
@@ -130,7 +104,7 @@ def test_import_conversations_with_custom_folder(tmp_path, sample_conversations_
     assert result.exit_code == 0
 
     # Check files in custom folder
-    conv_path = tmp_path / conversations_folder / "20250105-test-conversation.md"
+    conv_path = tmp_path / conversations_folder / "20250105-Test_Conversation.md"
     assert conv_path.exists()
 
 
@@ -168,7 +142,7 @@ def test_import_conversation_with_attachments(tmp_path):
     assert result.exit_code == 0
 
     # Check attachment formatting
-    conv_path = tmp_path / "conversations/20250105-test-with-attachments.md"
+    conv_path = tmp_path / "conversations/20250105-Test_With_Attachments.md"
     content = conv_path.read_text(encoding="utf-8")
     assert "**Attachment: test.txt**" in content
     assert "```" in content

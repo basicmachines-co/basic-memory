@@ -66,7 +66,7 @@ class SearchService:
             logger.debug("no criteria passed to query")
             return []
 
-        logger.debug(f"Searching with query: {query}")
+        logger.trace(f"Searching with query: {query}")
 
         after_date = (
             (
@@ -85,7 +85,7 @@ class SearchService:
             permalink_match=query.permalink_match,
             title=query.title,
             types=query.types,
-            entity_types=query.entity_types,
+            search_item_types=query.entity_types,
             after_date=after_date,
             limit=limit,
             offset=offset,
@@ -156,6 +156,7 @@ class SearchService:
                 },
                 created_at=entity.created_at,
                 updated_at=entity.updated_at,
+                project_id=entity.project_id,
             )
         )
 
@@ -169,16 +170,20 @@ class SearchService:
         1. Entities
            - permalink: direct from entity (e.g., "specs/search")
            - file_path: physical file location
+           - project_id: project context for isolation
 
         2. Observations
            - permalink: entity permalink + /observations/id (e.g., "specs/search/observations/123")
            - file_path: parent entity's file (where observation is defined)
+           - project_id: inherited from parent entity
 
         3. Relations (only index outgoing relations defined in this file)
            - permalink: from_entity/relation_type/to_entity (e.g., "specs/search/implements/features/search-ui")
            - file_path: source entity's file (where relation is defined)
+           - project_id: inherited from source entity
 
         Each type gets its own row in the search index with appropriate metadata.
+        The project_id is automatically added by the repository when indexing.
         """
 
         content_stems = []
@@ -214,6 +219,7 @@ class SearchService:
                 },
                 created_at=entity.created_at,
                 updated_at=entity.updated_at,
+                project_id=entity.project_id,
             )
         )
 
@@ -239,6 +245,7 @@ class SearchService:
                     },
                     created_at=entity.created_at,
                     updated_at=entity.updated_at,
+                    project_id=entity.project_id,
                 )
             )
 
@@ -268,6 +275,7 @@ class SearchService:
                     relation_type=rel.relation_type,
                     created_at=entity.created_at,
                     updated_at=entity.updated_at,
+                    project_id=entity.project_id,
                 )
             )
 

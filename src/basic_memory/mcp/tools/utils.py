@@ -282,6 +282,7 @@ async def call_post(
             timeout=timeout,
             extensions=extensions,
         )
+        logger.debug(f"response: {response.json()}")
 
         if response.is_success:
             return response

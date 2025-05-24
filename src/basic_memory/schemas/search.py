@@ -90,7 +90,7 @@ class SearchResult(BaseModel):
     title: str
     type: SearchItemType
     score: float
-    entity: Optional[Permalink]
+    entity: Optional[Permalink] = None
     permalink: Optional[str]
     content: Optional[str] = None
     file_path: str

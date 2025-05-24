@@ -7,7 +7,7 @@ import pytest_asyncio
 from sqlalchemy import select
 
 from basic_memory import db
-from basic_memory.models import Entity, Observation, Relation
+from basic_memory.models import Entity, Observation, Relation, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.utils import generate_permalink
 
@@ -31,10 +31,11 @@ async def entity_with_observations(session_maker, sample_entity):
 
 
 @pytest_asyncio.fixture
-async def related_results(session_maker):
+async def related_results(session_maker, test_project: Project):
     """Create entities with relations between them."""
     async with db.scoped_session(session_maker) as session:
         source = Entity(
+            project_id=test_project.id,
             title="source",
             entity_type="test",
             permalink="source/source",
@@ -44,6 +45,7 @@ async def related_results(session_maker):
             updated_at=datetime.now(timezone.utc),
         )
         target = Entity(
+            project_id=test_project.id,
             title="target",
             entity_type="test",
             permalink="target/target",
@@ -71,6 +73,7 @@ async def related_results(session_maker):
 async def test_create_entity(entity_repository: EntityRepository):
     """Test creating a new entity"""
     entity_data = {
+        "project_id": entity_repository.project_id,
         "title": "Test",
         "entity_type": "test",
         "permalink": "test/test",
@@ -104,6 +107,7 @@ async def test_create_all(entity_repository: EntityRepository):
     """Test creating a new entity"""
     entity_data = [
         {
+            "project_id": entity_repository.project_id,
             "title": "Test_1",
             "entity_type": "test",
             "permalink": "test/test-1",
@@ -113,6 +117,7 @@ async def test_create_all(entity_repository: EntityRepository):
             "updated_at": datetime.now(timezone.utc),
         },
         {
+            "project_id": entity_repository.project_id,
             "title": "Test-2",
             "entity_type": "test",
             "permalink": "test/test-2",
@@ -247,11 +252,12 @@ async def test_delete_nonexistent_entity(entity_repository: EntityRepository):
 
 
 @pytest_asyncio.fixture
-async def test_entities(session_maker):
+async def test_entities(session_maker, test_project: Project):
     """Create multiple test entities."""
     async with db.scoped_session(session_maker) as session:
         entities = [
             Entity(
+                project_id=test_project.id,
                 title="entity1",
                 entity_type="test",
                 permalink="type1/entity1",
@@ -261,6 +267,7 @@ async def test_entities(session_maker):
                 updated_at=datetime.now(timezone.utc),
             ),
             Entity(
+                project_id=test_project.id,
                 title="entity2",
                 entity_type="test",
                 permalink="type1/entity2",
@@ -270,6 +277,7 @@ async def test_entities(session_maker):
                 updated_at=datetime.now(timezone.utc),
             ),
             Entity(
+                project_id=test_project.id,
                 title="entity3",
                 entity_type="test",
                 permalink="type2/entity3",
@@ -344,6 +352,7 @@ async def test_get_by_title(entity_repository: EntityRepository, session_maker):
     async with db.scoped_session(session_maker) as session:
         entities = [
             Entity(
+                project_id=entity_repository.project_id,
                 title="Unique Title",
                 entity_type="test",
                 permalink="test/unique-title",
@@ -353,6 +362,7 @@ async def test_get_by_title(entity_repository: EntityRepository, session_maker):
                 updated_at=datetime.now(timezone.utc),
             ),
             Entity(
+                project_id=entity_repository.project_id,
                 title="Another Title",
                 entity_type="test",
                 permalink="test/another-title",
@@ -362,6 +372,7 @@ async def test_get_by_title(entity_repository: EntityRepository, session_maker):
                 updated_at=datetime.now(timezone.utc),
             ),
             Entity(
+                project_id=entity_repository.project_id,
                 title="Another Title",
                 entity_type="test",
                 permalink="test/another-title-1",
@@ -400,6 +411,7 @@ async def test_get_by_file_path(entity_repository: EntityRepository, session_mak
     async with db.scoped_session(session_maker) as session:
         entities = [
             Entity(
+                project_id=entity_repository.project_id,
                 title="Unique Title",
                 entity_type="test",
                 permalink="test/unique-title",

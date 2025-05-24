@@ -10,7 +10,7 @@ from basic_memory.schemas import EntityResponse
 
 
 @pytest.mark.asyncio
-async def test_get_resource_content(client, test_config, entity_repository):
+async def test_get_resource_content(client, test_config, entity_repository, project_url):
     """Test getting content by permalink."""
     # Create a test file
     content = "# Test Content\n\nThis is a test file."
@@ -32,14 +32,14 @@ async def test_get_resource_content(client, test_config, entity_repository):
     )
 
     # Test getting the content
-    response = await client.get(f"/resource/{entity.permalink}")
+    response = await client.get(f"{project_url}/resource/{entity.permalink}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert response.text == content
 
 
 @pytest.mark.asyncio
-async def test_get_resource_pagination(client, test_config, entity_repository):
+async def test_get_resource_pagination(client, test_config, entity_repository, project_url):
     """Test getting content by permalink with pagination."""
     # Create a test file
     content = "# Test Content\n\nThis is a test file."
@@ -61,14 +61,16 @@ async def test_get_resource_pagination(client, test_config, entity_repository):
     )
 
     # Test getting the content
-    response = await client.get(f"/resource/{entity.permalink}", params={"page": 1, "page_size": 1})
+    response = await client.get(
+        f"{project_url}/resource/{entity.permalink}", params={"page": 1, "page_size": 1}
+    )
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert response.text == content
 
 
 @pytest.mark.asyncio
-async def test_get_resource_by_title(client, test_config, entity_repository):
+async def test_get_resource_by_title(client, test_config, entity_repository, project_url):
     """Test getting content by permalink."""
     # Create a test file
     content = "# Test Content\n\nThis is a test file."
@@ -90,20 +92,20 @@ async def test_get_resource_by_title(client, test_config, entity_repository):
     )
 
     # Test getting the content
-    response = await client.get(f"/resource/{entity.title}")
+    response = await client.get(f"{project_url}/resource/{entity.title}")
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_get_resource_missing_entity(client):
+async def test_get_resource_missing_entity(client, project_url):
     """Test 404 when entity doesn't exist."""
-    response = await client.get("/resource/does/not/exist")
+    response = await client.get(f"{project_url}/resource/does/not/exist")
     assert response.status_code == 404
     assert "Resource not found" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_get_resource_missing_file(client, test_config, entity_repository):
+async def test_get_resource_missing_file(client, test_config, entity_repository, project_url):
     """Test 404 when file doesn't exist."""
     # Create entity referencing non-existent file
     entity = await entity_repository.create(
@@ -118,13 +120,13 @@ async def test_get_resource_missing_file(client, test_config, entity_repository)
         }
     )
 
-    response = await client.get(f"/resource/{entity.permalink}")
+    response = await client.get(f"{project_url}/resource/{entity.permalink}")
     assert response.status_code == 404
     assert "File not found" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_get_resource_observation(client, test_config, entity_repository):
+async def test_get_resource_observation(client, test_config, entity_repository, project_url):
     """Test getting content by observation permalink."""
     # Create entity
     content = "# Test Content\n\n- [note] an observation."
@@ -134,7 +136,7 @@ async def test_get_resource_observation(client, test_config, entity_repository):
         "entity_type": "test",
         "content": f"{content}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity = EntityResponse(**entity_response)
 
@@ -142,7 +144,7 @@ async def test_get_resource_observation(client, test_config, entity_repository):
     observation = entity.observations[0]
 
     # Test getting the content via the observation
-    response = await client.get(f"/resource/{observation.permalink}")
+    response = await client.get(f"{project_url}/resource/{observation.permalink}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
@@ -162,7 +164,7 @@ permalink: test/test-entity
 
 
 @pytest.mark.asyncio
-async def test_get_resource_entities(client, test_config, entity_repository):
+async def test_get_resource_entities(client, test_config, entity_repository, project_url):
     """Test getting content by permalink match."""
     # Create entity
     content1 = "# Test Content\n"
@@ -172,7 +174,7 @@ async def test_get_resource_entities(client, test_config, entity_repository):
         "entity_type": "test",
         "content": f"{content1}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity1 = EntityResponse(**entity_response)
 
@@ -183,14 +185,14 @@ async def test_get_resource_entities(client, test_config, entity_repository):
         "entity_type": "test",
         "content": f"{content2}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity2 = EntityResponse(**entity_response)
 
     assert len(entity2.relations) == 1
 
     # Test getting the content via the relation
-    response = await client.get("/resource/test/*")
+    response = await client.get(f"{project_url}/resource/test/*")
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
@@ -210,7 +212,9 @@ async def test_get_resource_entities(client, test_config, entity_repository):
 
 
 @pytest.mark.asyncio
-async def test_get_resource_entities_pagination(client, test_config, entity_repository):
+async def test_get_resource_entities_pagination(
+    client, test_config, entity_repository, project_url
+):
     """Test getting content by permalink match."""
     # Create entity
     content1 = "# Test Content\n"
@@ -220,7 +224,7 @@ async def test_get_resource_entities_pagination(client, test_config, entity_repo
         "entity_type": "test",
         "content": f"{content1}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity1 = EntityResponse(**entity_response)
     assert entity1
@@ -232,14 +236,16 @@ async def test_get_resource_entities_pagination(client, test_config, entity_repo
         "entity_type": "test",
         "content": f"{content2}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity2 = EntityResponse(**entity_response)
 
     assert len(entity2.relations) == 1
 
     # Test getting second result
-    response = await client.get("/resource/test/*", params={"page": 2, "page_size": 1})
+    response = await client.get(
+        f"{project_url}/resource/test/*", params={"page": 2, "page_size": 1}
+    )
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
@@ -258,7 +264,7 @@ permalink: test/related-entity
 
 
 @pytest.mark.asyncio
-async def test_get_resource_relation(client, test_config, entity_repository):
+async def test_get_resource_relation(client, test_config, entity_repository, project_url):
     """Test getting content by relation permalink."""
     # Create entity
     content1 = "# Test Content\n"
@@ -268,7 +274,7 @@ async def test_get_resource_relation(client, test_config, entity_repository):
         "entity_type": "test",
         "content": f"{content1}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity1 = EntityResponse(**entity_response)
 
@@ -279,7 +285,7 @@ async def test_get_resource_relation(client, test_config, entity_repository):
         "entity_type": "test",
         "content": f"{content2}",
     }
-    response = await client.post("/knowledge/entities", json=data)
+    response = await client.post(f"{project_url}/knowledge/entities", json=data)
     entity_response = response.json()
     entity2 = EntityResponse(**entity_response)
 
@@ -287,7 +293,7 @@ async def test_get_resource_relation(client, test_config, entity_repository):
     relation = entity2.relations[0]
 
     # Test getting the content via the relation
-    response = await client.get(f"/resource/{relation.permalink}")
+    response = await client.get(f"{project_url}/resource/{relation.permalink}")
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
@@ -307,7 +313,9 @@ async def test_get_resource_relation(client, test_config, entity_repository):
 
 
 @pytest.mark.asyncio
-async def test_put_resource_new_file(client, test_config, entity_repository, search_repository):
+async def test_put_resource_new_file(
+    client, test_config, entity_repository, search_repository, project_url
+):
     """Test creating a new file via PUT."""
     # Test data
     file_path = "visualizations/test.canvas"
@@ -332,7 +340,9 @@ async def test_put_resource_new_file(client, test_config, entity_repository, sea
         full_path.unlink()
 
     # Execute PUT request
-    response = await client.put(f"/resource/{file_path}", json=json.dumps(canvas_data, indent=2))
+    response = await client.put(
+        f"{project_url}/resource/{file_path}", json=json.dumps(canvas_data, indent=2)
+    )
 
     # Verify response
     assert response.status_code == 201
@@ -361,7 +371,7 @@ async def test_put_resource_new_file(client, test_config, entity_repository, sea
 
 
 @pytest.mark.asyncio
-async def test_put_resource_update_existing(client, test_config, entity_repository):
+async def test_put_resource_update_existing(client, test_config, entity_repository, project_url):
     """Test updating an existing file via PUT."""
     # Create an initial file and entity
     file_path = "visualizations/update-test.canvas"
@@ -414,7 +424,9 @@ async def test_put_resource_update_existing(client, test_config, entity_reposito
     }
 
     # Execute PUT request to update
-    response = await client.put(f"/resource/{file_path}", json=json.dumps(updated_data, indent=2))
+    response = await client.put(
+        f"{project_url}/resource/{file_path}", json=json.dumps(updated_data, indent=2)
+    )
 
     # Verify response
     assert response.status_code == 200
