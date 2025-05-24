@@ -129,7 +129,7 @@ class BasicMemoryConfig(BaseSettings):
 
     @field_validator("projects")
     @classmethod
-    def ensure_project_paths_exists(cls, v: Dict[str, str]) -> Path:  # pragma: no cover
+    def ensure_project_paths_exists(cls, v: Dict[str, str]) -> Dict[str, str]:  # pragma: no cover
         """Ensure project path exists."""
         for name, path_value in v.items():
             path = Path(path_value)

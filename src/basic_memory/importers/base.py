@@ -63,6 +63,7 @@ class Importer[T: ImportResult]:
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
 
+    @abstractmethod
     def handle_error(
         self, message: str, error: Optional[Exception] = None
     ) -> T:  # pragma: no cover
@@ -75,13 +76,4 @@ class Importer[T: ImportResult]:
         Returns:
             ImportResult with error information.
         """
-        error_message = f"{message}"
-        if error:
-            error_message += f": {str(error)}"
-
-        logger.error(error_message)
-        return ImportResult(
-            import_count={},
-            success=False,
-            error_message=error_message,
-        )
+        pass

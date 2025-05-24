@@ -26,6 +26,23 @@ class TestImporter(Importer[ImportResult]):
         except Exception as e:
             return self.handle_error("Test import failed", e)
 
+    def handle_error(self, message: str, error=None) -> ImportResult:
+        """Implement the abstract handle_error method."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        error_message = f"{message}"
+        if error:
+            error_message += f": {str(error)}"
+
+        logger.error(error_message)
+        return ImportResult(
+            import_count={},
+            success=False,
+            error_message=error_message,
+        )
+
 
 @pytest.fixture
 def mock_markdown_processor():

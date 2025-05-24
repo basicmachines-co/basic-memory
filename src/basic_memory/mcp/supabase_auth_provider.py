@@ -16,9 +16,7 @@ from mcp.server.auth.provider import (
     RefreshToken,
     AccessToken,
     TokenError,
-    TokenErrorCode,
     AuthorizeError,
-    AuthorizationErrorCode,
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
@@ -91,6 +89,7 @@ class SupabaseOAuthProvider(
             return OAuthClientInformationFull(
                 client_id=client_id,
                 client_secret="",  # Supabase handles secrets
+                redirect_uris=[],  # Supabase handles redirect URIs
             )
 
         return None
@@ -150,7 +149,7 @@ class SupabaseOAuthProvider(
         auth_request = self.pending_auth_codes.get(state)
         if not auth_request:
             raise AuthorizeError(
-                error=AuthorizationErrorCode.INVALID_REQUEST,
+                error="invalid_request",
                 error_description="Invalid state parameter",
             )
 
@@ -170,7 +169,7 @@ class SupabaseOAuthProvider(
 
         if not token_response.is_success:
             raise AuthorizeError(
-                error=AuthorizationErrorCode.SERVER_ERROR,
+                error="server_error",
                 error_description="Failed to exchange code with Supabase",
             )
 
@@ -233,9 +232,7 @@ class SupabaseOAuthProvider(
         # Get stored Supabase tokens
         token_data = self.mcp_to_supabase_tokens.get(authorization_code.code)
         if not token_data:
-            raise TokenError(
-                error=TokenErrorCode.INVALID_GRANT, error_description="Invalid authorization code"
-            )
+            raise TokenError(error="invalid_grant", error_description="Invalid authorization code")
 
         supabase_tokens = token_data["supabase_tokens"]
         user = token_data["user"]
@@ -243,8 +240,8 @@ class SupabaseOAuthProvider(
         # Generate MCP tokens that wrap Supabase tokens
         access_token = self._generate_mcp_token(
             client_id=client.client_id,
-            user_id=user.get("id"),
-            email=user.get("email"),
+            user_id=user.get("id", ""),
+            email=user.get("email", ""),
             scopes=authorization_code.scopes,
             supabase_access_token=supabase_tokens["access_token"],
         )
@@ -275,7 +272,7 @@ class SupabaseOAuthProvider(
 
         return OAuthToken(
             access_token=access_token,
-            token_type="Bearer",
+            token_type="bearer",
             expires_in=supabase_tokens.get("expires_in", 3600),
             refresh_token=refresh_token,
             scope=" ".join(authorization_code.scopes) if authorization_code.scopes else None,
@@ -320,7 +317,7 @@ class SupabaseOAuthProvider(
 
         if not token_response.is_success:
             raise TokenError(
-                error=TokenErrorCode.INVALID_GRANT,
+                error="invalid_grant",
                 error_description="Failed to refresh with Supabase",
             )
 
@@ -340,8 +337,8 @@ class SupabaseOAuthProvider(
         # Generate new MCP tokens
         new_access_token = self._generate_mcp_token(
             client_id=client.client_id,
-            user_id=user_data.get("id"),
-            email=user_data.get("email"),
+            user_id=user_data.get("id", ""),
+            email=user_data.get("email", ""),
             scopes=scopes or refresh_token.scopes,
             supabase_access_token=supabase_tokens["access_token"],
         )
@@ -370,7 +367,7 @@ class SupabaseOAuthProvider(
 
         return OAuthToken(
             access_token=new_access_token,
-            token_type="Bearer",
+            token_type="bearer",
             expires_in=supabase_tokens.get("expires_in", 3600),
             refresh_token=new_refresh_token,
             scope=" ".join(scopes or refresh_token.scopes),

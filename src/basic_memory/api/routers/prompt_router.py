@@ -53,6 +53,9 @@ async def continue_conversation(
 
     since = parse(request.timeframe) if request.timeframe else None
 
+    # Initialize search results
+    search_results = []
+
     # Get data needed for template
     if request.topic:
         query = SearchQuery(text=request.topic, after_date=request.timeframe)
@@ -122,9 +125,12 @@ async def continue_conversation(
         relation_count = 0
         entity_count = 0
 
+        # Get the hierarchical results from the template context
+        hierarchical_results_for_count = template_context.get("hierarchical_results", [])
+
         # For topic-based search
         if request.topic:
-            for item in all_hierarchical_results:
+            for item in hierarchical_results_for_count:
                 if hasattr(item, "observations"):
                     observation_count += len(item.observations) if item.observations else 0
 
@@ -137,7 +143,7 @@ async def continue_conversation(
                                 entity_count += 1  # pragma: no cover
         # For recent activity
         else:
-            for item in hierarchical_results:
+            for item in hierarchical_results_for_count:
                 if hasattr(item, "observations"):
                     observation_count += len(item.observations) if item.observations else 0
 
@@ -153,14 +159,14 @@ async def continue_conversation(
         metadata = {
             "query": request.topic,
             "timeframe": request.timeframe,
-            "search_count": len(results) if request.topic else 0,  # Original search results count
-            "context_count": len(all_hierarchical_results)
+            "search_count": len(search_results)
             if request.topic
-            else len(hierarchical_results),
+            else 0,  # Original search results count
+            "context_count": len(hierarchical_results_for_count),
             "observation_count": observation_count,
             "relation_count": relation_count,
             "total_items": (
-                len(all_hierarchical_results if request.topic else hierarchical_results)
+                len(hierarchical_results_for_count)
                 + observation_count
                 + relation_count
                 + entity_count

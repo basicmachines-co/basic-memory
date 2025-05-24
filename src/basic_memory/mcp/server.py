@@ -53,12 +53,12 @@ def create_auth_config() -> tuple[AuthSettings | None, Any | None]:
 
     if os.getenv("FASTMCP_AUTH_ENABLED", "false").lower() == "true":
         from pydantic import AnyHttpUrl
-        
+
         # Configure OAuth settings
         issuer_url = os.getenv("FASTMCP_AUTH_ISSUER_URL", "http://localhost:8000")
         required_scopes = os.getenv("FASTMCP_AUTH_REQUIRED_SCOPES", "read,write")
         docs_url = os.getenv("FASTMCP_AUTH_DOCS_URL") or "http://localhost:8000/docs/oauth"
-        
+
         auth_settings = AuthSettings(
             issuer_url=AnyHttpUrl(issuer_url),
             service_documentation_url=AnyHttpUrl(docs_url),

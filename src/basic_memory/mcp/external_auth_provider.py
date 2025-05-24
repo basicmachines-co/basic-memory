@@ -22,6 +22,7 @@ class ExternalAuthorizationCode(AuthorizationCode):
     """Authorization code with external provider metadata."""
 
     external_code: Optional[str] = None
+    state: Optional[str] = None
 
 
 @dataclass
@@ -103,6 +104,7 @@ class ExternalOAuthProvider(
             code_challenge=params.code_challenge,
             redirect_uri=params.redirect_uri,
             redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
+            state=params.state,
         )
 
         # Build external provider URL
@@ -153,6 +155,7 @@ class ExternalOAuthProvider(
             redirect_uri=auth_code.redirect_uri,
             redirect_uri_provided_explicitly=auth_code.redirect_uri_provided_explicitly,
             external_code=code,
+            state=auth_code.state,
         )
 
         self.tokens[internal_code] = external_tokens
@@ -161,7 +164,7 @@ class ExternalOAuthProvider(
         return construct_redirect_uri(
             str(auth_code.redirect_uri),
             code=internal_code,
-            state=auth_code.issuer_state,
+            state=auth_code.state,
         )
 
     async def load_authorization_code(
@@ -206,7 +209,7 @@ class ExternalOAuthProvider(
 
         return OAuthToken(
             access_token=access_token,
-            token_type="Bearer",
+            token_type="bearer",
             expires_in=expires_in,
             refresh_token=refresh_token,
             scope=" ".join(authorization_code.scopes) if authorization_code.scopes else None,
@@ -269,7 +272,7 @@ class ExternalOAuthProvider(
 
         return OAuthToken(
             access_token=new_access_token,
-            token_type="Bearer",
+            token_type="bearer",
             expires_in=expires_in,
             refresh_token=new_refresh_token,
             scope=" ".join(scopes or refresh_token.scopes),

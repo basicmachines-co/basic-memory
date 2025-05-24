@@ -7,7 +7,7 @@ from loguru import logger
 
 from basic_memory import db
 from basic_memory.cli.app import app
-from basic_memory.config import config
+from basic_memory.config import app_config
 
 
 @app.command()
@@ -18,7 +18,7 @@ def reset(
     if typer.confirm("This will delete all data in your db. Are you sure?"):
         logger.info("Resetting database...")
         # Get database path
-        db_path = config.database_path
+        db_path = app_config.app_database_path
 
         # Delete the database file if it exists
         if db_path.exists():
@@ -26,7 +26,7 @@ def reset(
             logger.info(f"Database file deleted: {db_path}")
 
         # Create a new empty database
-        asyncio.run(db.run_migrations(config))
+        asyncio.run(db.run_migrations(app_config))
         logger.info("Database reset complete")
 
         if reindex:

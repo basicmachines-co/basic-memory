@@ -12,6 +12,7 @@ from mcp.shared.auth import OAuthClientInformationFull
 auth_app = typer.Typer(help="OAuth client management commands")
 app.add_typer(auth_app, name="auth")
 
+
 @auth_app.command()
 def register_client(
     client_id: Optional[str] = typer.Option(
@@ -27,12 +28,10 @@ def register_client(
     # Create provider instance
     provider = BasicMemoryOAuthProvider(issuer_url=issuer_url)
 
-
-    
     # Create client info with required redirect_uris
     client_info = OAuthClientInformationFull(
-        client_id=client_id,
-        client_secret=client_secret,
+        client_id=client_id or "",  # Provider will generate if empty
+        client_secret=client_secret or "",  # Provider will generate if empty
         redirect_uris=[AnyHttpUrl("http://localhost:8000/callback")],  # Default redirect URI
         client_name="Basic Memory OAuth Client",
         grant_types=["authorization_code", "refresh_token"],

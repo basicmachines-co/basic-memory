@@ -225,14 +225,14 @@ class ProjectService:
 
             # Update in database
             project.path = resolved_path
-            await self.repository.update(project)
+            await self.repository.update(project.id, project)
 
             logger.info(f"Updated path for project '{name}' to {resolved_path}")
 
         # Update active status if provided
         if is_active is not None:
             project.is_active = is_active
-            await self.repository.update(project)
+            await self.repository.update(project.id, project)
             logger.info(f"Set active status for project '{name}' to {is_active}")
 
         # If project was made inactive and it was the default, we need to pick a new default
