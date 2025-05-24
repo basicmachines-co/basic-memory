@@ -63,7 +63,9 @@ class Importer[T: ImportResult]:
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
 
-    def handle_error(self, message: str, error: Optional[Exception] = None) -> T:  # pragma: no cover
+    def handle_error(
+        self, message: str, error: Optional[Exception] = None
+    ) -> T:  # pragma: no cover
         """Handle errors during import.
 
         Args:

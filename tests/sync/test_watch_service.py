@@ -426,25 +426,25 @@ def test_is_project_path(watch_service, tmp_path):
     # Create a project at a specific path
     project_path = tmp_path / "project"
     project_path.mkdir(parents=True, exist_ok=True)
-    
+
     # Create a file inside the project
     file_in_project = project_path / "subdirectory" / "file.md"
     file_in_project.parent.mkdir(parents=True, exist_ok=True)
     file_in_project.touch()
-    
+
     # Create a file outside the project
     file_outside_project = tmp_path / "outside" / "file.md"
     file_outside_project.parent.mkdir(parents=True, exist_ok=True)
     file_outside_project.touch()
-    
+
     # Create Project object with our path
     project = Project(id=1, name="test", path=str(project_path), permalink="test")
-    
+
     # Test a file inside the project
     assert watch_service.is_project_path(project, file_in_project) is True
-    
+
     # Test a file outside the project
     assert watch_service.is_project_path(project, file_outside_project) is False
-    
+
     # Test the project path itself
     assert watch_service.is_project_path(project, project_path) is False

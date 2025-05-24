@@ -279,7 +279,7 @@ def test_directory_property():
         project_id=1,
     )
     assert row1.directory == "/projects/notes"
-    
+
     # Test a file at the root level
     row2 = SearchIndexRow(
         id=2,
@@ -290,7 +290,7 @@ def test_directory_property():
         project_id=1,
     )
     assert row2.directory == "/"
-    
+
     # Test a non-entity type with empty file_path
     row3 = SearchIndexRow(
         id=3,

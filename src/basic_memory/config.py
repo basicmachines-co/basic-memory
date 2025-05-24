@@ -82,7 +82,7 @@ class BasicMemoryConfig(BaseSettings):
         """Get the path for a specific project or the default project."""
         name = project_name or self.default_project
 
-        if name not in self.projects: 
+        if name not in self.projects:
             raise ValueError(f"Project '{name}' not found in configuration")
 
         return Path(self.projects[name])

@@ -69,7 +69,9 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             logger.exception("Failed to import ChatGPT conversations")
             return self.handle_error("Failed to import ChatGPT conversations", e)  # pyright: ignore [reportReturnType]
 
-    def _format_chat_content(self, folder: str, conversation: Dict[str, Any]) -> EntityMarkdown:  # pragma: no cover
+    def _format_chat_content(
+        self, folder: str, conversation: Dict[str, Any]
+    ) -> EntityMarkdown:  # pragma: no cover
         """Convert chat conversation to Basic Memory entity.
 
         Args:

@@ -66,7 +66,7 @@ async def test_call_post_error(mock_response):
     client = AsyncClient()
     response = mock_response(500)
     response.json = lambda: {"test": "error"}
-    
+
     client.post = lambda *args, **kwargs: AsyncMock(return_value=response)()
 
     with pytest.raises(ToolError) as exc:
@@ -166,7 +166,7 @@ async def test_call_post_with_json(mock_response):
     client = AsyncClient()
     response = mock_response()
     response.json = lambda: {"test": "data"}
-    
+
     mock_post = AsyncMock(return_value=response)
     client.post = mock_post
 

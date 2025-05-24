@@ -138,7 +138,7 @@ def format_prompt_context(context: PromptContext) -> str:
                     - type: **{related.type}**
                     - title: {related.title}
                     """)
-                if related.permalink: # pragma: no cover
+                if related.permalink:  # pragma: no cover
                     section_content += (
                         f'You can view this document with: `read_note("{related.permalink}")`'
                     )

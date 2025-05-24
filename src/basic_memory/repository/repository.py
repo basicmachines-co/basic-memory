@@ -306,7 +306,7 @@ class Repository[T: Base]:
             conditions = [self.primary_key.in_(ids)]
 
             # Add project_id filter if applicable
-            if self.has_project_id and self.project_id is not None: # pragma: no cover
+            if self.has_project_id and self.project_id is not None:  # pragma: no cover
                 conditions.append(getattr(self.Model, "project_id") == self.project_id)
 
             query = delete(self.Model).where(and_(*conditions))
@@ -341,7 +341,9 @@ class Repository[T: Base]:
                     and self.has_project_id
                     and self.project_id is not None
                 ):
-                    query = query.where(getattr(self.Model, "project_id") == self.project_id)  # pragma: no cover
+                    query = query.where(
+                        getattr(self.Model, "project_id") == self.project_id
+                    )  # pragma: no cover
 
             result = await session.execute(query)
             scalar = result.scalar()

@@ -33,8 +33,11 @@ from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
 from basic_memory.config import app_config
 
+
 def get_app_config() -> BasicMemoryConfig:  # pragma: no cover
     return app_config
+
+
 AppConfigDep = Annotated[BasicMemoryConfig, Depends(get_app_config)]  # pragma: no cover
 
 

@@ -1,4 +1,5 @@
 """FastAPI application for basic-memory knowledge graph API."""
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -31,7 +32,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     await initialize_app(app_config)
 
     logger.info(f"Sync changes enabled: {app_config.sync_changes}")
-    if app_config.sync_changes:  
+    if app_config.sync_changes:
         # start file sync task in background
         app.state.sync_task = asyncio.create_task(initialize_file_sync(app_config))
     else:
