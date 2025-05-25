@@ -211,13 +211,22 @@ basic-memory auth test-auth
 - Project service integration tests
 - Import system unit tests
 
-## Contributors
+## New features 
 
-This release includes contributions from the Basic Machines team and the AI assistant Claude, demonstrating effective human-AI collaboration in software development.
+  ✅ list_project(dir: Optional[str]) tool - Trivial to add
+  - GET /projects endpoint already exists
+  - Just wrap it like project_info.py does
+  - Gives LLMs project discovery capability
 
-## Next Steps
+  ✅ edit_note() tool - Easy to add
+  - Can reuse existing PUT /entities/{permalink} endpoint
+  - Read current content, apply edits, save back
+  - Major UX improvement for LLMs doing incremental edits
 
-- Production deployment guide updates
-- Additional OAuth provider implementations
-- Performance profiling and optimization
-- Enhanced project analytics features
+  ⚠️ move_note() tool - Medium complexity
+  - No dedicated API endpoint (would need create + delete)
+  - More edge cases to handle
+  - Could be v0.13.1
+
+- project_info()
+- switch_projects()

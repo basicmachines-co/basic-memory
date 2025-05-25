@@ -1,8 +1,9 @@
 """Directory service for managing file directories and tree structure."""
 
+import fnmatch
 import logging
 import os
-from typing import Dict
+from typing import Dict, List, Optional
 
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas.directory import DirectoryNode
@@ -87,3 +88,76 @@ class DirectoryService:
 
         # Return the root node with its children
         return root_node
+
+    async def list_directory(
+        self,
+        dir_name: str = "/",
+        depth: int = 1,
+        file_name_glob: Optional[str] = None,
+    ) -> List[DirectoryNode]:
+        """List directory contents with filtering and depth control.
+
+        Args:
+            dir_name: Directory path to list (default: root "/")
+            depth: Recursion depth (1 = immediate children only)
+            file_name_glob: Glob pattern for filtering file names
+
+        Returns:
+            List of DirectoryNode objects matching the criteria
+        """
+        # Normalize directory path
+        if not dir_name.startswith("/"):
+            dir_name = f"/{dir_name}"
+        if dir_name != "/" and dir_name.endswith("/"):
+            dir_name = dir_name.rstrip("/")
+
+        # Get the full directory tree
+        root_tree = await self.get_directory_tree()
+
+        # Find the target directory node
+        target_node = self._find_directory_node(root_tree, dir_name)
+        if not target_node:
+            return []
+
+        # Collect nodes with depth and glob filtering
+        result = []
+        self._collect_nodes_recursive(target_node, result, depth, file_name_glob, 0)
+
+        return result
+
+    def _find_directory_node(self, root: DirectoryNode, target_path: str) -> Optional[DirectoryNode]:
+        """Find a directory node by path in the tree."""
+        if root.directory_path == target_path:
+            return root
+
+        for child in root.children:
+            if child.type == "directory":
+                found = self._find_directory_node(child, target_path)
+                if found:
+                    return found
+
+        return None
+
+    def _collect_nodes_recursive(
+        self,
+        node: DirectoryNode,
+        result: List[DirectoryNode],
+        max_depth: int,
+        file_name_glob: Optional[str],
+        current_depth: int,
+    ) -> None:
+        """Recursively collect nodes with depth and glob filtering."""
+        if current_depth >= max_depth:
+            return
+
+        for child in node.children:
+            # Apply glob filtering
+            if file_name_glob and not fnmatch.fnmatch(child.name, file_name_glob):
+                continue
+
+            # Add the child to results
+            result.append(child)
+
+            # Recurse into subdirectories if we haven't reached max depth
+            if child.type == "directory" and current_depth  < max_depth:
+                self._collect_nodes_recursive(child, result, max_depth, file_name_glob, current_depth + 1)
