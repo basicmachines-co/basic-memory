@@ -110,6 +110,10 @@ async def list_directory(
         title = node.get("title", "")
         updated = node.get("updated_at", "")
 
+        # Remove leading slash if present, requesting the file via read_note does not use the beginning slash'
+        if path_display.startswith("/"):
+            path_display = path_display[1:]
+
         # Format date if available
         date_str = ""
         if updated:
@@ -118,7 +122,7 @@ async def list_directory(
 
                 dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
                 date_str = dt.strftime("%Y-%m-%d")
-            except Exception: # pragma: no cover
+            except Exception:  # pragma: no cover
                 date_str = updated[:10] if len(updated) >= 10 else ""
 
         # Create formatted line

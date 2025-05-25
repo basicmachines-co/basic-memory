@@ -205,8 +205,8 @@ async def test_list_directory_shows_file_metadata(client, test_graph):
     assert "📄 Connected Entity 2.md" in result
     
     # Should show directory paths
-    assert "/test/Connected Entity 1.md" in result
-    assert "/test/Connected Entity 2.md" in result
+    assert "test/Connected Entity 1.md" in result
+    assert "test/Connected Entity 2.md" in result
     
     # Files should be listed after directories (but no directories in this case)
     lines = result.split('\n')
