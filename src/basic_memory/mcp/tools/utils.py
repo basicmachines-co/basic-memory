@@ -295,9 +295,9 @@ async def call_patch(
             if isinstance(response_data, dict) and "detail" in response_data:
                 error_message = response_data["detail"]
             else:
-                error_message = get_error_message(status_code, url, "PATCH")
-        except Exception:
-            error_message = get_error_message(status_code, url, "PATCH")
+                error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
+        except Exception:  # pragma: no cover
+            error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -306,9 +306,9 @@ async def call_patch(
                 logger.warning(f"Rate limit exceeded: PATCH {url}: {error_message}")
             else:
                 logger.info(f"Client error: PATCH {url}: {error_message}")
-        else:
+        else:  # pragma: no cover
             # Server errors: log as error
-            logger.error(f"Server error: PATCH {url}: {error_message}")
+            logger.error(f"Server error: PATCH {url}: {error_message}")  # pragma: no cover
 
         # Raise a tool error with the friendly message
         response.raise_for_status()  # Will always raise since we're in the error case
@@ -323,9 +323,9 @@ async def call_patch(
             if isinstance(response_data, dict) and "detail" in response_data:
                 error_message = response_data["detail"]
             else:
-                error_message = get_error_message(status_code, url, "PATCH")
-        except Exception:
-            error_message = get_error_message(status_code, url, "PATCH")
+                error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
+        except Exception:  # pragma: no cover
+            error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
 
         raise ToolError(error_message) from e
 

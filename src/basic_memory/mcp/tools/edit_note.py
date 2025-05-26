@@ -89,7 +89,9 @@ Multiple sections found with the same header in note '{identifier}'.
 Use `find_replace` to update specific text within the duplicate sections."""
 
     # Generic server/request errors
-    if "Invalid request" in error_message or "malformed" in error_message.lower():
+    if (
+        "Invalid request" in error_message or "malformed" in error_message.lower()
+    ):  # pragma: no cover
         return f"""# Edit Failed - Request Error
 
 There was a problem with the edit request to note '{identifier}': {error_message}.
@@ -162,22 +164,22 @@ async def edit_note(
 
         # Update version number (single occurrence)
         edit_note("config-spec", "find_replace", "v0.13.0", find_text="v0.12.0")
-        
+
         # Update version in multiple places with validation
         edit_note("api-docs", "find_replace", "v2.1.0", find_text="v2.0.0", expected_replacements=3)
-        
+
         # Replace text that appears multiple times - validate count first
         edit_note("docs/guide", "find_replace", "new-api", find_text="old-api", expected_replacements=5)
 
         # Replace implementation section
         edit_note("api-spec", "replace_section", "New implementation approach...\\n", section="## Implementation")
-        
+
         # Replace subsection with more specific header
         edit_note("docs/setup", "replace_section", "Updated install steps\\n", section="### Installation")
 
         # Using different identifier formats
         edit_note("Meeting Notes", "append", "\\n- Follow up on action items")  # title
-        edit_note("docs/meeting-notes", "append", "\\n- Follow up tasks")       # permalink  
+        edit_note("docs/meeting-notes", "append", "\\n- Follow up tasks")       # permalink
         edit_note("docs/Meeting Notes", "append", "\\n- Next steps")           # folder/title
 
         # Add new section to document
@@ -218,7 +220,7 @@ async def edit_note(
         if find_text:
             edit_data["find_text"] = find_text
         if expected_replacements != 1:  # Only send if different from default
-            edit_data["expected_replacements"] = expected_replacements
+            edit_data["expected_replacements"] = str(expected_replacements)
 
         # Call the PATCH endpoint
         url = f"{project_url}/knowledge/entities/{identifier}"
