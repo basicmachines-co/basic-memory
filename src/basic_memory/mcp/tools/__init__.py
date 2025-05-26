@@ -15,11 +15,13 @@ from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.canvas import canvas
 from basic_memory.mcp.tools.list_directory import list_directory
+from basic_memory.mcp.tools.edit_note import edit_note
 
 __all__ = [
     "build_context",
     "canvas",
     "delete_note",
+    "edit_note",
     "list_directory",
     "read_content",
     "read_note",

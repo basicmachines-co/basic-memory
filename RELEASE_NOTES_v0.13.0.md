@@ -218,12 +218,12 @@ basic-memory auth test-auth
   - Just wrap it like project_info.py does
   - Gives LLMs project discovery capability
 
-  ✅ edit_note() tool - Easy to add
+  [ ] edit_note() tool - Easy to add
   - Can reuse existing PUT /entities/{permalink} endpoint
   - Read current content, apply edits, save back
   - Major UX improvement for LLMs doing incremental edits
 
-  ⚠️ move_note() tool - Medium complexity
+  [ ] move_note() tool - Medium complexity
   - No dedicated API endpoint (would need create + delete)
   - More edge cases to handle
   - Could be v0.13.1

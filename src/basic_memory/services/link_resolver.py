@@ -15,10 +15,10 @@ class LinkResolver:
 
     Uses a combination of exact matching and search-based resolution:
     1. Try exact permalink match (fastest)
-    2. Try permalink pattern match (for wildcards)
-    3. Try exact title match
-    4. Fall back to search for fuzzy matching
-    5. Generate new permalink if no match found
+    2. Try exact title match
+    3. Try exact file path match
+    4. Try file path with .md extension (for folder/title patterns)
+    5. Fall back to search for fuzzy matching
     """
 
     def __init__(self, entity_repository: EntityRepository, search_service: SearchService):
@@ -52,9 +52,17 @@ class LinkResolver:
             logger.debug(f"Found entity with path: {found_path.file_path}")
             return found_path
 
+        # 4. Try file path with .md extension if not already present
+        if not clean_text.endswith(".md") and "/" in clean_text:
+            file_path_with_md = f"{clean_text}.md"
+            found_path_md = await self.entity_repository.get_by_file_path(file_path_with_md)
+            if found_path_md:
+                logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
+                return found_path_md
+
         # search if indicated
         if use_search and "*" not in clean_text:
-            # 3. Fall back to search for fuzzy matching on title
+            # 5. Fall back to search for fuzzy matching on title
             results = await self.search_service.search(
                 query=SearchQuery(title=clean_text, entity_types=[SearchItemType.ENTITY]),
             )

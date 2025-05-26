@@ -530,3 +530,372 @@ async def test_update_entity_search_index(client: AsyncClient, project_url):
     results = search_response.json()["results"]
     assert len(results) == 1
     assert results[0]["permalink"] == entity.permalink
+
+
+# PATCH edit entity endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_append(client: AsyncClient, project_url):
+    """Test appending content to an entity via PATCH endpoint."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "Original content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Edit entity with append operation
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "append", "content": "Appended content"},
+    )
+    if response.status_code != 200:
+        print(f"PATCH failed with status {response.status_code}")
+        print(f"Response content: {response.text}")
+    assert response.status_code == 200
+    updated = response.json()
+
+    # Verify content was appended by reading the file
+    response = await client.get(f"{project_url}/resource/{updated['permalink']}?content=true")
+    file_content = response.text
+    assert "Original content" in file_content
+    assert "Appended content" in file_content
+    assert file_content.index("Original content") < file_content.index("Appended content")
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_prepend(client: AsyncClient, project_url):
+    """Test prepending content to an entity via PATCH endpoint."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "Original content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Edit entity with prepend operation
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "prepend", "content": "Prepended content"},
+    )
+    if response.status_code != 200:
+        print(f"PATCH prepend failed with status {response.status_code}")
+        print(f"Response content: {response.text}")
+    assert response.status_code == 200
+    updated = response.json()
+
+    # Verify the entire file content structure
+    response = await client.get(f"{project_url}/resource/{updated['permalink']}?content=true")
+    file_content = response.text
+
+    # Expected content with frontmatter preserved and content prepended to body
+    expected_content = """---
+title: Test Note
+type: note
+permalink: test/test-note
+---
+
+Prepended content
+Original content"""
+
+    assert file_content.strip() == expected_content.strip()
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace(client: AsyncClient, project_url):
+    """Test find and replace operation via PATCH endpoint."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "This is old content that needs updating",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Edit entity with find_replace operation
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "find_replace", "content": "new content", "find_text": "old content"},
+    )
+    assert response.status_code == 200
+    updated = response.json()
+
+    # Verify content was replaced
+    response = await client.get(f"{project_url}/resource/{updated['permalink']}?content=true")
+    file_content = response.text
+    assert "old content" not in file_content
+    assert "This is new content that needs updating" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_with_expected_replacements(
+    client: AsyncClient, project_url
+):
+    """Test find and replace with expected_replacements parameter."""
+    # Create test entity with repeated text
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Sample Note",
+            "folder": "docs",
+            "entity_type": "note",
+            "content": "The word banana appears here. Another banana word here.",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Edit entity with find_replace operation, expecting 2 replacements
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={
+            "operation": "find_replace",
+            "content": "apple",
+            "find_text": "banana",
+            "expected_replacements": 2,
+        },
+    )
+    assert response.status_code == 200
+    updated = response.json()
+
+    # Verify both instances were replaced
+    response = await client.get(f"{project_url}/resource/{updated['permalink']}?content=true")
+    file_content = response.text
+    assert "The word apple appears here. Another apple word here." in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section(client: AsyncClient, project_url):
+    """Test replacing a section via PATCH endpoint."""
+    # Create test entity with sections
+    content = """# Main Title
+
+## Section 1
+Original section 1 content
+
+## Section 2
+Original section 2 content"""
+
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Sample Note",
+            "folder": "docs",
+            "entity_type": "note",
+            "content": content,
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Edit entity with replace_section operation
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={
+            "operation": "replace_section",
+            "content": "New section 1 content",
+            "section": "## Section 1",
+        },
+    )
+    assert response.status_code == 200
+    updated = response.json()
+
+    # Verify section was replaced
+    response = await client.get(f"{project_url}/resource/{updated['permalink']}?content=true")
+    file_content = response.text
+    assert "New section 1 content" in file_content
+    assert "Original section 1 content" not in file_content
+    assert "Original section 2 content" in file_content  # Other sections preserved
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_not_found(client: AsyncClient, project_url):
+    """Test editing a non-existent entity returns 400."""
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/non-existent",
+        json={"operation": "append", "content": "content"},
+    )
+    assert response.status_code == 400
+    assert "Entity not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_invalid_operation(client: AsyncClient, project_url):
+    """Test editing with invalid operation returns 400."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "Original content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Try invalid operation
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "invalid_operation", "content": "content"},
+    )
+    assert response.status_code == 422
+    assert "invalid_operation" in response.json()["detail"][0]["input"]
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_missing_find_text(client: AsyncClient, project_url):
+    """Test find_replace without find_text returns 400."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "Original content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Try find_replace without find_text
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "find_replace", "content": "new content"},
+    )
+    assert response.status_code == 400
+    assert "find_text is required" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_missing_section(client: AsyncClient, project_url):
+    """Test replace_section without section parameter returns 400."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "Original content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Try replace_section without section
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "replace_section", "content": "new content"},
+    )
+    assert response.status_code == 400
+    assert "section is required" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_not_found(client: AsyncClient, project_url):
+    """Test find_replace when text is not found returns 400."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Test Note",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "This is some content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Try to replace text that doesn't exist
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "find_replace", "content": "new content", "find_text": "nonexistent"},
+    )
+    assert response.status_code == 400
+    assert "Text to replace not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_wrong_expected_count(client: AsyncClient, project_url):
+    """Test find_replace with wrong expected_replacements count returns 400."""
+    # Create test entity with repeated text
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Sample Note",
+            "folder": "docs",
+            "entity_type": "note",
+            "content": "The word banana appears here. Another banana word here.",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Try to replace with wrong expected count
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={
+            "operation": "find_replace",
+            "content": "replacement",
+            "find_text": "banana",
+            "expected_replacements": 1,  # Wrong - there are actually 2
+        },
+    )
+    assert response.status_code == 400
+    assert "Expected 1 occurrences" in response.json()["detail"]
+    assert "but found 2" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_search_reindex(client: AsyncClient, project_url):
+    """Test that edited entities are reindexed for search."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "Search Test",
+            "folder": "test",
+            "entity_type": "note",
+            "content": "Original searchable content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Edit the entity
+    response = await client.patch(
+        f"{project_url}/knowledge/entities/{entity['permalink']}",
+        json={"operation": "append", "content": " with unique zebra marker"},
+    )
+    assert response.status_code == 200
+
+    # Search should find the new content
+    search_response = await client.post(
+        f"{project_url}/search/",
+        json={"text": "zebra marker", "entity_types": ["entity"]},
+    )
+    results = search_response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["permalink"] == entity["permalink"]

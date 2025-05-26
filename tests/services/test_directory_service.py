@@ -71,7 +71,7 @@ async def test_list_directory_empty(directory_service: DirectoryService):
 async def test_list_directory_root(directory_service: DirectoryService, test_graph):
     """Test listing root directory contents."""
     result = await directory_service.list_directory(dir_name="/")
-    
+
     # Should return immediate children of root (the "test" directory)
     assert len(result) == 1
     assert result[0].name == "test"
@@ -83,19 +83,19 @@ async def test_list_directory_root(directory_service: DirectoryService, test_gra
 async def test_list_directory_specific_path(directory_service: DirectoryService, test_graph):
     """Test listing specific directory contents."""
     result = await directory_service.list_directory(dir_name="/test")
-    
+
     # Should return the 5 files in the test directory
     assert len(result) == 5
     file_names = {node.name for node in result}
     expected_files = {
-        "Connected Entity 1.md", 
-        "Connected Entity 2.md", 
+        "Connected Entity 1.md",
+        "Connected Entity 2.md",
         "Deep Entity.md",
-        "Deeper Entity.md", 
-        "Root.md"
+        "Deeper Entity.md",
+        "Root.md",
     }
     assert file_names == expected_files
-    
+
     # All should be files
     for node in result:
         assert node.type == "file"
@@ -112,11 +112,8 @@ async def test_list_directory_nonexistent_path(directory_service: DirectoryServi
 async def test_list_directory_with_glob_filter(directory_service: DirectoryService, test_graph):
     """Test listing directory with glob pattern filtering."""
     # Filter for files containing "Connected"
-    result = await directory_service.list_directory(
-        dir_name="/test", 
-        file_name_glob="*Connected*"
-    )
-    
+    result = await directory_service.list_directory(dir_name="/test", file_name_glob="*Connected*")
+
     assert len(result) == 2
     file_names = {node.name for node in result}
     assert file_names == {"Connected Entity 1.md", "Connected Entity 2.md"}
@@ -125,23 +122,19 @@ async def test_list_directory_with_glob_filter(directory_service: DirectoryServi
 @pytest.mark.asyncio
 async def test_list_directory_with_markdown_filter(directory_service: DirectoryService, test_graph):
     """Test listing directory with markdown file filter."""
-    result = await directory_service.list_directory(
-        dir_name="/test", 
-        file_name_glob="*.md"
-    )
-    
+    result = await directory_service.list_directory(dir_name="/test", file_name_glob="*.md")
+
     # All files in test_graph are markdown files
     assert len(result) == 5
 
 
 @pytest.mark.asyncio
-async def test_list_directory_with_specific_file_filter(directory_service: DirectoryService, test_graph):
+async def test_list_directory_with_specific_file_filter(
+    directory_service: DirectoryService, test_graph
+):
     """Test listing directory with specific file pattern."""
-    result = await directory_service.list_directory(
-        dir_name="/test", 
-        file_name_glob="Root.*"
-    )
-    
+    result = await directory_service.list_directory(dir_name="/test", file_name_glob="Root.*")
+
     assert len(result) == 1
     assert result[0].name == "Root.md"
 
@@ -152,7 +145,7 @@ async def test_list_directory_depth_control(directory_service: DirectoryService,
     # Depth 1 should only return immediate children
     result_depth_1 = await directory_service.list_directory(dir_name="/", depth=1)
     assert len(result_depth_1) == 1  # Just the "test" directory
-    
+
     # Depth 2 should return directory + its contents
     result_depth_2 = await directory_service.list_directory(dir_name="/", depth=2)
     assert len(result_depth_2) == 6  # "test" directory + 5 files in it
@@ -163,9 +156,9 @@ async def test_list_directory_path_normalization(directory_service: DirectorySer
     """Test that directory paths are normalized correctly."""
     # Test various path formats that should all be equivalent
     paths_to_test = ["/test", "test", "/test/", "test/"]
-    
+
     base_result = await directory_service.list_directory(dir_name="/test")
-    
+
     for path in paths_to_test:
         result = await directory_service.list_directory(dir_name=path)
         assert len(result) == len(base_result)
@@ -179,8 +172,7 @@ async def test_list_directory_path_normalization(directory_service: DirectorySer
 async def test_list_directory_glob_no_matches(directory_service: DirectoryService, test_graph):
     """Test listing directory with glob that matches nothing."""
     result = await directory_service.list_directory(
-        dir_name="/test", 
-        file_name_glob="*.nonexistent"
+        dir_name="/test", file_name_glob="*.nonexistent"
     )
     assert result == []
 
@@ -190,7 +182,7 @@ async def test_list_directory_default_parameters(directory_service: DirectorySer
     """Test listing directory with default parameters."""
     # Should default to root directory, depth 1, no glob filter
     result = await directory_service.list_directory()
-    
+
     assert len(result) == 1
     assert result[0].name == "test"
     assert result[0].type == "directory"

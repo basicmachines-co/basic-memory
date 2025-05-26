@@ -17,6 +17,7 @@ from basic_memory.schemas import (
     DeleteEntitiesResponse,
     DeleteEntitiesRequest,
 )
+from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.schemas.base import Permalink, Entity
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -101,6 +102,58 @@ async def create_or_update_entity(
         status_code=response.status_code,
     )
     return result
+
+
+@router.patch("/entities/{identifier:path}", response_model=EntityResponse)
+async def edit_entity(
+    identifier: str,
+    data: EditEntityRequest,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    search_service: SearchServiceDep,
+) -> EntityResponse:
+    """Edit an existing entity using various operations like append, prepend, find_replace, or replace_section.
+
+    This endpoint allows for targeted edits without requiring the full entity content.
+    """
+    logger.info(
+        "API request",
+        endpoint="edit_entity",
+        identifier=identifier,
+        operation=data.operation,
+    )
+
+    try:
+        # Edit the entity using the service
+        entity = await entity_service.edit_entity(
+            identifier=identifier,
+            operation=data.operation,
+            content=data.content,
+            section=data.section,
+            find_text=data.find_text,
+            expected_replacements=data.expected_replacements,
+        )
+
+        # Reindex the updated entity
+        await search_service.index_entity(entity, background_tasks=background_tasks)
+
+        # Return the updated entity response
+        result = EntityResponse.model_validate(entity)
+
+        logger.info(
+            "API response",
+            endpoint="edit_entity",
+            identifier=identifier,
+            operation=data.operation,
+            permalink=result.permalink,
+            status_code=200,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error editing entity: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 ## Read endpoints

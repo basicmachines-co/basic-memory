@@ -227,6 +227,109 @@ async def call_put(
         raise ToolError(error_message) from e
 
 
+async def call_patch(
+    client: AsyncClient,
+    url: URL | str,
+    *,
+    content: RequestContent | None = None,
+    data: RequestData | None = None,
+    files: RequestFiles | None = None,
+    json: typing.Any | None = None,
+    params: QueryParamTypes | None = None,
+    headers: HeaderTypes | None = None,
+    cookies: CookieTypes | None = None,
+    auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+    follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+    timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+    extensions: RequestExtensions | None = None,
+) -> Response:
+    """Make a PATCH request and handle errors appropriately.
+
+    Args:
+        client: The HTTPX AsyncClient to use
+        url: The URL to request
+        content: Request content
+        data: Form data
+        files: Files to upload
+        json: JSON data
+        params: Query parameters
+        headers: HTTP headers
+        cookies: HTTP cookies
+        auth: Authentication
+        follow_redirects: Whether to follow redirects
+        timeout: Request timeout
+        extensions: HTTPX extensions
+
+    Returns:
+        The HTTP response
+
+    Raises:
+        ToolError: If the request fails with an appropriate error message
+    """
+    logger.debug(f"Calling PATCH '{url}'")
+    try:
+        response = await client.patch(
+            url,
+            content=content,
+            data=data,
+            files=files,
+            json=json,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            auth=auth,
+            follow_redirects=follow_redirects,
+            timeout=timeout,
+            extensions=extensions,
+        )
+
+        if response.is_success:
+            return response
+
+        # Handle different status codes differently
+        status_code = response.status_code
+
+        # Try to extract specific error message from response body
+        try:
+            response_data = response.json()
+            if isinstance(response_data, dict) and "detail" in response_data:
+                error_message = response_data["detail"]
+            else:
+                error_message = get_error_message(status_code, url, "PATCH")
+        except Exception:
+            error_message = get_error_message(status_code, url, "PATCH")
+
+        # Log at appropriate level based on status code
+        if 400 <= status_code < 500:
+            # Client errors: log as info except for 429 (Too Many Requests)
+            if status_code == 429:  # pragma: no cover
+                logger.warning(f"Rate limit exceeded: PATCH {url}: {error_message}")
+            else:
+                logger.info(f"Client error: PATCH {url}: {error_message}")
+        else:
+            # Server errors: log as error
+            logger.error(f"Server error: PATCH {url}: {error_message}")
+
+        # Raise a tool error with the friendly message
+        response.raise_for_status()  # Will always raise since we're in the error case
+        return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
+
+    except HTTPStatusError as e:
+        status_code = e.response.status_code
+
+        # Try to extract specific error message from response body
+        try:
+            response_data = e.response.json()
+            if isinstance(response_data, dict) and "detail" in response_data:
+                error_message = response_data["detail"]
+            else:
+                error_message = get_error_message(status_code, url, "PATCH")
+        except Exception:
+            error_message = get_error_message(status_code, url, "PATCH")
+
+        raise ToolError(error_message) from e
+
+
 async def call_post(
     client: AsyncClient,
     url: URL | str,

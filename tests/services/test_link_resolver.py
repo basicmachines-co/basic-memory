@@ -179,3 +179,44 @@ async def test_resolve_file(link_resolver):
     assert resolved is not None
     assert resolved.entity_type == "file"
     assert resolved.title == "Image.png"
+
+
+@pytest.mark.asyncio
+async def test_folder_title_pattern_with_md_extension(link_resolver, test_entities):
+    """Test resolving folder/title patterns that need .md extension added.
+
+    This tests the new logic added in step 4 of resolve_link that handles
+    patterns like 'folder/title' by trying 'folder/title.md' as file path.
+    """
+    # Test folder/title pattern for markdown entities
+    # "components/Core Service" should resolve to file path "components/Core Service.md"
+    entity = await link_resolver.resolve_link("components/Core Service")
+    assert entity is not None
+    assert entity.permalink == "components/core-service"
+    assert entity.file_path == "components/Core Service.md"
+
+    # Test with different entity
+    entity = await link_resolver.resolve_link("config/Service Config")
+    assert entity is not None
+    assert entity.permalink == "config/service-config"
+    assert entity.file_path == "config/Service Config.md"
+
+    # Test with nested folder structure
+    entity = await link_resolver.resolve_link("specs/subspec/Sub Features 1")
+    assert entity is not None
+    assert entity.permalink == "specs/subspec/sub-features-1"
+    assert entity.file_path == "specs/subspec/Sub Features 1.md"
+
+    # Test that it doesn't try to add .md to things that already have it
+    entity = await link_resolver.resolve_link("components/Core Service.md")
+    assert entity is not None
+    assert entity.permalink == "components/core-service"
+
+    # Test that it doesn't try to add .md to single words (no slash)
+    entity = await link_resolver.resolve_link("NonExistent")
+    assert entity is None
+
+    # Test that it doesn't interfere with exact permalink matches
+    entity = await link_resolver.resolve_link("components/core-service")
+    assert entity is not None
+    assert entity.permalink == "components/core-service"

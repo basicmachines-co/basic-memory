@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
 
 import frontmatter
+import yaml
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from basic_memory.file_utils import has_frontmatter, parse_frontmatter, remove_frontmatter
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
@@ -325,3 +327,222 @@ class EntityService(BaseService[EntityModel]):
                 continue
 
         return await self.repository.get_by_file_path(path)
+
+    async def edit_entity(
+        self,
+        identifier: str,
+        operation: str,
+        content: str,
+        section: Optional[str] = None,
+        find_text: Optional[str] = None,
+        expected_replacements: int = 1,
+    ) -> EntityModel:
+        """Edit an existing entity's content using various operations.
+
+        Args:
+            identifier: Entity identifier (permalink, title, etc.)
+            operation: The editing operation (append, prepend, find_replace, replace_section)
+            content: The content to add or use for replacement
+            section: For replace_section operation - the markdown header
+            find_text: For find_replace operation - the text to find and replace
+            expected_replacements: For find_replace operation - expected number of replacements (default: 1)
+
+        Returns:
+            The updated entity model
+
+        Raises:
+            EntityNotFoundError: If the entity cannot be found
+            ValueError: If required parameters are missing for the operation or replacement count doesn't match expected
+        """
+        logger.debug(f"Editing entity: {identifier}, operation: {operation}")
+
+        # Find the entity using the link resolver
+        entity = await self.link_resolver.resolve_link(identifier)
+        if not entity:
+            raise EntityNotFoundError(f"Entity not found: {identifier}")
+
+        # Read the current file content
+        file_path = Path(entity.file_path)
+        current_content, _ = await self.file_service.read_file(file_path)
+
+        # Apply the edit operation
+        new_content = self.apply_edit_operation(
+            current_content, operation, content, section, find_text, expected_replacements
+        )
+
+        # Write the updated content back to the file
+        checksum = await self.file_service.write_file(file_path, new_content)
+
+        # Parse the updated file to get new observations/relations
+        entity_markdown = await self.entity_parser.parse_file(file_path)
+
+        # Update entity and its relationships
+        entity = await self.update_entity_and_observations(file_path, entity_markdown)
+        await self.update_entity_relations(str(file_path), entity_markdown)
+
+        # Set final checksum to match file
+        entity = await self.repository.update(entity.id, {"checksum": checksum})
+
+        return entity
+
+    def apply_edit_operation(
+        self,
+        current_content: str,
+        operation: str,
+        content: str,
+        section: Optional[str] = None,
+        find_text: Optional[str] = None,
+        expected_replacements: int = 1,
+    ) -> str:
+        """Apply the specified edit operation to the current content."""
+
+        if operation == "append":
+            # Ensure proper spacing
+            if current_content and not current_content.endswith("\n"):
+                return current_content + "\n" + content
+            return current_content + content
+
+        elif operation == "prepend":
+            # Handle frontmatter-aware prepending
+            return self._prepend_after_frontmatter(current_content, content)
+
+        elif operation == "find_replace":
+            if not find_text:
+                raise ValueError("find_text is required for find_replace operation")
+            if not find_text.strip():
+                raise ValueError("find_text cannot be empty or whitespace only")
+
+            # Count actual occurrences
+            actual_count = current_content.count(find_text)
+
+            # Validate count matches expected
+            if actual_count != expected_replacements:
+                if actual_count == 0:
+                    raise ValueError(f"Text to replace not found: '{find_text}'")
+                else:
+                    raise ValueError(
+                        f"Expected {expected_replacements} occurrences of '{find_text}', "
+                        f"but found {actual_count}"
+                    )
+
+            return current_content.replace(find_text, content)
+
+        elif operation == "replace_section":
+            if not section:
+                raise ValueError("section is required for replace_section operation")
+            if not section.strip():
+                raise ValueError("section cannot be empty or whitespace only")
+            return self.replace_section_content(current_content, section, content)
+
+        else:
+            raise ValueError(f"Unsupported operation: {operation}")
+
+    def replace_section_content(
+        self, current_content: str, section_header: str, new_content: str
+    ) -> str:
+        """Replace content under a specific markdown section header.
+
+        This method uses a simple, safe approach: when replacing a section, it only
+        replaces the immediate content under that header until it encounters the next
+        header of ANY level. This means:
+
+        - Replacing "# Header" replaces content until "## Subsection" (preserves subsections)
+        - Replacing "## Section" replaces content until "### Subsection" (preserves subsections)
+        - More predictable and safer than trying to consume entire hierarchies
+
+        Args:
+            current_content: The current markdown content
+            section_header: The section header to find and replace (e.g., "## Section Name")
+            new_content: The new content to replace the section with
+
+        Returns:
+            The updated content with the section replaced
+
+        Raises:
+            ValueError: If multiple sections with the same header are found
+        """
+        # Normalize the section header (ensure it starts with #)
+        if not section_header.startswith("#"):
+            section_header = "## " + section_header
+
+        # First pass: count matching sections to check for duplicates
+        lines = current_content.split("\n")
+        matching_sections = []
+
+        for i, line in enumerate(lines):
+            if line.strip() == section_header.strip():
+                matching_sections.append(i)
+
+        # Handle multiple sections error
+        if len(matching_sections) > 1:
+            raise ValueError(
+                f"Multiple sections found with header '{section_header}'. "
+                f"Section replacement requires unique headers."
+            )
+
+        # If no section found, append it
+        if len(matching_sections) == 0:
+            logger.info(f"Section '{section_header}' not found, appending to end of document")
+            separator = "\n\n" if current_content and not current_content.endswith("\n\n") else ""
+            return current_content + separator + section_header + "\n" + new_content
+
+        # Replace the single matching section
+        result_lines = []
+        section_line_idx = matching_sections[0]
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+
+            # Check if this is our target section header
+            if i == section_line_idx:
+                # Add the section header and new content
+                result_lines.append(line)
+                result_lines.append(new_content)
+                i += 1
+
+                # Skip the original section content until next header or end
+                while i < len(lines):
+                    next_line = lines[i]
+                    # Stop consuming when we hit any header (preserve subsections)
+                    if next_line.startswith("#"):
+                        # We found another header - continue processing from here
+                        break
+                    i += 1
+                # Continue processing from the next header (don't increment i again)
+                continue
+
+            # Add all other lines (including subsequent sections)
+            result_lines.append(line)
+            i += 1
+
+        return "\n".join(result_lines)
+
+    def _prepend_after_frontmatter(self, current_content: str, content: str) -> str:
+        """Prepend content after frontmatter, preserving frontmatter structure."""
+
+        # Check if file has frontmatter
+        if has_frontmatter(current_content):
+            try:
+                # Parse and separate frontmatter from body
+                frontmatter_data = parse_frontmatter(current_content)
+                body_content = remove_frontmatter(current_content)
+
+                # Prepend content to the body
+                if content and not content.endswith("\n"):
+                    new_body = content + "\n" + body_content
+                else:
+                    new_body = content + body_content
+
+                # Reconstruct file with frontmatter + prepended body
+                yaml_fm = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
+                return f"---\n{yaml_fm}---\n\n{new_body.strip()}"
+
+            except Exception as e:
+                logger.warning(f"Failed to parse frontmatter during prepend: {e}")
+                # Fall back to simple prepend if frontmatter parsing fails
+
+        # No frontmatter or parsing failed - do simple prepend
+        if content and not content.endswith("\n"):
+            return content + "\n" + current_content
+        return content + current_content

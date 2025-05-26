@@ -24,7 +24,6 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
         title="Test Entity",
         folder="",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
 
     # Act
@@ -65,7 +64,6 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
         folder="",
         entity_type="test",
         content="first",
-        project=entity_service.repository.project_id,
     )
 
     # Act
@@ -85,7 +83,6 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
         folder="",
         entity_type="test",
         content="second",
-        project=entity_service.repository.project_id,
     )
 
     with pytest.raises(EntityCreationError):
@@ -104,7 +101,6 @@ async def test_create_entity_unique_permalink(
         title="Test Entity",
         folder="test",
         entity_type="test",
-        project=entity_repository.project_id,
     )
 
     entity = await entity_service.create_entity(entity_data)
@@ -137,7 +133,6 @@ async def test_get_by_permalink(entity_service: EntityService):
         title="TestEntity1",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     entity1 = await entity_service.create_entity(entity1_data)
 
@@ -145,7 +140,6 @@ async def test_get_by_permalink(entity_service: EntityService):
         title="TestEntity2",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     entity2 = await entity_service.create_entity(entity2_data)
 
@@ -173,7 +167,6 @@ async def test_get_entity_success(entity_service: EntityService):
         title="TestEntity",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity_data)
 
@@ -192,7 +185,6 @@ async def test_delete_entity_success(entity_service: EntityService):
         title="TestEntity",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity_data)
 
@@ -212,7 +204,6 @@ async def test_delete_entity_by_id(entity_service: EntityService):
         title="TestEntity",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     created = await entity_service.create_entity(entity_data)
 
@@ -246,7 +237,6 @@ async def test_create_entity_with_special_chars(entity_service: EntityService):
         title=name,
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     entity = await entity_service.create_entity(entity_data)
 
@@ -264,13 +254,11 @@ async def test_get_entities_by_permalinks(entity_service: EntityService):
         title="Entity1",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     entity2_data = EntitySchema(
         title="Entity2",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity1_data)
     await entity_service.create_entity(entity2_data)
@@ -299,7 +287,6 @@ async def test_get_entities_some_not_found(entity_service: EntityService):
         title="Entity1",
         folder="test",
         entity_type="test",
-        project=entity_service.repository.project_id,
     )
     await entity_service.create_entity(entity_data)
 
@@ -332,7 +319,6 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
         folder="test",
         entity_type="note",
         entity_metadata={"status": "draft"},
-        project=entity_service.repository.project_id,
     )
 
     entity = await entity_service.create_entity(schema)
@@ -370,7 +356,6 @@ async def test_create_or_update_new(entity_service: EntityService, file_service:
             folder="test",
             entity_type="test",
             entity_metadata={"status": "draft"},
-            project=entity_service.repository.project_id,
         )
     )
     assert entity.title == "test"
@@ -388,7 +373,6 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
             entity_type="test",
             content="Test entity",
             entity_metadata={"status": "final"},
-            project=entity_service.repository.project_id,
         )
     )
 
@@ -431,7 +415,6 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
             folder="test",
             entity_type="test",
             content=content,
-            project=entity_service.repository.project_id,
         )
     )
 
@@ -498,7 +481,6 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
             entity_type="test",
             folder="test",
             content=content,
-            project=entity_service.repository.project_id,
         )
     )
 
@@ -558,7 +540,6 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
             folder="test",
             entity_type="test",
             content=update_content,
-            project=entity_service.repository.project_id,
         )
     )
 
@@ -618,3 +599,602 @@ async def test_create_with_no_frontmatter(
         # Git Workflow Guide
         """).strip()
     assert expected == file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_append(entity_service: EntityService, file_service: FileService):
+    """Test appending content to an entity."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    # Edit entity with append operation
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink, operation="append", content="Appended content"
+    )
+
+    # Verify content was appended
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Original content" in file_content
+    assert "Appended content" in file_content
+    assert file_content.index("Original content") < file_content.index("Appended content")
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_prepend(entity_service: EntityService, file_service: FileService):
+    """Test prepending content to an entity."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    # Edit entity with prepend operation
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink, operation="prepend", content="Prepended content"
+    )
+
+    # Verify content was prepended
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Original content" in file_content
+    assert "Prepended content" in file_content
+    assert file_content.index("Prepended content") < file_content.index("Original content")
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace(entity_service: EntityService, file_service: FileService):
+    """Test find and replace operation on an entity."""
+    # Create test entity with specific content to replace
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="This is old content that needs updating",
+        )
+    )
+
+    # Edit entity with find_replace operation
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="find_replace",
+        content="new content",
+        find_text="old content",
+    )
+
+    # Verify content was replaced
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "old content" not in file_content
+    assert "This is new content that needs updating" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test replacing a specific section in an entity."""
+    # Create test entity with sections
+    content = dedent("""
+        # Main Title
+        
+        ## Section 1
+        Original section 1 content
+        
+        ## Section 2
+        Original section 2 content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Edit entity with replace_section operation
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="replace_section",
+        content="New section 1 content",
+        section="## Section 1",
+    )
+
+    # Verify section was replaced
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "New section 1 content" in file_content
+    assert "Original section 1 content" not in file_content
+    assert "Original section 2 content" in file_content  # Other sections preserved
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_create_new(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test replacing a section that doesn't exist creates it."""
+    # Create test entity without the section
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="# Main Title\n\nSome content",
+        )
+    )
+
+    # Edit entity with replace_section operation for non-existent section
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="replace_section",
+        content="New section content",
+        section="## New Section",
+    )
+
+    # Verify section was created
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "## New Section" in file_content
+    assert "New section content" in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_not_found(entity_service: EntityService):
+    """Test editing a non-existent entity raises error."""
+    with pytest.raises(EntityNotFoundError):
+        await entity_service.edit_entity(
+            identifier="non-existent", operation="append", content="content"
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_invalid_operation(entity_service: EntityService):
+    """Test editing with invalid operation raises error."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    with pytest.raises(ValueError, match="Unsupported operation"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink, operation="invalid_operation", content="content"
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_missing_find_text(entity_service: EntityService):
+    """Test find_replace operation without find_text raises error."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    with pytest.raises(ValueError, match="find_text is required"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink, operation="find_replace", content="new content"
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_missing_section(entity_service: EntityService):
+    """Test replace_section operation without section parameter raises error."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    with pytest.raises(ValueError, match="section is required"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink, operation="replace_section", content="new content"
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_with_observations_and_relations(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test editing entity updates observations and relations correctly."""
+    # Create test entity with observations and relations
+    content = dedent("""
+        # Test Note
+        
+        - [note] This is an observation
+        - links to [[Other Entity]]
+        
+        Original content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Verify initial state
+    assert len(entity.observations) == 1
+    assert len(entity.relations) == 1
+
+    # Edit entity by appending content with new observations/relations
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="append",
+        content="\n- [category] New observation\n- relates to [[New Entity]]",
+    )
+
+    # Verify observations and relations were updated
+    assert len(updated.observations) == 2
+    assert len(updated.relations) == 2
+
+    # Check new observation
+    new_obs = [obs for obs in updated.observations if obs.category == "category"][0]
+    assert new_obs.content == "New observation"
+
+    # Check new relation
+    new_rel = [rel for rel in updated.relations if rel.to_name == "New Entity"][0]
+    assert new_rel.relation_type == "relates to"
+
+
+# Edge case tests for find_replace operation
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_not_found(entity_service: EntityService):
+    """Test find_replace operation when text is not found."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="This is some content",
+        )
+    )
+
+    # Try to replace text that doesn't exist
+    with pytest.raises(ValueError, match="Text to replace not found: 'nonexistent'"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="find_replace",
+            content="new content",
+            find_text="nonexistent",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_multiple_occurrences_expected_one(
+    entity_service: EntityService,
+):
+    """Test find_replace with multiple occurrences when expecting one."""
+    # Create entity with repeated text (avoiding "test" since it appears in frontmatter)
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content="The word banana appears here. Another banana word here.",
+        )
+    )
+
+    # Try to replace with expected count of 1 when there are 2
+    with pytest.raises(ValueError, match="Expected 1 occurrences of 'banana', but found 2"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="find_replace",
+            content="replacement",
+            find_text="banana",
+            expected_replacements=1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_multiple_occurrences_success(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test find_replace with multiple occurrences when expected count matches."""
+    # Create test entity with repeated text (avoiding "test" since it appears in frontmatter)
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content="The word banana appears here. Another banana word here.",
+        )
+    )
+
+    # Replace with correct expected count
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="find_replace",
+        content="apple",
+        find_text="banana",
+        expected_replacements=2,
+    )
+
+    # Verify both instances were replaced
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "The word apple appears here. Another apple word here." in file_content
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_empty_find_text(entity_service: EntityService):
+    """Test find_replace with empty find_text."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Some content",
+        )
+    )
+
+    # Try with empty find_text
+    with pytest.raises(ValueError, match="find_text cannot be empty or whitespace only"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="find_replace",
+            content="new content",
+            find_text="   ",  # whitespace only
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_find_replace_multiline(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test find_replace with multiline text."""
+    # Create test entity with multiline content
+    content = dedent("""
+        # Title
+        
+        This is a paragraph
+        that spans multiple lines
+        and needs replacement.
+        
+        Other content.
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Replace multiline text
+    find_text = "This is a paragraph\nthat spans multiple lines\nand needs replacement."
+    new_text = "This is new content\nthat replaces the old paragraph."
+
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink, operation="find_replace", content=new_text, find_text=find_text
+    )
+
+    # Verify replacement worked
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "This is new content\nthat replaces the old paragraph." in file_content
+    assert "Other content." in file_content  # Make sure rest is preserved
+
+
+# Edge case tests for replace_section operation
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_multiple_sections_error(entity_service: EntityService):
+    """Test replace_section with multiple sections having same header."""
+    # Create test entity with duplicate section headers
+    content = dedent("""
+        # Main Title
+        
+        ## Section 1
+        First instance content
+        
+        ## Section 2
+        Some content
+        
+        ## Section 1
+        Second instance content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Try to replace section when multiple exist
+    with pytest.raises(ValueError, match="Multiple sections found with header '## Section 1'"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="replace_section",
+            content="New content",
+            section="## Section 1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_empty_section(entity_service: EntityService):
+    """Test replace_section with empty section parameter."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Some content",
+        )
+    )
+
+    # Try with empty section
+    with pytest.raises(ValueError, match="section cannot be empty or whitespace only"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="replace_section",
+            content="new content",
+            section="   ",  # whitespace only
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_header_variations(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test replace_section with different header formatting."""
+    # Create entity with various header formats (avoiding "test" in frontmatter)
+    content = dedent("""
+        # Main Title
+        
+        ## Section Name
+        Original content
+        
+        ### Subsection
+        Sub content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Test replacing with different header format (no ##)
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="replace_section",
+        content="New section content",
+        section="Section Name",  # No ## prefix
+    )
+
+    # Verify replacement worked
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "New section content" in file_content
+    assert "Original content" not in file_content
+    assert "### Subsection" in file_content  # Subsection preserved
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_at_end_of_document(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test replace_section when section is at the end of document."""
+    # Create test entity with section at end
+    content = dedent("""
+        # Main Title
+        
+        ## First Section
+        First content
+        
+        ## Last Section
+        Last section content""").strip()  # No trailing newline
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Replace the last section
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="replace_section",
+        content="New last section content",
+        section="## Last Section",
+    )
+
+    # Verify replacement worked
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "New last section content" in file_content
+    assert "Last section content" not in file_content
+    assert "First content" in file_content  # Previous section preserved
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_with_subsections(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test replace_section preserves subsections (stops at any header)."""
+    # Create test entity with nested sections
+    content = dedent("""
+        # Main Title
+        
+        ## Parent Section
+        Parent content
+        
+        ### Child Section 1
+        Child 1 content
+        
+        ### Child Section 2  
+        Child 2 content
+        
+        ## Another Section
+        Other content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Replace parent section (should only replace content until first subsection)
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="replace_section",
+        content="New parent content",
+        section="## Parent Section",
+    )
+
+    # Verify replacement worked - only immediate content replaced, subsections preserved
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "New parent content" in file_content
+    assert "Parent content" not in file_content  # Original content replaced
+    assert "Child 1 content" in file_content  # Child sections preserved
+    assert "Child 2 content" in file_content  # Child sections preserved
+    assert "## Another Section" in file_content  # Next section preserved
+    assert "Other content" in file_content

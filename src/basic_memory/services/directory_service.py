@@ -125,7 +125,9 @@ class DirectoryService:
 
         return result
 
-    def _find_directory_node(self, root: DirectoryNode, target_path: str) -> Optional[DirectoryNode]:
+    def _find_directory_node(
+        self, root: DirectoryNode, target_path: str
+    ) -> Optional[DirectoryNode]:
         """Find a directory node by path in the tree."""
         if root.directory_path == target_path:
             return root
@@ -159,5 +161,7 @@ class DirectoryService:
             result.append(child)
 
             # Recurse into subdirectories if we haven't reached max depth
-            if child.type == "directory" and current_depth  < max_depth:
-                self._collect_nodes_recursive(child, result, max_depth, file_name_glob, current_depth + 1)
+            if child.type == "directory" and current_depth < max_depth:
+                self._collect_nodes_recursive(
+                    child, result, max_depth, file_name_glob, current_depth + 1
+                )

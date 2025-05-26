@@ -1,9 +1,9 @@
 """Request schemas for interacting with the knowledge graph."""
 
-from typing import List, Optional, Annotated
+from typing import List, Optional, Annotated, Literal
 from annotated_types import MaxLen, MinLen
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from basic_memory.schemas.base import (
     Relation,
@@ -56,3 +56,33 @@ class GetEntitiesRequest(BaseModel):
 
 class CreateRelationsRequest(BaseModel):
     relations: List[Relation]
+
+
+class EditEntityRequest(BaseModel):
+    """Request schema for editing an existing entity's content.
+
+    This allows for targeted edits without requiring the full entity content.
+    Supports various operation types for different editing scenarios.
+    """
+
+    operation: Literal["append", "prepend", "find_replace", "replace_section"]
+    content: str
+    section: Optional[str] = None
+    find_text: Optional[str] = None
+    expected_replacements: int = 1
+
+    @field_validator("section")
+    @classmethod
+    def validate_section_for_replace_section(cls, v, info):
+        """Ensure section is provided for replace_section operation."""
+        if info.data.get("operation") == "replace_section" and not v:
+            raise ValueError("section parameter is required for replace_section operation")
+        return v
+
+    @field_validator("find_text")
+    @classmethod
+    def validate_find_text_for_find_replace(cls, v, info):
+        """Ensure find_text is provided for find_replace operation."""
+        if info.data.get("operation") == "find_replace" and not v:
+            raise ValueError("find_text parameter is required for find_replace operation")
+        return v
