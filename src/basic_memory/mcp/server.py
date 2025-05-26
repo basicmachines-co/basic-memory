@@ -15,6 +15,7 @@ from mcp.server.auth.settings import AuthSettings
 from basic_memory.config import app_config
 from basic_memory.services.initialization import initialize_app
 from basic_memory.mcp.auth_provider import BasicMemoryOAuthProvider
+from basic_memory.mcp.project_session import session
 from basic_memory.mcp.external_auth_provider import (
     create_github_provider,
     create_google_provider,
@@ -37,6 +38,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:  # pragma:
     """Manage application lifecycle with type-safe context"""
     # Initialize on startup
     watch_task = await initialize_app(app_config)
+    
+    # Initialize project session with default project
+    session.initialize(app_config.name)
+    
     try:
         yield AppContext(watch_task=watch_task)
     finally:

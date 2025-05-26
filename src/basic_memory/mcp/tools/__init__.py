@@ -16,16 +16,26 @@ from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.canvas import canvas
 from basic_memory.mcp.tools.list_directory import list_directory
 from basic_memory.mcp.tools.edit_note import edit_note
+from basic_memory.mcp.tools.project_management import (
+    list_projects,
+    switch_project,
+    get_current_project,
+    set_default_project,
+)
 
 __all__ = [
     "build_context",
     "canvas",
     "delete_note",
     "edit_note",
+    "get_current_project",
     "list_directory",
+    "list_projects",
     "read_content",
     "read_note",
     "recent_activity",
     "search_notes",
+    "set_default_project",
+    "switch_project",
     "write_note",
 ]

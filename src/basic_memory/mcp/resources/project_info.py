@@ -9,7 +9,8 @@ from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas import ProjectInfoResponse
 
 
-@mcp.tool(
+@mcp.resource(
+    uri="memory://project_info",
     description="Get information and statistics about the current Basic Memory project.",
 )
 async def project_info() -> ProjectInfoResponse:

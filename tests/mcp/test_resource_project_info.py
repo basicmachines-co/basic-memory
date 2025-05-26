@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 from httpx import Response
 
-from basic_memory.mcp.tools.project_info import project_info
+from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.schemas import (
     ProjectInfoResponse,
 )
@@ -94,7 +94,7 @@ async def test_project_info_tool():
 
     # Mock the call_get function
     with patch(
-        "basic_memory.mcp.tools.project_info.call_get", return_value=mock_response
+        "basic_memory.mcp.resources.project_info.call_get", return_value=mock_response
     ) as mock_call_get:
         # Call the function
         result = await project_info()
@@ -133,7 +133,7 @@ async def test_project_info_tool():
 async def test_project_info_error_handling():
     """Test that the project_info tool handles errors gracefully."""
     # Mock call_get to raise an exception
-    with patch("basic_memory.mcp.tools.project_info.call_get", side_effect=Exception("Test error")):
+    with patch("basic_memory.mcp.resources.project_info.call_get", side_effect=Exception("Test error")):
         # Verify that the exception propagates
         with pytest.raises(Exception) as excinfo:
             await project_info()

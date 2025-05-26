@@ -10,7 +10,7 @@ from rich.table import Table
 
 from basic_memory.cli.app import app
 from basic_memory.config import config
-from basic_memory.mcp.tools.project_info import project_info
+from basic_memory.mcp.resources.project_info import project_info
 import json
 from datetime import datetime
 
