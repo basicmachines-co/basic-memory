@@ -228,5 +228,5 @@ basic-memory auth test-auth
   - More edge cases to handle
   - Could be v0.13.1
 
-- project_info() resource
-- switch_projects()
+- [ ] project_info() resource
+- [ ] switch_projects()

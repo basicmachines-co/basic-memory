@@ -14,7 +14,7 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 
 
 @pytest.mark.asyncio
-async def test_temp_file_filter(watch_service, app_config, test_config, test_project):
+async def test_temp_file_filter(watch_service, app_config, project_config, test_project):
     """Test that .tmp files are correctly filtered out."""
     # Test filter_changes method directly
     tmp_path = Path(test_project.path) / "test.tmp"
@@ -26,7 +26,7 @@ async def test_temp_file_filter(watch_service, app_config, test_config, test_pro
 
 
 @pytest.mark.asyncio
-async def test_handle_tmp_files(watch_service, test_config, test_project, sync_service):
+async def test_handle_tmp_files(watch_service, project_config, test_project, sync_service):
     """Test handling of .tmp files during sync process."""
     project_dir = Path(test_project.path)
 
@@ -57,10 +57,10 @@ async def test_handle_tmp_files(watch_service, test_config, test_project, sync_s
 
 @pytest.mark.asyncio
 async def test_atomic_write_tmp_file_handling(
-    watch_service, test_config, test_project, sync_service
+    watch_service, project_config, test_project, sync_service
 ):
     """Test handling of file changes during atomic write operations."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # This test simulates the full atomic write process:
     # 1. First a .tmp file is created
@@ -103,7 +103,7 @@ async def test_atomic_write_tmp_file_handling(
 
 
 @pytest.mark.asyncio
-async def test_rapid_atomic_writes(watch_service, test_config, test_project, sync_service):
+async def test_rapid_atomic_writes(watch_service, project_config, test_project, sync_service):
     """Test handling of rapid atomic writes to the same destination."""
     project_dir = Path(test_project.path)
 

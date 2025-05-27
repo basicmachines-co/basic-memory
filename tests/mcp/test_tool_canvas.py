@@ -9,7 +9,7 @@ from basic_memory.mcp.tools import canvas
 
 
 @pytest.mark.asyncio
-async def test_create_canvas(app, test_config):
+async def test_create_canvas(app, project_config):
     """Test creating a new canvas file.
 
     Should:
@@ -42,7 +42,7 @@ async def test_create_canvas(app, test_config):
     assert "The canvas is ready to open in Obsidian" in result
 
     # Verify file was created
-    file_path = Path(test_config.home) / folder / f"{title}.canvas"
+    file_path = Path(project_config.home) / folder / f"{title}.canvas"
     assert file_path.exists()
 
     # Verify content is correct
@@ -52,7 +52,7 @@ async def test_create_canvas(app, test_config):
 
 
 @pytest.mark.asyncio
-async def test_create_canvas_with_extension(app, test_config):
+async def test_create_canvas_with_extension(app, project_config):
     """Test creating a canvas file with .canvas extension already in the title."""
     # Test data
     nodes = [
@@ -77,7 +77,7 @@ async def test_create_canvas_with_extension(app, test_config):
     assert "Created: visualizations/extension-test.canvas" in result
 
     # Verify file exists with correct name (shouldn't have double extension)
-    file_path = Path(test_config.home) / folder / title
+    file_path = Path(project_config.home) / folder / title
     assert file_path.exists()
 
     # Verify content
@@ -86,7 +86,7 @@ async def test_create_canvas_with_extension(app, test_config):
 
 
 @pytest.mark.asyncio
-async def test_update_existing_canvas(app, test_config):
+async def test_update_existing_canvas(app, project_config):
     """Test updating an existing canvas file."""
     # First create a canvas
     nodes = [
@@ -108,7 +108,7 @@ async def test_update_existing_canvas(app, test_config):
     await canvas(nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify file exists
-    file_path = Path(test_config.home) / folder / f"{title}.canvas"
+    file_path = Path(project_config.home) / folder / f"{title}.canvas"
     assert file_path.exists()
 
     # Now update with new content
@@ -140,7 +140,7 @@ async def test_update_existing_canvas(app, test_config):
 
 
 @pytest.mark.asyncio
-async def test_create_canvas_with_nested_folders(app, test_config):
+async def test_create_canvas_with_nested_folders(app, project_config):
     """Test creating a canvas in nested folders that don't exist yet."""
     # Test data
     nodes = [
@@ -165,13 +165,13 @@ async def test_create_canvas_with_nested_folders(app, test_config):
     assert "Created: visualizations/nested/folders/nested-test.canvas" in result
 
     # Verify folders and file were created
-    file_path = Path(test_config.home) / folder / f"{title}.canvas"
+    file_path = Path(project_config.home) / folder / f"{title}.canvas"
     assert file_path.exists()
     assert file_path.parent.exists()
 
 
 @pytest.mark.asyncio
-async def test_create_canvas_complex_content(app, test_config):
+async def test_create_canvas_complex_content(app, project_config):
     """Test creating a canvas with complex content structures."""
     # Test data - more complex structure with all node types
     nodes = [
@@ -237,7 +237,7 @@ async def test_create_canvas_complex_content(app, test_config):
     folder = "visualizations"
 
     # Create a test file that we're referencing
-    test_file_path = Path(test_config.home) / "test/test-file.md"
+    test_file_path = Path(project_config.home) / "test/test-file.md"
     test_file_path.parent.mkdir(parents=True, exist_ok=True)
     test_file_path.write_text("# Test File\nThis is referenced by the canvas")
 
@@ -248,7 +248,7 @@ async def test_create_canvas_complex_content(app, test_config):
     assert "Created: visualizations/complex-test.canvas" in result
 
     # Verify file was created
-    file_path = Path(test_config.home) / folder / f"{title}.canvas"
+    file_path = Path(project_config.home) / folder / f"{title}.canvas"
     assert file_path.exists()
 
     # Verify content is correct with all complex structures

@@ -60,14 +60,17 @@ app = FastAPI(
 
 # Include routers
 app.include_router(knowledge.router, prefix="/{project}")
-app.include_router(management.router, prefix="/{project}")
 app.include_router(memory.router, prefix="/{project}")
 app.include_router(resource.router, prefix="/{project}")
 app.include_router(search.router, prefix="/{project}")
-app.include_router(project.router, prefix="/{project}")
+app.include_router(project.project_router, prefix="/{project}")
 app.include_router(directory_router.router, prefix="/{project}")
 app.include_router(prompt_router.router, prefix="/{project}")
 app.include_router(importer_router.router, prefix="/{project}")
+
+# Project resource router works accross projects
+app.include_router(project.project_resource_router)
+app.include_router(management.router)
 
 # Auth routes are handled by FastMCP automatically when auth is enabled
 

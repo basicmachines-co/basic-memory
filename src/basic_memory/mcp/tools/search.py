@@ -8,6 +8,7 @@ from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
+from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
 
@@ -22,6 +23,7 @@ async def search_notes(
     types: Optional[List[str]] = None,
     entity_types: Optional[List[str]] = None,
     after_date: Optional[str] = None,
+    project: Optional[str] = None,
 ) -> SearchResponse:
     """Search across all content in the knowledge base.
 
@@ -37,6 +39,7 @@ async def search_notes(
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d")
+        project: Optional project name to search in. If not provided, uses current active project.
 
     Returns:
         SearchResponse with results and pagination info
@@ -80,6 +83,9 @@ async def search_notes(
             query="docs/meeting-*",
             search_type="permalink"
         )
+
+        # Search in specific project
+        results = await search_notes("meeting notes", project="work-project")
     """
     # Create a SearchQuery object based on the parameters
     search_query = SearchQuery()
@@ -104,7 +110,8 @@ async def search_notes(
     if after_date:
         search_query.after_date = after_date
 
-    project_url = get_project_config().project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     logger.info(f"Searching for {search_query}")
     response = await call_post(

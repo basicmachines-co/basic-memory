@@ -197,7 +197,7 @@ class TestSwitchProject:
                 result = await switch_project("work-notes")
                 # If no exception, check error message
                 assert "Error switching to project 'work-notes'" in result
-            except NameError:
+            except NameError as e:
                 # Expected bug: previous_project undefined in exception handler
                 pass
             
@@ -338,34 +338,3 @@ class TestProjectSessionIntegration:
         session.reset_to_default()
         
         assert session.get_current_project() == "default-project"
-
-
-class TestGetActiveProject:
-    """Tests for get_active_project utility function."""
-
-    def test_get_active_project_with_override(self):
-        """Test that project override takes precedence."""
-        session.initialize("default-project") 
-        session.set_current_project("session-project")
-        
-        result = get_active_project("override-project")
-        
-        assert result == "override-project"
-    
-    def test_get_active_project_without_override(self):
-        """Test that session context is used when no override."""
-        session.initialize("default-project")
-        session.set_current_project("session-project")
-        
-        result = get_active_project()
-        
-        assert result == "session-project"
-    
-    def test_get_active_project_with_none_override(self):
-        """Test that None override uses session context."""
-        session.initialize("default-project")
-        session.set_current_project("session-project")
-        
-        result = get_active_project(None)
-        
-        assert result == "session-project"

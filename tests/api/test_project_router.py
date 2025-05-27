@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_endpoint(test_graph, client, test_config, project_url):
+async def test_get_project_info_endpoint(test_graph, client, project_config, project_url):
     """Test the project-info endpoint returns correctly structured data."""
     # Set up some test data in the database
 
@@ -51,7 +51,7 @@ async def test_get_project_info_endpoint(test_graph, client, test_config, projec
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_content(test_graph, client, test_config, project_url):
+async def test_get_project_info_content(test_graph, client, project_config, project_url):
     """Test that project-info contains actual data from the test database."""
     # Call the endpoint
     response = await client.get(f"{project_url}/project/info")
@@ -77,7 +77,7 @@ async def test_get_project_info_content(test_graph, client, test_config, project
 
 
 @pytest.mark.asyncio
-async def test_get_project_info_watch_status(test_graph, client, test_config, project_url):
+async def test_get_project_info_watch_status(test_graph, client, project_config, project_url):
     """Test that project-info correctly handles watch status."""
     # Create a mock watch status file
     mock_watch_status = {
@@ -111,10 +111,10 @@ async def test_get_project_info_watch_status(test_graph, client, test_config, pr
 
 
 @pytest.mark.asyncio
-async def test_list_projects_endpoint(test_graph, client, test_config, project_url):
+async def test_list_projects_endpoint(test_graph, client, project_config, project_url):
     """Test the list projects endpoint returns correctly structured data."""
     # Call the endpoint
-    response = await client.get(f"{project_url}/project/projects")
+    response = await client.get("/projects/projects")
 
     # Verify response
     assert response.status_code == 200

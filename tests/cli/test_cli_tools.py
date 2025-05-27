@@ -56,7 +56,7 @@ async def setup_test_note(entity_service, search_service) -> AsyncGenerator[dict
     }
 
 
-def test_write_note(cli_env, test_config):
+def test_write_note(cli_env, project_config):
     """Test write_note command with basic arguments."""
     result = runner.invoke(
         tool_app,
@@ -78,7 +78,7 @@ def test_write_note(cli_env, test_config):
     assert "permalink" in result.stdout
 
 
-def test_write_note_with_tags(cli_env, test_config):
+def test_write_note_with_tags(cli_env, project_config):
     """Test write_note command with tags."""
     result = runner.invoke(
         tool_app,
@@ -103,7 +103,7 @@ def test_write_note_with_tags(cli_env, test_config):
     assert "tag1, tag2" in result.stdout or "tag1" in result.stdout and "tag2" in result.stdout
 
 
-def test_write_note_from_stdin(cli_env, test_config, monkeypatch):
+def test_write_note_from_stdin(cli_env, project_config, monkeypatch):
     """Test write_note command reading from stdin.
 
     This test requires minimal mocking of stdin to simulate piped input.
@@ -135,7 +135,7 @@ def test_write_note_from_stdin(cli_env, test_config, monkeypatch):
     assert "permalink" in result.stdout
 
 
-def test_write_note_content_param_priority(cli_env, test_config):
+def test_write_note_content_param_priority(cli_env, project_config):
     """Test that content parameter has priority over stdin."""
     stdin_content = "This content from stdin should NOT be used"
     param_content = "This explicit content parameter should be used"
@@ -167,7 +167,7 @@ def test_write_note_content_param_priority(cli_env, test_config):
         assert "Created" in result.stdout or "Updated" in result.stdout
 
 
-def test_write_note_no_content(cli_env, test_config):
+def test_write_note_no_content(cli_env, project_config):
     """Test error handling when no content is provided."""
     # Mock stdin to appear as a terminal, not a pipe
     with patch("sys.stdin.isatty", return_value=True):
@@ -417,19 +417,19 @@ def test_continue_conversation_no_results(cli_env):
 
 
 @patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_functionality(mock_initialize_database, test_config, monkeypatch):
+def test_ensure_migrations_functionality(mock_initialize_database, project_config, monkeypatch):
     """Test the database initialization functionality."""
     from basic_memory.services.initialization import ensure_initialization
 
     # Call the function
-    ensure_initialization(test_config)
+    ensure_initialization(project_config)
 
     # The underlying asyncio.run should call our mocked function
     mock_initialize_database.assert_called_once()
 
 
 @patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_handles_errors(mock_initialize_database, test_config, monkeypatch):
+def test_ensure_migrations_handles_errors(mock_initialize_database, project_config, monkeypatch):
     """Test that initialization handles errors gracefully."""
     from basic_memory.services.initialization import ensure_initialization
 
@@ -437,6 +437,6 @@ def test_ensure_migrations_handles_errors(mock_initialize_database, test_config,
     mock_initialize_database.side_effect = Exception("Test error")
 
     # Call the function - should not raise exception
-    ensure_initialization(test_config)
+    ensure_initialization(project_config)
 
     # We're just making sure it doesn't crash by calling it

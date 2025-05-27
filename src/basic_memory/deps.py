@@ -1,6 +1,7 @@
 """Dependency injection functions for basic-memory services."""
 
 from typing import Annotated
+from loguru import logger
 
 from fastapi import Depends, HTTPException, Path, status
 from sqlalchemy.ext.asyncio import (
@@ -8,9 +9,10 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
 )
+import pathlib
 
 from basic_memory import db
-from basic_memory.config import ProjectConfig, config, BasicMemoryConfig
+from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.importers import (
     ChatGPTImporter,
     ClaudeConversationsImporter,
@@ -44,8 +46,30 @@ AppConfigDep = Annotated[BasicMemoryConfig, Depends(get_app_config)]  # pragma: 
 ## project
 
 
-def get_project_config() -> ProjectConfig:  # pragma: no cover
-    return config
+async def get_project_config(
+    project: "ProjectPathDep", project_repository: "ProjectRepositoryDep"
+) -> ProjectConfig:  # pragma: no cover
+    """Get the current project referenced from request state.
+
+    Args:
+        request: The current request object
+        project_repository: Repository for project operations
+
+    Returns:
+        The resolved project config
+
+    Raises:
+        HTTPException: If project is not found
+    """
+
+    project_obj = await project_repository.get_by_permalink(str(project))
+    if project_obj:
+        return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
+
+    # Not found
+    raise HTTPException(  # pragma: no cover
+        status_code=status.HTTP_404_NOT_FOUND, detail=f"Project '{project}' not found."
+    )
 
 
 ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]  # pragma: no cover
@@ -203,7 +227,12 @@ MarkdownProcessorDep = Annotated[MarkdownProcessor, Depends(get_markdown_process
 async def get_file_service(
     project_config: ProjectConfigDep, markdown_processor: MarkdownProcessorDep
 ) -> FileService:
-    return FileService(project_config.home, markdown_processor)
+    logger.debug(
+        f"Creating FileService for project: {project_config.name}, base_path: {project_config.home}"
+    )
+    file_service = FileService(project_config.home, markdown_processor)
+    logger.debug(f"Created FileService for project: {file_service} ")
+    return file_service
 
 
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]

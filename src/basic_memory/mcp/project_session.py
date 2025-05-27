@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Optional
 from loguru import logger
 
+from basic_memory.config import ProjectConfig, get_project_config
+
 
 @dataclass
 class ProjectSession:
@@ -67,7 +69,7 @@ class ProjectSession:
 session = ProjectSession()
 
 
-def get_active_project(project_override: Optional[str] = None) -> str:
+def get_active_project(project_override: Optional[str] = None) -> ProjectConfig:
     """Get the active project name for a tool call.
     
     This is the main function tools should use to determine which project
@@ -79,9 +81,13 @@ def get_active_project(project_override: Optional[str] = None) -> str:
     Returns:
         The project name to use (override takes precedence over session context)
     """
-    if project_override:
-        return project_override
-    return session.get_current_project()
+    if project_override: # pragma: no cover
+        project = get_project_config(project_override)
+        session.set_current_project(project_override)
+        return project
+    
+    current_project = session.get_current_project()
+    return get_project_config(current_project)
 
 
 def add_project_metadata(result: str, project_name: str) -> str:

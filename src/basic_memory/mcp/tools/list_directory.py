@@ -6,6 +6,7 @@ from loguru import logger
 
 from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_session import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 
@@ -17,6 +18,7 @@ async def list_directory(
     dir_name: str = "/",
     depth: int = 1,
     file_name_glob: Optional[str] = None,
+    project: Optional[str] = None
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
 
@@ -31,7 +33,7 @@ async def list_directory(
                Higher values show subdirectory contents recursively
         file_name_glob: Optional glob pattern for filtering file names
                        Examples: "*.md", "*meeting*", "project_*"
-
+        project: Optional project name to delete from. If not provided, uses current active project.
     Returns:
         Formatted listing of directory contents with file metadata
 
@@ -50,9 +52,12 @@ async def list_directory(
 
         # Find meeting notes in projects folder
         list_directory(dir_name="/projects", file_name_glob="*meeting*")
+
+        # Find meeting notes in a specific project
+        list_directory(dir_name="/projects", file_name_glob="*meeting*", project="work-project")
     """
-    project_config = get_project_config()
-    project_url = project_config.project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     # Prepare query parameters
     params = {

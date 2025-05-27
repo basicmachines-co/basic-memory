@@ -6,6 +6,7 @@ from loguru import logger
 
 from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_session import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_patch
 from basic_memory.schemas import EntityResponse
@@ -134,6 +135,7 @@ async def edit_note(
     section: Optional[str] = None,
     find_text: Optional[str] = None,
     expected_replacements: int = 1,
+    project: Optional[str] = None,
 ) -> str:
     """Edit an existing markdown note in the knowledge base.
 
@@ -151,7 +153,8 @@ async def edit_note(
         section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
-
+        project: Optional project name to delete from. If not provided, uses current active project.
+        
     Returns:
         A markdown formatted summary of the edit operation and resulting semantic content
 
@@ -187,9 +190,13 @@ async def edit_note(
 
         # Update status across document (expecting exactly 2 occurrences)
         edit_note("status-report", "find_replace", "In Progress", find_text="Not Started", expected_replacements=2)
+
+        # Replace text in a file, specifying project name
+        edit_note("docs/guide", "find_replace", "new-api", find_text="old-api", project="my-project"))
+
     """
-    project_config = get_project_config()
-    project_url = project_config.project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 

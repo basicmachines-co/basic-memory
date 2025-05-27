@@ -41,9 +41,9 @@ def valid_entity_content():
 
 
 @pytest.mark.asyncio
-async def test_parse_complete_file(test_config, entity_parser, valid_entity_content):
+async def test_parse_complete_file(project_config, entity_parser, valid_entity_content):
     """Test parsing a complete entity file with all features."""
-    test_file = test_config.home / "test_entity.md"
+    test_file = project_config.home / "test_entity.md"
     test_file.write_text(valid_entity_content)
 
     entity = await entity_parser.parse_file(test_file)
@@ -95,7 +95,7 @@ async def test_parse_complete_file(test_config, entity_parser, valid_entity_cont
 
 
 @pytest.mark.asyncio
-async def test_parse_minimal_file(test_config, entity_parser):
+async def test_parse_minimal_file(project_config, entity_parser):
     """Test parsing a minimal valid entity file."""
     content = dedent("""
         ---
@@ -112,7 +112,7 @@ async def test_parse_minimal_file(test_config, entity_parser):
         - references [[Other Entity]]
         """)
 
-    test_file = test_config.home / "minimal.md"
+    test_file = project_config.home / "minimal.md"
     test_file.write_text(content)
 
     entity = await entity_parser.parse_file(test_file)
@@ -127,7 +127,7 @@ async def test_parse_minimal_file(test_config, entity_parser):
 
 
 @pytest.mark.asyncio
-async def test_error_handling(test_config, entity_parser):
+async def test_error_handling(project_config, entity_parser):
     """Test error handling."""
 
     # Missing file
@@ -135,7 +135,7 @@ async def test_error_handling(test_config, entity_parser):
         await entity_parser.parse_file(Path("nonexistent.md"))
 
     # Invalid file encoding
-    test_file = test_config.home / "binary.md"
+    test_file = project_config.home / "binary.md"
     with open(test_file, "wb") as f:
         f.write(b"\x80\x81")  # Invalid UTF-8
     with pytest.raises(UnicodeDecodeError):
@@ -143,7 +143,7 @@ async def test_error_handling(test_config, entity_parser):
 
 
 @pytest.mark.asyncio
-async def test_parse_file_without_section_headers(test_config, entity_parser):
+async def test_parse_file_without_section_headers(project_config, entity_parser):
     """Test parsing a minimal valid entity file."""
     content = dedent("""
         ---
@@ -163,7 +163,7 @@ async def test_parse_file_without_section_headers(test_config, entity_parser):
         - references [[Other Entity]]
         """)
 
-    test_file = test_config.home / "minimal.md"
+    test_file = project_config.home / "minimal.md"
     test_file.write_text(content)
 
     entity = await entity_parser.parse_file(test_file)
@@ -218,7 +218,7 @@ def test_parse_empty_content():
 
 
 @pytest.mark.asyncio
-async def test_parse_file_with_absolute_path(test_config, entity_parser):
+async def test_parse_file_with_absolute_path(project_config, entity_parser):
     """Test parsing a file with an absolute path."""
     content = dedent("""
         ---
@@ -232,7 +232,7 @@ async def test_parse_file_with_absolute_path(test_config, entity_parser):
         """)
 
     # Create a test file in the project directory
-    test_file = test_config.home / "absolute_path_test.md"
+    test_file = project_config.home / "absolute_path_test.md"
     test_file.write_text(content)
 
     # Get the absolute path to the test file

@@ -8,6 +8,7 @@ from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     GraphContext,
@@ -36,6 +37,7 @@ async def build_context(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
+    project: Optional[str] = None,
 ) -> GraphContext:
     """Get context needed to continue a discussion.
 
@@ -50,6 +52,7 @@ async def build_context(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
+        project: Optional project name to build context from. If not provided, uses current active project.
 
     Returns:
         GraphContext containing:
@@ -69,11 +72,15 @@ async def build_context(
 
         # Research the history of a feature
         build_context("memory://features/knowledge-graph", timeframe="3 months ago")
+
+        # Build context from specific project
+        build_context("memory://specs/search", project="work-project")
     """
     logger.info(f"Building context from {url}")
     url = normalize_memory_url(url)
 
-    project_url = get_project_config().project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     response = await call_get(
         client,

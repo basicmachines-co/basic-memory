@@ -25,11 +25,11 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 @pytest.mark.asyncio
 async def test_forward_reference_resolution(
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     entity_service: EntityService,
 ):
     """Test that forward references get resolved when target file is created."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # First create a file with a forward reference
     source_content = """
@@ -45,7 +45,7 @@ type: knowledge
     await create_test_file(project_dir / "source.md", source_content)
 
     # Initial sync - should create forward reference
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify forward reference
     source = await entity_service.get_by_permalink("source")
@@ -64,7 +64,7 @@ Target content
     await create_test_file(project_dir / "target_doc.md", target_content)
 
     # Sync again - should resolve the reference
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify reference is now resolved
     source = await entity_service.get_by_permalink("source")
@@ -76,11 +76,11 @@ Target content
 
 @pytest.mark.asyncio
 async def test_sync(
-    sync_service: SyncService, test_config: ProjectConfig, entity_service: EntityService
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test basic knowledge sync functionality."""
     # Create test files
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # New entity with relation
     new_content = """
@@ -117,7 +117,7 @@ A test concept.
     await entity_service.repository.add(other)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify results
     entities = await entity_service.repository.find_all()
@@ -137,17 +137,17 @@ A test concept.
 
 @pytest.mark.asyncio
 async def test_sync_hidden_file(
-    sync_service: SyncService, test_config: ProjectConfig, entity_service: EntityService
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test basic knowledge sync functionality."""
     # Create test files
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # hidden file
     await create_test_file(project_dir / "concept/.hidden.md", "hidden")
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify results
     entities = await entity_service.repository.find_all()
@@ -156,10 +156,10 @@ async def test_sync_hidden_file(
 
 @pytest.mark.asyncio
 async def test_sync_entity_with_nonexistent_relations(
-    sync_service: SyncService, test_config: ProjectConfig
+    sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test syncing an entity that references nonexistent entities."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create entity that references entities we haven't created yet
     content = """
@@ -181,7 +181,7 @@ modified: 2024-01-01
     await create_test_file(project_dir / "concept/depends_on_future.md", content)
 
     # Sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify entity created but no relations
     entity = await sync_service.entity_service.repository.get_by_permalink(
@@ -195,10 +195,10 @@ modified: 2024-01-01
 
 @pytest.mark.asyncio
 async def test_sync_entity_circular_relations(
-    sync_service: SyncService, test_config: ProjectConfig
+    sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test syncing entities with circular dependencies."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create entity A that depends on B
     content_a = """
@@ -237,7 +237,7 @@ modified: 2024-01-01
     await create_test_file(project_dir / "concept/entity_b.md", content_b)
 
     # Sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify both entities and their relations
     entity_a = await sync_service.entity_service.repository.get_by_permalink("concept/entity-a")
@@ -265,10 +265,10 @@ modified: 2024-01-01
 
 @pytest.mark.asyncio
 async def test_sync_entity_duplicate_relations(
-    sync_service: SyncService, test_config: ProjectConfig
+    sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test handling of duplicate relations in an entity."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create target entity first
     target_content = """
@@ -308,7 +308,7 @@ modified: 2024-01-01
     await create_test_file(project_dir / "concept/duplicate_relations.md", content)
 
     # Sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify duplicates are handled
     entity = await sync_service.entity_service.repository.get_by_permalink(
@@ -327,10 +327,10 @@ modified: 2024-01-01
 
 @pytest.mark.asyncio
 async def test_sync_entity_with_random_categories(
-    sync_service: SyncService, test_config: ProjectConfig
+    sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test handling of random observation categories."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     content = """
 ---
@@ -350,7 +350,7 @@ modified: 2024-01-01
     await create_test_file(project_dir / "concept/invalid_category.md", content)
 
     # Sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify observations
     entity = await sync_service.entity_service.repository.get_by_permalink(
@@ -369,10 +369,10 @@ modified: 2024-01-01
 
 @pytest.mark.asyncio
 async def test_sync_entity_with_order_dependent_relations(
-    sync_service: SyncService, test_config: ProjectConfig
+    sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test that order of entity syncing doesn't affect relation creation."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create several interrelated entities
     entities = {
@@ -430,7 +430,7 @@ modified: 2024-01-01
         await create_test_file(project_dir / f"concept/entity_{name}.md", content)
 
     # Sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify all relations are created correctly regardless of order
     entity_a = await sync_service.entity_service.repository.get_by_permalink("concept/entity-a")
@@ -448,21 +448,21 @@ modified: 2024-01-01
 
 
 @pytest.mark.asyncio
-async def test_sync_empty_directories(sync_service: SyncService, test_config: ProjectConfig):
+async def test_sync_empty_directories(sync_service: SyncService, project_config: ProjectConfig):
     """Test syncing empty directories."""
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Should not raise exceptions for empty dirs
-    assert (test_config.home).exists()
+    assert (project_config.home).exists()
 
 
 @pytest.mark.asyncio
 async def test_sync_file_modified_during_sync(
-    sync_service: SyncService, test_config: ProjectConfig
+    sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test handling of files that change during sync process."""
     # Create initial files
-    doc_path = test_config.home / "changing.md"
+    doc_path = project_config.home / "changing.md"
     await create_test_file(
         doc_path,
         """
@@ -485,7 +485,7 @@ modified: 2024-01-01
         doc_path.write_text("Modified during sync")
 
     # Run sync and modification concurrently
-    await asyncio.gather(sync_service.sync(test_config.home), modify_file())
+    await asyncio.gather(sync_service.sync(project_config.home), modify_file())
 
     # Verify final state
     doc = await sync_service.entity_service.repository.get_by_permalink("changing")
@@ -493,14 +493,14 @@ modified: 2024-01-01
 
     # if we failed in the middle of a sync, the next one should fix it.
     if doc.checksum is None:
-        await sync_service.sync(test_config.home)
+        await sync_service.sync(project_config.home)
         doc = await sync_service.entity_service.repository.get_by_permalink("changing")
         assert doc.checksum is not None
 
 
 @pytest.mark.asyncio
 async def test_permalink_formatting(
-    sync_service: SyncService, test_config: ProjectConfig, entity_service: EntityService
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test that permalinks are properly formatted during sync."""
 
@@ -526,10 +526,10 @@ modified: 2024-01-01
 
 Testing permalink generation.
 """
-        await create_test_file(test_config.home / filename, content)
+        await create_test_file(project_config.home / filename, content)
 
         # Run sync
-        await sync_service.sync(test_config.home)
+        await sync_service.sync(project_config.home)
 
     # Verify permalinks
     entities = await entity_service.repository.find_all()
@@ -545,7 +545,7 @@ Testing permalink generation.
 async def test_handle_entity_deletion(
     test_graph,
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     entity_repository: EntityRepository,
     search_service: SearchService,
 ):
@@ -572,11 +572,11 @@ async def test_handle_entity_deletion(
 @pytest.mark.asyncio
 async def test_sync_preserves_timestamps(
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     entity_service: EntityService,
 ):
     """Test that sync preserves file timestamps and frontmatter dates."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create a file with explicit frontmatter dates
     frontmatter_content = """
@@ -600,7 +600,7 @@ Testing file timestamps
     await create_test_file(file_path, file_dates_content)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Check explicit frontmatter dates
     explicit_entity = await entity_service.get_by_permalink("explicit-dates")
@@ -621,11 +621,11 @@ Testing file timestamps
 @pytest.mark.asyncio
 async def test_file_move_updates_search_index(
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     search_service: SearchService,
 ):
     """Test that moving a file updates its path in the search index."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create initial file
     content = """
@@ -640,7 +640,7 @@ Content for move test
     await create_test_file(old_path, content)
 
     # Initial sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Move the file
     new_path = project_dir / "new" / "moved_file.md"
@@ -648,7 +648,7 @@ Content for move test
     old_path.rename(new_path)
 
     # Sync again
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Check search index has updated path
     results = await search_service.search(SearchQuery(text="Content for move test"))
@@ -658,7 +658,7 @@ Content for move test
 
 @pytest.mark.asyncio
 async def test_sync_null_checksum_cleanup(
-    sync_service: SyncService, test_config: ProjectConfig, entity_service: EntityService
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test handling of entities with null checksums from incomplete syncs."""
     # Create entity with null checksum (simulating incomplete sync)
@@ -687,10 +687,10 @@ modified: 2024-01-01
 ## Observations
 - Testing cleanup
 """
-    await create_test_file(test_config.home / "concept/incomplete.md", content)
+    await create_test_file(project_config.home / "concept/incomplete.md", content)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify entity was properly synced
     updated = await entity_service.get_by_permalink("concept/incomplete")
@@ -700,11 +700,11 @@ modified: 2024-01-01
 @pytest.mark.asyncio
 async def test_sync_permalink_resolved(
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     file_service: FileService,
 ):
     """Test that we resolve duplicate permalinks on sync ."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create initial file
     content = """
@@ -719,7 +719,7 @@ Content for move test
     await create_test_file(old_path, content)
 
     # Initial sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Move the file
     new_path = project_dir / "new" / "moved_file.md"
@@ -727,7 +727,7 @@ Content for move test
     old_path.rename(new_path)
 
     # Sync again
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
     assert "permalink: old/test-move" in file_content
@@ -746,7 +746,7 @@ Content for move test
     await create_test_file(old_path, content)
 
     # Sync new file
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # assert permalink is unique
     file_content, _ = await file_service.read_file(old_path)
@@ -756,11 +756,11 @@ Content for move test
 @pytest.mark.asyncio
 async def test_sync_permalink_resolved_on_update(
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     file_service: FileService,
 ):
     """Test that sync resolves permalink conflicts on update."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     one_file = project_dir / "one.md"
     two_file = project_dir / "two.md"
@@ -788,7 +788,7 @@ async def test_sync_permalink_resolved_on_update(
     )
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Check permalinks
     file_one_content, _ = await file_service.read_file(one_file)
@@ -811,7 +811,7 @@ test content
     two_file.write_text(updated_content)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Check permalinks
     file_two_content, _ = await file_service.read_file(two_file)
@@ -832,7 +832,7 @@ test content
     await create_test_file(new_file, new_content)
 
     # Run another time
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Should have deduplicated permalink
     new_file_content, _ = await file_service.read_file(new_file)
@@ -842,17 +842,17 @@ test content
 @pytest.mark.asyncio
 async def test_sync_permalink_not_created_if_no_frontmatter(
     sync_service: SyncService,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     file_service: FileService,
 ):
     """Test that sync resolves permalink conflicts on update."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     file = project_dir / "one.md"
     await create_test_file(file)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Check permalink not created
     file_content, _ = await file_service.read_file(file)
@@ -869,13 +869,13 @@ def test_config_update_permamlinks_on_move(app_config) -> BasicMemoryConfig:
 @pytest.mark.asyncio
 async def test_sync_permalink_updated_on_move(
     test_config_update_permamlinks_on_move: BasicMemoryConfig,
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     sync_service: SyncService,
     file_service: FileService,
 ):
     """Test that we update a permalink on a file move if set in config ."""
-    project_dir = test_config.home
-    sync_service.project_config = test_config
+    project_dir = project_config.home
+    sync_service.project_config = project_config
 
     # Create initial file
     content = dedent(
@@ -893,7 +893,7 @@ async def test_sync_permalink_updated_on_move(
     await create_test_file(old_path, content)
 
     # Initial sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # verify permalink
     old_content, _ = await file_service.read_file(old_path)
@@ -905,16 +905,16 @@ async def test_sync_permalink_updated_on_move(
     old_path.rename(new_path)
 
     # Sync again
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
     assert "permalink: new/moved-file" in file_content
 
 
 @pytest.mark.asyncio
-async def test_sync_non_markdown_files(sync_service, test_config, test_files):
+async def test_sync_non_markdown_files(sync_service, project_config, test_files):
     """Test syncing non-markdown files."""
-    report = await sync_service.sync(test_config.home)
+    report = await sync_service.sync(project_config.home)
     assert report.total == 2
 
     # Check files were detected
@@ -934,10 +934,10 @@ async def test_sync_non_markdown_files(sync_service, test_config, test_files):
 
 @pytest.mark.asyncio
 async def test_sync_non_markdown_files_modified(
-    sync_service, test_config, test_files, file_service
+    sync_service, project_config, test_files, file_service
 ):
     """Test syncing non-markdown files."""
-    report = await sync_service.sync(test_config.home)
+    report = await sync_service.sync(project_config.home)
     assert report.total == 2
 
     # Check files were detected
@@ -947,7 +947,7 @@ async def test_sync_non_markdown_files_modified(
     test_files["pdf"].write_text("New content")
     test_files["image"].write_text("New content")
 
-    report = await sync_service.sync(test_config.home)
+    report = await sync_service.sync(project_config.home)
     assert len(report.modified) == 2
 
     pdf_file_content, pdf_checksum = await file_service.read_file(test_files["pdf"].name)
@@ -963,17 +963,17 @@ async def test_sync_non_markdown_files_modified(
 
 
 @pytest.mark.asyncio
-async def test_sync_non_markdown_files_move(sync_service, test_config, test_files):
+async def test_sync_non_markdown_files_move(sync_service, project_config, test_files):
     """Test syncing non-markdown files updates permalink"""
-    report = await sync_service.sync(test_config.home)
+    report = await sync_service.sync(project_config.home)
     assert report.total == 2
 
     # Check files were detected
     assert test_files["pdf"].name in [f for f in report.new]
     assert test_files["image"].name in [f for f in report.new]
 
-    test_files["pdf"].rename(test_config.home / "moved_pdf.pdf")
-    report2 = await sync_service.sync(test_config.home)
+    test_files["pdf"].rename(project_config.home / "moved_pdf.pdf")
+    report2 = await sync_service.sync(project_config.home)
     assert len(report2.moves) == 1
 
     # Verify entity is updated
@@ -983,9 +983,9 @@ async def test_sync_non_markdown_files_move(sync_service, test_config, test_file
 
 
 @pytest.mark.asyncio
-async def test_sync_non_markdown_files_deleted(sync_service, test_config, test_files):
+async def test_sync_non_markdown_files_deleted(sync_service, project_config, test_files):
     """Test syncing non-markdown files updates permalink"""
-    report = await sync_service.sync(test_config.home)
+    report = await sync_service.sync(project_config.home)
     assert report.total == 2
 
     # Check files were detected
@@ -993,7 +993,7 @@ async def test_sync_non_markdown_files_deleted(sync_service, test_config, test_f
     assert test_files["image"].name in [f for f in report.new]
 
     test_files["pdf"].unlink()
-    report2 = await sync_service.sync(test_config.home)
+    report2 = await sync_service.sync(project_config.home)
     assert len(report2.deleted) == 1
 
     # Verify entity is deleted
@@ -1003,23 +1003,23 @@ async def test_sync_non_markdown_files_deleted(sync_service, test_config, test_f
 
 @pytest.mark.asyncio
 async def test_sync_non_markdown_files_move_with_delete(
-    sync_service, test_config, test_files, file_service
+    sync_service, project_config, test_files, file_service
 ):
     """Test syncing non-markdown files handles file deletes and renames during sync"""
 
     # Create initial files
-    await create_test_file(test_config.home / "doc.pdf", "content1")
-    await create_test_file(test_config.home / "other/doc-1.pdf", "content2")
+    await create_test_file(project_config.home / "doc.pdf", "content1")
+    await create_test_file(project_config.home / "other/doc-1.pdf", "content2")
 
     # Initial sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # First move/delete the original file to make way for the move
-    (test_config.home / "doc.pdf").unlink()
-    (test_config.home / "other/doc-1.pdf").rename(test_config.home / "doc.pdf")
+    (project_config.home / "doc.pdf").unlink()
+    (project_config.home / "other/doc-1.pdf").rename(project_config.home / "doc.pdf")
 
     # Sync again
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify the changes
     moved_entity = await sync_service.entity_repository.get_by_file_path("doc.pdf")
@@ -1032,10 +1032,10 @@ async def test_sync_non_markdown_files_move_with_delete(
 
 @pytest.mark.asyncio
 async def test_sync_relation_to_non_markdown_file(
-    sync_service: SyncService, test_config: ProjectConfig, file_service: FileService, test_files
+    sync_service: SyncService, project_config: ProjectConfig, file_service: FileService, test_files
 ):
     """Test that sync resolves permalink conflicts on update."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     content = f"""
 ---
@@ -1051,7 +1051,7 @@ tags: []
     await create_test_file(note_file, content)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Check permalinks
     file_one_content, _ = await file_service.read_file(note_file)

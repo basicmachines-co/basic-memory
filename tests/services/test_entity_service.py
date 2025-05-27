@@ -91,7 +91,7 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
 
 @pytest.mark.asyncio
 async def test_create_entity_unique_permalink(
-    test_config,
+        project_config,
     entity_service: EntityService,
     file_service: FileService,
     entity_repository: EntityRepository,
@@ -110,7 +110,7 @@ async def test_create_entity_unique_permalink(
 
     # move file
     file_path = file_service.get_entity_path(entity)
-    file_path.rename(test_config.home / "new_path.md")
+    file_path.rename(project_config.home / "new_path.md")
     await entity_repository.update(entity.id, {"file_path": "new_path.md"})
 
     # create again
@@ -573,7 +573,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
 
 @pytest.mark.asyncio
 async def test_create_with_no_frontmatter(
-    test_config: ProjectConfig,
+        project_config: ProjectConfig,
     entity_parser: EntityParser,
     entity_service: EntityService,
     file_service: FileService,
@@ -581,7 +581,7 @@ async def test_create_with_no_frontmatter(
     # contains no frontmatter
     content = "# Git Workflow Guide"
     file_path = Path("test/Git Workflow Guide.md")
-    full_path = test_config.home / file_path
+    full_path = project_config.home / file_path
 
     await file_service.write_file(Path(full_path), content)
 

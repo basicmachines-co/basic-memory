@@ -94,8 +94,8 @@ class FileService:
         """
         try:
             # Convert string to Path if needed
-            path_obj = Path(path) if isinstance(path, str) else path
-
+            path_obj = self.base_path / path if isinstance(path, str) else path
+            logger.debug(f"Checking file existence: path={path_obj}")
             if path_obj.is_absolute():
                 return path_obj.exists()
             else:
@@ -121,7 +121,7 @@ class FileService:
             FileOperationError: If write fails
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
@@ -140,7 +140,7 @@ class FileService:
 
             # Compute and return checksum
             checksum = await file_utils.compute_checksum(content)
-            logger.debug("File write completed", path=str(full_path), checksum=checksum)
+            logger.debug(f"File write completed path={full_path}, {checksum=}")
             return checksum
 
         except Exception as e:
@@ -164,7 +164,7 @@ class FileService:
             FileOperationError: If read fails
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
@@ -194,7 +194,7 @@ class FileService:
             path: Path to delete (Path or string)
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         full_path.unlink(missing_ok=True)
 
@@ -210,7 +210,7 @@ class FileService:
             Checksum of updated file
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         return await file_utils.update_frontmatter(full_path, updates)
 
@@ -227,7 +227,7 @@ class FileService:
             FileError: If checksum computation fails
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
@@ -253,7 +253,7 @@ class FileService:
             File statistics
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         # get file timestamps
         return full_path.stat()
@@ -268,7 +268,7 @@ class FileService:
             MIME type of the file
         """
         # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+        path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         # get file timestamps
         mime_type, _ = mimetypes.guess_type(full_path.name)

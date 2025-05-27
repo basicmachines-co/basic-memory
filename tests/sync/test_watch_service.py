@@ -18,12 +18,12 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 
 
 @pytest.fixture
-def watch_service(sync_service, file_service, test_config):
+def watch_service(sync_service, file_service, project_config):
     """Create watch service instance."""
-    return WatchService(sync_service, file_service, test_config)
+    return WatchService(sync_service, file_service, project_config)
 
 
-def test_watch_service_init(watch_service, test_config):
+def test_watch_service_init(watch_service, project_config):
     """Test watch service initialization."""
     assert watch_service.status_path.parent.exists()
 
@@ -70,9 +70,9 @@ async def test_write_status(watch_service):
 
 
 @pytest.mark.asyncio
-async def test_handle_file_add(watch_service, test_config, test_project, entity_repository):
+async def test_handle_file_add(watch_service, project_config, test_project, entity_repository):
     """Test handling new file creation."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # empty dir is ignored
     empty_dir = project_dir / "empty_dir"
@@ -107,9 +107,9 @@ Test content
 
 
 @pytest.mark.asyncio
-async def test_handle_file_modify(watch_service, test_config, sync_service, test_project):
+async def test_handle_file_modify(watch_service, project_config, sync_service, test_project):
     """Test handling file modifications."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # empty dir is ignored
     empty_dir = project_dir / "empty_dir"
@@ -155,9 +155,9 @@ Modified content
 
 
 @pytest.mark.asyncio
-async def test_handle_file_delete(watch_service, test_config, test_project, sync_service):
+async def test_handle_file_delete(watch_service, project_config, test_project, sync_service):
     """Test handling file deletion."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create initial file
     test_file = project_dir / "to_delete.md"
@@ -193,9 +193,9 @@ Test content
 
 
 @pytest.mark.asyncio
-async def test_handle_file_move(watch_service, test_config, test_project, sync_service):
+async def test_handle_file_move(watch_service, project_config, test_project, sync_service):
     """Test handling file moves."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create initial file
     old_path = project_dir / "old" / "test_move.md"
@@ -239,9 +239,9 @@ Test content
 
 
 @pytest.mark.asyncio
-async def test_handle_concurrent_changes(watch_service, test_config, test_project, sync_service):
+async def test_handle_concurrent_changes(watch_service, project_config, test_project, sync_service):
     """Test handling multiple file changes happening close together."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create multiple files with small delays to simulate concurrent changes
     async def create_files():
@@ -288,9 +288,9 @@ async def test_handle_concurrent_changes(watch_service, test_config, test_projec
 
 
 @pytest.mark.asyncio
-async def test_handle_rapid_move(watch_service, test_config, test_project, sync_service):
+async def test_handle_rapid_move(watch_service, project_config, test_project, sync_service):
     """Test handling rapid move operations."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create initial file
     original_path = project_dir / "original.md"
@@ -334,9 +334,9 @@ Test content for rapid moves
 
 
 @pytest.mark.asyncio
-async def test_handle_delete_then_add(watch_service, test_config, test_project, sync_service):
+async def test_handle_delete_then_add(watch_service, project_config, test_project, sync_service):
     """Test handling rapid move operations."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create initial file
     original_path = project_dir / "original.md"
@@ -363,12 +363,12 @@ Test content for rapid moves
 
 
 @pytest.mark.asyncio
-async def test_handle_directory_rename(watch_service, test_config, test_project, sync_service):
+async def test_handle_directory_rename(watch_service, project_config, test_project, sync_service):
     """Test handling directory rename operations - regression test for the bug where directories
     were being processed as files, causing errors."""
     from unittest.mock import AsyncMock
 
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create a directory with a file inside
     old_dir_path = project_dir / "old_dir"

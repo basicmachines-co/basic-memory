@@ -103,9 +103,9 @@ This file has UTF-8 characters in the frontmatter.
 
 
 @pytest.mark.asyncio
-async def test_utf8_in_entity_sync(sync_service, test_config):
+async def test_utf8_in_entity_sync(sync_service, project_config):
     """Test syncing an entity with UTF-8 content."""
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Create a test file with UTF-8 characters
     test_file = project_dir / "utf8_entity.md"
@@ -130,7 +130,7 @@ permalink: i18n/utf8-document
     test_file.write_text(utf8_content, encoding="utf-8")
 
     # Sync the file
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify entity was created
     entity = await sync_service.entity_service.get_by_permalink("i18n/utf8-document")
@@ -157,7 +157,7 @@ permalink: i18n/utf8-document
 
 
 @pytest.mark.asyncio
-async def test_write_file_service_utf8(sync_service, test_config):
+async def test_write_file_service_utf8(sync_service, project_config):
     """Test FileService handling of UTF-8 content."""
     file_service = sync_service.file_service
 

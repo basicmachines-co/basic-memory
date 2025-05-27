@@ -18,7 +18,7 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 
 @pytest.mark.asyncio
 async def test_permalink_formatting(
-    sync_service: SyncService, test_config: ProjectConfig, entity_service: EntityService
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test that permalinks are properly formatted during sync.
 
@@ -29,7 +29,7 @@ async def test_permalink_formatting(
     - Directory structure is preserved
     - Multiple directories work correctly
     """
-    project_dir = test_config.home
+    project_dir = project_config.home
 
     # Test cases with different filename formats
     test_cases = [
@@ -59,7 +59,7 @@ Testing permalink generation.
         await create_test_file(project_dir / filename, content)
 
     # Run sync
-    await sync_service.sync(test_config.home)
+    await sync_service.sync(project_config.home)
 
     # Verify permalinks
     for filename, expected_permalink in test_cases:

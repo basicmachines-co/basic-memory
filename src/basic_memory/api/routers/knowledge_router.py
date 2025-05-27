@@ -10,6 +10,8 @@ from basic_memory.deps import (
     get_search_service,
     SearchServiceDep,
     LinkResolverDep,
+    ProjectPathDep,
+    FileServiceDep,
 )
 from basic_memory.schemas import (
     EntityListResponse,
@@ -44,41 +46,31 @@ async def create_entity(
     result = EntityResponse.model_validate(entity)
 
     logger.info(
-        "API response",
-        endpoint="create_entity",
-        title=result.title,
-        permalink=result.permalink,
-        status_code=201,
+        f"API response: endpoint='create_entity' title={result.title}, permalink={result.permalink}, status_code=201"
     )
     return result
 
 
 @router.put("/entities/{permalink:path}", response_model=EntityResponse)
 async def create_or_update_entity(
+    project: ProjectPathDep,
     permalink: Permalink,
     data: Entity,
     response: Response,
     background_tasks: BackgroundTasks,
     entity_service: EntityServiceDep,
     search_service: SearchServiceDep,
+    file_service: FileServiceDep,
 ) -> EntityResponse:
     """Create or update an entity. If entity exists, it will be updated, otherwise created."""
     logger.info(
-        "API request",
-        endpoint="create_or_update_entity",
-        permalink=permalink,
-        entity_type=data.entity_type,
-        title=data.title,
+        f"API request: create_or_update_entity for {project=}, {permalink=}, {data.entity_type=}, {data.title=}"
     )
 
     # Validate permalink matches
     if data.permalink != permalink:
         logger.warning(
-            "API validation error",
-            endpoint="create_or_update_entity",
-            permalink=permalink,
-            data_permalink=data.permalink,
-            error="Permalink mismatch",
+            f"API validation error: creating/updating entity with permalink mismatch - url={permalink}, data={data.permalink}",
         )
         raise HTTPException(
             status_code=400,
@@ -94,12 +86,7 @@ async def create_or_update_entity(
     result = EntityResponse.model_validate(entity)
 
     logger.info(
-        "API response",
-        endpoint="create_or_update_entity",
-        title=result.title,
-        permalink=result.permalink,
-        created=created,
-        status_code=response.status_code,
+        f"API response: {result.title=}, {result.permalink=}, {created=}, status_code={response.status_code}"
     )
     return result
 
@@ -117,10 +104,7 @@ async def edit_entity(
     This endpoint allows for targeted edits without requiring the full entity content.
     """
     logger.info(
-        "API request",
-        endpoint="edit_entity",
-        identifier=identifier,
-        operation=data.operation,
+        f"API request: endpoint='edit_entity', identifier='{identifier}', operation='{data.operation}'"
     )
 
     try:

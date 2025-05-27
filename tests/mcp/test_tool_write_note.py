@@ -265,7 +265,7 @@ async def test_write_note_verbose(app):
 
 
 @pytest.mark.asyncio
-async def test_write_note_preserves_custom_metadata(app, test_config):
+async def test_write_note_preserves_custom_metadata(app, project_config):
     """Test that updating a note preserves custom metadata fields.
 
     Reproduces issue #36 where custom frontmatter fields like Status
@@ -291,7 +291,7 @@ async def test_write_note_preserves_custom_metadata(app, test_config):
     # We need to use a direct file update to add custom frontmatter
     import frontmatter
 
-    file_path = test_config.home / "test" / "Custom Metadata Note.md"
+    file_path = project_config.home / "test" / "Custom Metadata Note.md"
     post = frontmatter.load(file_path)
 
     # Add custom frontmatter

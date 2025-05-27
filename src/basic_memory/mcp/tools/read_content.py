@@ -5,17 +5,19 @@ supporting various file types including text, images, and other binary files.
 Files are read directly without any knowledge graph processing.
 """
 
+from typing import Optional
+import base64
+import io
+
 from loguru import logger
+from PIL import Image as PILImage
 
 from basic_memory.config import get_project_config
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
-
-import base64
-import io
-from PIL import Image as PILImage
 
 
 def calculate_target_params(content_length):
@@ -145,7 +147,7 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 
 
 @mcp.tool(description="Read a file's raw content by path or permalink")
-async def read_content(path: str) -> dict:
+async def read_content(path: str, project: Optional[str] = None) -> dict:
     """Read a file's raw content by path or permalink.
 
     This tool provides direct access to file content in the knowledge base,
@@ -159,6 +161,7 @@ async def read_content(path: str) -> dict:
             - A regular file path (docs/example.md)
             - A memory URL (memory://docs/example)
             - A permalink (docs/example)
+        project: Optional project name to read from. If not provided, uses current active project.
 
     Returns:
         A dictionary with the file content and metadata:
@@ -176,10 +179,14 @@ async def read_content(path: str) -> dict:
 
         # Read using memory URL
         content = await read_file("memory://docs/architecture")
+
+        # Read from specific project
+        content = await read_content("docs/example.md", project="work-project")
     """
     logger.info("Reading file", path=path)
 
-    project_url = get_project_config().project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     url = memory_url_path(path)
     response = await call_get(client, f"{project_url}/resource/{url}")

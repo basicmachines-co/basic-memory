@@ -18,19 +18,19 @@ from basic_memory.services.initialization import (
 
 @pytest.mark.asyncio
 @patch("basic_memory.services.initialization.db.run_migrations")
-async def test_initialize_database(mock_run_migrations, test_config):
+async def test_initialize_database(mock_run_migrations, project_config):
     """Test initializing the database."""
-    await initialize_database(test_config)
-    mock_run_migrations.assert_called_once_with(test_config)
+    await initialize_database(project_config)
+    mock_run_migrations.assert_called_once_with(project_config)
 
 
 @pytest.mark.asyncio
 @patch("basic_memory.services.initialization.db.run_migrations")
-async def test_initialize_database_error(mock_run_migrations, test_config):
+async def test_initialize_database_error(mock_run_migrations, project_config):
     """Test handling errors during database initialization."""
     mock_run_migrations.side_effect = Exception("Test error")
-    await initialize_database(test_config)
-    mock_run_migrations.assert_called_once_with(test_config)
+    await initialize_database(project_config)
+    mock_run_migrations.assert_called_once_with(project_config)
 
 
 @pytest.mark.asyncio
@@ -76,9 +76,9 @@ async def test_initialize_app_sync_disabled(
 
 
 @patch("basic_memory.services.initialization.asyncio.run")
-def test_ensure_initialization(mock_run, test_config):
+def test_ensure_initialization(mock_run, project_config):
     """Test synchronous initialization wrapper."""
-    ensure_initialization(test_config)
+    ensure_initialization(project_config)
     mock_run.assert_called_once()
 
 

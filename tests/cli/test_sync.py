@@ -71,14 +71,14 @@ def test_display_detailed_sync_results_with_changes():
 
 
 @pytest.mark.asyncio
-async def test_run_sync_basic(sync_service, test_config, test_project):
+async def test_run_sync_basic(sync_service, project_config, test_project):
     """Test basic sync operation."""
     # Set up test environment
-    config.home = test_config.home
+    config.home = project_config.home
     config.name = test_project.name
 
     # Create test files
-    test_file = test_config.home / "test.md"
+    test_file = project_config.home / "test.md"
     test_file.write_text("""---
 title: Test
 ---
@@ -89,9 +89,9 @@ Some content""")
     await run_sync(verbose=True)
 
 
-def test_sync_command(sync_service, test_config, test_project):
+def test_sync_command(sync_service, project_config, test_project):
     """Test the sync command."""
-    config.home = test_config.home
+    config.home = project_config.home
     config.name = test_project.name
 
     result = runner.invoke(app, ["sync", "--verbose"])

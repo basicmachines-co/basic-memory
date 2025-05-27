@@ -6,34 +6,34 @@ import pytest
 from watchfiles import Change
 
 
-def test_filter_changes_valid_path(watch_service, test_config):
+def test_filter_changes_valid_path(watch_service, project_config):
     """Test the filter_changes method with valid non-hidden paths."""
     # Regular file path
     assert (
-        watch_service.filter_changes(Change.added, str(test_config.home / "valid_file.txt")) is True
+            watch_service.filter_changes(Change.added, str(project_config.home / "valid_file.txt")) is True
     )
 
     # Nested path
     assert (
         watch_service.filter_changes(
-            Change.added, str(test_config.home / "nested" / "valid_file.txt")
+            Change.added, str(project_config.home / "nested" / "valid_file.txt")
         )
         is True
     )
 
 
-def test_filter_changes_hidden_path(watch_service, test_config):
+def test_filter_changes_hidden_path(watch_service, project_config):
     """Test the filter_changes method with hidden files/directories."""
     # Hidden file (starts with dot)
     assert (
-        watch_service.filter_changes(Change.added, str(test_config.home / ".hidden_file.txt"))
+        watch_service.filter_changes(Change.added, str(project_config.home / ".hidden_file.txt"))
         is False
     )
 
     # File in hidden directory
     assert (
         watch_service.filter_changes(
-            Change.added, str(test_config.home / ".hidden_dir" / "file.txt")
+            Change.added, str(project_config.home / ".hidden_dir" / "file.txt")
         )
         is False
     )
@@ -41,14 +41,14 @@ def test_filter_changes_hidden_path(watch_service, test_config):
     # Deeply nested hidden directory
     assert (
         watch_service.filter_changes(
-            Change.added, str(test_config.home / "valid" / ".hidden" / "file.txt")
+            Change.added, str(project_config.home / "valid" / ".hidden" / "file.txt")
         )
         is False
     )
 
 
 @pytest.mark.asyncio
-async def test_handle_changes_empty_set(watch_service, test_config, test_project):
+async def test_handle_changes_empty_set(watch_service, project_config, test_project):
     """Test handle_changes with an empty set (no processed files)."""
     # Mock write_status to avoid file operations
     with patch.object(watch_service, "write_status", return_value=None):

@@ -3,21 +3,13 @@
 install:
 	pip install -e ".[dev]"
 
-test:
+test-unit:
 	uv run pytest -p pytest_mock -v
 
-# Run tests for a specific module
-# Usage: make test-module m=path/to/module.py [cov=module_path]
-test-module:
-	@if [ -z "$(m)" ]; then \
-		echo "Usage: make test-module m=path/to/module.py [cov=module_path]"; \
-		exit 1; \
-	fi; \
-	if [ -z "$(cov)" ]; then \
-		uv run pytest $(m) -v; \
-	else \
-		uv run pytest $(m) -v --cov=$(cov); \
-	fi
+test-int:
+	uv run pytest -p pytest_mock -v --no-cov tests-int
+
+test: test-unit test-int
 
 lint:
 	ruff check . --fix

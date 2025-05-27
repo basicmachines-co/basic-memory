@@ -4,7 +4,7 @@ This tool creates Obsidian canvas files (.canvas) using the JSON Canvas 1.0 spec
 """
 
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from loguru import logger
 
@@ -12,6 +12,7 @@ from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
+from basic_memory.mcp.project_session import get_active_project
 
 
 @mcp.tool(
@@ -22,6 +23,7 @@ async def canvas(
     edges: List[Dict[str, Any]],
     title: str,
     folder: str,
+    project: Optional[str] = None,
 ) -> str:
     """Create an Obsidian canvas file with the provided nodes and edges.
 
@@ -35,6 +37,7 @@ async def canvas(
         edges: List of edge objects following JSON Canvas 1.0 spec
         title: The title of the canvas (will be saved as title.canvas)
         folder: The folder where the file should be saved
+        project: Optional project name to create canvas in. If not provided, uses current active project.
 
     Returns:
         A summary of the created canvas file
@@ -72,8 +75,16 @@ async def canvas(
       ]
     }
     ```
+
+    Examples:
+        # Create canvas in current project
+        canvas(nodes=[...], edges=[...], title="My Canvas", folder="diagrams")
+
+        # Create canvas in specific project
+        canvas(nodes=[...], edges=[...], title="My Canvas", folder="diagrams", project="work-project")
     """
-    project_url = get_project_config().project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     # Ensure path has .canvas extension
     file_title = title if title.endswith(".canvas") else f"{title}.canvas"

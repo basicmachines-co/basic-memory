@@ -10,10 +10,10 @@ from basic_memory.deps import get_project_config, get_engine_factory
 
 
 @pytest_asyncio.fixture
-def app(test_config, engine_factory) -> FastAPI:
+def app(project_config, engine_factory) -> FastAPI:
     """Create test FastAPI application."""
     app = fastapi_app
-    app.dependency_overrides[get_project_config] = lambda: test_config
+    app.dependency_overrides[get_project_config] = lambda: project_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     return app
 
@@ -26,5 +26,14 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture
-def cli_env(test_config, client):
-    pass
+def cli_env(project_config, client):
+    """Set up CLI environment with correct project session."""
+    from basic_memory.mcp.project_session import session
+    
+    # Initialize the session with the test project
+    session.set_current_project(project_config.name)
+    
+    return {
+        "project_config": project_config,
+        "client": client
+    }

@@ -17,7 +17,7 @@ from basic_memory.sync.sync_service import SyncReport
 runner = CliRunner()
 
 
-def test_status_command(tmp_path, app_config, test_config, test_project):
+def test_status_command(tmp_path, app_config, project_config, test_project):
     """Test CLI status command."""
     config.home = tmp_path
     config.name = test_project.name

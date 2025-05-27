@@ -10,11 +10,11 @@ from basic_memory.schemas import EntityResponse
 
 
 @pytest.mark.asyncio
-async def test_get_resource_content(client, test_config, entity_repository, project_url):
+async def test_get_resource_content(client, project_config, entity_repository, project_url):
     """Test getting content by permalink."""
     # Create a test file
     content = "# Test Content\n\nThis is a test file."
-    test_file = Path(test_config.home) / "test" / "test.md"
+    test_file = Path(project_config.home) / "test" / "test.md"
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text(content)
 
@@ -39,11 +39,11 @@ async def test_get_resource_content(client, test_config, entity_repository, proj
 
 
 @pytest.mark.asyncio
-async def test_get_resource_pagination(client, test_config, entity_repository, project_url):
+async def test_get_resource_pagination(client, project_config, entity_repository, project_url):
     """Test getting content by permalink with pagination."""
     # Create a test file
     content = "# Test Content\n\nThis is a test file."
-    test_file = Path(test_config.home) / "test" / "test.md"
+    test_file = Path(project_config.home) / "test" / "test.md"
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text(content)
 
@@ -70,11 +70,11 @@ async def test_get_resource_pagination(client, test_config, entity_repository, p
 
 
 @pytest.mark.asyncio
-async def test_get_resource_by_title(client, test_config, entity_repository, project_url):
+async def test_get_resource_by_title(client, project_config, entity_repository, project_url):
     """Test getting content by permalink."""
     # Create a test file
     content = "# Test Content\n\nThis is a test file."
-    test_file = Path(test_config.home) / "test" / "test.md"
+    test_file = Path(project_config.home) / "test" / "test.md"
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text(content)
 
@@ -105,7 +105,7 @@ async def test_get_resource_missing_entity(client, project_url):
 
 
 @pytest.mark.asyncio
-async def test_get_resource_missing_file(client, test_config, entity_repository, project_url):
+async def test_get_resource_missing_file(client, project_config, entity_repository, project_url):
     """Test 404 when file doesn't exist."""
     # Create entity referencing non-existent file
     entity = await entity_repository.create(
@@ -126,7 +126,7 @@ async def test_get_resource_missing_file(client, test_config, entity_repository,
 
 
 @pytest.mark.asyncio
-async def test_get_resource_observation(client, test_config, entity_repository, project_url):
+async def test_get_resource_observation(client, project_config, entity_repository, project_url):
     """Test getting content by observation permalink."""
     # Create entity
     content = "# Test Content\n\n- [note] an observation."
@@ -164,7 +164,7 @@ permalink: test/test-entity
 
 
 @pytest.mark.asyncio
-async def test_get_resource_entities(client, test_config, entity_repository, project_url):
+async def test_get_resource_entities(client, project_config, entity_repository, project_url):
     """Test getting content by permalink match."""
     # Create entity
     content1 = "# Test Content\n"
@@ -213,7 +213,7 @@ async def test_get_resource_entities(client, test_config, entity_repository, pro
 
 @pytest.mark.asyncio
 async def test_get_resource_entities_pagination(
-    client, test_config, entity_repository, project_url
+    client, project_config, entity_repository, project_url
 ):
     """Test getting content by permalink match."""
     # Create entity
@@ -264,7 +264,7 @@ permalink: test/related-entity
 
 
 @pytest.mark.asyncio
-async def test_get_resource_relation(client, test_config, entity_repository, project_url):
+async def test_get_resource_relation(client, project_config, entity_repository, project_url):
     """Test getting content by relation permalink."""
     # Create entity
     content1 = "# Test Content\n"
@@ -314,7 +314,7 @@ async def test_get_resource_relation(client, test_config, entity_repository, pro
 
 @pytest.mark.asyncio
 async def test_put_resource_new_file(
-    client, test_config, entity_repository, search_repository, project_url
+    client, project_config, entity_repository, search_repository, project_url
 ):
     """Test creating a new file via PUT."""
     # Test data
@@ -335,7 +335,7 @@ async def test_put_resource_new_file(
     }
 
     # Make sure the file doesn't exist yet
-    full_path = Path(test_config.home) / file_path
+    full_path = Path(project_config.home) / file_path
     if full_path.exists():
         full_path.unlink()
 
@@ -352,7 +352,7 @@ async def test_put_resource_new_file(
     assert "size" in response_data
 
     # Verify file was created
-    full_path = Path(test_config.home) / file_path
+    full_path = Path(project_config.home) / file_path
     assert full_path.exists()
 
     # Verify file content
@@ -371,11 +371,11 @@ async def test_put_resource_new_file(
 
 
 @pytest.mark.asyncio
-async def test_put_resource_update_existing(client, test_config, entity_repository, project_url):
+async def test_put_resource_update_existing(client, project_config, entity_repository, project_url):
     """Test updating an existing file via PUT."""
     # Create an initial file and entity
     file_path = "visualizations/update-test.canvas"
-    full_path = Path(test_config.home) / file_path
+    full_path = Path(project_config.home) / file_path
     full_path.parent.mkdir(parents=True, exist_ok=True)
 
     initial_data = {

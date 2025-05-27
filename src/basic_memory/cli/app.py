@@ -2,6 +2,8 @@ from typing import Optional
 
 import typer
 
+from basic_memory.config import get_project_config
+from basic_memory.mcp.project_session import session
 
 def version_callback(value: bool) -> None:
     """Show version and exit."""
@@ -42,28 +44,21 @@ def app_callback(
     # We use the project option to set the BASIC_MEMORY_PROJECT environment variable
     # The config module will pick this up when loading
     if project:  # pragma: no cover
-        import os
-        import importlib
-        from basic_memory import config as config_module
 
-        # Set the environment variable
-        os.environ["BASIC_MEMORY_PROJECT"] = project
-
-        # Reload the config module to pick up the new project
-        importlib.reload(config_module)
-
-        # Update the local reference
-        global app_config
-        from basic_memory.config import app_config as new_config
-
-        app_config = new_config
+        # Initialize MCP session with the supplied
+        current_project = get_project_config(project)
+        session.set_current_project(current_project.name)
 
     # Run initialization for every command unless --version was specified
     if not version and ctx.invoked_subcommand is not None:
         from basic_memory.config import app_config
         from basic_memory.services.initialization import ensure_initialization
-
+        
         ensure_initialization(app_config)
+        
+        # Initialize MCP session with the default project
+        current_project = app_config.default_project
+        session.set_current_project(current_project)
 
 
 # Register sub-command groups

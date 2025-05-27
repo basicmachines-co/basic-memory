@@ -1,6 +1,6 @@
 """Recent activity tool for Basic Memory MCP server."""
 
-from typing import List, Union
+from typing import List, Union, Optional
 
 from loguru import logger
 
@@ -8,6 +8,7 @@ from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import GraphContext
 from basic_memory.schemas.search import SearchItemType
@@ -32,6 +33,7 @@ async def recent_activity(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
+    project: Optional[str] = None,
 ) -> GraphContext:
     """Get recent activity across the knowledge base.
 
@@ -52,6 +54,7 @@ async def recent_activity(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
+        project: Optional project name to get activity from. If not provided, uses current active project.
 
     Returns:
         GraphContext containing:
@@ -74,6 +77,9 @@ async def recent_activity(
 
         # Look back further with more context
         recent_activity(type="entity", depth=2, timeframe="2 weeks ago")
+
+        # Get activity from specific project
+        recent_activity(type="entity", project="work-project")
 
     Notes:
         - Higher depth values (>3) may impact performance with large result sets
@@ -115,7 +121,8 @@ async def recent_activity(
         # Add validated types to params
         params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
-    project_url = get_project_config().project_url
+    active_project = get_active_project(project)
+    project_url = active_project.project_url
 
     response = await call_get(
         client,
