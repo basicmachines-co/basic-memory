@@ -50,7 +50,9 @@ def project_root() -> Path:
 @pytest.fixture
 def app_config(project_config: ProjectConfig) -> BasicMemoryConfig:
     projects = {project_config.name: str(project_config.home)}
-    app_config = BasicMemoryConfig(env="test", projects=projects, default_project=project_config.name)
+    app_config = BasicMemoryConfig(
+        env="test", projects=projects, default_project=project_config.name
+    )
 
     # set the module app_config instance project list
     basic_memory_app_config.projects = projects
@@ -144,6 +146,7 @@ async def test_project(project_config, project_repository: ProjectRepository) ->
 async def project_session(test_project: Project):
     """Initialize project session for tests."""
     from basic_memory.mcp.project_session import session
+
     session.initialize(test_project.name)
     return session
 
@@ -172,7 +175,9 @@ async def entity_service(
 
 
 @pytest.fixture
-def file_service(project_config: ProjectConfig, markdown_processor: MarkdownProcessor) -> FileService:
+def file_service(
+    project_config: ProjectConfig, markdown_processor: MarkdownProcessor
+) -> FileService:
     """Create FileService instance."""
     return FileService(project_config.home, markdown_processor)
 

@@ -11,7 +11,6 @@ from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.base import Entity
 from basic_memory.utils import parse_tags
-from basic_memory.config import get_project_config
 
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]

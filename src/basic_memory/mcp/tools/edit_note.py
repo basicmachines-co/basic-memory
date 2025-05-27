@@ -4,7 +4,6 @@ from typing import Optional
 
 from loguru import logger
 
-from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.mcp.server import mcp
@@ -154,7 +153,7 @@ async def edit_note(
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
         project: Optional project name to delete from. If not provided, uses current active project.
-        
+
     Returns:
         A markdown formatted summary of the edit operation and resulting semantic content
 

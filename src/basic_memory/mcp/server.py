@@ -38,10 +38,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:  # pragma:
     """Manage application lifecycle with type-safe context"""
     # Initialize on startup
     watch_task = await initialize_app(app_config)
-    
+
     # Initialize project session with default project
-    session.initialize(app_config.name)
-    
+    session.initialize(app_config.default_project)
+
     try:
         yield AppContext(watch_task=watch_task)
     finally:

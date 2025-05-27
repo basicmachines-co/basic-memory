@@ -25,7 +25,7 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
 @pytest.mark.asyncio
 async def test_forward_reference_resolution(
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     entity_service: EntityService,
 ):
     """Test that forward references get resolved when target file is created."""
@@ -545,7 +545,7 @@ Testing permalink generation.
 async def test_handle_entity_deletion(
     test_graph,
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     entity_repository: EntityRepository,
     search_service: SearchService,
 ):
@@ -572,7 +572,7 @@ async def test_handle_entity_deletion(
 @pytest.mark.asyncio
 async def test_sync_preserves_timestamps(
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     entity_service: EntityService,
 ):
     """Test that sync preserves file timestamps and frontmatter dates."""
@@ -621,7 +621,7 @@ Testing file timestamps
 @pytest.mark.asyncio
 async def test_file_move_updates_search_index(
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     search_service: SearchService,
 ):
     """Test that moving a file updates its path in the search index."""
@@ -700,7 +700,7 @@ modified: 2024-01-01
 @pytest.mark.asyncio
 async def test_sync_permalink_resolved(
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     file_service: FileService,
 ):
     """Test that we resolve duplicate permalinks on sync ."""
@@ -756,7 +756,7 @@ Content for move test
 @pytest.mark.asyncio
 async def test_sync_permalink_resolved_on_update(
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     file_service: FileService,
 ):
     """Test that sync resolves permalink conflicts on update."""
@@ -842,7 +842,7 @@ test content
 @pytest.mark.asyncio
 async def test_sync_permalink_not_created_if_no_frontmatter(
     sync_service: SyncService,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     file_service: FileService,
 ):
     """Test that sync resolves permalink conflicts on update."""
@@ -869,7 +869,7 @@ def test_config_update_permamlinks_on_move(app_config) -> BasicMemoryConfig:
 @pytest.mark.asyncio
 async def test_sync_permalink_updated_on_move(
     test_config_update_permamlinks_on_move: BasicMemoryConfig,
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     sync_service: SyncService,
     file_service: FileService,
 ):

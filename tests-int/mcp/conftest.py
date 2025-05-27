@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from basic_memory.config import ProjectConfig, BasicMemoryConfig
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Project
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
@@ -21,6 +21,7 @@ from basic_memory.config import app_config as basic_memory_app_config  # noqa: F
 @pytest.fixture(scope="function")
 def mcp() -> FastMCP:
     return mcp_server
+
 
 @pytest_asyncio.fixture(scope="function")
 async def second_project(app_config, project_repository, tmp_path) -> Project:
@@ -47,9 +48,14 @@ def app(app_config, project_config, engine_factory, project_session) -> FastAPI:
 
 
 @pytest.fixture(scope="function")
-def multiple_app_config(test_project, second_project, ) -> BasicMemoryConfig:
-    projects = {test_project.name: str(test_project.path),
-                second_project.name: str(second_project.path)}
+def multiple_app_config(
+    test_project,
+    second_project,
+) -> BasicMemoryConfig:
+    projects = {
+        test_project.name: str(test_project.path),
+        second_project.name: str(second_project.path),
+    }
     app_config = BasicMemoryConfig(env="test", projects=projects, default_project=test_project.name)
 
     # set the module app_config instance project list
@@ -61,7 +67,7 @@ def multiple_app_config(test_project, second_project, ) -> BasicMemoryConfig:
 
 @pytest.fixture(scope="function")
 def multi_project_app(multiple_app_config, engine_factory, project_session) -> FastAPI:
-    """Create test FastAPI application. """
+    """Create test FastAPI application."""
 
     # override the app config with two projects
     app = fastapi_app

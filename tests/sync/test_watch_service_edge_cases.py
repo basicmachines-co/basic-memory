@@ -10,7 +10,8 @@ def test_filter_changes_valid_path(watch_service, project_config):
     """Test the filter_changes method with valid non-hidden paths."""
     # Regular file path
     assert (
-            watch_service.filter_changes(Change.added, str(project_config.home / "valid_file.txt")) is True
+        watch_service.filter_changes(Change.added, str(project_config.home / "valid_file.txt"))
+        is True
     )
 
     # Nested path

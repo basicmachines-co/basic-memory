@@ -92,7 +92,6 @@ class EntityParser:
     async def parse_file(self, path: Path | str) -> EntityMarkdown:
         """Parse markdown file into EntityMarkdown."""
 
-        # TODO move to api endpoint to check if absolute path was requested
         # Check if the path is already absolute
         if (
             isinstance(path, Path)
@@ -101,11 +100,15 @@ class EntityParser:
         ):
             absolute_path = Path(path)
         else:
-            absolute_path = self.base_path / path
+            absolute_path = self.get_file_path(path)
 
         # Parse frontmatter and content using python-frontmatter
         file_content = absolute_path.read_text(encoding="utf-8")
         return await self.parse_file_content(absolute_path, file_content)
+
+    def get_file_path(self, path):
+        """Get absolute path for a file using the base path for the project."""
+        return self.base_path / path
 
     async def parse_file_content(self, absolute_path, file_content):
         post = frontmatter.loads(file_content)

@@ -144,7 +144,7 @@ async def create_test_upload_file(tmp_path, content):
 
 @pytest.mark.asyncio
 async def test_import_chatgpt(
-        project_config, client: AsyncClient, tmp_path, chatgpt_json_content, file_service, project_url
+    project_config, client: AsyncClient, tmp_path, chatgpt_json_content, file_service, project_url
 ):
     """Test importing ChatGPT conversations."""
     # Create a test file

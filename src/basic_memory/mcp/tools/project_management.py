@@ -38,7 +38,6 @@ async def list_projects(ctx: Context | None = None) -> str:
 
     try:
         # Get projects from API
-        base_url = get_project_config().project_url.replace(f"/{get_project_config().name}", "")
         response = await call_get(client, "/projects/projects")
         project_list = ProjectList.model_validate(response.json())
 
@@ -117,9 +116,6 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
             result += f"• {project_info.statistics.total_entities} entities\n"
             result += f"• {project_info.statistics.total_observations} observations\n"
             result += f"• {project_info.statistics.total_relations} relations\n"
-
-            if project_info.recent_activity:  # pragma: no cover - bug: field doesn't exist
-                result += f"• Recent activity: {len(project_info.recent_activity)} items\n"
 
         except Exception as e:
             # If we can't get project info, still confirm the switch

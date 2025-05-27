@@ -30,7 +30,7 @@ async def test_get_project_info_additional(client, test_graph, project_url):
 async def test_project_list_additional(client, project_url):
     """Test additional fields in the project list endpoint."""
     # Call the endpoint
-    response = await client.get(f"/projects/projects")
+    response = await client.get("/projects/projects")
 
     # Verify response
     assert response.status_code == 200

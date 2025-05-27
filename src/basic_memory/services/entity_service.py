@@ -109,7 +109,7 @@ class EntityService(BaseService[EntityModel]):
         logger.debug(f"Creating entity: {schema.title}")
 
         # Get file path and ensure it's a Path object
-        file_path = schema.file_path
+        file_path = Path(schema.file_path)
 
         if await self.file_service.exists(file_path):
             raise EntityCreationError(

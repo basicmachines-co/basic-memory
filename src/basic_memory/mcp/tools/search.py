@@ -4,7 +4,6 @@ from typing import List, Optional
 
 from loguru import logger
 
-from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post

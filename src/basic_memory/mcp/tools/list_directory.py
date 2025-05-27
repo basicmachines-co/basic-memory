@@ -4,7 +4,6 @@ from typing import Optional
 
 from loguru import logger
 
-from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.mcp.server import mcp
@@ -18,7 +17,7 @@ async def list_directory(
     dir_name: str = "/",
     depth: int = 1,
     file_name_glob: Optional[str] = None,
-    project: Optional[str] = None
+    project: Optional[str] = None,
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
 

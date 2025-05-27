@@ -232,17 +232,21 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
 
     actual_project_name = None
     os_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
-    if os_project_name: # pragma: no cover
-        logger.warning(f"BASIC_MEMORY_PROJECT is not supported anymore. Use the --project flag or set the default project in the config instead. Setting default project to {os_project_name}")
+    if os_project_name:  # pragma: no cover
+        logger.warning(
+            f"BASIC_MEMORY_PROJECT is not supported anymore. Use the --project flag or set the default project in the config instead. Setting default project to {os_project_name}"
+        )
         actual_project_name = project_name
     # if the project_name is passed in, use it
     elif not project_name:
         # Get project name from environment variable or use provided name or default
         actual_project_name = config_manager.default_project
-    else: # pragma: no cover
+    else:  # pragma: no cover
         actual_project_name = project_name
 
     # the config contains a dict[str,str] of project names and absolute paths
+    assert actual_project_name is not None, "actual_project_name cannot be None"
+
     project_path = config_manager.projects.get(actual_project_name)
     if not project_path:  # pragma: no cover
         raise ValueError(f"Project '{actual_project_name}' not found")

@@ -29,11 +29,8 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 def cli_env(project_config, client):
     """Set up CLI environment with correct project session."""
     from basic_memory.mcp.project_session import session
-    
+
     # Initialize the session with the test project
     session.set_current_project(project_config.name)
-    
-    return {
-        "project_config": project_config,
-        "client": client
-    }
+
+    return {"project_config": project_config, "client": client}

@@ -5,7 +5,6 @@ from typing import Optional
 
 from loguru import logger
 
-from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
@@ -17,7 +16,9 @@ from basic_memory.schemas.memory import memory_url_path
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
 )
-async def read_note(identifier: str, page: int = 1, page_size: int = 10, project: Optional[str] = None) -> str:
+async def read_note(
+    identifier: str, page: int = 1, page_size: int = 10, project: Optional[str] = None
+) -> str:
     """Read a markdown note from the knowledge base.
 
     This tool finds and retrieves a note by its title, permalink, or content search,

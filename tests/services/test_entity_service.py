@@ -91,7 +91,7 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
 
 @pytest.mark.asyncio
 async def test_create_entity_unique_permalink(
-        project_config,
+    project_config,
     entity_service: EntityService,
     file_service: FileService,
     entity_repository: EntityRepository,
@@ -573,7 +573,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
 
 @pytest.mark.asyncio
 async def test_create_with_no_frontmatter(
-        project_config: ProjectConfig,
+    project_config: ProjectConfig,
     entity_parser: EntityParser,
     entity_service: EntityService,
     file_service: FileService,
