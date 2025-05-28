@@ -72,7 +72,7 @@ async def write_note(
     # Process tags using the helper function
     tag_list = parse_tags(tags)
     # Create the entity request
-    metadata = {"tags": [f"#{tag}" for tag in tag_list]} if tag_list else None
+    metadata = {"tags": tag_list} if tag_list else None
     entity = Entity(
         title=title,
         folder=folder,

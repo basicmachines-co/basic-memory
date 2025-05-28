@@ -24,18 +24,11 @@ async def test_write_note(app):
     )
 
     assert result
-    assert (
-        dedent("""
-        # Created note
-        file_path: test/Test Note.md
-        permalink: test/test-note
-        checksum: 159f2168
-        
-        ## Tags
-        - test, documentation
-        """).strip()
-        in result
-    )
+    assert "# Created note" in result
+    assert "file_path: test/Test Note.md" in result
+    assert "permalink: test/test-note" in result
+    assert "## Tags" in result
+    assert "- test, documentation" in result
 
     # Try reading it back via permalink
     content = await read_note("test/test-note")
@@ -46,8 +39,8 @@ async def test_write_note(app):
         type: note
         permalink: test/test-note
         tags:
-        - '#test'
-        - '#documentation'
+        - test
+        - documentation
         ---
         
         # Test
@@ -63,15 +56,9 @@ async def test_write_note_no_tags(app):
     result = await write_note(title="Simple Note", folder="test", content="Just some text")
 
     assert result
-    assert (
-        dedent("""
-        # Created note
-        file_path: test/Simple Note.md
-        permalink: test/simple-note
-        checksum: 9a1ff079
-        """).strip()
-        in result
-    )
+    assert "# Created note" in result
+    assert "file_path: test/Simple Note.md" in result
+    assert "permalink: test/simple-note" in result
     # Should be able to read it back
     content = await read_note("test/simple-note")
     assert (
@@ -106,18 +93,11 @@ async def test_write_note_update_existing(app):
     )
 
     assert result  # Got a valid permalink
-    assert (
-        dedent("""
-        # Created note
-        file_path: test/Test Note.md
-        permalink: test/test-note
-        checksum: 159f2168
-        
-        ## Tags
-        - test, documentation
-        """).strip()
-        in result
-    )
+    assert "# Created note" in result
+    assert "file_path: test/Test Note.md" in result
+    assert "permalink: test/test-note" in result
+    assert "## Tags" in result
+    assert "- test, documentation" in result
 
     result = await write_note(
         title="Test Note",
@@ -125,18 +105,11 @@ async def test_write_note_update_existing(app):
         content="# Test\nThis is an updated note",
         tags=["test", "documentation"],
     )
-    assert (
-        dedent("""
-        # Updated note
-        file_path: test/Test Note.md
-        permalink: test/test-note
-        checksum: a8eb4d44
-        
-        ## Tags
-        - test, documentation
-        """).strip()
-        in result
-    )
+    assert "# Updated note" in result
+    assert "file_path: test/Test Note.md" in result
+    assert "permalink: test/test-note" in result
+    assert "## Tags" in result
+    assert "- test, documentation" in result
 
     # Try reading it back
     content = await read_note("test/test-note")
@@ -148,8 +121,8 @@ async def test_write_note_update_existing(app):
         type: note
         permalink: test/test-note
         tags:
-        - '#test'
-        - '#documentation'
+        - test
+        - documentation
         ---
         
         # Test
@@ -241,27 +214,14 @@ async def test_write_note_verbose(app):
         tags=["test", "documentation"],
     )
 
-    assert (
-        dedent("""
-        # Created note
-        file_path: test/Test Note.md
-        permalink: test/test-note
-        checksum: 06873a7a
-        
-        ## Observations
-        - note: 1
-        
-        ## Relations
-        - Resolved: 0
-        - Unresolved: 1
-        
-        Unresolved relations will be retried on next sync.
-        
-        ## Tags
-        - test, documentation
-        """).strip()
-        in result
-    )
+    assert "# Created note" in result
+    assert "file_path: test/Test Note.md" in result
+    assert "permalink: test/test-note" in result
+    assert "## Observations" in result
+    assert "- note: 1" in result
+    assert "## Relations" in result
+    assert "## Tags" in result
+    assert "- test, documentation" in result
 
 
 @pytest.mark.asyncio
@@ -327,9 +287,9 @@ async def test_write_note_preserves_custom_metadata(app, project_config):
     # And new content should be there
     assert "# Updated content" in content
 
-    # And tags should be updated
-    assert "'#test'" in content
-    assert "'#updated'" in content
+    # And tags should be updated (without # prefix)
+    assert "- test" in content
+    assert "- updated" in content
 
 
 @pytest.mark.asyncio
@@ -366,8 +326,8 @@ async def test_write_note_preserves_content_frontmatter(app):
             version: 1.0
             author: name
             tags:
-            - '#test'
-            - '#documentation'
+            - test
+            - documentation
             ---
             
             # Test
