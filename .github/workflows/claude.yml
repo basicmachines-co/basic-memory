@@ -17,6 +17,7 @@ jobs:
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,4 +78,4 @@ jobs:
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-
+          allowed_tools: Bash(uv run pytest),Bash(uv run ruff check . --fix),Bash(uv run ruff format .),Bash(uv run pyright),Bash(make test),Bash(make lint),Bash(make format),Bash(make type-check),Bash(make check),Read,Write,Edit,MultiEdit,Glob,Grep,LS
