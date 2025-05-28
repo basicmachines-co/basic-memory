@@ -24,12 +24,55 @@ jobs:
       issues: read
       id-token: write
     steps:
+      - name: Check organization membership
+        id: check_membership
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let actor;
+            if (context.eventName === 'issue_comment') {
+              actor = context.payload.comment.user.login;
+            } else if (context.eventName === 'pull_request_review_comment') {
+              actor = context.payload.comment.user.login;
+            } else if (context.eventName === 'pull_request_review') {
+              actor = context.payload.review.user.login;
+            } else if (context.eventName === 'issues') {
+              actor = context.payload.issue.user.login;
+            }
+            
+            console.log(`Checking membership for user: ${actor}`);
+            
+            try {
+              const membership = await github.rest.orgs.getMembershipForUser({
+                org: 'basicmachines-co',
+                username: actor
+              });
+              
+              console.log(`Membership status: ${membership.data.state}`);
+              
+              // Allow if user is a member (public or private) or admin
+              const allowed = membership.data.state === 'active' && 
+                            (membership.data.role === 'member' || membership.data.role === 'admin');
+              
+              core.setOutput('is_member', allowed);
+              
+              if (!allowed) {
+                core.notice(`User ${actor} is not a member of basicmachines-co organization`);
+              }
+            } catch (error) {
+              console.log(`Error checking membership: ${error.message}`);
+              core.setOutput('is_member', false);
+              core.notice(`User ${actor} is not a member of basicmachines-co organization`);
+            }
+
       - name: Checkout repository
+        if: steps.check_membership.outputs.is_member == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
+        if: steps.check_membership.outputs.is_member == 'true'
         id: claude
         uses: anthropics/claude-code-action@beta
         with:
