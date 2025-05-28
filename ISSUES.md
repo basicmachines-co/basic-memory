@@ -15,19 +15,21 @@ These issues address core functionality problems and should be resolved first:
 - **User Impact**: High - affects all tag usage
 - **Resolution**: Fixed in write_note.py by removing `#` prefix from tag formatting
 
-### #110: [BUG] `--project` flag ignored in some commands
+### ~~#110: [BUG] `--project` flag ignored in some commands~~ ✅ COMPLETED
 - **Impact**: Breaks multi-project functionality added in v0.12.3
 - **Description**: Commands like `project info` and `sync` don't respect `--project` flag
 - **Root Cause**: Inconsistent project parameter handling across CLI commands
 - **Complexity**: Medium - requires CLI argument parsing review
 - **User Impact**: High - breaks core multi-project workflow
+- **Resolution**: Fixed CLI app callback to update global config when --project specified
 
-### #107: [BUG] Fails to update note ("already exists")
+### ~~#107: [BUG] Fails to update note ("already exists")~~ ✅ ALREADY RESOLVED
 - **Impact**: Prevents updating existing notes via write_note tool
 - **Description**: `write_note` errors when target file exists, breaking daily note workflows
-- **Root Cause**: Tool designed for creation only, lacks update capability
+- **Root Cause**: EntityParser couldn't handle absolute paths correctly
 - **Complexity**: Medium - requires write_note behavior enhancement
 - **User Impact**: High - breaks core knowledge management workflow
+- **Resolution**: Fixed in commit 9bff1f7 - EntityParser now handles absolute paths correctly
 
 ## Medium Priority Enhancements
 
@@ -73,8 +75,8 @@ These issues are tracked but not planned for v0.13.0:
 ## Success Criteria for v0.13.0
 
 - [x] YAML tag formatting follows standard specification
-- [ ] `--project` flag works consistently across all commands
-- [ ] `write_note` can update existing notes reliably
+- [x] `--project` flag works consistently across all commands
+- [x] `write_note` can update existing notes reliably
 - [ ] Comprehensive test coverage for all fixes
 - [ ] Documentation updates for any behavior changes
 
