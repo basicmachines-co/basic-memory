@@ -264,6 +264,15 @@ app_config: BasicMemoryConfig = config_manager.config
 config: ProjectConfig = get_project_config()
 
 
+def update_current_project(project_name: str) -> None:
+    """Update the global config to use a different project.
+    
+    This is used by the CLI when --project flag is specified.
+    """
+    global config
+    config = get_project_config(project_name)
+
+
 # setup logging to a single log file in user home directory
 user_home = Path.home()
 log_dir = user_home / DATA_DIR_NAME
