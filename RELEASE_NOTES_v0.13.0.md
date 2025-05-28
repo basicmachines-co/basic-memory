@@ -4,6 +4,14 @@
 
 This is a major release that introduces multi-project support, OAuth authentication, server-side templating, and numerous improvements to the MCP server implementation. The codebase has been significantly refactored to support a unified database architecture while maintaining backward compatibility.
 
+**Key v0.13.0 Accomplishments:**
+- ✅ **Complete Project Management System** - Fluid project switching and cross-project operations
+- ✅ **Advanced Note Editing** - Incremental editing with append, prepend, find/replace, and section operations  
+- ✅ **File Management System** - Full move operations with database consistency and rollback protection
+- ✅ **Enhanced MCP Tool Suite** - 5+ new tools with comprehensive error handling and session management
+- ✅ **Full Test Coverage** - 38+ new tests across service, API, and MCP layers
+- ✅ **Production Ready** - Complete implementation from planning documents to tested release
+
 ## Major Features
 
 ### 1. Multi-Project Support 🎯
@@ -74,6 +82,10 @@ This is a major release that introduces multi-project support, OAuth authenticat
 - `GET /management/sync/status` - Get sync status
 - `POST /management/sync/start` - Start background sync
 - `POST /management/sync/stop` - Stop background sync
+
+#### Note Operations API  
+- `PATCH /{project}/knowledge/entities/{identifier}` - Edit existing entities incrementally
+- `POST /{project}/knowledge/move` - Move entities to new file locations
 
 ### Updated Endpoints
 
@@ -210,23 +222,88 @@ basic-memory auth test-auth
 - Template engine tests with various scenarios
 - Project service integration tests
 - Import system unit tests
+- **Enhanced MCP Tool Testing**: 16 new tests for `move_note()`, 20+ tests for `edit_note()`
+- **API Integration Testing**: 11 new tests for move entity endpoints
+- **Service Layer Testing**: 11 comprehensive tests for entity move operations
+- **Full Stack Testing**: Complete coverage from MCP tools through API to database
 
-## New features 
+## New MCP Tools & Features
 
-  ✅ list_project(dir: Optional[str]) tool - Trivial to add
-  - GET /projects endpoint already exists
-  - Just wrap it like project_info.py does
-  - Gives LLMs project discovery capability
+### 6. Enhanced MCP Tool Set 🛠️
 
-  [x] edit_note() tool - Easy to add
-  - Can reuse existing PUT /entities/{permalink} endpoint
-  - Read current content, apply edits, save back
-  - Major UX improvement for LLMs doing incremental edits
+#### Project Management Tools ✅
+- **`list_projects()`** - Discover and list all available projects
+- **`switch_project(project_name)`** - Change active project context during conversations
+- **`get_current_project()`** - Show currently active project with statistics
+- **`set_default_project(project_name)`** - Update default project configuration
+- **Cross-Project Operations** - Optional `project` parameter on all tools for targeted operations
 
-  [ ] move_note() tool - Medium complexity
-  - No dedicated API endpoint (would need create + delete)
-  - More edge cases to handle
-  - Could be v0.13.1
+#### Note Editing Tools ✅
+- **`edit_note()`** - Incremental note editing without full content replacement
+  - **Append Operation**: Add content to end of notes
+  - **Prepend Operation**: Add content to beginning of notes  
+  - **Find & Replace**: Simple text replacements with occurrence counting
+  - **Section Replace**: Replace content under specific markdown headers
+  - **Smart Error Handling**: Helpful guidance when operations fail
 
-- [ ] project_info() resource
-- [ ] switch_projects()
+#### File Management Tools ✅
+- **`move_note()`** - Move notes to new locations with full consistency
+  - **Database Consistency**: Updates file paths, permalinks, and checksums
+  - **Search Reindexing**: Maintains search functionality after moves
+  - **Folder Creation**: Automatically creates destination directories
+  - **Cross-Project Moves**: Support for moving between projects
+  - **Rollback on Failure**: Ensures data integrity during failed operations
+
+#### Enhanced Session Management
+- **Fluid Project Switching**: Change project context mid-conversation
+- **Session State Persistence**: Maintains active project throughout MCP session
+- **Project Context Metadata**: All tool responses include project information
+- **Backward Compatibility**: Defaults to main project for existing workflows
+
+### 7. Advanced Note Operations 📝
+
+#### Incremental Editing Capabilities
+```python
+# Append new sections
+edit_note("project-planning", "append", "\n## New Requirements\n- Feature X\n- Feature Y")
+
+# Prepend timestamps to meeting notes
+edit_note("meeting-notes", "prepend", "## 2025-05-27 Update\n- Progress update...")
+
+# Replace specific sections
+edit_note("api-spec", "replace_section", "New implementation details", section="## Implementation")
+
+# Find and replace with validation
+edit_note("config", "find_replace", "v0.13.0", find_text="v0.12.0", expected_replacements=2)
+```
+
+#### File Movement Operations
+```python
+# Simple moves with automatic folder creation
+move_note("my-note", "work/projects/my-note.md")
+
+# Cross-project moves
+move_note("shared-doc", "archive/old-docs/shared-doc.md", project="personal-notes")
+
+# Rename operations
+move_note("old-name", "same-folder/new-name.md")
+```
+
+### 8. Comprehensive Testing Coverage 🧪
+- **Service Layer Tests**: 11 comprehensive tests for `move_entity()` service method
+- **API Integration Tests**: 11 tests for move entity API endpoints  
+- **MCP Tool Tests**: 16 tests for `move_note()` tool covering all scenarios
+- **Error Handling Tests**: Complete coverage of validation, rollback, and edge cases
+- **Cross-Layer Integration**: Full workflow testing from MCP → API → Service → Database
+
+## Updated Endpoints
+
+### Knowledge Management API
+- `PATCH /{project}/knowledge/entities/{identifier}` - Edit existing entities incrementally
+- `POST /{project}/knowledge/move` - Move entities to new file locations
+
+### Enhanced Tool Capabilities
+All existing MCP tools now support:
+- Optional `project` parameter for cross-project operations
+- Session context awareness (uses active project when project not specified)
+- Enhanced error messages with project context metadata

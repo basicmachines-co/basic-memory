@@ -6,7 +6,7 @@ from textwrap import dedent
 import pytest
 import yaml
 
-from basic_memory.config import ProjectConfig
+from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
@@ -1198,3 +1198,467 @@ async def test_edit_entity_replace_section_with_subsections(
     assert "Child 2 content" in file_content  # Child sections preserved
     assert "## Another Section" in file_content  # Next section preserved
     assert "Other content" in file_content
+
+
+# Move entity tests
+@pytest.mark.asyncio
+async def test_move_entity_success(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test successful entity move with basic settings."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="original",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    # Verify original file exists
+    original_path = file_service.get_entity_path(entity)
+    assert await file_service.exists(original_path)
+
+    # Create app config with permalinks disabled
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Move entity
+    result = await entity_service.move_entity(
+        identifier=entity.permalink,
+        destination_path="moved/test-note.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+
+    # Verify result message
+    assert "✅ Note moved successfully" in result
+    assert "original/Test Note.md" in result
+    assert "moved/test-note.md" in result
+    assert "📊 Database and search index updated" in result
+
+    # Verify original file no longer exists
+    assert not await file_service.exists(original_path)
+
+    # Verify new file exists
+    new_path = project_config.home / "moved/test-note.md"
+    assert new_path.exists()
+
+    # Verify database was updated
+    updated_entity = await entity_service.get_by_permalink(entity.permalink)
+    assert updated_entity.file_path == "moved/test-note.md"
+
+    # Verify file content is preserved
+    new_content, _ = await file_service.read_file("moved/test-note.md")
+    assert "Original content" in new_content
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_permalink_update(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test entity move with permalink updates enabled."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="original",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    original_permalink = entity.permalink
+
+    # Create app config with permalinks enabled
+    app_config = BasicMemoryConfig(update_permalinks_on_move=True)
+
+    # Move entity
+    result = await entity_service.move_entity(
+        identifier=entity.permalink,
+        destination_path="moved/test-note.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+
+    # Verify result message includes permalink update
+    assert "✅ Note moved successfully" in result
+    assert "🔗 Permalink updated:" in result
+    assert original_permalink in result
+
+    # Verify entity was found by new path (since permalink changed)
+    moved_entity = await entity_service.link_resolver.resolve_link("moved/test-note.md")
+    assert moved_entity is not None
+    assert moved_entity.file_path == "moved/test-note.md"
+    assert moved_entity.permalink != original_permalink
+
+    # Verify frontmatter was updated with new permalink
+    new_content, _ = await file_service.read_file("moved/test-note.md")
+    assert moved_entity.permalink in new_content
+
+
+@pytest.mark.asyncio
+async def test_move_entity_creates_destination_directory(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test that moving creates destination directory if it doesn't exist."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="original",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Move to deeply nested path that doesn't exist
+    await entity_service.move_entity(
+        identifier=entity.permalink,
+        destination_path="deeply/nested/folders/test-note.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+
+    # Verify directory was created
+    new_path = project_config.home / "deeply/nested/folders/test-note.md"
+    assert new_path.exists()
+    assert new_path.parent.exists()
+
+
+@pytest.mark.asyncio
+async def test_move_entity_not_found(
+    entity_service: EntityService,
+    project_config: ProjectConfig,
+):
+    """Test moving non-existent entity raises error."""
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    with pytest.raises(EntityNotFoundError, match="Entity not found: non-existent"):
+        await entity_service.move_entity(
+            identifier="non-existent",
+            destination_path="new/path.md",
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_move_entity_source_file_missing(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test moving when source file doesn't exist on filesystem."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    # Manually delete the file (simulating corruption/external deletion)
+    file_path = file_service.get_entity_path(entity)
+    file_path.unlink()
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    with pytest.raises(ValueError, match="Source file not found:"):
+        await entity_service.move_entity(
+            identifier=entity.permalink,
+            destination_path="new/path.md",
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_move_entity_destination_exists(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test moving to existing destination fails."""
+    # Create two test entities
+    entity1 = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note 1",
+            folder="test",
+            entity_type="note",
+            content="Content 1",
+        )
+    )
+
+    entity2 = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note 2",
+            folder="test",
+            entity_type="note",
+            content="Content 2",
+        )
+    )
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Try to move entity1 to entity2's location
+    with pytest.raises(ValueError, match="Destination already exists:"):
+        await entity_service.move_entity(
+            identifier=entity1.permalink,
+            destination_path=entity2.file_path,
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_move_entity_invalid_destination_path(
+    entity_service: EntityService,
+    project_config: ProjectConfig,
+):
+    """Test moving with invalid destination paths."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="test",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Test absolute path
+    with pytest.raises(ValueError, match="Invalid destination path:"):
+        await entity_service.move_entity(
+            identifier=entity.permalink,
+            destination_path="/absolute/path.md",
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+    # Test empty path
+    with pytest.raises(ValueError, match="Invalid destination path:"):
+        await entity_service.move_entity(
+            identifier=entity.permalink,
+            destination_path="",
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+
+@pytest.mark.asyncio
+async def test_move_entity_by_title(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test moving entity by title instead of permalink."""
+    # Create test entity
+    await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="original",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Move by title
+    result = await entity_service.move_entity(
+        identifier="Test Note",  # Use title instead of permalink
+        destination_path="moved/test-note.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+
+    # Verify move succeeded
+    assert "✅ Note moved successfully" in result
+
+    # Verify new file exists
+    new_path = project_config.home / "moved/test-note.md"
+    assert new_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_move_entity_preserves_observations_and_relations(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test that moving preserves entity observations and relations."""
+    # Create test entity with observations and relations
+    content = dedent("""
+        # Test Note
+        
+        - [note] This is an observation #test
+        - links to [[Other Entity]]
+        
+        Original content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="original",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Verify initial observations and relations
+    assert len(entity.observations) == 1
+    assert len(entity.relations) == 1
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Move entity
+    await entity_service.move_entity(
+        identifier=entity.permalink,
+        destination_path="moved/test-note.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+
+    # Get moved entity
+    moved_entity = await entity_service.link_resolver.resolve_link("moved/test-note.md")
+
+    # Verify observations and relations are preserved
+    assert len(moved_entity.observations) == 1
+    assert moved_entity.observations[0].content == "This is an observation #test"
+    assert len(moved_entity.relations) == 1
+    assert moved_entity.relations[0].to_name == "Other Entity"
+
+    # Verify file content includes observations and relations
+    new_content, _ = await file_service.read_file("moved/test-note.md")
+    assert "- [note] This is an observation #test" in new_content
+    assert "- links to [[Other Entity]]" in new_content
+
+
+@pytest.mark.asyncio
+async def test_move_entity_rollback_on_database_failure(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+    entity_repository: EntityRepository,
+):
+    """Test that filesystem changes are rolled back on database failures."""
+    # Create test entity
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            folder="original",
+            entity_type="note",
+            content="Original content",
+        )
+    )
+
+    original_path = file_service.get_entity_path(entity)
+    assert await file_service.exists(original_path)
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Mock repository update to fail
+    original_update = entity_repository.update
+
+    async def failing_update(*args, **kwargs):
+        return None  # Simulate failure
+
+    entity_repository.update = failing_update
+
+    try:
+        with pytest.raises(ValueError, match="Move failed:"):
+            await entity_service.move_entity(
+                identifier=entity.permalink,
+                destination_path="moved/test-note.md",
+                project_config=project_config,
+                app_config=app_config,
+            )
+
+        # Verify rollback - original file should still exist
+        assert await file_service.exists(original_path)
+
+        # Verify destination file was cleaned up
+        destination_path = project_config.home / "moved/test-note.md"
+        assert not destination_path.exists()
+
+    finally:
+        # Restore original update method
+        entity_repository.update = original_update
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_complex_observations(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
+    """Test moving entity with complex observations (tags, context)."""
+    content = dedent("""
+        # Complex Note
+        
+        - [design] Keep feature branches short-lived #git #workflow (Reduces merge conflicts)
+        - [tech] Using SQLite for storage #implementation (Fast and reliable)
+        - implements [[Branch Strategy]] (Our standard workflow)
+        
+        Complex content with [[Multiple]] [[Links]].
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Complex Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Verify complex structure
+    assert len(entity.observations) == 2
+    assert len(entity.relations) == 3  # 1 explicit + 2 wikilinks
+
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+
+    # Move entity
+    await entity_service.move_entity(
+        identifier=entity.permalink,
+        destination_path="moved/complex-note.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+
+    # Verify moved entity maintains structure
+    moved_entity = await entity_service.link_resolver.resolve_link("moved/complex-note.md")
+
+    # Check observations with tags and context
+    design_obs = [obs for obs in moved_entity.observations if obs.category == "design"][0]
+    assert "git" in design_obs.tags
+    assert "workflow" in design_obs.tags
+    assert design_obs.context == "Reduces merge conflicts"
+
+    tech_obs = [obs for obs in moved_entity.observations if obs.category == "tech"][0]
+    assert "implementation" in tech_obs.tags
+    assert tech_obs.context == "Fast and reliable"
+
+    # Check relations
+    relation_types = {rel.relation_type for rel in moved_entity.relations}
+    assert "implements" in relation_types
+    assert "links to" in relation_types
+
+    relation_targets = {rel.to_name for rel in moved_entity.relations}
+    assert "Branch Strategy" in relation_targets
+    assert "Multiple" in relation_targets
+    assert "Links" in relation_targets

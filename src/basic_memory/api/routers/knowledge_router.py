@@ -12,6 +12,8 @@ from basic_memory.deps import (
     LinkResolverDep,
     ProjectPathDep,
     FileServiceDep,
+    ProjectConfigDep,
+    AppConfigDep,
 )
 from basic_memory.schemas import (
     EntityListResponse,
@@ -19,7 +21,7 @@ from basic_memory.schemas import (
     DeleteEntitiesResponse,
     DeleteEntitiesRequest,
 )
-from basic_memory.schemas.request import EditEntityRequest
+from basic_memory.schemas.request import EditEntityRequest, MoveEntityRequest
 from basic_memory.schemas.base import Permalink, Entity
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -137,6 +139,53 @@ async def edit_entity(
 
     except Exception as e:
         logger.error(f"Error editing entity: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/move")
+async def move_entity(
+    data: MoveEntityRequest,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    project_config: ProjectConfigDep,
+    app_config: AppConfigDep,
+    search_service: SearchServiceDep,
+) -> str:
+    """Move an entity to a new file location with project consistency.
+
+    This endpoint moves a note to a different path while maintaining project
+    consistency and optionally updating permalinks based on configuration.
+    """
+    logger.info(
+        f"API request: endpoint='move_entity', identifier='{data.identifier}', destination='{data.destination_path}'"
+    )
+
+    try:
+        # Move the entity using the service
+        result_message = await entity_service.move_entity(
+            identifier=data.identifier,
+            destination_path=data.destination_path,
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+        # Get the moved entity to reindex it
+        entity = await entity_service.link_resolver.resolve_link(data.destination_path)
+        if entity:
+            await search_service.index_entity(entity, background_tasks=background_tasks)
+
+        logger.info(
+            "API response",
+            endpoint="move_entity",
+            identifier=data.identifier,
+            destination=data.destination_path,
+            status_code=200,
+        )
+
+        return result_message
+
+    except Exception as e:
+        logger.error(f"Error moving entity: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 

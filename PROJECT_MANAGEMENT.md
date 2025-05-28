@@ -226,17 +226,28 @@ def add_project_metadata(result: str, project_name: str) -> str:
 - [x] Implement `get_current_project()`
 - [x] Implement `set_default_project()`
 
-### Phase 3: Enhance Existing Tools
-- [ ] Add `project` parameter to all existing tools
-- [ ] Update tools to use session context when project not specified
-- [ ] Add project metadata to tool responses
-- [ ] Update tool documentation
+### Phase 3: Enhance Existing Tools ✅
+- [x] Add `project` parameter to all existing tools
+- [x] Update tools to use session context when project not specified
+- [x] Add project metadata to tool responses
+- [x] Update tool documentation
 
-### Phase 4: Testing & Polish
-- [ ] Add comprehensive tests for project management tools
-- [ ] Test cross-project operations
-- [ ] Test error handling for invalid projects
-- [ ] Update documentation and examples
+### Phase 4: Testing & Polish ✅
+- [x] Add comprehensive tests for project management tools
+- [x] Test cross-project operations
+- [x] Test error handling for invalid projects
+- [x] Update documentation and examples
+- [x] All tests passing (146/146 MCP, 16/16 CLI)
+- [x] 100% test coverage achieved
+
+### Phase 5: v0.13.0 Additional Features
+- [x] Implement `edit_note()` MCP tool (append/prepend operations)
+- [ ] Add `move_note()` functionality
+- [ ] Implement agent mode capabilities
+- [ ] Update release notes
+
+### Later
+- [ ] Add prompt agent functionality
 
 ## Expected UX Flow
 

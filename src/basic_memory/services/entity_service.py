@@ -8,6 +8,7 @@ import yaml
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import has_frontmatter, parse_frontmatter, remove_frontmatter
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.markdown.entity_parser import EntityParser
@@ -548,3 +549,120 @@ class EntityService(BaseService[EntityModel]):
         if content and not content.endswith("\n"):  # pragma: no cover
             return content + "\n" + current_content  # pragma: no cover
         return content + current_content  # pragma: no cover
+
+    async def move_entity(
+        self,
+        identifier: str,
+        destination_path: str,
+        project_config: ProjectConfig,
+        app_config: BasicMemoryConfig,
+    ) -> str:
+        """Move entity to new location with database consistency.
+
+        Args:
+            identifier: Entity identifier (title, permalink, or memory:// URL)
+            destination_path: New path relative to project root
+            project_config: Project configuration for file operations
+            app_config: App configuration for permalink update settings
+
+        Returns:
+            Success message with move details
+
+        Raises:
+            EntityNotFoundError: If the entity cannot be found
+            ValueError: If move operation fails due to validation or filesystem errors
+        """
+        logger.debug(f"Moving entity: {identifier} to {destination_path}")
+
+        # 1. Resolve identifier to entity
+        entity = await self.link_resolver.resolve_link(identifier)
+        if not entity:
+            raise EntityNotFoundError(f"Entity not found: {identifier}")
+
+        current_path = entity.file_path
+        old_permalink = entity.permalink
+
+        # 2. Validate destination path format first
+        if not destination_path or destination_path.startswith("/") or not destination_path.strip():
+            raise ValueError(f"Invalid destination path: {destination_path}")
+
+        # 3. Validate paths
+        source_file = project_config.home / current_path
+        destination_file = project_config.home / destination_path
+
+        # Validate source exists
+        if not source_file.exists():
+            raise ValueError(f"Source file not found: {current_path}")
+
+        # Check if destination already exists
+        if destination_file.exists():
+            raise ValueError(f"Destination already exists: {destination_path}")
+
+        try:
+            # 4. Create destination directory if needed
+            destination_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # 5. Move physical file
+            source_file.rename(destination_file)
+            logger.info(f"Moved file: {current_path} -> {destination_path}")
+
+            # 6. Prepare database updates
+            updates = {"file_path": destination_path}
+            permalink_updated = False
+
+            # 7. Update permalink if configured
+            if app_config.update_permalinks_on_move:
+                # Generate new permalink from destination path
+                new_permalink = await self.resolve_permalink(destination_path)
+
+                # Update frontmatter with new permalink
+                await self.file_service.update_frontmatter(
+                    destination_path, {"permalink": new_permalink}
+                )
+
+                updates["permalink"] = new_permalink
+                permalink_updated = True
+                logger.info(f"Updated permalink: {old_permalink} -> {new_permalink}")
+
+            # 8. Recalculate checksum
+            new_checksum = await self.file_service.compute_checksum(destination_path)
+            updates["checksum"] = new_checksum
+
+            # 9. Update database
+            updated_entity = await self.repository.update(entity.id, updates)
+            if not updated_entity:
+                raise ValueError(f"Failed to update entity in database: {entity.id}")
+
+            # 10. Build success message
+            result_lines = [
+                "✅ Note moved successfully",
+                "",
+                f"📁 **{current_path}** → **{destination_path}**",
+            ]
+
+            if permalink_updated:
+                result_lines.append(
+                    f"🔗 Permalink updated: {old_permalink} → {updates['permalink']}"
+                )
+
+            result_lines.extend(
+                [
+                    "📊 Database and search index updated",
+                    "",
+                    f"<!-- Project: {project_config.name} -->",
+                ]
+            )
+
+            return "\n".join(result_lines)
+
+        except Exception as e:
+            # Rollback: try to restore original file location if move succeeded
+            if destination_file.exists() and not source_file.exists():
+                try:
+                    destination_file.rename(source_file)
+                    logger.info(f"Rolled back file move: {destination_path} -> {current_path}")
+                except Exception as rollback_error:  # pragma: no cover
+                    logger.error(f"Failed to rollback file move: {rollback_error}")
+
+            # Re-raise the original error with context
+            raise ValueError(f"Move failed: {str(e)}") from e

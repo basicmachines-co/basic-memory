@@ -86,3 +86,27 @@ class EditEntityRequest(BaseModel):
         if info.data.get("operation") == "find_replace" and not v:
             raise ValueError("find_text parameter is required for find_replace operation")
         return v
+
+
+class MoveEntityRequest(BaseModel):
+    """Request schema for moving an entity to a new file location.
+
+    This allows moving notes to different paths while maintaining project
+    consistency and optionally updating permalinks based on configuration.
+    """
+
+    identifier: Annotated[str, MinLen(1), MaxLen(200)]
+    destination_path: Annotated[str, MinLen(1), MaxLen(500)]
+    project: Optional[str] = None
+
+    @field_validator("destination_path")
+    @classmethod
+    def validate_destination_path(cls, v):
+        """Ensure destination path is relative and valid."""
+        if v.startswith("/"):
+            raise ValueError("destination_path must be relative, not absolute")
+        if ".." in v:
+            raise ValueError("destination_path cannot contain '..' path components")
+        if not v.strip():
+            raise ValueError("destination_path cannot be empty or whitespace only")
+        return v.strip()

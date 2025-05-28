@@ -899,3 +899,342 @@ async def test_edit_entity_search_reindex(client: AsyncClient, project_url):
     results = search_response.json()["results"]
     assert len(results) == 1
     assert results[0]["permalink"] == entity["permalink"]
+
+
+# Move entity endpoint tests
+
+
+@pytest.mark.asyncio
+async def test_move_entity_success(client: AsyncClient, project_url):
+    """Test successfully moving an entity to a new location."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "TestNote",
+            "folder": "source",
+            "entity_type": "note",
+            "content": "Test content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+    original_permalink = entity["permalink"]
+
+    # Move entity
+    move_data = {
+        "identifier": original_permalink,
+        "destination_path": "target/MovedNote.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 200
+    result_message = response.text.strip('"')  # Remove quotes from string response
+    assert "moved successfully" in result_message
+
+    # Verify original entity no longer exists
+    response = await client.get(f"{project_url}/knowledge/entities/{original_permalink}")
+    assert response.status_code == 404
+
+    # Verify entity exists at new location
+    response = await client.get(f"{project_url}/knowledge/entities/target/moved-note")
+    assert response.status_code == 200
+    moved_entity = response.json()
+    assert moved_entity["file_path"] == "target/MovedNote.md"
+    assert moved_entity["permalink"] == "target/moved-note"
+
+    # Verify file content using resource endpoint
+    response = await client.get(f"{project_url}/resource/target/moved-note?content=true")
+    assert response.status_code == 200
+    file_content = response.text
+    assert "Test content" in file_content
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_folder_creation(client: AsyncClient, project_url):
+    """Test moving entity creates necessary folders."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "TestNote",
+            "folder": "",
+            "entity_type": "note",
+            "content": "Test content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Move to deeply nested path
+    move_data = {
+        "identifier": entity["permalink"],
+        "destination_path": "deeply/nested/folder/MovedNote.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 200
+
+    # Verify entity exists at new location
+    response = await client.get(f"{project_url}/knowledge/entities/deeply/nested/folder/moved-note")
+    assert response.status_code == 200
+    moved_entity = response.json()
+    assert moved_entity["file_path"] == "deeply/nested/folder/MovedNote.md"
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_observations_and_relations(client: AsyncClient, project_url):
+    """Test moving entity preserves observations and relations."""
+    # Create test entity with complex content
+    content = """# Complex Entity
+
+## Observations
+- [note] Important observation #tag1
+- [feature] Key feature #feature
+- relation to [[SomeOtherEntity]]
+- depends on [[Dependency]]
+
+Some additional content."""
+
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "ComplexEntity",
+            "folder": "source",
+            "entity_type": "note",
+            "content": content,
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Verify original observations and relations
+    assert len(entity["observations"]) == 2
+    assert len(entity["relations"]) == 2
+
+    # Move entity
+    move_data = {
+        "identifier": entity["permalink"],
+        "destination_path": "target/MovedComplex.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 200
+
+    # Verify moved entity preserves data
+    response = await client.get(f"{project_url}/knowledge/entities/target/moved-complex")
+    assert response.status_code == 200
+    moved_entity = response.json()
+
+    # Check observations preserved
+    assert len(moved_entity["observations"]) == 2
+    obs_categories = {obs["category"] for obs in moved_entity["observations"]}
+    assert obs_categories == {"note", "feature"}
+
+    # Check relations preserved
+    assert len(moved_entity["relations"]) == 2
+    rel_types = {rel["relation_type"] for rel in moved_entity["relations"]}
+    assert rel_types == {"relation to", "depends on"}
+
+    # Verify file content preserved
+    response = await client.get(f"{project_url}/resource/target/moved-complex?content=true")
+    assert response.status_code == 200
+    file_content = response.text
+    assert "Important observation #tag1" in file_content
+    assert "[[SomeOtherEntity]]" in file_content
+
+
+@pytest.mark.asyncio
+async def test_move_entity_search_reindexing(client: AsyncClient, project_url):
+    """Test that moved entities are properly reindexed for search."""
+    # Create searchable entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "SearchableNote",
+            "folder": "source",
+            "entity_type": "note",
+            "content": "Unique searchable elephant content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Move entity
+    move_data = {
+        "identifier": entity["permalink"],
+        "destination_path": "target/MovedSearchable.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 200
+
+    # Search should find entity at new location
+    search_response = await client.post(
+        f"{project_url}/search/",
+        json={"text": "elephant", "entity_types": [SearchItemType.ENTITY.value]},
+    )
+    results = search_response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["permalink"] == "target/moved-searchable"
+
+
+@pytest.mark.asyncio
+async def test_move_entity_not_found(client: AsyncClient, project_url):
+    """Test moving non-existent entity returns 400 error."""
+    move_data = {
+        "identifier": "non-existent-entity",
+        "destination_path": "target/SomeFile.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 400
+    assert "Entity not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_move_entity_invalid_destination_path(client: AsyncClient, project_url):
+    """Test moving entity with invalid destination path."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "TestNote",
+            "folder": "",
+            "entity_type": "note",
+            "content": "Test content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Test various invalid paths
+    invalid_paths = [
+        "/absolute/path.md",  # Absolute path
+        "../parent/path.md",  # Parent directory
+        "",  # Empty string
+        "   ",  # Whitespace only
+    ]
+
+    for invalid_path in invalid_paths:
+        move_data = {
+            "identifier": entity["permalink"],
+            "destination_path": invalid_path,
+        }
+        response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+        assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.asyncio
+async def test_move_entity_destination_exists(client: AsyncClient, project_url):
+    """Test moving entity to existing destination returns error."""
+    # Create source entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "SourceNote",
+            "folder": "source",
+            "entity_type": "note",
+            "content": "Source content",
+        },
+    )
+    assert response.status_code == 200
+    source_entity = response.json()
+
+    # Create destination entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "DestinationNote",
+            "folder": "target",
+            "entity_type": "note",
+            "content": "Destination content",
+        },
+    )
+    assert response.status_code == 200
+
+    # Try to move source to existing destination
+    move_data = {
+        "identifier": source_entity["permalink"],
+        "destination_path": "target/DestinationNote.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 400
+    assert "already exists" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_move_entity_missing_identifier(client: AsyncClient, project_url):
+    """Test move request with missing identifier."""
+    move_data = {
+        "destination_path": "target/SomeFile.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.asyncio
+async def test_move_entity_missing_destination(client: AsyncClient, project_url):
+    """Test move request with missing destination path."""
+    move_data = {
+        "identifier": "some-entity",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.asyncio
+async def test_move_entity_by_file_path(client: AsyncClient, project_url):
+    """Test moving entity using file path as identifier."""
+    # Create test entity
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "TestNote",
+            "folder": "source",
+            "entity_type": "note",
+            "content": "Test content",
+        },
+    )
+    assert response.status_code == 200
+    entity = response.json()
+
+    # Move using file path as identifier
+    move_data = {
+        "identifier": entity["file_path"],
+        "destination_path": "target/MovedByPath.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 200
+
+    # Verify entity exists at new location
+    response = await client.get(f"{project_url}/knowledge/entities/target/moved-by-path")
+    assert response.status_code == 200
+    moved_entity = response.json()
+    assert moved_entity["file_path"] == "target/MovedByPath.md"
+
+
+@pytest.mark.asyncio
+async def test_move_entity_by_title(client: AsyncClient, project_url):
+    """Test moving entity using title as identifier."""
+    # Create test entity with unique title
+    response = await client.post(
+        f"{project_url}/knowledge/entities",
+        json={
+            "title": "UniqueTestTitle",
+            "folder": "source",
+            "entity_type": "note",
+            "content": "Test content",
+        },
+    )
+    assert response.status_code == 200
+
+    # Move using title as identifier
+    move_data = {
+        "identifier": "UniqueTestTitle",
+        "destination_path": "target/MovedByTitle.md",
+    }
+    response = await client.post(f"{project_url}/knowledge/move", json=move_data)
+    assert response.status_code == 200
+
+    # Verify entity exists at new location
+    response = await client.get(f"{project_url}/knowledge/entities/target/moved-by-title")
+    assert response.status_code == 200
+    moved_entity = response.json()
+    assert moved_entity["file_path"] == "target/MovedByTitle.md"
+    assert moved_entity["title"] == "UniqueTestTitle"
