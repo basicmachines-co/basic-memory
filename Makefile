@@ -1,4 +1,4 @@
-.PHONY: install test test-module lint clean format type-check installer-mac installer-win check
+.PHONY: install test test-module lint clean format type-check installer-mac installer-win check test-int
 
 install:
 	pip install -e ".[dev]"
@@ -7,7 +7,7 @@ test-unit:
 	uv run pytest -p pytest_mock -v
 
 test-int:
-	uv run pytest -p pytest_mock -v --no-cov tests-int
+	uv run pytest -p pytest_mock -v --no-cov tests
 
 test: test-unit test-int
 
