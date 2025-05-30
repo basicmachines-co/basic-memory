@@ -1,5 +1,6 @@
 """Service for search operations."""
 
+import ast
 from datetime import datetime
 from typing import List, Optional, Set
 
@@ -117,6 +118,38 @@ class SearchService:
 
         return variants
 
+    def _extract_entity_tags(self, entity: Entity) -> List[str]:
+        """Extract tags from entity metadata for search indexing.
+
+        Handles multiple tag formats:
+        - List format: ["tag1", "tag2"]
+        - String format: "['tag1', 'tag2']" or "[tag1, tag2]"
+        - Empty: [] or "[]"
+
+        Returns a list of tag strings for search indexing.
+        """
+        if not entity.entity_metadata or "tags" not in entity.entity_metadata:
+            return []
+
+        tags = entity.entity_metadata["tags"]
+
+        # Handle list format (preferred)
+        if isinstance(tags, list):
+            return [str(tag) for tag in tags if tag]
+
+        # Handle string format (legacy)
+        if isinstance(tags, str):
+            try:
+                # Parse string representation of list
+                parsed_tags = ast.literal_eval(tags)
+                if isinstance(parsed_tags, list):
+                    return [str(tag) for tag in parsed_tags if tag]
+            except (ValueError, SyntaxError):
+                # If parsing fails, treat as single tag
+                return [tags] if tags.strip() else []
+
+        return []
+
     async def index_entity(
         self,
         entity: Entity,
@@ -200,6 +233,11 @@ class SearchService:
             content_stems.extend(self._generate_variants(entity.permalink))
 
         content_stems.extend(self._generate_variants(entity.file_path))
+
+        # Add entity tags from frontmatter to search content
+        entity_tags = self._extract_entity_tags(entity)
+        if entity_tags:
+            content_stems.extend(entity_tags)
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 

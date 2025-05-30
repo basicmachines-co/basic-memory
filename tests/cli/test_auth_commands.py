@@ -218,7 +218,7 @@ class TestAuthCommands:
             mock_provider_class.assert_called_once_with(issuer_url="https://custom-issuer.com")
 
             # Should exit early due to client not found
-            assert "Error: Client not found after registration" in result.stdout
+            assert "Error: Client not found after registration" in result.stderr
 
     def test_test_auth_client_not_found(self, runner, mock_provider):
         """Test OAuth test flow when client is not found after registration."""
@@ -236,7 +236,7 @@ class TestAuthCommands:
             result = runner.invoke(auth_app, ["test-auth"])
 
             assert result.exit_code == 0  # Command completes but with error message
-            assert "Error: Client not found after registration" in result.stdout
+            assert "Error: Client not found after registration" in result.stderr
 
     def test_test_auth_no_auth_code_in_url(self, runner, mock_provider):
         """Test OAuth test flow when no auth code in URL."""
@@ -265,7 +265,7 @@ class TestAuthCommands:
             result = runner.invoke(auth_app, ["test-auth"])
 
             assert result.exit_code == 0
-            assert "Error: No authorization code in URL" in result.stdout
+            assert "Error: No authorization code in URL" in result.stderr
 
     def test_test_auth_invalid_auth_code(self, runner, mock_provider):
         """Test OAuth test flow when authorization code is invalid."""
@@ -295,7 +295,7 @@ class TestAuthCommands:
             result = runner.invoke(auth_app, ["test-auth"])
 
             assert result.exit_code == 0
-            assert "Error: Invalid authorization code" in result.stdout
+            assert "Error: Invalid authorization code" in result.stderr
 
     def test_test_auth_invalid_access_token(self, runner, mock_provider):
         """Test OAuth test flow when access token validation fails."""
@@ -336,7 +336,7 @@ class TestAuthCommands:
 
             assert result.exit_code == 0
             assert "Access token: test-access-token" in result.stdout
-            assert "Error: Invalid access token" in result.stdout
+            assert "Error: Invalid access token" in result.stderr
 
     def test_test_auth_exception_handling(self, runner, mock_provider):
         """Test OAuth test flow exception handling."""

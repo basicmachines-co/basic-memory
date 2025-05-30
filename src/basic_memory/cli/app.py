@@ -54,9 +54,10 @@ def app_callback(
             # Use the project specified via --project flag
             current_project_config = get_project_config(project)
             session.set_current_project(current_project_config.name)
-            
+
             # Update the global config to use this project
             from basic_memory.config import update_current_project
+
             update_current_project(project)
         else:
             # Use the default project

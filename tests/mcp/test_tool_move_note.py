@@ -325,11 +325,11 @@ async def test_move_note_with_tags(client):
     assert isinstance(result, str)
     assert "moved successfully" in result
 
-    # Verify tags are preserved
+    # Verify tags are preserved in correct YAML format
     content = await read_note("target/moved-tagged-note")
-    assert "'#important'" in content
-    assert "'#work'" in content
-    assert "'#project'" in content
+    assert "- important" in content
+    assert "- work" in content
+    assert "- project" in content
 
 
 @pytest.mark.asyncio

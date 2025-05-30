@@ -343,3 +343,213 @@ async def test_boolean_operators_detection(search_service):
         assert not query.has_boolean_operators(), (
             f"Incorrectly detected boolean operators in: {query_text}"
         )
+
+
+# Tests for frontmatter tag search functionality
+
+
+@pytest.mark.asyncio
+async def test_extract_entity_tags_list_format(search_service, session_maker):
+    """Test tag extraction from list format in entity metadata."""
+    from basic_memory.models import Entity
+
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        entity_metadata={"tags": ["business", "strategy", "planning"]},
+        content_type="text/markdown",
+        file_path="test/business-strategy.md",
+        project_id=1,
+    )
+
+    tags = search_service._extract_entity_tags(entity)
+    assert tags == ["business", "strategy", "planning"]
+
+
+@pytest.mark.asyncio
+async def test_extract_entity_tags_string_format(search_service, session_maker):
+    """Test tag extraction from string format in entity metadata."""
+    from basic_memory.models import Entity
+
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        entity_metadata={"tags": "['documentation', 'tools', 'best-practices']"},
+        content_type="text/markdown",
+        file_path="test/docs.md",
+        project_id=1,
+    )
+
+    tags = search_service._extract_entity_tags(entity)
+    assert tags == ["documentation", "tools", "best-practices"]
+
+
+@pytest.mark.asyncio
+async def test_extract_entity_tags_empty_list(search_service, session_maker):
+    """Test tag extraction from empty list in entity metadata."""
+    from basic_memory.models import Entity
+
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        entity_metadata={"tags": []},
+        content_type="text/markdown",
+        file_path="test/empty-tags.md",
+        project_id=1,
+    )
+
+    tags = search_service._extract_entity_tags(entity)
+    assert tags == []
+
+
+@pytest.mark.asyncio
+async def test_extract_entity_tags_empty_string(search_service, session_maker):
+    """Test tag extraction from empty string in entity metadata."""
+    from basic_memory.models import Entity
+
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        entity_metadata={"tags": "[]"},
+        content_type="text/markdown",
+        file_path="test/empty-string-tags.md",
+        project_id=1,
+    )
+
+    tags = search_service._extract_entity_tags(entity)
+    assert tags == []
+
+
+@pytest.mark.asyncio
+async def test_extract_entity_tags_no_metadata(search_service, session_maker):
+    """Test tag extraction when entity has no metadata."""
+    from basic_memory.models import Entity
+
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        entity_metadata=None,
+        content_type="text/markdown",
+        file_path="test/no-metadata.md",
+        project_id=1,
+    )
+
+    tags = search_service._extract_entity_tags(entity)
+    assert tags == []
+
+
+@pytest.mark.asyncio
+async def test_extract_entity_tags_no_tags_key(search_service, session_maker):
+    """Test tag extraction when metadata exists but has no tags key."""
+    from basic_memory.models import Entity
+
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        entity_metadata={"title": "Some Title", "type": "note"},
+        content_type="text/markdown",
+        file_path="test/no-tags-key.md",
+        project_id=1,
+    )
+
+    tags = search_service._extract_entity_tags(entity)
+    assert tags == []
+
+
+@pytest.mark.asyncio
+async def test_search_by_frontmatter_tags(search_service, session_maker, test_project):
+    """Test that entities can be found by searching for their frontmatter tags."""
+    from basic_memory.repository import EntityRepository
+    from unittest.mock import AsyncMock
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Create entity with tags
+    from datetime import datetime
+
+    entity_data = {
+        "title": "Business Strategy Guide",
+        "entity_type": "note",
+        "entity_metadata": {"tags": ["business", "strategy", "planning", "organization"]},
+        "content_type": "text/markdown",
+        "file_path": "guides/business-strategy.md",
+        "permalink": "guides/business-strategy",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    await search_service.index_entity(entity)
+
+    # Search for entities by tag
+    results = await search_service.search(SearchQuery(text="business"))
+    assert len(results) >= 1
+
+    # Check that our entity is in the results
+    entity_found = False
+    for result in results:
+        if result.title == "Business Strategy Guide":
+            entity_found = True
+            break
+    assert entity_found, "Entity with 'business' tag should be found in search results"
+
+    # Test searching by another tag
+    results = await search_service.search(SearchQuery(text="planning"))
+    assert len(results) >= 1
+
+    entity_found = False
+    for result in results:
+        if result.title == "Business Strategy Guide":
+            entity_found = True
+            break
+    assert entity_found, "Entity with 'planning' tag should be found in search results"
+
+
+@pytest.mark.asyncio
+async def test_search_by_frontmatter_tags_string_format(
+    search_service, session_maker, test_project
+):
+    """Test that entities with string format tags can be found in search."""
+    from basic_memory.repository import EntityRepository
+    from unittest.mock import AsyncMock
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Create entity with tags in string format
+    from datetime import datetime
+
+    entity_data = {
+        "title": "Documentation Guidelines",
+        "entity_type": "note",
+        "entity_metadata": {"tags": "['documentation', 'tools', 'best-practices']"},
+        "content_type": "text/markdown",
+        "file_path": "guides/documentation.md",
+        "permalink": "guides/documentation",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    await search_service.index_entity(entity)
+
+    # Search for entities by tag
+    results = await search_service.search(SearchQuery(text="documentation"))
+    assert len(results) >= 1
+
+    # Check that our entity is in the results
+    entity_found = False
+    for result in results:
+        if result.title == "Documentation Guidelines":
+            entity_found = True
+            break
+    assert entity_found, "Entity with 'documentation' tag should be found in search results"

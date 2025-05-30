@@ -35,12 +35,13 @@ These issues address core functionality problems and should be resolved first:
 
 These features would improve user experience and can be added if time permits:
 
-### #52: Search frontmatter tags
+### ~~#52: Search frontmatter tags~~ ✅ COMPLETED
 - **Impact**: Enhances search capabilities
 - **Description**: Include YAML frontmatter tags in search index
 - **Implementation**: Index tags in search metadata, possibly add "tag:" search prefix
 - **Complexity**: Medium - requires search index modification
 - **User Impact**: Medium - improves discoverability
+- **Resolution**: Implemented Phase 1 - frontmatter tags now included in FTS5 search index
 
 ### #93: Reliable write_note Behavior for Populating Link Placeholders
 - **Impact**: Improves WikiLink workflow

@@ -33,12 +33,16 @@ def tmp_project_path():
 @pytest_asyncio.fixture(scope="function")
 async def engine_factory():
     """Create an in-memory SQLite engine factory for testing."""
-    async with engine_session_factory(Path(":memory:"), DatabaseType.MEMORY) as (engine, session_maker):
+    async with engine_session_factory(Path(":memory:"), DatabaseType.MEMORY) as (
+        engine,
+        session_maker,
+    ):
         # Initialize database schema
         from basic_memory.models.base import Base
+
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        
+
         # Return the tuple directly (like the regular tests do)
         yield engine, session_maker
 
@@ -53,7 +57,7 @@ async def test_project(tmp_project_path, engine_factory) -> Project:
         "is_active": True,
         "is_default": True,
     }
-    
+
     engine, session_maker = engine_factory
     project_repository = ProjectRepository(session_maker)
     project = await project_repository.create(project_data)
@@ -64,11 +68,7 @@ async def test_project(tmp_project_path, engine_factory) -> Project:
 def app_config(test_project) -> BasicMemoryConfig:
     """Create test app configuration."""
     projects = {test_project.name: str(test_project.path)}
-    return BasicMemoryConfig(
-        env="test",
-        projects=projects,
-        default_project=test_project.name
-    )
+    return BasicMemoryConfig(env="test", projects=projects, default_project=test_project.name)
 
 
 @pytest.fixture(scope="function")
@@ -88,4 +88,3 @@ def app(app_config, project_config, engine_factory) -> FastAPI:
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     app.dependency_overrides[get_app_config] = lambda: app_config
     return app
-

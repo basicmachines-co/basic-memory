@@ -18,7 +18,7 @@ async def test_write_simple_note(app):
         content="# Simple Note\n\nThis is a simple note for testing.",
         tags="simple,test",
     )
-    
+
     assert result
     assert "file_path: basic/Simple Note.md" in result
     assert "permalink: basic/simple-note" in result
@@ -52,18 +52,18 @@ def hello():
 |-------|--------|
 | Cell  | Data   |
 """
-    
+
     result = await write_note(
         title="Complex Content Note",
         folder="advanced",
         content=complex_content,
         tags="complex,markdown,testing",
     )
-    
+
     assert result
     assert "file_path: advanced/Complex Content Note.md" in result
     assert "permalink: advanced/complex-content-note" in result
-    
+
     # Verify content was saved correctly by reading it back
     read_result = await read_note("advanced/complex-content-note")
     assert "def hello():" in read_result
@@ -91,18 +91,18 @@ This is a research topic about artificial intelligence.
 ## Notes
 Further research needed on scalability.
 """
-    
+
     result = await write_note(
         title="Research Topic",
         folder="research",
         content=content_with_kg,
         tags="research,ai,ml",
     )
-    
+
     assert result
     assert "file_path: research/Research Topic.md" in result
     assert "permalink: research/research-topic" in result
-    
+
     # Verify knowledge graph elements were processed
     read_result = await read_note("research/research-topic")
     assert "- [method]" in read_result
@@ -118,7 +118,7 @@ async def test_write_note_nested_folders(app):
         content="# Deep Note\n\nThis note is in a deeply nested folder.",
         tags="nested,deep",
     )
-    
+
     assert result
     assert "file_path: level1/level2/level3/Deep Note.md" in result
     assert "permalink: level1/level2/level3/deep-note" in result
@@ -133,7 +133,7 @@ async def test_write_note_root_folder(app):
         content="# Root Note\n\nThis note is in the root folder.",
         tags="root",
     )
-    
+
     assert result
     assert "file_path: Root Note.md" in result
     assert "permalink: root-note" in result
@@ -148,7 +148,7 @@ async def test_write_note_special_characters_in_title(app):
         content="# Special Characters\n\nTesting special characters in title.",
         tags="special,characters",
     )
-    
+
     assert result
     assert "file_path: special/Note with Special: Characters & Symbols!.md" in result
     # Permalink should be sanitized
@@ -165,9 +165,9 @@ async def test_write_note_update_existing(app):
         content="# Initial Content\n\nOriginal content.",
         tags="initial",
     )
-    
+
     assert "file_path: updates/Update Test.md" in initial_result
-    
+
     # Update the same note
     updated_result = await write_note(
         title="Update Test",
@@ -175,10 +175,10 @@ async def test_write_note_update_existing(app):
         content="# Updated Content\n\nThis content has been updated.",
         tags="updated",
     )
-    
+
     assert "file_path: updates/Update Test.md" in updated_result
     assert "Updated" in updated_result
-    
+
     # Verify the content was actually updated
     read_result = await read_note("updates/update-test")
     assert "Updated Content" in read_result
@@ -194,9 +194,9 @@ async def test_write_note_with_frontmatter_tags(app):
         content="# Tags Test\n\nTesting tag functionality.",
         tags="tag1,tag2,tag3",
     )
-    
+
     assert result
-    
+
     # Read back and verify tags in frontmatter
     read_result = await read_note("tagging/tags-test")
     assert "tags:" in read_result
@@ -214,10 +214,10 @@ async def test_write_note_empty_content(app):
         content="",
         tags="empty",
     )
-    
+
     assert result
     assert "file_path: minimal/Empty Note.md" in result
-    
+
     # Should still create the note with frontmatter
     read_result = await read_note("minimal/empty-note")
     assert "title: Empty Note" in read_result
@@ -232,10 +232,10 @@ async def test_write_note_no_tags(app):
         content="# No Tags\n\nThis note has no tags.",
         tags="",
     )
-    
+
     assert result
     assert "file_path: notags/No Tags Note.md" in result
-    
+
     # Verify note was created successfully
     read_result = await read_note("notags/no-tags-note")
     assert "# No Tags" in read_result

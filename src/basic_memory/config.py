@@ -266,7 +266,7 @@ config: ProjectConfig = get_project_config()
 
 def update_current_project(project_name: str) -> None:
     """Update the global config to use a different project.
-    
+
     This is used by the CLI when --project flag is specified.
     """
     global config
