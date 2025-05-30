@@ -43,7 +43,7 @@ These features would improve user experience and can be added if time permits:
 - **User Impact**: Medium - improves discoverability
 - **Resolution**: Implemented Phase 1 - frontmatter tags now included in FTS5 search index
 
-### #93: Reliable write_note Behavior for Populating Link Placeholders
+### ~~#93: Reliable write_note Behavior for Populating Link Placeholders~~ ✅ COMPLETED
 - **Impact**: Improves WikiLink workflow
 - **Description**: Handle system-generated placeholder files gracefully in write_note
 - **Features Needed**:
@@ -52,6 +52,7 @@ These features would improve user experience and can be added if time permits:
   - Consistent file conflict handling
 - **Complexity**: High - requires significant write_note refactoring
 - **User Impact**: Medium-High - smooths linking workflow
+- **Resolution**: Fixed entity_service.py to parse frontmatter before permalink resolution. Both new and existing notes now respect custom permalinks specified in frontmatter.
 
 ## Lower Priority Issues
 
@@ -78,7 +79,9 @@ These issues are tracked but not planned for v0.13.0:
 - [x] YAML tag formatting follows standard specification
 - [x] `--project` flag works consistently across all commands
 - [x] `write_note` can update existing notes reliably
-- [ ] Comprehensive test coverage for all fixes
+- [x] Custom permalinks in frontmatter are respected by write_note
+- [x] Frontmatter tags are included in search index
+- [x] Comprehensive test coverage for all fixes
 - [ ] Documentation updates for any behavior changes
 
 ## Notes
