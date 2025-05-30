@@ -134,6 +134,82 @@ async def test_write_note_update_existing(app):
 
 
 @pytest.mark.asyncio
+async def test_issue_93_write_note_respects_custom_permalink_new_note(app):
+    """Test that write_note respects custom permalinks in frontmatter for new notes (Issue #93)"""
+
+    # Create a note with custom permalink in frontmatter
+    content_with_custom_permalink = dedent("""
+        ---
+        permalink: custom/my-desired-permalink  
+        ---
+        
+        # My New Note
+        
+        This note has a custom permalink specified in frontmatter.
+        
+        - [note] Testing if custom permalink is respected
+    """).strip()
+
+    result = await write_note(
+        title="My New Note",
+        folder="notes",
+        content=content_with_custom_permalink,
+    )
+
+    # Verify the custom permalink is respected
+    assert "# Created note" in result
+    assert "file_path: notes/My New Note.md" in result
+    assert "permalink: custom/my-desired-permalink" in result
+
+
+@pytest.mark.asyncio
+async def test_issue_93_write_note_respects_custom_permalink_existing_note(app):
+    """Test that write_note respects custom permalinks when updating existing notes (Issue #93)"""
+
+    # Step 1: Create initial note (auto-generated permalink)
+    result1 = await write_note(
+        title="Existing Note",
+        folder="test",
+        content="Initial content without custom permalink",
+    )
+
+    assert "# Created note" in result1
+
+    # Extract the auto-generated permalink
+    initial_permalink = None
+    for line in result1.split("\n"):
+        if line.startswith("permalink:"):
+            initial_permalink = line.split(":", 1)[1].strip()
+            break
+
+    assert initial_permalink is not None
+
+    # Step 2: Update with content that includes custom permalink in frontmatter
+    updated_content = dedent("""
+        ---
+        permalink: custom/new-permalink
+        ---
+        
+        # Existing Note
+        
+        Updated content with custom permalink in frontmatter.
+        
+        - [note] Custom permalink should be respected on update
+    """).strip()
+
+    result2 = await write_note(
+        title="Existing Note",
+        folder="test",
+        content=updated_content,
+    )
+
+    # Verify the custom permalink is respected
+    assert "# Updated note" in result2
+    assert "permalink: custom/new-permalink" in result2
+    assert f"permalink: {initial_permalink}" not in result2
+
+
+@pytest.mark.asyncio
 async def test_delete_note_existing(app):
     """Test deleting a new note.
 

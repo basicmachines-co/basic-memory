@@ -117,8 +117,29 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
             )
 
-        # Get unique permalink
-        permalink = await self.resolve_permalink(schema.permalink or file_path)
+        # Parse content frontmatter to check for user-specified permalink
+        content_markdown = None
+        if schema.content and has_frontmatter(schema.content):
+            content_frontmatter = parse_frontmatter(schema.content)
+            if "permalink" in content_frontmatter:
+                # Create a minimal EntityMarkdown object for permalink resolution
+                from basic_memory.markdown.schemas import EntityFrontmatter
+
+                frontmatter_metadata = {
+                    "title": schema.title,
+                    "type": schema.entity_type,
+                    "permalink": content_frontmatter["permalink"],
+                }
+                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
+                content_markdown = EntityMarkdown(
+                    frontmatter=frontmatter_obj,
+                    content="",  # content not needed for permalink resolution
+                    observations=[],
+                    relations=[],
+                )
+
+        # Get unique permalink (prioritizing content frontmatter)
+        permalink = await self.resolve_permalink(file_path, content_markdown)
         schema._permalink = permalink
 
         post = await schema_to_markdown(schema)
@@ -151,11 +172,46 @@ class EntityService(BaseService[EntityModel]):
         # Read existing frontmatter from the file if it exists
         existing_markdown = await self.entity_parser.parse_file(file_path)
 
+        # Parse content frontmatter to check for user-specified permalink
+        content_markdown = None
+        if schema.content and has_frontmatter(schema.content):
+            content_frontmatter = parse_frontmatter(schema.content)
+            if "permalink" in content_frontmatter:
+                # Create a minimal EntityMarkdown object for permalink resolution
+                from basic_memory.markdown.schemas import EntityFrontmatter
+
+                frontmatter_metadata = {
+                    "title": schema.title,
+                    "type": schema.entity_type,
+                    "permalink": content_frontmatter["permalink"],
+                }
+                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
+                content_markdown = EntityMarkdown(
+                    frontmatter=frontmatter_obj,
+                    content="",  # content not needed for permalink resolution
+                    observations=[],
+                    relations=[],
+                )
+
+        # Check if we need to update the permalink based on content frontmatter
+        new_permalink = entity.permalink  # Default to existing
+        if content_markdown and content_markdown.frontmatter.permalink:
+            # Resolve permalink with the new content frontmatter
+            resolved_permalink = await self.resolve_permalink(file_path, content_markdown)
+            if resolved_permalink != entity.permalink:
+                new_permalink = resolved_permalink
+                # Update the schema to use the new permalink
+                schema._permalink = new_permalink
+
         # Create post with new content from schema
         post = await schema_to_markdown(schema)
 
         # Merge new metadata with existing metadata
         existing_markdown.frontmatter.metadata.update(post.metadata)
+
+        # Ensure the permalink in the metadata is the resolved one
+        if new_permalink != entity.permalink:
+            existing_markdown.frontmatter.metadata["permalink"] = new_permalink
 
         # Create a new post with merged metadata
         merged_post = frontmatter.Post(post.content, **existing_markdown.frontmatter.metadata)

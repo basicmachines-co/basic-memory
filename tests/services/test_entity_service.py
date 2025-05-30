@@ -421,7 +421,7 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
     assert created is True
     assert entity.title == "Git Workflow Guide"
     assert entity.entity_type == "test"
-    assert entity.permalink == "test/git-workflow-guide"
+    assert entity.permalink == "git-workflow-guide"
     assert entity.file_path == "test/Git Workflow Guide.md"
 
     assert len(entity.observations) == 1
@@ -451,7 +451,7 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
         ---
         title: Git Workflow Guide
         type: test
-        permalink: test/git-workflow-guide
+        permalink: git-workflow-guide
         ---
         
         # Git Workflow Guide
@@ -516,7 +516,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
         ---
         title: Git Workflow Guide
         type: test
-        permalink: test/git-workflow-guide
+        permalink: git-workflow-guide
         ---
         
         # Git Workflow Guide
@@ -545,6 +545,9 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
 
     assert created is False
     assert entity.title == "Git Workflow Guide"
+
+    # assert custom permalink value
+    assert entity.permalink == "git-workflow-guide"
 
     assert len(entity.observations) == 1
     assert entity.observations[0].category == "design"
