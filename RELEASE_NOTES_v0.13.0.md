@@ -151,6 +151,13 @@ All knowledge-related endpoints now require project context:
 
 ## Bug Fixes
 
+### Core Functionality Fixes ✅
+- **#118: Fixed YAML tag formatting** - Tags now follow standard YAML specification (`tags: [basicmemory]` instead of `tags: ['#basicmemory']`)
+- **#110: Fixed --project flag consistency** - CLI commands now properly respect `--project` flag across all operations
+- **#107: Fixed write_note update failures** - EntityParser now handles absolute paths correctly (resolved in commit 9bff1f7)
+- **#93: Fixed custom permalink handling** - write_note now respects user-specified permalinks in frontmatter for both new and existing notes
+
+### Infrastructure Fixes
 - Fixed duplicate initialization in MCP server startup
 - Fixed JWT audience validation for OAuth tokens
 - Fixed trailing slash requirement for MCP endpoints
@@ -158,6 +165,12 @@ All knowledge-related endpoints now require project context:
 - Fixed stdio transport initialization
 - Improved error handling in file sync operations
 - Fixed search result ranking and filtering
+
+## Enhancements
+
+### Knowledge Management Improvements ✅
+- **#52: Enhanced search capabilities** - Frontmatter tags are now included in the FTS5 search index, improving content discoverability
+- **Improved search quality** - Tags from YAML frontmatter (both list and string formats) are indexed and searchable
 
 ## Breaking Changes
 
