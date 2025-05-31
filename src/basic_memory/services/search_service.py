@@ -324,3 +324,32 @@ class SearchService:
     async def delete_by_entity_id(self, entity_id: int):
         """Delete an item from the search index."""
         await self.repository.delete_by_entity_id(entity_id)
+
+    async def handle_delete(self, entity: Entity):
+        """Handle complete entity deletion from search index including observations and relations.
+        
+        This replicates the logic from sync_service.handle_delete() to properly clean up
+        all search index entries for an entity and its related data.
+        """
+        logger.debug(
+            f"Cleaning up search index for entity_id={entity.id}, file_path={entity.file_path}, "
+            f"observations={len(entity.observations)}, relations={len(entity.outgoing_relations)}"
+        )
+        
+        # Clean up search index - same logic as sync_service.handle_delete()
+        permalinks = (
+            [entity.permalink]
+            + [o.permalink for o in entity.observations]
+            + [r.permalink for r in entity.outgoing_relations]
+        )
+
+        logger.debug(
+            f"Deleting search index entries for entity_id={entity.id}, "
+            f"index_entries={len(permalinks)}"
+        )
+
+        for permalink in permalinks:
+            if permalink:
+                await self.delete_by_permalink(permalink)
+            else:
+                await self.delete_by_entity_id(entity.id)

@@ -130,26 +130,35 @@ class SearchRepository:
         For FTS5:
         - Special characters and phrases need to be quoted
         - Terms with spaces or special chars need quotes
-        - Boolean operators (AND, OR, NOT) and parentheses are preserved
+        - Boolean operators (AND, OR, NOT) are preserved for complex queries
         """
         if "*" in term:
             return term
 
-        # Check for boolean operators - if present, return the term as is
-        boolean_operators = [" AND ", " OR ", " NOT ", "(", ")"]
+        # Check for explicit boolean operators - if present, return the term as is
+        boolean_operators = [" AND ", " OR ", " NOT "]
         if any(op in f" {term} " for op in boolean_operators):
             return term
 
-        # List of special characters that need quoting (excluding *)
+        # List of FTS5 special characters that need escaping/quoting
         special_chars = ["/", "-", ".", " ", "(", ")", "[", "]", '"', "'"]
 
         # Check if term contains any special characters
         needs_quotes = any(c in term for c in special_chars)
 
         if needs_quotes:
-            # If the term already contains quotes, escape them and add a wildcard
-            term = term.replace('"', '""')
-            term = f'"{term}"*'
+            # Escape any existing quotes by doubling them
+            escaped_term = term.replace('"', '""')
+            # Quote the entire term to handle special characters safely
+            if is_prefix and not ("/" in term and term.endswith(".md")):
+                # For search terms (not file paths), add prefix matching
+                term = f'"{escaped_term}"*'
+            else:
+                # For file paths, use exact matching
+                term = f'"{escaped_term}"'
+        elif is_prefix:
+            # Only add wildcard for simple terms without special characters
+            term = f"{term}*"
 
         return term
 
