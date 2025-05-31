@@ -1,14 +1,62 @@
 """
 Shared fixtures for integration tests.
 
-These tests use the full Basic Memory stack including MCP server,
-API endpoints, and database with realistic workflows.
+Integration tests verify the complete flow: MCP Client → MCP Server → FastAPI → Database.
+Unlike unit tests which use in-memory databases and mocks, integration tests use real SQLite
+files and test the full application stack to ensure all components work together correctly.
+
+## Architecture
+
+The integration test setup creates this flow:
+
+```
+Test → MCP Client → MCP Server → HTTP Request (ASGITransport) → FastAPI App → Database
+                                                                      ↑
+                                                               Dependency overrides
+                                                               point to test database
+```
+
+## Key Components
+
+1. **Real SQLite Database**: Uses `DatabaseType.FILESYSTEM` with actual SQLite files
+   in temporary directories instead of in-memory databases.
+
+2. **Shared Database Connection**: Both MCP server and FastAPI app use the same 
+   database via dependency injection overrides.
+
+3. **Project Session Management**: Initializes the MCP project session with test
+   project configuration so tools know which project to operate on.
+
+4. **Search Index Initialization**: Creates the FTS5 search index tables that
+   the application requires for search functionality.
+
+5. **Global Configuration Override**: Modifies the global `basic_memory_app_config`
+   so MCP tools use test project settings instead of user configuration.
+
+## Usage
+
+Integration tests should include both `mcp_server` and `app` fixtures to ensure
+the complete stack is wired correctly:
+
+```python
+@pytest.mark.asyncio
+async def test_my_mcp_tool(mcp_server, app):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("tool_name", {"param": "value"})
+        # Assert on results...
+```
+
+The `app` fixture ensures FastAPI dependency overrides are active, and 
+`mcp_server` provides the MCP server with proper project session initialization.
 """
 
-import tempfile
+from typing import AsyncGenerator
+
 import pytest
 import pytest_asyncio
 from pathlib import Path
+
+from httpx import AsyncClient, ASGITransport
 
 from basic_memory.config import BasicMemoryConfig, ProjectConfig
 from basic_memory.db import engine_session_factory, DatabaseType
@@ -18,22 +66,17 @@ from fastapi import FastAPI
 
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_project_config, get_engine_factory, get_app_config
+from basic_memory.config import app_config as basic_memory_app_config
 
 # Import MCP tools so they're available for testing
 from basic_memory.mcp import tools  # noqa: F401
 
 
-@pytest.fixture(scope="function")
-def tmp_project_path():
-    """Create a temporary directory for test project."""
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        yield Path(tmp_dir)
-
-
 @pytest_asyncio.fixture(scope="function")
-async def engine_factory():
-    """Create an in-memory SQLite engine factory for testing."""
-    async with engine_session_factory(Path(":memory:"), DatabaseType.MEMORY) as (
+async def engine_factory(tmp_path):
+    """Create a SQLite file engine factory for integration testing."""
+    db_path = tmp_path / "test.db"
+    async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (
         engine,
         session_maker,
     ):
@@ -43,17 +86,16 @@ async def engine_factory():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-        # Return the tuple directly (like the regular tests do)
         yield engine, session_maker
 
 
 @pytest_asyncio.fixture(scope="function")
-async def test_project(tmp_project_path, engine_factory) -> Project:
+async def test_project(tmp_path, engine_factory) -> Project:
     """Create a test project."""
     project_data = {
         "name": "test-project",
         "description": "Project used for integration tests",
-        "path": str(tmp_project_path),
+        "path": str(tmp_path),
         "is_active": True,
         "is_default": True,
     }
@@ -68,7 +110,17 @@ async def test_project(tmp_project_path, engine_factory) -> Project:
 def app_config(test_project) -> BasicMemoryConfig:
     """Create test app configuration."""
     projects = {test_project.name: str(test_project.path)}
-    return BasicMemoryConfig(env="test", projects=projects, default_project=test_project.name)
+    app_config = BasicMemoryConfig(
+        env="test", 
+        projects=projects, 
+        default_project=test_project.name
+    )
+    
+    # Set the module app_config instance project list (like regular tests)
+    basic_memory_app_config.projects = projects
+    basic_memory_app_config.default_project = test_project.name
+    
+    return app_config
 
 
 @pytest.fixture(scope="function")
@@ -88,3 +140,54 @@ def app(app_config, project_config, engine_factory) -> FastAPI:
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     app.dependency_overrides[get_app_config] = lambda: app_config
     return app
+
+
+@pytest_asyncio.fixture(scope="function")
+async def search_service(engine_factory, test_project):
+    """Create and initialize search service for integration tests."""
+    from basic_memory.repository.search_repository import SearchRepository
+    from basic_memory.repository.entity_repository import EntityRepository
+    from basic_memory.services.file_service import FileService
+    from basic_memory.services.search_service import SearchService
+    from basic_memory.markdown.markdown_processor import MarkdownProcessor
+    from basic_memory.markdown import EntityParser
+    
+    engine, session_maker = engine_factory
+    
+    # Create repositories
+    search_repository = SearchRepository(session_maker, project_id=test_project.id)
+    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
+    
+    # Create file service
+    entity_parser = EntityParser(Path(test_project.path))
+    markdown_processor = MarkdownProcessor(entity_parser)
+    file_service = FileService(Path(test_project.path), markdown_processor)
+    
+    # Create and initialize search service
+    service = SearchService(search_repository, entity_repository, file_service)
+    await service.init_search_index()
+    return service
+
+
+@pytest.fixture(scope="function")
+def mcp_server(app_config, search_service):
+    # Import mcp instance
+    from basic_memory.mcp.server import mcp as server
+
+    # Import mcp tools to register them
+    import basic_memory.mcp.tools  # noqa: F401
+
+    # Import prompts to register them
+    import basic_memory.mcp.prompts  # noqa: F401
+    
+    # Initialize project session with test project
+    from basic_memory.mcp.project_session import session
+    session.initialize(app_config.default_project)
+
+    return server
+
+@pytest_asyncio.fixture(scope="function")
+async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+    """Create test client that both MCP and tests will use."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
