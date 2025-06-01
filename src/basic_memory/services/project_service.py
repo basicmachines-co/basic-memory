@@ -9,7 +9,8 @@ from typing import Dict, Optional
 from loguru import logger
 from sqlalchemy import text
 
-from basic_memory.config import ConfigManager, config, app_config
+from basic_memory.config import config_manager, config, app_config
+from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas import (
     ActivityMetrics,
@@ -23,10 +24,12 @@ from basic_memory.config import WATCH_STATUS_JSON
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
-    def __init__(self, repository: Optional[ProjectRepository] = None):
+    repository: ProjectRepository
+
+    def __init__(self, repository: ProjectRepository):
         """Initialize the project service."""
         super().__init__()
-        self.config_manager = ConfigManager()
+        self.config_manager = config_manager
         self.repository = repository
 
     @property
@@ -55,6 +58,10 @@ class ProjectService:
             The name of the current project
         """
         return os.environ.get("BASIC_MEMORY_PROJECT", self.config_manager.default_project)
+
+    async def get_project(self, name: str) -> Optional[Project]:
+        """Get the file path for a project by name."""
+        return await self.repository.get_by_name(name)
 
     async def add_project(self, name: str, path: str) -> None:
         """Add a new project to the configuration and database.

@@ -130,11 +130,6 @@ async def test_get_statistics(project_service: ProjectService, test_graph):
     assert statistics.total_entities > 0
     assert "test" in statistics.entity_types
 
-    # Test with no repository
-    temp_service = ProjectService()  # No repository provided
-    with pytest.raises(ValueError, match="Repository is required for get_statistics"):
-        await temp_service.get_statistics()
-
 
 @pytest.mark.asyncio
 async def test_get_activity_metrics(project_service: ProjectService, test_graph):
@@ -146,11 +141,6 @@ async def test_get_activity_metrics(project_service: ProjectService, test_graph)
     assert isinstance(metrics, ActivityMetrics)
     assert len(metrics.recently_created) > 0
     assert len(metrics.recently_updated) > 0
-
-    # Test with no repository
-    temp_service = ProjectService()  # No repository provided
-    with pytest.raises(ValueError, match="Repository is required for get_activity_metrics"):
-        await temp_service.get_activity_metrics()
 
 
 @pytest.mark.asyncio
@@ -168,11 +158,6 @@ async def test_get_project_info(project_service: ProjectService, test_graph):
     assert isinstance(info.statistics, ProjectStatistics)
     assert isinstance(info.activity, ActivityMetrics)
     assert isinstance(info.system, SystemStatus)
-
-    # Test with no repository
-    temp_service = ProjectService()  # No repository provided
-    with pytest.raises(ValueError, match="Repository is required for get_project_info"):
-        await temp_service.get_project_info()
 
 
 @pytest.mark.asyncio

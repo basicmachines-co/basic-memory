@@ -123,7 +123,6 @@ async def test_list_projects_endpoint(test_graph, client, project_config, projec
     # Check that the response contains expected fields
     assert "projects" in data
     assert "default_project" in data
-    assert "current_project" in data
 
     # Check that projects is a list
     assert isinstance(data["projects"], list)
@@ -137,12 +136,6 @@ async def test_list_projects_endpoint(test_graph, client, project_config, projec
         assert "name" in project
         assert "path" in project
         assert "is_default" in project
-        assert "is_current" in project
-
-        # Current project should be marked
-        current_project = next((p for p in data["projects"] if p["is_current"]), None)
-        assert current_project is not None
-        assert current_project["name"] == data["current_project"]
 
         # Default project should be marked
         default_project = next((p for p in data["projects"] if p["is_default"]), None)

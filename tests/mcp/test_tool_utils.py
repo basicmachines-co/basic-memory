@@ -17,6 +17,7 @@ def mock_response(monkeypatch):
         def __init__(self, status_code=200):
             self.status_code = status_code
             self.is_success = status_code < 400
+            self.json = lambda: {}
 
         def raise_for_status(self):
             if self.status_code >= 400:

@@ -21,7 +21,7 @@ Test → MCP Client → MCP Server → HTTP Request (ASGITransport) → FastAPI 
 1. **Real SQLite Database**: Uses `DatabaseType.FILESYSTEM` with actual SQLite files
    in temporary directories instead of in-memory databases.
 
-2. **Shared Database Connection**: Both MCP server and FastAPI app use the same 
+2. **Shared Database Connection**: Both MCP server and FastAPI app use the same
    database via dependency injection overrides.
 
 3. **Project Session Management**: Initializes the MCP project session with test
@@ -46,7 +46,7 @@ async def test_my_mcp_tool(mcp_server, app):
         # Assert on results...
 ```
 
-The `app` fixture ensures FastAPI dependency overrides are active, and 
+The `app` fixture ensures FastAPI dependency overrides are active, and
 `mcp_server` provides the MCP server with proper project session initialization.
 """
 
@@ -58,7 +58,7 @@ from pathlib import Path
 
 from httpx import AsyncClient, ASGITransport
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig
+from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -107,19 +107,18 @@ async def test_project(tmp_path, engine_factory) -> Project:
 
 
 @pytest.fixture(scope="function")
-def app_config(test_project) -> BasicMemoryConfig:
+def app_config(test_project, tmp_path, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
     projects = {test_project.name: str(test_project.path)}
-    app_config = BasicMemoryConfig(
-        env="test", 
-        projects=projects, 
-        default_project=test_project.name
-    )
-    
+    app_config = BasicMemoryConfig(env="test", projects=projects, default_project=test_project.name)
+
+    # set the home dir to the tmp_path so each test gets it's own config
+    monkeypatch.setenv("HOME", str(tmp_path))
+
     # Set the module app_config instance project list (like regular tests)
     basic_memory_app_config.projects = projects
     basic_memory_app_config.default_project = test_project.name
-    
+
     return app_config
 
 
@@ -133,8 +132,16 @@ def project_config(test_project):
 
 
 @pytest.fixture(scope="function")
-def app(app_config, project_config, engine_factory) -> FastAPI:
+def app(app_config, project_config, engine_factory, test_project, monkeypatch) -> FastAPI:
     """Create test FastAPI application with single project."""
+    # Patch the ConfigManager to use test configuration
+
+    test_projects = {test_project.name: str(test_project.path)}
+    test_default = test_project.name
+
+    monkeypatch.setattr(ConfigManager, "projects", property(lambda self: test_projects))
+    monkeypatch.setattr(ConfigManager, "default_project", property(lambda self: test_default))
+
     app = fastapi_app
     app.dependency_overrides[get_project_config] = lambda: project_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
@@ -151,18 +158,18 @@ async def search_service(engine_factory, test_project):
     from basic_memory.services.search_service import SearchService
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown import EntityParser
-    
+
     engine, session_maker = engine_factory
-    
+
     # Create repositories
     search_repository = SearchRepository(session_maker, project_id=test_project.id)
     entity_repository = EntityRepository(session_maker, project_id=test_project.id)
-    
+
     # Create file service
     entity_parser = EntityParser(Path(test_project.path))
     markdown_processor = MarkdownProcessor(entity_parser)
     file_service = FileService(Path(test_project.path), markdown_processor)
-    
+
     # Create and initialize search service
     service = SearchService(search_repository, entity_repository, file_service)
     await service.init_search_index()
@@ -179,12 +186,14 @@ def mcp_server(app_config, search_service):
 
     # Import prompts to register them
     import basic_memory.mcp.prompts  # noqa: F401
-    
+
     # Initialize project session with test project
     from basic_memory.mcp.project_session import session
+
     session.initialize(app_config.default_project)
 
     return server
+
 
 @pytest_asyncio.fixture(scope="function")
 async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:

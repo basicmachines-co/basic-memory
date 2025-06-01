@@ -29,7 +29,7 @@ async def test_write_note_basic_creation(mcp_server, app):
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: basic/Simple Note.md" in response_text
         assert "permalink: basic/simple-note" in response_text
@@ -54,7 +54,7 @@ async def test_write_note_no_tags(mcp_server, app):
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: test/No Tags Note.md" in response_text
         assert "permalink: test/no-tags-note" in response_text
@@ -78,13 +78,13 @@ async def test_write_note_update_existing(mcp_server, app):
         )
 
         assert "# Created note" in result1[0].text
-        
+
         # Update the same note
         result2 = await client.call_tool(
             "write_note",
             {
                 "title": "Update Test",
-                "folder": "test", 
+                "folder": "test",
                 "content": "# Update Test\n\nUpdated content with changes.",
                 "tags": "updated,modified",
             },
@@ -93,7 +93,7 @@ async def test_write_note_update_existing(mcp_server, app):
         assert len(result2) == 1
         assert result2[0].type == "text"
         response_text = result2[0].text
-        
+
         assert "# Updated note" in response_text
         assert "file_path: test/Update Test.md" in response_text
         assert "permalink: test/update-test" in response_text
@@ -119,7 +119,7 @@ async def test_write_note_tag_array(mcp_server, app):
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: test/Array Tags Test.md" in response_text
         assert "permalink: test/array-tags-test" in response_text
@@ -156,7 +156,7 @@ async def test_write_note_custom_permalink(mcp_server, app):
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: notes/Custom Permalink Note.md" in response_text
         assert "permalink: custom/my-special-permalink" in response_text
@@ -182,7 +182,7 @@ async def test_write_note_unicode_content(mcp_server, app):
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: test/Unicode Test 🌟.md" in response_text
         # Permalink should be sanitized
@@ -190,7 +190,7 @@ async def test_write_note_unicode_content(mcp_server, app):
         assert "## Tags" in response_text
 
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
 async def test_write_note_complex_content_with_observations_relations(mcp_server, app):
     """Test creating note with complex content including observations and relations."""
 
@@ -228,20 +228,20 @@ async def test_write_note_complex_content_with_observations_relations(mcp_server
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: knowledge/Complex Knowledge Note.md" in response_text
         assert "permalink: knowledge/complex-knowledge-note" in response_text
-        
+
         # Should show observation and relation counts
         assert "## Observations" in response_text
         assert "tech: 1" in response_text
         assert "design: 1" in response_text
         assert "note: 1" in response_text
-        
+
         assert "## Relations" in response_text
         # Should show outgoing relations
-        
+
         assert "## Tags" in response_text
         assert "complex, knowledge, relations" in response_text
 
@@ -278,7 +278,7 @@ async def test_write_note_preserve_frontmatter(mcp_server, app):
         assert len(result) == 1
         assert result[0].type == "text"
         response_text = result[0].text
-        
+
         assert "# Created note" in response_text
         assert "file_path: test/Frontmatter Note.md" in response_text
         assert "permalink: test/frontmatter-note" in response_text

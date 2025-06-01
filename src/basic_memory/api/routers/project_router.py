@@ -8,7 +8,7 @@ from basic_memory.schemas import ProjectInfoResponse
 from basic_memory.schemas.project_info import (
     ProjectList,
     ProjectItem,
-    ProjectSwitchRequest,
+    ProjectInfoRequest,
     ProjectStatusResponse,
     ProjectWatchStatus,
 )
@@ -29,17 +29,17 @@ async def get_project_info(
 
 
 # Update a project
-@project_router.patch("/projects/{name}", response_model=ProjectStatusResponse)
+@project_router.patch("/{name}", response_model=ProjectStatusResponse)
 async def update_project(
     project_service: ProjectServiceDep,
-    name: str = Path(..., description="Name of the project to update"),
+    project_name: str = Path(..., description="Name of the project to update"),
     path: Optional[str] = Body(None, description="New path for the project"),
     is_active: Optional[bool] = Body(None, description="Status of the project (active/inactive)"),
 ) -> ProjectStatusResponse:
     """Update a project's information in configuration and database.
 
     Args:
-        name: The name of the project to update
+        project_name: The name of the project to update
         path: Optional new path for the project
         is_active: Optional status update for the project
 
@@ -48,23 +48,22 @@ async def update_project(
     """
     try:  # pragma: no cover
         # Get original project info for the response
-        old_project = ProjectWatchStatus(
-            name=name,
-            path=project_service.projects.get(name, ""),
-            watch_status=None,
+        old_project = ProjectItem(
+            name=project_name,
+            path=project_service.projects.get(project_name, ""),
         )
 
-        await project_service.update_project(name, updated_path=path, is_active=is_active)
+        await project_service.update_project(project_name, updated_path=path, is_active=is_active)
 
         # Get updated project info
-        updated_path = path if path else project_service.projects.get(name, "")
+        updated_path = path if path else project_service.projects.get(project_name, "")
 
         return ProjectStatusResponse(
-            message=f"Project '{name}' updated successfully",
+            message=f"Project '{project_name}' updated successfully",
             status="success",
-            default=(name == project_service.default_project),
+            default=(project_name == project_service.default_project),
             old_project=old_project,
-            new_project=ProjectWatchStatus(name=name, path=updated_path, watch_status=None),
+            new_project=ProjectItem(name=project_name, path=updated_path),
         )
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=400, detail=str(e))
@@ -82,7 +81,6 @@ async def list_projects(
     """
     projects_dict = project_service.projects
     default_project = project_service.default_project
-    current_project = project_service.current_project
 
     project_items = []
     for name, path in projects_dict.items():
@@ -91,21 +89,19 @@ async def list_projects(
                 name=name,
                 path=path,
                 is_default=(name == default_project),
-                is_current=(name == current_project),
             )
         )
 
     return ProjectList(
         projects=project_items,
         default_project=default_project,
-        current_project=current_project,
     )
 
 
 # Add a new project
 @project_resource_router.post("/projects", response_model=ProjectStatusResponse)
 async def add_project(
-    project_data: ProjectSwitchRequest,
+    project_data: ProjectInfoRequest,
     project_service: ProjectServiceDep,
 ) -> ProjectStatusResponse:
     """Add a new project to configuration and database.
@@ -126,10 +122,8 @@ async def add_project(
             message=f"Project '{project_data.name}' added successfully",
             status="success",
             default=project_data.set_default,
-            new_project=ProjectWatchStatus(
-                name=project_data.name,
-                path=project_data.path,
-                watch_status=None,
+            new_project=ProjectItem(
+                name=project_data.name, path=project_data.path, is_default=project_data.set_default
             ),
         )
     except ValueError as e:  # pragma: no cover
@@ -137,7 +131,7 @@ async def add_project(
 
 
 # Remove a project
-@project_resource_router.delete("/projects/{name}", response_model=ProjectStatusResponse)
+@project_resource_router.delete("/{name}", response_model=ProjectStatusResponse)
 async def remove_project(
     project_service: ProjectServiceDep,
     name: str = Path(..., description="Name of the project to remove"),
@@ -171,7 +165,7 @@ async def remove_project(
 
 
 # Set a project as default
-@project_resource_router.put("/projects/{name}/default", response_model=ProjectStatusResponse)
+@project_resource_router.put("/{name}/default", response_model=ProjectStatusResponse)
 async def set_default_project(
     project_service: ProjectServiceDep,
     name: str = Path(..., description="Name of the project to set as default"),
@@ -184,16 +178,19 @@ async def set_default_project(
     Returns:
         Response confirming the project was set as default
     """
-    try:  # pragma: no cover
+    try:
         # Get the old default project
-        old_default = project_service.default_project
-        old_project = None
-        if old_default != name:
-            old_project = ProjectWatchStatus(
-                name=old_default,
-                path=project_service.projects.get(old_default, ""),
-                watch_status=None,
+        default_name = project_service.default_project
+        default_project = await project_service.get_project(default_name)
+        if not default_project:
+            raise HTTPException(
+                status_code=404, detail=f"Default Project: '{default_name}' does not exist"
             )
+
+        # get the new project
+        new_default_project = await project_service.get_project(name)
+        if not new_default_project:
+            raise HTTPException(status_code=404, detail=f"Project: '{name}' does not exist")
 
         await project_service.set_default_project(name)
 
@@ -201,11 +198,11 @@ async def set_default_project(
             message=f"Project '{name}' set as default successfully",
             status="success",
             default=True,
-            old_project=old_project,
-            new_project=ProjectWatchStatus(
+            old_project=ProjectItem(name=default_name, path=default_project.path),
+            new_project=ProjectItem(
                 name=name,
-                path=project_service.projects.get(name, ""),
-                watch_status=None,
+                path=new_default_project.path,
+                is_default=True,
             ),
         )
     except ValueError as e:  # pragma: no cover

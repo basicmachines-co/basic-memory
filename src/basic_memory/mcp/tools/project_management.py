@@ -36,32 +36,27 @@ async def list_projects(ctx: Context | None = None) -> str:
     if ctx:  # pragma: no cover
         await ctx.info("Listing all available projects")
 
-    try:
-        # Get projects from API
-        response = await call_get(client, "/projects/projects")
-        project_list = ProjectList.model_validate(response.json())
+    # Get projects from API
+    response = await call_get(client, "/projects/projects")
+    project_list = ProjectList.model_validate(response.json())
 
-        current = session.get_current_project()
+    current = session.get_current_project()
 
-        result = "Available projects:\n"
+    result = "Available projects:\n"
 
-        for project in project_list.projects:
-            indicators = []
-            if project.name == current:
-                indicators.append("current")
-            if project.is_default:
-                indicators.append("default")
+    for project in project_list.projects:
+        indicators = []
+        if project.name == current:
+            indicators.append("current")
+        if project.is_default:
+            indicators.append("default")
 
-            if indicators:
-                result += f"• {project.name} ({', '.join(indicators)})\n"
-            else:
-                result += f"• {project.name}\n"
+        if indicators:
+            result += f"• {project.name} ({', '.join(indicators)})\n"
+        else:
+            result += f"• {project.name}\n"
 
-        return add_project_metadata(result, current)
-
-    except Exception as e:
-        logger.error(f"Error listing projects: {e}")
-        return f"Error listing projects: {str(e)}"
+    return add_project_metadata(result, current)
 
 
 @mcp.tool()
@@ -88,10 +83,9 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
     if ctx:  # pragma: no cover
         await ctx.info(f"Switching to project: {project_name}")
 
-    previous_project = session.get_current_project()
+    current_project = session.get_current_project()
     try:
         # Validate project exists by getting project list
-        base_url = get_project_config().project_url.replace(f"/{get_project_config().name}", "")
         response = await call_get(client, "/projects/projects")
         project_list = ProjectList.model_validate(response.json())
 
@@ -102,13 +96,13 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
             return f"Error: Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
 
         # Switch to the project
-        previous_project = session.get_current_project()
         session.set_current_project(project_name)
+        current_project = session.get_current_project()
+        project_config = get_project_config(current_project)
 
         # Get project info to show summary
         try:
-            project_url = f"{base_url}/{project_name}"
-            response = await call_get(client, f"{project_url}/project/info")
+            response = await call_get(client, f"{project_config.project_url}/project/info")
             project_info = ProjectInfoResponse.model_validate(response.json())
 
             result = f"✓ Switched to {project_name} project\n\n"
@@ -128,8 +122,8 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
     except Exception as e:
         logger.error(f"Error switching to project {project_name}: {e}")
         # Revert to previous project on error
-        session.set_current_project(previous_project)
-        return f"Error switching to project '{project_name}': {str(e)}"  # pragma: no cover - bug: undefined var
+        session.set_current_project(current_project)
+        raise e
 
 
 @mcp.tool()
@@ -153,43 +147,23 @@ async def get_current_project(ctx: Context | None = None) -> str:
     if ctx:  # pragma: no cover
         await ctx.info("Getting current project information")
 
-    try:
-        current = session.get_current_project()
-        result = f"Current project: {current}\n\n"
+    current_project = session.get_current_project()
+    project_config = get_project_config(current_project)
+    result = f"Current project: {current_project}\n\n"
 
-        # Get base URL for project API calls
-        base_url = get_project_config().project_url.replace(f"/{get_project_config().name}", "")
+    # get project stats
+    response = await call_get(client, f"{project_config.project_url}/project/info")
+    project_info = ProjectInfoResponse.model_validate(response.json())
 
-        # Try to get project stats
-        try:
-            project_url = f"{base_url}/{current}"
-            response = await call_get(client, f"{project_url}/project/info")
-            project_info = ProjectInfoResponse.model_validate(response.json())
+    result += f"• {project_info.statistics.total_entities} entities\n"
+    result += f"• {project_info.statistics.total_observations} observations\n"
+    result += f"• {project_info.statistics.total_relations} relations\n"
 
-            result += f"• {project_info.statistics.total_entities} entities\n"
-            result += f"• {project_info.statistics.total_observations} observations\n"
-            result += f"• {project_info.statistics.total_relations} relations\n"
+    default_project = session.get_default_project()
+    if current_project != default_project:
+        result += f"• Default project: {default_project}\n"
 
-        except Exception as e:
-            logger.warning(f"Could not get stats for current project: {e}")
-            result += "• Statistics unavailable\n"
-
-        # Get default project info
-        try:
-            response = await call_get(client, f"{base_url}/project/projects")
-            project_list = ProjectList.model_validate(response.json())
-            default = project_list.default_project
-
-            if current != default:
-                result += f"• Default project: {default}\n"
-        except Exception:
-            pass
-
-        return add_project_metadata(result, current)
-
-    except Exception as e:
-        logger.error(f"Error getting current project: {e}")
-        return f"Error getting current project: {str(e)}"
+    return add_project_metadata(result, current_project)
 
 
 @mcp.tool()
@@ -214,20 +188,15 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
     if ctx:  # pragma: no cover
         await ctx.info(f"Setting default project to: {project_name}")
 
-    try:
-        # Call API to set default project
-        response = await call_put(client, f"/projects/{project_name}/default")
-        status_response = ProjectStatusResponse.model_validate(response.json())
+    # Call API to set default project
+    response = await call_put(client, f"/projects/{project_name}/default")
+    status_response = ProjectStatusResponse.model_validate(response.json())
 
-        result = f"✓ {status_response.message}\n\n"
-        result += "Restart Basic Memory for this change to take effect:\n"
-        result += "basic-memory mcp\n"
+    result = f"✓ {status_response.message}\n\n"
+    result += "Restart Basic Memory for this change to take effect:\n"
+    result += "basic-memory mcp\n"
 
-        if status_response.old_project:
-            result += f"\nPrevious default: {status_response.old_project.name}\n"
+    if status_response.old_project:
+        result += f"\nPrevious default: {status_response.old_project.name}\n"
 
-        return add_project_metadata(result, session.get_current_project())
-
-    except Exception as e:
-        logger.error(f"Error setting default project: {e}")
-        return f"Error setting default project '{project_name}': {str(e)}"
+    return add_project_metadata(result, session.get_current_project())

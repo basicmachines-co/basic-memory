@@ -7,7 +7,7 @@ test-unit:
 	uv run pytest -p pytest_mock -v
 
 test-int:
-	uv run pytest -p pytest_mock -v --no-cov tests
+	uv run pytest -p pytest_mock -v --no-cov test-int
 
 test: test-unit test-int
 

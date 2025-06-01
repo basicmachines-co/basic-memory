@@ -107,7 +107,7 @@ class ProjectInfoResponse(BaseModel):
     system: SystemStatus = Field(description="System and service status information")
 
 
-class ProjectSwitchRequest(BaseModel):
+class ProjectInfoRequest(BaseModel):
     """Request model for switching projects."""
 
     name: str = Field(..., description="Name of the project to switch to")
@@ -177,27 +177,12 @@ class ProjectWatchStatus(BaseModel):
     )
 
 
-class ProjectStatusResponse(BaseModel):
-    """Response model for switching projects."""
-
-    message: str = Field(..., description="Status message about the project switch")
-    status: str = Field(..., description="Status of the switch (success or error)")
-    default: bool = Field(..., description="True if the project was set as the default")
-    old_project: Optional[ProjectWatchStatus] = Field(
-        None, description="Information about the project being switched from"
-    )
-    new_project: Optional[ProjectWatchStatus] = Field(
-        None, description="Information about the project being switched to"
-    )
-
-
 class ProjectItem(BaseModel):
     """Simple representation of a project."""
 
     name: str
     path: str
-    is_default: bool
-    is_current: bool
+    is_default: bool = False
 
 
 class ProjectList(BaseModel):
@@ -205,4 +190,17 @@ class ProjectList(BaseModel):
 
     projects: List[ProjectItem]
     default_project: str
-    current_project: str
+
+
+class ProjectStatusResponse(BaseModel):
+    """Response model for switching projects."""
+
+    message: str = Field(..., description="Status message about the project switch")
+    status: str = Field(..., description="Status of the switch (success or error)")
+    default: bool = Field(..., description="True if the project was set as the default")
+    old_project: Optional[ProjectItem] = Field(
+        None, description="Information about the project being switched from"
+    )
+    new_project: Optional[ProjectItem] = Field(
+        None, description="Information about the project being switched to"
+    )

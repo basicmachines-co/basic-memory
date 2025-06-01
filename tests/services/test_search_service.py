@@ -553,3 +553,147 @@ async def test_search_by_frontmatter_tags_string_format(
             entity_found = True
             break
     assert entity_found, "Entity with 'documentation' tag should be found in search results"
+
+
+@pytest.mark.asyncio
+async def test_search_special_characters_in_title(search_service, session_maker, test_project):
+    """Test that entities with special characters in titles can be searched without FTS5 syntax errors."""
+    from basic_memory.repository import EntityRepository
+    from unittest.mock import AsyncMock
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Create entities with special characters that could cause FTS5 syntax errors
+    special_titles = [
+        "Note with spaces",
+        "Note-with-dashes",
+        "Note_with_underscores",
+        "Note (with parentheses)",  # This is the problematic one
+        "Note & Symbols!",
+        "Note [with brackets]",
+        "Note {with braces}",
+        'Note "with quotes"',
+        "Note 'with apostrophes'",
+    ]
+
+    entities = []
+    for i, title in enumerate(special_titles):
+        from datetime import datetime
+
+        entity_data = {
+            "title": title,
+            "entity_type": "note",
+            "entity_metadata": {"tags": ["special", "characters"]},
+            "content_type": "text/markdown",
+            "file_path": f"special/{title}.md",
+            "permalink": f"special/note-{i}",
+            "project_id": test_project.id,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+        }
+
+        entity = await entity_repo.create(entity_data)
+        entities.append(entity)
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    # Index all entities
+    for entity in entities:
+        await search_service.index_entity(entity)
+
+    # Test searching for each title - this should not cause FTS5 syntax errors
+    for title in special_titles:
+        results = await search_service.search(SearchQuery(title=title))
+
+        # Should find the entity without throwing FTS5 syntax errors
+        entity_found = False
+        for result in results:
+            if result.title == title:
+                entity_found = True
+                break
+
+        assert entity_found, f"Entity with title '{title}' should be found in search results"
+
+
+@pytest.mark.asyncio
+async def test_search_title_with_parentheses_specific(search_service, session_maker, test_project):
+    """Test searching specifically for title with parentheses to reproduce FTS5 error."""
+    from basic_memory.repository import EntityRepository
+    from unittest.mock import AsyncMock
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Create the problematic entity
+    from datetime import datetime
+
+    entity_data = {
+        "title": "Note (with parentheses)",
+        "entity_type": "note",
+        "entity_metadata": {"tags": ["test"]},
+        "content_type": "text/markdown",
+        "file_path": "special/Note (with parentheses).md",
+        "permalink": "special/note-with-parentheses",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    # Index the entity
+    await search_service.index_entity(entity)
+
+    # Test searching for the title - this should not cause FTS5 syntax errors
+    search_query = SearchQuery(title="Note (with parentheses)")
+    results = await search_service.search(search_query)
+
+    # Should find the entity without throwing FTS5 syntax errors
+    assert len(results) >= 1
+    assert any(result.title == "Note (with parentheses)" for result in results)
+
+
+@pytest.mark.asyncio
+async def test_search_title_via_repository_direct(search_service, session_maker, test_project):
+    """Test searching via search repository directly to isolate the FTS5 error."""
+    from basic_memory.repository import EntityRepository
+    from unittest.mock import AsyncMock
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Create the problematic entity
+    from datetime import datetime
+
+    entity_data = {
+        "title": "Note (with parentheses)",
+        "entity_type": "note",
+        "entity_metadata": {"tags": ["test"]},
+        "content_type": "text/markdown",
+        "file_path": "special/Note (with parentheses).md",
+        "permalink": "special/note-with-parentheses",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    # Index the entity
+    await search_service.index_entity(entity)
+
+    # Test searching via repository directly - this reproduces the error path
+    results = await search_service.repository.search(
+        title="Note (with parentheses)",
+        limit=10,
+        offset=0,
+    )
+
+    # Should find the entity without throwing FTS5 syntax errors
+    assert len(results) >= 1
+    assert any(result.title == "Note (with parentheses)" for result in results)

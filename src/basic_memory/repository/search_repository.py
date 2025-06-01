@@ -181,9 +181,8 @@ class SearchRepository:
 
         # Handle text search for title and content
         if search_text:
-            has_boolean = any(
-                op in f" {search_text} " for op in [" AND ", " OR ", " NOT ", "(", ")"]
-            )
+            # Check for explicit boolean operators - only detect them in proper boolean contexts
+            has_boolean = any(op in f" {search_text} " for op in [" AND ", " OR ", " NOT "])
 
             if has_boolean:
                 # If boolean operators are present, use the raw query
@@ -198,9 +197,9 @@ class SearchRepository:
 
         # Handle title match search
         if title:
-            title_text = self._prepare_search_term(title.strip())
-            params["text"] = title_text
-            conditions.append("title MATCH :text")
+            title_text = self._prepare_search_term(title.strip(), is_prefix=False)
+            params["title_text"] = title_text
+            conditions.append("title MATCH :title_text")
 
         # Handle permalink exact search
         if permalink:

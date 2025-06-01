@@ -327,7 +327,7 @@ class SearchService:
 
     async def handle_delete(self, entity: Entity):
         """Handle complete entity deletion from search index including observations and relations.
-        
+
         This replicates the logic from sync_service.handle_delete() to properly clean up
         all search index entries for an entity and its related data.
         """
@@ -335,7 +335,7 @@ class SearchService:
             f"Cleaning up search index for entity_id={entity.id}, file_path={entity.file_path}, "
             f"observations={len(entity.observations)}, relations={len(entity.outgoing_relations)}"
         )
-        
+
         # Clean up search index - same logic as sync_service.handle_delete()
         permalinks = (
             [entity.permalink]

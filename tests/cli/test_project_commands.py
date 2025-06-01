@@ -14,9 +14,7 @@ def test_project_list_command(mock_run, cli_env):
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.json.return_value = {
-        "projects": [
-            {"name": "test", "path": "/path/to/test", "is_default": True, "is_current": True}
-        ],
+        "projects": [{"name": "test", "path": "/path/to/test", "is_default": True}],
         "default_project": "test",
         "current_project": "test",
     }
@@ -24,28 +22,6 @@ def test_project_list_command(mock_run, cli_env):
 
     runner = CliRunner()
     result = runner.invoke(cli_app, ["project", "list"])
-
-    # Just verify it runs without exception
-    assert result.exit_code == 0
-
-
-@patch("basic_memory.cli.commands.project.asyncio.run")
-def test_project_current_command(mock_run, cli_env):
-    """Test the 'project current' command with mocked API."""
-    # Mock the API response
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "projects": [
-            {"name": "test", "path": "/path/to/test", "is_default": True, "is_current": True}
-        ],
-        "default_project": "test",
-        "current_project": "test",
-    }
-    mock_run.return_value = mock_response
-
-    runner = CliRunner()
-    result = runner.invoke(cli_app, ["project", "current"])
 
     # Just verify it runs without exception
     assert result.exit_code == 0
@@ -153,7 +129,6 @@ def test_project_failure_exits_with_error(mock_run, cli_env):
     list_result = runner.invoke(cli_app, ["project", "list"])
     add_result = runner.invoke(cli_app, ["project", "add", "test-project", "/path/to/project"])
     remove_result = runner.invoke(cli_app, ["project", "remove", "test-project"])
-    current_result = runner.invoke(cli_app, ["project", "current"])
     default_result = runner.invoke(cli_app, ["project", "default", "test-project"])
 
     # All should exit with code 1 and show error message
@@ -166,9 +141,6 @@ def test_project_failure_exits_with_error(mock_run, cli_env):
 
     assert remove_result.exit_code == 1
     assert "Error removing project" in remove_result.output
-
-    assert current_result.exit_code == 1
-    assert "Error getting current project" in current_result.output
 
     assert default_result.exit_code == 1
     assert "Error setting default project" in default_result.output

@@ -10,6 +10,7 @@ from rich.table import Table
 
 from basic_memory.cli.app import app
 from basic_memory.config import config
+from basic_memory.mcp.project_session import session
 from basic_memory.mcp.resources.project_info import project_info
 import json
 from datetime import datetime
@@ -58,7 +59,7 @@ def list_projects() -> None:
 
         for project in result.projects:
             is_default = "✓" if project.is_default else ""
-            is_active = "✓" if project.is_current else ""
+            is_active = "✓" if session.get_current_project() == project.name else ""
             table.add_row(project.name, format_path(project.path), is_default, is_active)
 
         console.print(table)
@@ -146,40 +147,6 @@ def set_default_project(
     reload(config_module)
 
     console.print("[green]Project activated for current session[/green]")
-
-
-@project_app.command("current")
-def show_current_project() -> None:
-    """Show the current project."""
-    # Use API to get current project
-
-    project_url = config.project_url
-
-    try:
-        response = asyncio.run(call_get(client, f"{project_url}/project/projects"))
-        result = ProjectList.model_validate(response.json())
-
-        # Find the current project from the API response
-        current_project = result.current_project
-        default_project = result.default_project
-
-        # Find the project details in the list
-        for project in result.projects:
-            if project.name == current_project:
-                console.print(f"Current project: [cyan]{project.name}[/cyan]")
-                console.print(f"Path: [green]{format_path(project.path)}[/green]")
-                # Use app_config for database_path, not project config
-                from basic_memory.config import app_config
-
-                console.print(
-                    f"Database: [blue]{format_path(str(app_config.app_database_path))}[/blue]"
-                )
-                console.print(f"Default project: [yellow]{default_project}[/yellow]")
-                break
-    except Exception as e:
-        console.print(f"[red]Error getting current project: {str(e)}[/red]")
-        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
-        raise typer.Exit(1)
 
 
 @project_app.command("sync")

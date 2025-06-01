@@ -62,9 +62,9 @@ class LinkResolver:
 
         # search if indicated
         if use_search and "*" not in clean_text:
-            # 5. Fall back to search for fuzzy matching on title
+            # 5. Fall back to search for fuzzy matching on title (use text search for prefix matching)
             results = await self.search_service.search(
-                query=SearchQuery(title=clean_text, entity_types=[SearchItemType.ENTITY]),
+                query=SearchQuery(text=clean_text, entity_types=[SearchItemType.ENTITY]),
             )
 
             if results:

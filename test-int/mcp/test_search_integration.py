@@ -12,7 +12,7 @@ from fastmcp import Client
 @pytest.mark.asyncio
 async def test_search_basic_text_search(mcp_server, app):
     """Test basic text search functionality."""
-    
+
     async with Client(mcp_server) as client:
         # Create test notes for searching
         await client.call_tool(
@@ -24,7 +24,7 @@ async def test_search_basic_text_search(mcp_server, app):
                 "tags": "python,programming",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -34,7 +34,7 @@ async def test_search_basic_text_search(mcp_server, app):
                 "tags": "python,flask,web",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -44,7 +44,7 @@ async def test_search_basic_text_search(mcp_server, app):
                 "tags": "javascript,programming",
             },
         )
-        
+
         # Search for Python-related content
         search_result = await client.call_tool(
             "search_notes",
@@ -52,10 +52,10 @@ async def test_search_basic_text_search(mcp_server, app):
                 "query": "Python",
             },
         )
-        
+
         assert len(search_result) == 1
         assert search_result[0].type == "text"
-        
+
         # Parse the response (it should be a SearchResponse)
         result_text = search_result[0].text
         assert "Python Programming Guide" in result_text
@@ -66,7 +66,7 @@ async def test_search_basic_text_search(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_boolean_operators(mcp_server, app):
     """Test boolean search operators (AND, OR, NOT)."""
-    
+
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
@@ -78,7 +78,7 @@ async def test_search_boolean_operators(mcp_server, app):
                 "tags": "python,flask,tutorial",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -88,7 +88,7 @@ async def test_search_boolean_operators(mcp_server, app):
                 "tags": "python,django,web",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -98,7 +98,7 @@ async def test_search_boolean_operators(mcp_server, app):
                 "tags": "javascript,react,frontend",
             },
         )
-        
+
         # Test AND operator
         search_result = await client.call_tool(
             "search_notes",
@@ -106,12 +106,12 @@ async def test_search_boolean_operators(mcp_server, app):
                 "query": "Python AND Flask",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "Python Flask Tutorial" in result_text
         assert "Python Django Guide" not in result_text
         assert "React JavaScript" not in result_text
-        
+
         # Test OR operator
         search_result = await client.call_tool(
             "search_notes",
@@ -119,12 +119,12 @@ async def test_search_boolean_operators(mcp_server, app):
                 "query": "Flask OR Django",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "Python Flask Tutorial" in result_text
         assert "Python Django Guide" in result_text
         assert "React JavaScript" not in result_text
-        
+
         # Test NOT operator
         search_result = await client.call_tool(
             "search_notes",
@@ -132,7 +132,7 @@ async def test_search_boolean_operators(mcp_server, app):
                 "query": "Python NOT Django",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "Python Flask Tutorial" in result_text
         assert "Python Django Guide" not in result_text
@@ -141,7 +141,7 @@ async def test_search_boolean_operators(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_title_only(mcp_server, app):
     """Test searching in titles only."""
-    
+
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
@@ -153,7 +153,7 @@ async def test_search_title_only(mcp_server, app):
                 "tags": "database,sql",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -163,7 +163,7 @@ async def test_search_title_only(mcp_server, app):
                 "tags": "web,development",
             },
         )
-        
+
         # Search for "database" in titles only
         search_result = await client.call_tool(
             "search_notes",
@@ -172,7 +172,7 @@ async def test_search_title_only(mcp_server, app):
                 "search_type": "title",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "Database Design" in result_text
         assert "Web Development" not in result_text  # Has "database" in content but not title
@@ -181,7 +181,7 @@ async def test_search_title_only(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_permalink_exact(mcp_server, app):
     """Test exact permalink search."""
-    
+
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
@@ -193,7 +193,7 @@ async def test_search_permalink_exact(mcp_server, app):
                 "tags": "api,docs",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -203,7 +203,7 @@ async def test_search_permalink_exact(mcp_server, app):
                 "tags": "api,testing",
             },
         )
-        
+
         # Search for exact permalink
         search_result = await client.call_tool(
             "search_notes",
@@ -212,7 +212,7 @@ async def test_search_permalink_exact(mcp_server, app):
                 "search_type": "permalink",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "API Documentation" in result_text
         assert "API Testing" not in result_text
@@ -221,7 +221,7 @@ async def test_search_permalink_exact(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_permalink_pattern(mcp_server, app):
     """Test permalink pattern search with wildcards."""
-    
+
     async with Client(mcp_server) as client:
         # Create test notes in different folders
         await client.call_tool(
@@ -233,7 +233,7 @@ async def test_search_permalink_pattern(mcp_server, app):
                 "tags": "meetings,january",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -243,7 +243,7 @@ async def test_search_permalink_pattern(mcp_server, app):
                 "tags": "meetings,february",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -253,7 +253,7 @@ async def test_search_permalink_pattern(mcp_server, app):
                 "tags": "projects,notes",
             },
         )
-        
+
         # Search for all meeting notes using pattern
         search_result = await client.call_tool(
             "search_notes",
@@ -262,7 +262,7 @@ async def test_search_permalink_pattern(mcp_server, app):
                 "search_type": "permalink",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "Meeting Notes January" in result_text
         assert "Meeting Notes February" in result_text
@@ -272,7 +272,7 @@ async def test_search_permalink_pattern(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_entity_type_filter(mcp_server, app):
     """Test filtering search results by entity type."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note with observations and relations
         content_with_observations = """# Development Process
@@ -298,7 +298,7 @@ Regular content about development practices."""
                 "tags": "development,process",
             },
         )
-        
+
         # Search for "development" in entities only
         search_result = await client.call_tool(
             "search_notes",
@@ -307,7 +307,7 @@ Regular content about development practices."""
                 "entity_types": ["entity"],
             },
         )
-        
+
         result_text = search_result[0].text
         # Should find the main entity but filter out observations/relations
         assert "Development Process" in result_text
@@ -316,20 +316,20 @@ Regular content about development practices."""
 @pytest.mark.asyncio
 async def test_search_pagination(mcp_server, app):
     """Test search result pagination."""
-    
+
     async with Client(mcp_server) as client:
         # Create multiple notes to test pagination
         for i in range(15):
             await client.call_tool(
                 "write_note",
                 {
-                    "title": f"Test Note {i+1:02d}",
+                    "title": f"Test Note {i + 1:02d}",
                     "folder": "test",
-                    "content": f"# Test Note {i+1:02d}\n\nThis is test content for pagination testing.",
+                    "content": f"# Test Note {i + 1:02d}\n\nThis is test content for pagination testing.",
                     "tags": "test,pagination",
                 },
             )
-        
+
         # Search with pagination (page 1, page_size 5)
         search_result = await client.call_tool(
             "search_notes",
@@ -339,12 +339,12 @@ async def test_search_pagination(mcp_server, app):
                 "page_size": 5,
             },
         )
-        
+
         result_text = search_result[0].text
         # Should contain 5 results and pagination info
         assert '"current_page": 1' in result_text
         assert '"page_size": 5' in result_text
-        
+
         # Search page 2
         search_result = await client.call_tool(
             "search_notes",
@@ -354,7 +354,7 @@ async def test_search_pagination(mcp_server, app):
                 "page_size": 5,
             },
         )
-        
+
         result_text = search_result[0].text
         assert '"current_page": 2' in result_text
 
@@ -362,7 +362,7 @@ async def test_search_pagination(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_no_results(mcp_server, app):
     """Test search with no matching results."""
-    
+
     async with Client(mcp_server) as client:
         # Create a test note
         await client.call_tool(
@@ -374,7 +374,7 @@ async def test_search_no_results(mcp_server, app):
                 "tags": "sample,test",
             },
         )
-        
+
         # Search for something that doesn't exist
         search_result = await client.call_tool(
             "search_notes",
@@ -382,7 +382,7 @@ async def test_search_no_results(mcp_server, app):
                 "query": "nonexistent",
             },
         )
-        
+
         result_text = search_result[0].text
         assert '"results": []' in result_text or '"results":[]' in result_text
 
@@ -390,7 +390,7 @@ async def test_search_no_results(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_complex_boolean_query(mcp_server, app):
     """Test complex boolean queries with grouping."""
-    
+
     async with Client(mcp_server) as client:
         # Create test notes
         await client.call_tool(
@@ -402,7 +402,7 @@ async def test_search_complex_boolean_query(mcp_server, app):
                 "tags": "python,web,development",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -412,7 +412,7 @@ async def test_search_complex_boolean_query(mcp_server, app):
                 "tags": "python,data,science",
             },
         )
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -422,7 +422,7 @@ async def test_search_complex_boolean_query(mcp_server, app):
                 "tags": "javascript,web,development",
             },
         )
-        
+
         # Complex boolean query: (Python OR JavaScript) AND web
         search_result = await client.call_tool(
             "search_notes",
@@ -430,7 +430,7 @@ async def test_search_complex_boolean_query(mcp_server, app):
                 "query": "(Python OR JavaScript) AND web",
             },
         )
-        
+
         result_text = search_result[0].text
         assert "Python Web Development" in result_text
         assert "JavaScript Web Development" in result_text
@@ -440,7 +440,7 @@ async def test_search_complex_boolean_query(mcp_server, app):
 @pytest.mark.asyncio
 async def test_search_case_insensitive(mcp_server, app):
     """Test that search is case insensitive."""
-    
+
     async with Client(mcp_server) as client:
         # Create test note
         await client.call_tool(
@@ -452,10 +452,10 @@ async def test_search_case_insensitive(mcp_server, app):
                 "tags": "ML,AI",
             },
         )
-        
+
         # Search with different cases
         search_cases = ["machine", "MACHINE", "Machine", "learning", "LEARNING"]
-        
+
         for search_term in search_cases:
             search_result = await client.call_tool(
                 "search_notes",
@@ -463,6 +463,6 @@ async def test_search_case_insensitive(mcp_server, app):
                     "query": search_term,
                 },
             )
-            
+
             result_text = search_result[0].text
             assert "Machine Learning Guide" in result_text, f"Failed for search term: {search_term}"

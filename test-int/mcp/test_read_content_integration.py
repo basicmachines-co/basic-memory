@@ -5,13 +5,10 @@ Comprehensive tests covering text files, binary files, images, error cases,
 and memory:// URL handling via the complete MCP client-server flow.
 """
 
-import base64
-import io
 import json
 import pytest
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
-from PIL import Image as PILImage
 
 
 def parse_read_content_response(mcp_result):
@@ -24,7 +21,7 @@ def parse_read_content_response(mcp_result):
 @pytest.mark.asyncio
 async def test_read_content_markdown_file(mcp_server, app):
     """Test reading a markdown file created by write_note."""
-    
+
     async with Client(mcp_server) as client:
         # First create a note
         await client.call_tool(
@@ -36,7 +33,7 @@ async def test_read_content_markdown_file(mcp_server, app):
                 "tags": "test,content",
             },
         )
-        
+
         # Then read the raw file content
         read_result = await client.call_tool(
             "read_content",
@@ -44,16 +41,16 @@ async def test_read_content_markdown_file(mcp_server, app):
                 "path": "test/Content Test.md",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
-        
+
         assert response_data["type"] == "text"
         assert response_data["content_type"] == "text/markdown; charset=utf-8"
         assert response_data["encoding"] == "utf-8"
-        
+
         content = response_data["text"]
-        
+
         # Should contain the raw markdown with frontmatter
         assert "# Content Test" in content
         assert "This is test content with **markdown**." in content
@@ -65,7 +62,7 @@ async def test_read_content_markdown_file(mcp_server, app):
 @pytest.mark.asyncio
 async def test_read_content_by_permalink(mcp_server, app):
     """Test reading content using permalink instead of file path."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note
         await client.call_tool(
@@ -76,7 +73,7 @@ async def test_read_content_by_permalink(mcp_server, app):
                 "content": "# Permalink Test\n\nTesting permalink-based content reading.",
             },
         )
-        
+
         # Read by permalink (without .md extension)
         read_result = await client.call_tool(
             "read_content",
@@ -84,11 +81,11 @@ async def test_read_content_by_permalink(mcp_server, app):
                 "path": "docs/permalink-test",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
         content = response_data["text"]
-        
+
         assert "# Permalink Test" in content
         assert "Testing permalink-based content reading." in content
 
@@ -96,7 +93,7 @@ async def test_read_content_by_permalink(mcp_server, app):
 @pytest.mark.asyncio
 async def test_read_content_memory_url(mcp_server, app):
     """Test reading content using memory:// URL format."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note
         await client.call_tool(
@@ -108,7 +105,7 @@ async def test_read_content_memory_url(mcp_server, app):
                 "tags": "memory,url",
             },
         )
-        
+
         # Read using memory:// URL
         read_result = await client.call_tool(
             "read_content",
@@ -116,11 +113,11 @@ async def test_read_content_memory_url(mcp_server, app):
                 "path": "memory://test/memory-url-test",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
         content = response_data["text"]
-        
+
         assert "# Memory URL Test" in content
         assert "Testing memory:// URL handling." in content
 
@@ -128,11 +125,13 @@ async def test_read_content_memory_url(mcp_server, app):
 @pytest.mark.asyncio
 async def test_read_content_unicode_file(mcp_server, app):
     """Test reading content with unicode characters and emojis."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note with unicode content
-        unicode_content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦\n\n测试中文内容"
-        
+        unicode_content = (
+            "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦\n\n测试中文内容"
+        )
+
         await client.call_tool(
             "write_note",
             {
@@ -142,7 +141,7 @@ async def test_read_content_unicode_file(mcp_server, app):
                 "tags": "unicode,emoji",
             },
         )
-        
+
         # Read the content back
         read_result = await client.call_tool(
             "read_content",
@@ -150,11 +149,11 @@ async def test_read_content_unicode_file(mcp_server, app):
                 "path": "test/Unicode Content Test.md",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
         content = response_data["text"]
-        
+
         # All unicode content should be preserved
         assert "🚀" in content
         assert "🎉" in content
@@ -165,7 +164,7 @@ async def test_read_content_unicode_file(mcp_server, app):
 @pytest.mark.asyncio
 async def test_read_content_complex_frontmatter(mcp_server, app):
     """Test reading content with complex frontmatter and markdown."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note with complex content
         complex_content = """---
@@ -201,7 +200,7 @@ Regular markdown content continues here."""
                 "tags": "complex,frontmatter",
             },
         )
-        
+
         # Read the content back
         read_result = await client.call_tool(
             "read_content",
@@ -209,11 +208,11 @@ Regular markdown content continues here."""
                 "path": "docs/Complex Note.md",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
         content = response_data["text"]
-        
+
         # Should preserve all frontmatter and content structure
         assert "version: 1.0" in content
         assert "author: Test Author" in content
@@ -225,7 +224,7 @@ Regular markdown content continues here."""
 @pytest.mark.asyncio
 async def test_read_content_missing_file(mcp_server, app):
     """Test reading a file that doesn't exist."""
-    
+
     async with Client(mcp_server) as client:
         try:
             await client.call_tool(
@@ -245,7 +244,7 @@ async def test_read_content_missing_file(mcp_server, app):
 @pytest.mark.asyncio
 async def test_read_content_empty_file(mcp_server, app):
     """Test reading an empty file."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note with minimal content
         await client.call_tool(
@@ -256,7 +255,7 @@ async def test_read_content_empty_file(mcp_server, app):
                 "content": "",  # Empty content
             },
         )
-        
+
         # Read the content back
         read_result = await client.call_tool(
             "read_content",
@@ -264,11 +263,11 @@ async def test_read_content_empty_file(mcp_server, app):
                 "path": "test/Empty Test.md",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
         content = response_data["text"]
-        
+
         # Should still have frontmatter even with empty content
         assert "title: Empty Test" in content
         assert "permalink: test/empty-test" in content
@@ -277,11 +276,11 @@ async def test_read_content_empty_file(mcp_server, app):
 @pytest.mark.asyncio
 async def test_read_content_large_file(mcp_server, app):
     """Test reading a file with substantial content."""
-    
+
     async with Client(mcp_server) as client:
         # Create a note with substantial content
         large_content = "# Large Content Test\n\n"
-        
+
         # Add multiple sections with substantial text
         for i in range(10):
             large_content += f"""
@@ -298,7 +297,7 @@ Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore
 eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
 
 """
-        
+
         await client.call_tool(
             "write_note",
             {
@@ -308,7 +307,7 @@ eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
                 "tags": "large,content,test",
             },
         )
-        
+
         # Read the content back
         read_result = await client.call_tool(
             "read_content",
@@ -316,11 +315,11 @@ eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
                 "path": "test/Large Content Note.md",
             },
         )
-        
+
         # Parse the response
         response_data = parse_read_content_response(read_result)
         content = response_data["text"]
-        
+
         # Should contain all sections
         assert "Section 1" in content
         assert "Section 10" in content
@@ -331,7 +330,7 @@ eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
 @pytest.mark.asyncio
 async def test_read_content_special_characters_in_filename(mcp_server, app):
     """Test reading files with special characters in the filename."""
-    
+
     async with Client(mcp_server) as client:
         # Create notes with special characters in titles
         test_cases = [
@@ -341,7 +340,7 @@ async def test_read_content_special_characters_in_filename(mcp_server, app):
             ("File (with parentheses)", "test"),
             ("File & Symbols!", "test"),
         ]
-        
+
         for title, folder in test_cases:
             await client.call_tool(
                 "write_note",
@@ -351,7 +350,7 @@ async def test_read_content_special_characters_in_filename(mcp_server, app):
                     "content": f"# {title}\n\nContent for {title}",
                 },
             )
-            
+
             # Read the content back using the exact filename
             read_result = await client.call_tool(
                 "read_content",
@@ -359,10 +358,10 @@ async def test_read_content_special_characters_in_filename(mcp_server, app):
                     "path": f"{folder}/{title}.md",
                 },
             )
-            
+
             assert len(read_result) == 1
             assert read_result[0].type == "text"
             content = read_result[0].text
-            
+
             assert f"# {title}" in content
             assert f"Content for {title}" in content
