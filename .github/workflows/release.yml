@@ -1,96 +1,60 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version_type:
-        description: 'Type of version bump (major, minor, patch)'
-        required: true
-        default: 'patch'
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v0.13.0, etc.
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    concurrency: release
     permissions:
       id-token: write
       contents: write
-    outputs:
-      released: ${{ steps.release.outputs.released }}
-      tag: ${{ steps.release.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Python Semantic Release
-        id: release
-        uses: python-semantic-release/python-semantic-release@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        if: steps.release.outputs.released == 'true'
-        with:
-          password: ${{ secrets.PYPI_TOKEN }}
-
-      - name: Publish to GitHub Release Assets
-        uses: python-semantic-release/publish-action@v9.8.9
-        if: steps.release.outputs.released == 'true'
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ steps.release.outputs.tag }}
-
-  build-macos:
-    needs: release
-    if: needs.release.outputs.released == 'true'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.release.outputs.tag }}
-
-      - name: Set up Python "3.12"
-        uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: 'pip'
-
-      - name: Install librsvg
-        run: brew install librsvg
 
       - name: Install uv
         run: |
           pip install uv
 
-      - name: Create virtual env
+      - name: Install dependencies and build
         run: |
           uv venv
-
-      - name: Install dependencies
-        run: |
           uv sync
+          uv build
 
-      - name: Build macOS installer
+      - name: Verify version matches tag
         run: |
-          make installer-mac
-          xattr -dr com.apple.quarantine "installer/build/Basic Memory Installer.app"
+          # Get version from built package
+          PACKAGE_VERSION=$(uv run python -c "import basic_memory; print(basic_memory.__version__)")
+          TAG_VERSION=${GITHUB_REF_NAME#v}  # Remove 'v' prefix from tag
+          echo "Package version: $PACKAGE_VERSION"
+          echo "Tag version: $TAG_VERSION"
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch! Package: $PACKAGE_VERSION, Tag: $TAG_VERSION"
+            exit 1
+          fi
 
-      - name: Zip macOS installer
-        run: |
-          cd installer/build
-          zip -ry "Basic-Memory-Installer-${{ needs.release.outputs.tag }}.zip" "Basic Memory Installer.app"
-
-      - name: Upload macOS installer
-        uses: softprops/action-gh-release@v1
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: installer/build/Basic-Memory-Installer-${{ needs.release.outputs.tag }}.zip
-          tag_name: ${{ needs.release.outputs.tag }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}

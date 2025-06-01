@@ -1,0 +1,53 @@
+name: Dev Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  dev-release:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Install dependencies and build
+        run: |
+          uv venv
+          uv sync
+          uv build
+
+      - name: Check if this is a dev version
+        id: check_version
+        run: |
+          VERSION=$(uv run python -c "import basic_memory; print(basic_memory.__version__)")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [[ "$VERSION" == *"dev"* ]]; then
+            echo "is_dev=true" >> $GITHUB_OUTPUT
+            echo "Dev version detected: $VERSION"
+          else
+            echo "is_dev=false" >> $GITHUB_OUTPUT
+            echo "Release version detected: $VERSION, skipping dev release"
+          fi
+
+      - name: Publish dev version to PyPI
+        if: steps.check_version.outputs.is_dev == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}
+          skip-existing: true  # Don't fail if version already exists
