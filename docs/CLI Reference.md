@@ -10,6 +10,25 @@ Basic Memory provides command line tools for managing your knowledge base. This 
 
 ## Core Commands
 
+### auth (New in v0.13.0)
+
+Manage OAuth authentication for secure remote access:
+
+```bash
+# Test authentication setup
+basic-memory auth test-auth
+
+# Register OAuth client
+basic-memory auth register-client
+```
+
+Supports multiple authentication providers:
+- **Basic Provider**: For development and testing
+- **Supabase Provider**: For production deployments
+- **External Providers**: GitHub, Google integration framework
+
+See [[OAuth Authentication Guide]] for complete setup instructions.
+
 ### sync
 
 Keeps files and the knowledge graph in sync:
@@ -45,9 +64,9 @@ To change the properties, set the following values:
 ```
 
 Thanks for using Basic Memory!
-### import
+### import (Enhanced in v0.13.0)
 
-Imports external knowledge sources:
+Imports external knowledge sources with support for project targeting:
 
 ```bash
 # Claude conversations
@@ -59,12 +78,19 @@ basic-memory import claude projects
 # ChatGPT history
 basic-memory import chatgpt
 
-# ChatGPT history
+# Memory JSON format
 basic-memory import memory-json /path/to/memory.json
 
+# Import to specific project (v0.13.0)
+basic-memory --project=work import claude conversations
 ```
 
-> **Note**: After importing, run `basic-memory sync` to index the new files.
+**New in v0.13.0:**
+- **Project Targeting**: Import directly to specific projects
+- **Real-time Sync**: Imported content available immediately
+- **Unified Database**: All imports stored in centralized database
+
+> **Note**: Changes sync automatically - no manual sync required in v0.13.0.
 ### status
 
 Shows system status information:
@@ -81,28 +107,32 @@ basic-memory status --json
 ```
 
 
-### project
+### project (Enhanced in v0.13.0)
 
-Create multiple projects to manage your knowledge. 
+Manage multiple projects with the new unified database architecture. Projects can now be switched instantly during conversations without restart.
   
 ```bash  
-# List all configured projects  
+# List all configured projects with status
 basic-memory project list  
   
-# Add a new project  
-basic-memory project add work ~/work-basic-memory  
+# Create a new project
+basic-memory project create work ~/work-basic-memory  
   
 # Set the default project  
-basic-memory project default work  
+basic-memory project set-default work  
   
-# Remove a project (doesn't delete files)  
-basic-memory project remove personal  
+# Delete a project (doesn't delete files)  
+basic-memory project delete personal  
   
-# Show current project  
-basic-memory project current  
+# Show detailed project statistics
+basic-memory project info
 ```  
 
-> Be sure to restart Claude Desktop after changing projects. 
+**New in v0.13.0:**
+- **Unified Database**: All projects share a single database for better performance
+- **Instant Switching**: Switch projects during conversations without restart
+- **Enhanced Commands**: Updated project commands with better status information
+- **Project Statistics**: Detailed info about entities, observations, and relations 
 
 #### Using Projects in Commands  
   
@@ -121,6 +151,34 @@ You can also set the `BASIC_MEMORY_PROJECT` environment variable:
 ```bash  
 BASIC_MEMORY_PROJECT=work basic-memory sync  
 ```  
+
+### tool (Enhanced in v0.13.0)
+
+Direct access to MCP tools via CLI with new editing and file management capabilities:
+
+```bash
+# Create notes
+basic-memory tool write-note --title "My Note" --content "Content here"
+
+# Edit notes incrementally (v0.13.0)
+echo "New content" | basic-memory tool edit-note --title "My Note" --operation append
+
+# Move notes (v0.13.0)
+basic-memory tool move-note --identifier "My Note" --destination "archive/my-note.md"
+
+# Search notes
+basic-memory tool search-notes --query "authentication"
+
+# Project management (v0.13.0)
+basic-memory tool list-projects
+basic-memory tool switch-project --project-name "work"
+```
+
+**New in v0.13.0:**
+- **edit-note**: Incremental editing (append, prepend, find/replace, section replace)
+- **move-note**: File management with database consistency
+- **Project tools**: list-projects, switch-project, get-current-project
+- **Cross-project operations**: Use `--project` flag with any tool
 
 ### help
 
@@ -144,10 +202,11 @@ The full list of commands and help for each can be viewed with the `--help` argu
 │ --help                              Show this message and exit.                           │
 ╰───────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ────────────────────────────────────────────────────────────────────────────────╮
-│ sync      Sync knowledge files with the database.                                         │
-│ status    Show sync status between files and database.                                    │
-│ reset     Reset database (drop all tables and recreate).                                  │
-│ mcp       Run the MCP server for Claude Desktop integration.                              │
+│ auth      OAuth authentication management (v0.13.0)                                      │
+│ sync      Sync knowledge files with the database                                          │
+│ status    Show sync status between files and database                                     │
+│ reset     Reset database (drop all tables and recreate)                                   │
+│ mcp       Run the MCP server for Claude Desktop integration                               │
 │ import    Import data from various sources                                                │
 │ tool      Direct access to MCP tools via CLI                                              │
 │ project   Manage multiple Basic Memory projects                                           │
@@ -301,6 +360,29 @@ You can then use the `/mcp` command in the REPL:
 
      • basic-memory: connected
 ```
+
+## Version Management (New in v0.13.0)
+
+Basic Memory v0.13.0 introduces automatic version management and multiple installation options:
+
+```bash
+# Stable releases
+pip install basic-memory
+
+# Beta/pre-releases
+pip install basic-memory --pre
+
+# Latest development builds (auto-published)
+pip install basic-memory --pre --force-reinstall
+
+# Check current version
+basic-memory --version
+```
+
+**Version Types:**
+- **Stable**: `0.13.0` (manual git tags)
+- **Beta**: `0.13.0b1` (manual git tags) 
+- **Development**: `0.12.4.dev26+468a22f` (automatic from commits)
 
 ## Troubleshooting Common Issues
 

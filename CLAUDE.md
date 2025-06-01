@@ -188,3 +188,37 @@ Basic Memory Pro is a desktop GUI application that wraps the basic-memory CLI/MC
 
 local repo: /Users/phernandez/dev/basicmachines/basic-memory-pro
 github: https://github.com/basicmachines-co/basic-memory-pro
+
+## Release and Version Management
+
+Basic Memory uses `uv-dynamic-versioning` for automatic version management based on git tags:
+
+### Version Types
+- **Development versions**: Automatically generated from commits (e.g., `0.12.4.dev26+468a22f`)
+- **Beta releases**: Created by tagging with beta suffixes (e.g., `v0.13.0b1`, `v0.13.0rc1`)
+- **Stable releases**: Created by tagging with version numbers (e.g., `v0.13.0`)
+
+### Release Workflows
+
+#### Development Builds (Automatic)
+- Triggered on every push to `main` branch
+- Publishes dev versions like `0.12.4.dev26+468a22f` to PyPI
+- Allows continuous testing of latest changes
+- Users install with: `pip install basic-memory --pre --force-reinstall`
+
+#### Beta/RC Releases (Manual)
+- Create beta tag: `git tag v0.13.0b1 && git push origin v0.13.0b1`
+- Automatically builds and publishes to PyPI as pre-release
+- Users install with: `pip install basic-memory --pre`
+- Use for milestone testing before stable release
+
+#### Stable Releases (Manual)
+- Create version tag: `git tag v0.13.0 && git push origin v0.13.0`
+- Automatically builds, creates GitHub release, and publishes to PyPI
+- Users install with: `pip install basic-memory`
+
+### For Development
+- No manual version bumping required
+- Versions automatically derived from git tags
+- `pyproject.toml` uses `dynamic = ["version"]`
+- `__init__.py` dynamically reads version from package metadata

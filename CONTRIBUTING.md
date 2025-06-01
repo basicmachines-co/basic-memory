@@ -144,6 +144,40 @@ agreement to the DCO.
 - **Database Testing**: Use in-memory SQLite for testing database operations
 - **Fixtures**: Use async pytest fixtures for setup and teardown
 
+## Release Process
+
+Basic Memory uses automatic versioning based on git tags with `uv-dynamic-versioning`. Here's how releases work:
+
+### Version Management
+- **Development versions**: Automatically generated from git commits (e.g., `0.12.4.dev26+468a22f`)
+- **Beta releases**: Created by tagging with beta suffixes (e.g., `git tag v0.13.0b1`)
+- **Stable releases**: Created by tagging with version numbers (e.g., `git tag v0.13.0`)
+
+### Release Workflows
+
+#### Development Builds
+- Automatically published to PyPI on every commit to `main`
+- Version format: `0.12.4.dev26+468a22f` (base version + dev + commit count + hash)
+- Users install with: `pip install basic-memory --pre --force-reinstall`
+
+#### Beta Releases
+1. Create and push a beta tag: `git tag v0.13.0b1 && git push origin v0.13.0b1`
+2. GitHub Actions automatically builds and publishes to PyPI
+3. Users install with: `pip install basic-memory --pre`
+
+#### Stable Releases
+1. Create and push a version tag: `git tag v0.13.0 && git push origin v0.13.0`
+2. GitHub Actions automatically:
+   - Builds the package with version `0.13.0`
+   - Creates GitHub release with auto-generated notes
+   - Publishes to PyPI
+3. Users install with: `pip install basic-memory`
+
+### For Contributors
+- No manual version bumping required
+- Versions are automatically derived from git tags
+- Focus on code changes, not version management
+
 ## Creating Issues
 
 If you're planning to work on something, please create an issue first to discuss the approach. Include:

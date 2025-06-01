@@ -376,6 +376,24 @@ See the [Documentation](https://memory.basicmachines.co/) for more info, includi
 - [Managing multiple Projects](https://memory.basicmachines.co/docs/cli-reference#project)
 - [Importing data from OpenAI/Claude Projects](https://memory.basicmachines.co/docs/cli-reference#import)
 
+## Installation Options
+
+### Stable Release
+```bash
+pip install basic-memory
+```
+
+### Beta/Pre-releases
+```bash
+pip install basic-memory --pre
+```
+
+### Development Builds
+Development versions are automatically published on every commit to main with versions like `0.12.4.dev26+468a22f`:
+```bash
+pip install basic-memory --pre --force-reinstall
+```
+
 ## License
 
 AGPL-3.0

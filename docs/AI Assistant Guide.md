@@ -10,6 +10,26 @@ You can [download](https://github.com/basicmachines-co/basic-memory/blob/main/do
 
 This guide helps you, the AI assistant, use Basic Memory tools effectively when working with users. It covers reading, writing, and navigating knowledge through the Model Context Protocol (MCP).
 
+## Quick Reference
+
+**Essential Tools:**
+- `write_note()` - Create/update notes (primary tool)
+- `read_note()` - Read existing content
+- `search_notes()` - Find information
+- `edit_note()` - Modify existing notes incrementally (v0.13.0)
+- `move_note()` - Organize files with database consistency (v0.13.0)
+
+**Project Management (v0.13.0):**
+- `list_projects()` - Show available projects
+- `switch_project()` - Change active project
+- `get_current_project()` - Current project info
+
+**Key Principles:**
+1. **Build connections** - Rich knowledge graphs > isolated notes
+2. **Ask permission** - "Would you like me to record this?"
+3. **Use exact titles** - For accurate `[[WikiLinks]]`
+4. **Leverage v0.13.0** - Edit incrementally, organize proactively, switch projects contextually
+
 ## Overview
 
 Basic Memory allows you and users to record context in local Markdown files, building a rich knowledge base through natural conversations. The system automatically creates a semantic knowledge graph from simple text patterns.
@@ -37,49 +57,57 @@ Remember that a knowledge graph with 10 heavily connected notes is more valuable
 
 ## Core Tools Reference
 
-```python
-# Writing knowledge - THE MOST IMPORTANT TOOL!
-response = await write_note(
-    title="Search Design",              # Required: Note title
-    content="# Search Design\n...",     # Required: Note content
-    folder="specs",                     # Optional: Folder to save in
-    tags=["search", "design"],          # Optional: Tags for categorization
-    verbose=True                        # Optional: Get parsing details
-)
+### Essential Content Management
 
-# Reading knowledge
-content = await read_note("Search Design")             # By title
-content = await read_note("specs/search-design")       # By path
-content = await read_note("memory://specs/search")     # By memory URL
-
-# Searching for knowledge
-results = await search_notes(
-    query="authentication system",      # Text to search for
-    page=1,                             # Optional: Pagination
-    page_size=10                        # Optional: Results per page
+**Writing knowledge** (most important tool):
+```
+write_note(
+    title="Search Design",
+    content="# Search Design\n...",
+    folder="specs",                     # Optional
+    tags=["search", "design"],          # v0.13.0: now searchable!
+    project="work-notes"                # v0.13.0: target specific project
 )
+```
 
-# Building context from the knowledge graph
-context = await build_context(
-    url="memory://specs/search",        # Starting point
-    depth=2,                            # Optional: How many hops to follow
-    timeframe="1 month"                 # Optional: Recent timeframe
-)
+**Reading knowledge:**
+```
+read_note("Search Design")              # By title
+read_note("specs/search-design")        # By path
+read_note("memory://specs/search")      # By memory URL
+```
 
-# Checking recent changes
-activity = await recent_activity(
-    type="all",                         # Optional: Entity types to include
-    depth=1,                            # Optional: Related items to include
-    timeframe="1 week"                  # Optional: Time window
+**Incremental editing** (v0.13.0):
+```
+edit_note(
+    identifier="Search Design",
+    operation="append",                 # append, prepend, find_replace, replace_section
+    content="\n## New Section\nContent here..."
 )
+```
 
-# Creating a knowledge visualization
-canvas_result = await canvas(
-    nodes=[{"id": "note1", "label": "Search Design"}],  # Nodes to display
-    edges=[{"from": "note1", "to": "note2"}],           # Connections
-    title="Project Overview",                           # Canvas title
-    folder="diagrams"                                   # Storage location
+**File organization** (v0.13.0):
+```
+move_note(
+    identifier="Old Note",
+    destination="archive/old-note.md"   # Folders created automatically
 )
+```
+
+### Project Management (v0.13.0)
+
+```
+list_projects()                         # Show available projects
+switch_project("work-notes")            # Change active project
+get_current_project()                   # Current project info
+```
+
+### Search & Discovery
+
+```
+search_notes("authentication system")   # v0.13.0: includes frontmatter tags
+build_context("memory://specs/search")  # Follow knowledge graph connections
+recent_activity(timeframe="1 week")     # Check what's been updated
 ```
 
 ## memory:// URLs Explained
@@ -158,6 +186,30 @@ Users will interact with Basic Memory in patterns like:
    [Then build_context() to understand connections]
    ```
 
+4. **Editing existing notes (v0.13.0)**:
+   ```
+   Human: "Add a section about deployment to my API documentation"
+   
+   You: I'll add that section to your existing documentation.
+   [Use edit_note() with operation="append" to add new content]
+   ```
+
+5. **Project management (v0.13.0)**:
+   ```
+   Human: "Switch to my work project and show recent activity"
+   
+   You: I'll switch to your work project and check what's been updated recently.
+   [Use switch_project() then recent_activity()]
+   ```
+
+6. **File organization (v0.13.0)**:
+   ```
+   Human: "Move my old meeting notes to the archive folder"
+   
+   You: I'll organize those notes for you.
+   [Use move_note() to relocate files with database consistency]
+   ```
+
 ## Key Things to Remember
 
 1. **Files are Truth**
@@ -174,16 +226,27 @@ Users will interact with Basic Memory in patterns like:
    - Combine related information
 
 3. **Writing Knowledge Wisely**
-   - Using the same title+folder will overwrite existing notes
-   - Structure content with clear headings and sections
-   - Use semantic markup for observations and relations
+   - Same title+folder overwrites existing notes
+   - Structure with clear headings and semantic markup
+   - Use tags for searchability (v0.13.0: frontmatter tags indexed)
    - Keep files organized in logical folders
+
+4. **Leverage v0.13.0 Features**
+   - **Edit incrementally**: Use `edit_note()` for small changes vs rewriting
+   - **Switch projects**: Change context when user mentions different work areas
+   - **Organize proactively**: Move old content to archive folders
+   - **Cross-project operations**: Create notes in specific projects while maintaining context
 
 ## Common Knowledge Patterns
 
 ### Capturing Decisions
 
 ```markdown
+---
+title: Coffee Brewing Methods
+tags: [coffee, brewing, pour-over, techniques]  # v0.13.0: Now searchable!
+---
+
 # Coffee Brewing Methods
 
 ## Context
@@ -196,11 +259,13 @@ Pour over is my preferred method for light to medium roasts because it highlight
 - [technique] Blooming the coffee grounds for 30 seconds improves extraction #brewing
 - [preference] Water temperature between 195-205°F works best #temperature
 - [equipment] Gooseneck kettle provides better control of water flow #tools
+- [timing] Total brew time of 3-4 minutes produces optimal extraction #process
 
 ## Relations
 - pairs_with [[Light Roast Beans]]
 - contrasts_with [[French Press Method]]
 - requires [[Proper Grinding Technique]]
+- part_of [[Morning Coffee Routine]]
 ```
 
 ### Recording Project Structure
@@ -241,119 +306,63 @@ Discussed strategies for improving the chocolate chip cookie recipe.
 - pairs_with [[Homemade Ice Cream]]
 ```
 
+## v0.13.0 Workflow Examples
+
+### Multi-Project Conversations
+
+**User:** "I need to update my work documentation and also add a personal recipe note."
+
+**Workflow:**
+1. `list_projects()` - Check available projects
+2. `write_note(title="Sprint Planning", project="work-notes")` - Work content
+3. `write_note(title="Weekend Recipes", project="personal")` - Personal content
+
+### Incremental Note Building
+
+**User:** "Add a troubleshooting section to my setup guide."
+
+**Workflow:**
+1. `edit_note(identifier="Setup Guide", operation="append", content="\n## Troubleshooting\n...")`
+
+**User:** "Update the authentication section in my API docs."
+
+**Workflow:**
+1. `edit_note(identifier="API Documentation", operation="replace_section", section="## Authentication")`
+
+### Smart File Organization
+
+**User:** "My notes are getting messy in the main folder."
+
+**Workflow:**
+1. `move_note("Old Meeting Notes", "archive/2024/old-meetings.md")`
+2. `move_note("Project Notes", "projects/client-work/notes.md")`
+
 ### Creating Effective Relations
 
-When creating relations, you can:
-1. Reference existing entities by their exact title
-2. Create forward references to entities that don't exist yet
+When creating relations:
+1. **Reference existing entities** by their exact title: `[[Exact Title]]`
+2. **Create forward references** to entities that don't exist yet - they'll be linked automatically when created
+3. **Search first** to find existing entities to reference
+4. **Use meaningful relation types**: `implements`, `requires`, `part_of` vs generic `relates_to`
 
-```python
-# Example workflow for creating notes with effective relations
-async def create_note_with_effective_relations():
-    # Search for existing entities to reference
-    search_results = await search_notes("travel")
-    existing_entities = [result.title for result in search_results.primary_results]
-    
-    # Check if specific entities exist
-    packing_tips_exists = "Packing Tips" in existing_entities
-    japan_travel_exists = "Japan Travel Guide" in existing_entities
-    
-    # Prepare relations section - include both existing and forward references
-    relations_section = "## Relations\n"
-    
-    # Existing reference - exact match to known entity
-    if packing_tips_exists:
-        relations_section += "- references [[Packing Tips]]\n"
-    else:
-        # Forward reference - will be linked when that entity is created later
-        relations_section += "- references [[Packing Tips]]\n"
-    
-    # Another possible reference
-    if japan_travel_exists:
-        relations_section += "- part_of [[Japan Travel Guide]]\n"
-    
-    # You can also check recently modified notes to reference them
-    recent = await recent_activity(timeframe="1 week")
-    recent_titles = [item.title for item in recent.primary_results]
-    
-    if "Transportation Options" in recent_titles:
-        relations_section += "- relates_to [[Transportation Options]]\n"
-    
-    # Always include meaningful forward references, even if they don't exist yet
-    relations_section += "- located_in [[Tokyo]]\n"
-    relations_section += "- visited_during [[Spring 2023 Trip]]\n"
-    
-    # Now create the note with both verified and forward relations
-    content = f"""# Tokyo Neighborhood Guide
-    
-## Overview
-Details about different Tokyo neighborhoods and their unique characteristics.
+**Example workflow:**
+1. `search_notes("travel")` to find existing travel-related notes
+2. Reference found entities: `- part_of [[Japan Travel Guide]]`
+3. Add forward references: `- located_in [[Tokyo]]` (even if Tokyo note doesn't exist yet)
 
-## Observations
-- [area] Shibuya is a busy shopping district #shopping
-- [transportation] Yamanote Line connects major neighborhoods #transit
-- [recommendation] Visit Shimokitazawa for vintage shopping #unique
-- [tip] Get a Suica card for easy train travel #convenience
+## Common Issues & Solutions
 
-{relations_section}
-    """
-    
-    result = await write_note(
-        title="Tokyo Neighborhood Guide",
-        content=content,
-        verbose=True
-    )
-    
-    # You can check which relations were resolved and which are forward references
-    if result and 'relations' in result:
-        resolved = [r['to_name'] for r in result['relations'] if r.get('target_id')]
-        forward_refs = [r['to_name'] for r in result['relations'] if not r.get('target_id')]
-        
-        print(f"Resolved relations: {resolved}")
-        print(f"Forward references that will be resolved later: {forward_refs}")
-```
+**Missing Content:**
+- Try `search_notes()` with broader terms if `read_note()` fails
+- Use fuzzy matching: search for partial titles
 
-## Error Handling
+**Forward References:**
+- These are normal! Basic Memory links them automatically when target notes are created
+- Inform users: "I've created forward references that will be linked when you create those notes"
 
-Common issues to watch for:
-
-1. **Missing Content**
-   ```python
-   try:
-       content = await read_note("Document")
-   except:
-       # Try search instead
-       results = await search_notes("Document")
-       if results and results.primary_results:
-           # Found something similar
-           content = await read_note(results.primary_results[0].permalink)
-   ```
-
-2. **Forward References (Unresolved Relations)**
-   ```python
-   response = await write_note(..., verbose=True)
-   # Check for forward references (unresolved relations)
-   forward_refs = []
-   for relation in response.get('relations', []):
-       if not relation.get('target_id'):
-           forward_refs.append(relation.get('to_name'))
-   
-   if forward_refs:
-       # This is a feature, not an error! Inform the user about forward references
-       print(f"Note created with forward references to: {forward_refs}")
-       print("These will be automatically linked when those notes are created.")
-       
-       # Optionally suggest creating those entities now
-       print("Would you like me to create any of these notes now to complete the connections?")
-   ```
-
-3. **Sync Issues**
-   ```python
-   # If information seems outdated
-   activity = await recent_activity(timeframe="1 hour")
-   if not activity or not activity.primary_results:
-       print("It seems there haven't been recent updates. You might need to run 'basic-memory sync'.")
-   ```
+**Sync Issues:**
+- If information seems outdated, suggest `basic-memory sync`
+- Use `recent_activity()` to check if content is current
 
 ## Best Practices
 
@@ -394,5 +403,6 @@ Common issues to watch for:
    - Recommend adding relations between topics
    - Offer to create summaries of scattered information
    - Suggest potential missing relations: "I notice this might relate to [topic], would you like me to add that connection?"
+
 
 Built with ♥️ by Basic Machines

@@ -20,13 +20,24 @@ The easiest way to install basic memory is via `uv`. See the [uv installation gu
 
 ### 1. Install Basic Memory
 
-```bash
-# Install with uv (recommended).  
-uv tool install basic-memory
+**v0.13.0 offers multiple installation options:**
 
-# Or with pip
-pip install basic-memory
+```bash
+# Stable release (recommended)
+uv tool install basic-memory
+# or: pip install basic-memory
+
+# Beta releases (new features, testing)
+pip install basic-memory --pre
+
+# Development builds (latest changes)
+pip install basic-memory --pre --force-reinstall
 ```
+
+**Version Information:**
+- **Stable**: Latest tested release (e.g., `0.13.0`)
+- **Beta**: Pre-release versions (e.g., `0.13.0b1`) 
+- **Development**: Auto-published from git commits (e.g., `0.12.4.dev26+468a22f`)
 
 > **Important**: You need to install Basic Memory using one of the commands above to use the command line tools.
 
@@ -99,29 +110,48 @@ To disable realtime sync, you can update the config. See [[CLI Reference#sync]].
 To update Basic Memory when new versions are released:
 
 ```bash
-# Update with uv (recommended)
+# Update stable release
 uv tool upgrade basic-memory 
+# or: pip install --upgrade basic-memory
 
-# Or with pip 
-pip install --upgrade basic-memory
+# Update to latest beta (v0.13.0)
+pip install --upgrade basic-memory --pre
+
+# Get latest development build
+pip install --upgrade basic-memory --pre --force-reinstall
 ```
 
-> **Note**: After updating, you'll need to restart Claude Desktop and your sync process for changes to take effect.
+**v0.13.0 Update Benefits:**
+- **Fluid project switching** during conversations
+- **Advanced note editing** capabilities
+- **Smart file management** with move operations
+- **Enhanced search** with frontmatter tag support
 
-### 5. Change the default project directory
+> **Note**: After updating, restart Claude Desktop for changes to take effect. No sync restart needed in v0.13.0.
 
-By default, Basic Memory will create a project in the  `basic-memory` folder in your home directory. You can change this via the `project` [[CLI Reference#project|cli command]]. 
+### 5. Multi-Project Setup (Enhanced in v0.13.0)
+
+By default, Basic Memory creates a project in `~/basic-memory`. v0.13.0 introduces **fluid project management** - switch between projects instantly during conversations.
 
 ```  
-# Add a new project  
-basic-memory project add work ~/work-basic-memory  
+# Create a new project
+basic-memory project create work ~/work-basic-memory  
   
 # Set the default project  
-basic-memory project default work  
+basic-memory project set-default work  
 
-# List all configured projects  
-basic-memory project list  
+# List all projects with status
+basic-memory project list
+
+# Get detailed project information
+basic-memory project info
 ```
+
+**New in v0.13.0:**
+- **Instant switching**: Change projects during conversations without restart
+- **Unified database**: All projects in single `~/.basic-memory/memory.db`
+- **Better performance**: Optimized queries and reduced file I/O
+- **Session context**: Maintains active project throughout conversations
 
 ## Troubleshooting Installation
 
@@ -168,6 +198,7 @@ If you encounter permission errors:
    ---
    title: Coffee Brewing Methods
    permalink: coffee-brewing-methods
+   tags: [coffee, brewing, equipment]  # v0.13.0: Now searchable!
    ---
    
    # Coffee Brewing Methods
@@ -180,11 +211,10 @@ If you encounter permission errors:
    - relates_to [[Other Coffee Topics]]
    ```
 
-5. **Start the sync process** in a Terminal window (optional):
-   ```bash
-   basic-memory sync --watch
-   ```
-   Keep this running in the background.
+**v0.13.0 Improvements:**
+- **Real-time sync**: Changes appear immediately, no background sync needed
+- **Searchable tags**: Frontmatter tags are now indexed for search
+- **Better file organization**: Enhanced file management capabilities
 
 ## Using Special Prompts
 
@@ -250,14 +280,37 @@ Or directly reference notes using memory:// URLs:
 You: "Take a look at memory://coffee-brewing-methods and let's discuss how to improve my technique."
 ```
 
-### Building On Previous Knowledge
+### Building On Previous Knowledge (Enhanced in v0.13.0)
 
 Basic Memory enables continuous knowledge building:
 
 1. **Reference previous discussions** in new conversations
-2. **Add to existing notes** through conversations
-3. **Create connections** between related topics
-4. **Follow relationships** to build comprehensive context
+2. **Edit notes incrementally** without rewriting entire documents
+3. **Move and organize notes** as your knowledge base grows
+4. **Switch between projects** instantly during conversations
+5. **Search by tags** to find related content quickly
+6. **Create connections** between related topics
+7. **Follow relationships** to build comprehensive context
+
+### v0.13.0 Workflow Examples
+
+**Incremental Editing:**
+```
+You: "Add a section about espresso to my coffee brewing notes"
+Claude: [Uses edit_note to append new section]
+```
+
+**File Organization:**
+```
+You: "Move my old meeting notes to an archive folder"
+Claude: [Uses move_note with database consistency]
+```
+
+**Project Switching:**
+```
+You: "Switch to my work project and show recent activity"
+Claude: [Switches projects and shows work-specific content]
+```
 
 ## Importing Existing Conversations
 
@@ -271,16 +324,23 @@ basic-memory import claude conversations
 basic-memory import chatgpt
 ```
 
-After importing, the changes will be synced. Initial syncs may take a few moments. You can see info about your project by running `basic-memrory project info`.
+After importing, changes sync automatically in real-time. You can see project statistics by running `basic-memory project info`.
 
 ## Quick Tips
 
-- Basic Memory will sync changes from your project in real time.
+### General Usage
+- Basic Memory syncs changes in real-time (no manual sync needed)
 - Use special prompts (Continue Conversation, Recent Activity, Search) to start contextual discussions
 - Build connections between notes for a richer knowledge graph
-- Use direct `memory://` URLs with a permalink when you need precise context. See [[User Guide#Using memory // URLs]]
-- Use git to version control your knowledge base (git integration is on the roadmap)
+- Use direct `memory://` URLs with permalinks for precise context
 - Review and edit AI-generated notes for accuracy
+
+### v0.13.0 Features
+- **Switch projects instantly**: "Switch to my work project" - no restart needed
+- **Edit notes incrementally**: "Add a section about..." instead of rewriting
+- **Organize with moves**: "Move this to my archive folder" with database consistency
+- **Search by tags**: Frontmatter tags are now searchable
+- **Try beta builds**: `pip install basic-memory --pre` for latest features
 
 ## Next Steps
 
@@ -291,3 +351,5 @@ After getting started, explore these areas:
 3. **Set up [[Obsidian Integration]]** for visual knowledge navigation
 4. **Learn about [[Canvas]]** visualizations for mapping concepts
 5. **Review the [[CLI Reference]]** for command line tools
+6. **Explore [[OAuth Authentication Guide]]** for secure remote access (v0.13.0)
+7. **Set up multiple projects** for different knowledge areas (v0.13.0)

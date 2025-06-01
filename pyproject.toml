@@ -1,6 +1,6 @@
 [project]
 name = "basic-memory"
-version = "0.12.3"
+dynamic = ["version"]
 description = "Local-first knowledge management combining Zettelkasten with knowledge graphs"
 readme = "README.md"
 requires-python = ">=3.12.1"
@@ -47,7 +47,7 @@ basic-memory = "basic_memory.cli.main:app"
 bm = "basic_memory.cli.main:app"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "uv-dynamic-versioning>=0.7.0"]
 build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
@@ -79,6 +79,15 @@ dev-dependencies = [
     "pyqt6>=6.8.1",
 ]
 
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+bump = true
+fallback-version = "0.0.0"
+
 [tool.pyright]
 include = ["src/"]
 exclude = ["**/__pycache__"]
@@ -89,20 +98,6 @@ reportMissingTypeStubs = false
 pythonVersion = "3.12"
 
 
-[tool.semantic_release]
-version_variables = [
-    "src/basic_memory/__init__.py:__version__",
-]
-version_toml = [
-    "pyproject.toml:project.version",
-]
-major_on_zero = false
-branch = "main"
-changelog_file = "CHANGELOG.md"
-build_command = "pip install uv && uv build"
-dist_path = "dist/"
-upload_to_pypi = true
-commit_message = "chore(release): {version} [skip ci]"
 
 [tool.coverage.run]
 concurrency = ["thread", "gevent"]

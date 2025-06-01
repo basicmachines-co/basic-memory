@@ -388,6 +388,59 @@ Maintain context for complex projects over time:
 
 ## Advanced Features
 
+### Note Editing (New in v0.13.0)
+
+**Edit notes incrementally without rewriting entire documents:**
+
+```
+💬 "Add a new section about deployment to my API documentation"
+🤖 [Uses edit_note to append new section]
+
+💬 "Update the date at the top of my meeting notes"
+🤖 [Uses edit_note to prepend new timestamp]
+
+💬 "Replace the implementation section in my design doc"
+🤖 [Uses edit_note to replace specific section]
+```
+
+Available editing operations:
+- **Append**: Add content to end of notes
+- **Prepend**: Add content to beginning of notes
+- **Replace Section**: Replace content under specific headers
+- **Find & Replace**: Simple text replacements with validation
+
+### File Management (New in v0.13.0)
+
+**Move and organize notes with full database consistency:**
+
+```
+💬 "Move my old meeting notes to the archive folder"
+🤖 [Uses move_note with automatic folder creation and database updates]
+
+💬 "Reorganize my project files into a better structure"
+🤖 [Moves files while maintaining search indexes and links]
+```
+
+Move operations include:
+- **Database Consistency**: Updates file paths, permalinks, and checksums
+- **Search Reindexing**: Maintains search functionality after moves
+- **Folder Creation**: Automatically creates destination directories
+- **Cross-Project Moves**: Support for moving between projects
+- **Rollback Protection**: Ensures data integrity during failed operations
+
+### Enhanced Search (New in v0.13.0)
+
+**Frontmatter tags are now searchable:**
+
+```yaml
+---
+title: Coffee Brewing Methods
+tags: [coffee, brewing, equipment]
+---
+```
+
+Now searchable by: "coffee", "brewing", "equipment", or "Coffee Brewing Methods"
+
 ### Importing External Knowledge
 
 Import existing conversations:
@@ -398,9 +451,12 @@ basic-memory import claude conversations
 
 # From ChatGPT
 basic-memory import chatgpt
+
+# Target specific projects (v0.13.0)
+basic-memory --project=work import claude conversations
 ```
 
-After importing, run `basic-memory sync` to index everything.
+After importing, changes sync automatically in real-time.
 
 ### Obsidian Integration
 
@@ -460,12 +516,45 @@ basic-memory import claude conversations
 basic-memory import chatgpt
 ```
 
-## Multiple Projects
+## Multiple Projects (v0.13.0)
 
-Basic Memory supports managing multiple separate knowledge bases through projects. This feature allows you to maintain  
-separate knowledge graphs for different purposes (e.g., personal notes, work projects, research topics).
+Basic Memory v0.13.0 introduces **fluid project management** - the ability to switch between projects instantly during conversations without restart. This allows you to maintain separate knowledge graphs for different purposes while seamlessly switching between them.
 
-Basic Memory keeps a list of projects in a config file: ` ~/.basic-memory/config.json`
+### Instant Project Switching (New in v0.13.0)
+
+**Switch projects during conversations:**
+
+```
+💬 "What projects do I have?"
+🤖 Available projects:
+   • main (current, default)
+   • work-notes
+   • personal-journal
+   • code-snippets
+
+💬 "Switch to work-notes"
+🤖 ✓ Switched to work-notes project
+   
+   Project Summary:
+   • 47 entities
+   • 125 observations  
+   • 23 relations
+
+💬 "What did I work on yesterday?"
+🤖 [Shows recent activity from work-notes project]
+```
+
+### Cross-Project Operations (New in v0.13.0)
+
+All MCP tools now support optional project parameters:
+
+```
+💬 "Create a note about this meeting in my personal-notes project"
+🤖 [Creates note in personal-notes project while staying in current project context]
+
+💬 "Search for 'API design' in my work project"
+🤖 [Searches specifically in work project]
+```
 
 ### Managing Projects
 
@@ -474,16 +563,16 @@ Basic Memory keeps a list of projects in a config file: ` ~/.basic-memory/config
 basic-memory project list  
   
 # Add a new project  
-basic-memory project add work ~/work-basic-memory  
+basic-memory project create work ~/work-basic-memory  
   
 # Set the default project  
-basic-memory project default work  
+basic-memory project set-default work  
   
 # Remove a project (doesn't delete files)  
-basic-memory project remove personal  
+basic-memory project delete personal  
   
-# Show current project  
-basic-memory project current  
+# Show current project statistics
+basic-memory project info
 ```  
 
 ### Using Projects in Commands
@@ -504,23 +593,32 @@ You can also set the `BASIC_MEMORY_PROJECT` environment variable:
 BASIC_MEMORY_PROJECT=work basic-memory sync  
 ```  
 
-### Project Isolation
+### Unified Database Architecture (New in v0.13.0)
 
-Each project maintains:
+Basic Memory v0.13.0 uses a unified database architecture:
 
-- Its own collection of markdown files in the specified directory
-- A separate SQLite database for that project
-- Complete knowledge graph isolation from other projects
+- **Single Database**: All projects share `~/.basic-memory/memory.db`
+- **Project Isolation**: Proper data separation with project context
+- **Better Performance**: Optimized queries and reduced file I/O
+- **Easier Backup**: Single database file contains all project data
+- **Session Context**: Maintains active project throughout conversations
 
 ## Workflow Tips
 
-1. Run sync in watch mode for automatic updates
-2. Use git for version control of your knowledge base
-3. Review and edit AI-created content for accuracy
-4. Periodically organize and refine your knowledge structure
-5. Build rich connections between related ideas
-6. Use forward references to plan future documentation
-7. Start conversations with special prompts to leverage existing knowledge
+### General Workflow
+1. **Project Organization**: Use multiple projects to separate different areas (work, personal, research)
+2. **Session Context**: Switch projects during conversations without restart (v0.13.0)
+3. **Real-time Sync**: Changes sync automatically - no need to run watch mode
+4. **Review Content**: Edit AI-created content for accuracy
+5. **Build Connections**: Create rich relationships between related ideas
+6. **Use Special Prompts**: Start conversations with context from your knowledge base
+
+### v0.13.0 Workflow Enhancements
+7. **Incremental Editing**: Use edit_note for small changes instead of rewriting entire documents
+8. **File Organization**: Move and reorganize notes as your knowledge base grows
+9. **Cross-Project References**: Create notes in specific projects while working in others
+10. **Search Tags**: Use frontmatter tags to improve content discoverability
+11. **Project Statistics**: Monitor project growth and activity with project info commands
 
 ## Troubleshooting
 
@@ -528,9 +626,8 @@ Each project maintains:
 
 If changes aren't showing up:
 
-1. Verify `basic-memory sync --watch` is running
-2. Run `basic-memory status` to check system state
-3. Try a manual sync with `basic-memory sync`
+1. Run `basic-memory status` to check system state 
+2. Try a manual sync with `basic-memory sync`
 
 ### Missing Content
 
@@ -554,3 +651,5 @@ If relations aren't working:
 - relates_to [[Getting Started with Basic Memory]] (Setup and first steps)
 - relates_to [[Canvas]] (Creating visual knowledge maps)
 - relates_to [[CLI Reference]] (Command line tools)
+- enhanced_in_v0.13.0 [[OAuth Authentication Guide]] (Production authentication)
+- enhanced_in_v0.13.0 [[Project Management]] (Multi-project workflows)
