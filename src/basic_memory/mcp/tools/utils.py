@@ -106,6 +106,7 @@ async def call_get(
         ToolError: If the request fails with an appropriate error message
     """
     logger.debug(f"Calling GET '{url}' params: '{params}'")
+    error_message = None
     try:
         response = await client.get(
             url,
@@ -123,7 +124,12 @@ async def call_get(
 
         # Handle different status codes differently
         status_code = response.status_code
-        error_message = get_error_message(status_code, url, "GET")
+        # get the message if available
+        response_data = response.json()
+        if isinstance(response_data, dict) and "detail" in response_data:
+            error_message = response_data["detail"]
+        else:
+            error_message = get_error_message(status_code, url, "PUT")
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -141,8 +147,6 @@ async def call_get(
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
 
     except HTTPStatusError as e:
-        status_code = e.response.status_code
-        error_message = get_error_message(status_code, url, "GET")
         raise ToolError(error_message) from e
 
 
@@ -379,6 +383,7 @@ async def call_post(
         ToolError: If the request fails with an appropriate error message
     """
     logger.debug(f"Calling POST '{url}'")
+    error_message = None
     try:
         response = await client.post(
             url=url,
@@ -401,7 +406,13 @@ async def call_post(
 
         # Handle different status codes differently
         status_code = response.status_code
-        error_message = get_error_message(status_code, url, "POST")
+        # get the message if available
+        response_data = response.json()
+        if isinstance(response_data, dict) and "detail" in response_data:
+            error_message = response_data["detail"]
+        else:
+            error_message = get_error_message(status_code, url, "POST")
+
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -419,8 +430,6 @@ async def call_post(
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
 
     except HTTPStatusError as e:
-        status_code = e.response.status_code
-        error_message = get_error_message(status_code, url, "POST")
         raise ToolError(error_message) from e
 
 
@@ -456,6 +465,7 @@ async def call_delete(
         ToolError: If the request fails with an appropriate error message
     """
     logger.debug(f"Calling DELETE '{url}'")
+    error_message = None
     try:
         response = await client.delete(
             url=url,
@@ -473,7 +483,13 @@ async def call_delete(
 
         # Handle different status codes differently
         status_code = response.status_code
-        error_message = get_error_message(status_code, url, "DELETE")
+        # get the message if available
+        response_data = response.json()
+        if isinstance(response_data, dict) and "detail" in response_data:
+            error_message = response_data["detail"]
+        else:
+            error_message = get_error_message(status_code, url, "DELETE")
+
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -491,6 +507,4 @@ async def call_delete(
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
 
     except HTTPStatusError as e:
-        status_code = e.response.status_code
-        error_message = get_error_message(status_code, url, "DELETE")
         raise ToolError(error_message) from e

@@ -13,6 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import basic_memory
 from basic_memory.utils import setup_logging, generate_permalink
 
+
 DATABASE_NAME = "memory.db"
 APP_DATABASE_NAME = "memory.db"  # Using the same name but in the app directory
 DATA_DIR_NAME = ".basic-memory"
@@ -147,7 +148,11 @@ class ConfigManager:
 
     def __init__(self) -> None:
         """Initialize the configuration manager."""
-        self.config_dir = Path.home() / DATA_DIR_NAME
+        home = os.getenv("HOME", Path.home())
+        if isinstance(home, str):
+            home = Path(home)
+            
+        self.config_dir = home / DATA_DIR_NAME
         self.config_file = self.config_dir / CONFIG_FILE_NAME
 
         # Ensure config directory exists
@@ -155,9 +160,6 @@ class ConfigManager:
 
         # Load or create configuration
         self.config = self.load_config()
-
-        # Current project context for the session
-        self.current_project_id: int
 
     def load_config(self) -> BasicMemoryConfig:
         """Load configuration from file or create default."""
@@ -192,7 +194,7 @@ class ConfigManager:
         """Get the default project name."""
         return self.config.default_project
 
-    def add_project(self, name: str, path: str) -> None:
+    def add_project(self, name: str, path: str) -> ProjectConfig:
         """Add a new project to the configuration."""
         if name in self.config.projects:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
@@ -203,6 +205,7 @@ class ConfigManager:
 
         self.config.projects[name] = str(project_path)
         self.save_config(self.config)
+        return ProjectConfig(name=name, home=project_path)
 
     def remove_project(self, name: str) -> None:
         """Remove a project from the configuration."""
@@ -231,6 +234,12 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     """
 
     actual_project_name = None
+    
+    # load the config from file
+    global app_config
+    app_config = config_manager.load_config()
+    
+    # Get project name from environment variable
     os_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
     if os_project_name:  # pragma: no cover
         logger.warning(
@@ -239,15 +248,15 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
         actual_project_name = project_name
     # if the project_name is passed in, use it
     elif not project_name:
-        # Get project name from environment variable or use provided name or default
-        actual_project_name = config_manager.default_project
+        # use default
+        actual_project_name = app_config.default_project
     else:  # pragma: no cover
         actual_project_name = project_name
 
     # the config contains a dict[str,str] of project names and absolute paths
     assert actual_project_name is not None, "actual_project_name cannot be None"
 
-    project_path = config_manager.projects.get(actual_project_name)
+    project_path = app_config.projects.get(actual_project_name)
     if not project_path:  # pragma: no cover
         raise ValueError(f"Project '{actual_project_name}' not found")
 

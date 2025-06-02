@@ -58,6 +58,9 @@ from pathlib import Path
 
 from httpx import AsyncClient, ASGITransport
 
+import basic_memory.config
+import basic_memory.mcp.project_session
+
 from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
@@ -67,6 +70,7 @@ from fastapi import FastAPI
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_project_config, get_engine_factory, get_app_config
 from basic_memory.config import app_config as basic_memory_app_config
+
 
 # Import MCP tools so they're available for testing
 from basic_memory.mcp import tools  # noqa: F401
@@ -118,6 +122,14 @@ def app_config(test_project, tmp_path, monkeypatch) -> BasicMemoryConfig:
     # Set the module app_config instance project list (like regular tests)
     basic_memory_app_config.projects = projects
     basic_memory_app_config.default_project = test_project.name
+
+    # set the config manager
+    basic_memory.config.config_manager = ConfigManager()
+    # save the config to disk
+    basic_memory.config.config_manager.save_config(app_config)
+    
+    # initialize the project session with the test project
+    basic_memory.mcp.project_session.session.initialize(test_project.name)
 
     return app_config
 

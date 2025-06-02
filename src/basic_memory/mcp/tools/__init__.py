@@ -22,12 +22,16 @@ from basic_memory.mcp.tools.project_management import (
     switch_project,
     get_current_project,
     set_default_project,
+    create_project,
+    delete_project,
 )
 
 __all__ = [
     "build_context",
     "canvas",
+    "create_project",
     "delete_note",
+    "delete_project",
     "edit_note",
     "get_current_project",
     "list_directory",

@@ -11,9 +11,9 @@ from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.project_session import session, add_project_metadata
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_put
+from basic_memory.mcp.tools.utils import call_get, call_put, call_post, call_delete
 from basic_memory.schemas import ProjectInfoResponse
-from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
+from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse, ProjectInfoRequest
 
 
 @mcp.tool()
@@ -27,11 +27,7 @@ async def list_projects(ctx: Context | None = None) -> str:
         Formatted list of projects with status indicators
 
     Example:
-        Available projects:
-        • main (current, default)
-        • work-notes
-        • personal-journal
-        • code-snippets
+        list_projects()
     """
     if ctx:  # pragma: no cover
         await ctx.info("Listing all available projects")
@@ -73,12 +69,8 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
         Confirmation message with project summary
 
     Example:
-        ✓ Switched to work-notes project
-
-        Project Summary:
-        • 47 entities
-        • 23 observations
-        • 15 relations
+        switch_project("work-notes")
+        switch_project("personal-journal")
     """
     if ctx:  # pragma: no cover
         await ctx.info(f"Switching to project: {project_name}")
@@ -137,12 +129,7 @@ async def get_current_project(ctx: Context | None = None) -> str:
         Current project name and basic statistics
 
     Example:
-        Current project: work-notes
-
-        • 47 entities
-        • 23 observations
-        • 15 relations
-        • Default project: main
+        get_current_project()
     """
     if ctx:  # pragma: no cover
         await ctx.info("Getting current project information")
@@ -180,10 +167,7 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
         Confirmation message about config update
 
     Example:
-        ✓ Updated default project to 'work-notes' in configuration
-
-        Restart Basic Memory for this change to take effect:
-        basic-memory mcp
+        set_default_project("work-notes")
     """
     if ctx:  # pragma: no cover
         await ctx.info(f"Setting default project to: {project_name}")
@@ -199,4 +183,114 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
     if status_response.old_project:
         result += f"\nPrevious default: {status_response.old_project.name}\n"
 
+    return add_project_metadata(result, session.get_current_project())
+
+
+@mcp.tool()
+async def create_project(project_name: str, project_path: str, set_default: bool = False, ctx: Context | None = None) -> str:
+    """Create a new Basic Memory project.
+
+    Creates a new project with the specified name and path. The project directory
+    will be created if it doesn't exist. Optionally sets the new project as default.
+
+    Args:
+        project_name: Name for the new project (must be unique)
+        project_path: File system path where the project will be stored
+        set_default: Whether to set this project as the default (optional, defaults to False)
+
+    Returns:
+        Confirmation message with project details
+
+    Example:
+        create_project("my-research", "~/Documents/research")
+        create_project("work-notes", "/home/user/work", set_default=True)
+    """
+    if ctx:  # pragma: no cover
+        await ctx.info(f"Creating project: {project_name} at {project_path}")
+
+    # Create the project request
+    project_request = ProjectInfoRequest(
+        name=project_name,
+        path=project_path,
+        set_default=set_default
+    )
+    
+    # Call API to create project
+    response = await call_post(client, "/projects/projects", json=project_request.model_dump())
+    status_response = ProjectStatusResponse.model_validate(response.json())
+
+    result = f"✓ {status_response.message}\n\n"
+    
+    if status_response.new_project:
+        result += "Project Details:\n"
+        result += f"• Name: {status_response.new_project.name}\n"
+        result += f"• Path: {status_response.new_project.path}\n"
+        
+        if set_default:
+            result += "• Set as default project\n"
+    
+    result += "\nProject is now available for use.\n"
+    
+    # If project was set as default, update session
+    if set_default:
+        session.set_current_project(project_name)
+        
+    return add_project_metadata(result, session.get_current_project())
+
+
+@mcp.tool()
+async def delete_project(project_name: str, ctx: Context | None = None) -> str:
+    """Delete a Basic Memory project.
+
+    Removes a project from the configuration and database. This does NOT delete
+    the actual files on disk - only removes the project from Basic Memory's
+    configuration and database records.
+
+    Args:
+        project_name: Name of the project to delete
+
+    Returns:
+        Confirmation message about project deletion
+
+    Example:
+        delete_project("old-project")
+        
+    Warning:
+        This action cannot be undone. The project will need to be re-added
+        to access its content through Basic Memory again.
+    """
+    if ctx:  # pragma: no cover
+        await ctx.info(f"Deleting project: {project_name}")
+
+    current_project = session.get_current_project()
+    
+    # Check if trying to delete current project
+    if project_name == current_project:
+        raise ValueError(f"Cannot delete the currently active project '{project_name}'. Switch to a different project first.")
+
+    # Get project info before deletion to validate it exists
+    response = await call_get(client, "/projects/projects")
+    project_list = ProjectList.model_validate(response.json())
+    
+    # Check if project exists
+    project_exists = any(p.name == project_name for p in project_list.projects)
+    if not project_exists:
+        available_projects = [p.name for p in project_list.projects]
+        raise ValueError(f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}")
+    
+    # Call API to delete project
+    response = await call_delete(client, f"/projects/{project_name}")
+    status_response = ProjectStatusResponse.model_validate(response.json())
+
+    result = f"✓ {status_response.message}\n\n"
+    
+    if status_response.old_project:
+        result += "Removed project details:\n"
+        result += f"• Name: {status_response.old_project.name}\n"
+        if hasattr(status_response.old_project, 'path'):
+            result += f"• Path: {status_response.old_project.path}\n"
+    
+    result += "Files remain on disk but project is no longer tracked by Basic Memory.\n"
+    result += "Re-add the project to access its content again.\n"
+    
     return add_project_metadata(result, session.get_current_project())

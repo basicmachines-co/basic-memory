@@ -236,6 +236,7 @@ async def edit_note(
         # Format summary
         summary = [
             f"# Edited note ({operation})",
+            f"project: {active_project.name}",
             f"file_path: {result.file_path}",
             f"permalink: {result.permalink}",
             f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
@@ -287,7 +288,7 @@ async def edit_note(
             status_code=response.status_code,
         )
 
-        return "\\n".join(summary)
+        return "\n".join(summary)
 
     except Exception as e:
         logger.error(f"Error editing note: {e}")

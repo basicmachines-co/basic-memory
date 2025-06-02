@@ -10,7 +10,6 @@ from basic_memory.schemas.project_info import (
     ProjectItem,
     ProjectInfoRequest,
     ProjectStatusResponse,
-    ProjectWatchStatus,
 )
 
 # Router for resources in a specific project
@@ -79,18 +78,14 @@ async def list_projects(
     Returns:
         A list of all projects with metadata
     """
-    projects_dict = project_service.projects
+    projects = await project_service.list_projects()
     default_project = project_service.default_project
 
-    project_items = []
-    for name, path in projects_dict.items():
-        project_items.append(
-            ProjectItem(
-                name=name,
-                path=path,
-                is_default=(name == default_project),
-            )
-        )
+    project_items = [ProjectItem(
+                name=project.name,
+                path=project.path,
+                is_default=project.is_default or False,
+            ) for project in projects]
 
     return ProjectList(
         projects=project_items,
@@ -144,21 +139,19 @@ async def remove_project(
     Returns:
         Response confirming the project was removed
     """
-    try:  # pragma: no cover
-        # Get project info before removal for the response
-        old_project = ProjectWatchStatus(
-            name=name,
-            path=project_service.projects.get(name, ""),
-            watch_status=None,
-        )
+    try: 
+        old_project = await project_service.get_project(name)
+        if not old_project:
+            raise HTTPException(status_code=404, detail=f"Project: '{name}' does not exist")       
 
         await project_service.remove_project(name)
 
-        return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
+        return ProjectStatusResponse(  
             message=f"Project '{name}' removed successfully",
             status="success",
             default=False,
-            old_project=old_project,
+            old_project=ProjectItem(name=old_project.name, path=old_project.path),
+            new_project=None,
         )
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=400, detail=str(e))
