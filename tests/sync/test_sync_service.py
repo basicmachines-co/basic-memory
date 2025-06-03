@@ -437,12 +437,6 @@ modified: 2024-01-01
     entity_b = await sync_service.entity_service.repository.get_by_permalink("concept/entity-b")
     entity_c = await sync_service.entity_service.repository.get_by_permalink("concept/entity-c")
 
-    # Debug: print entity IDs and relations
-    print(f"\nEntity IDs: A={entity_a.id}, B={entity_b.id}, C={entity_c.id}")
-    print(f"Entity A outgoing relations: {[(rel.relation_type, rel.to_id, rel.to_name) for rel in entity_a.outgoing_relations]}")
-    print(f"Entity B outgoing relations: {[(rel.relation_type, rel.to_id, rel.to_name) for rel in entity_b.outgoing_relations]}")
-    print(f"Entity C outgoing relations: {[(rel.relation_type, rel.to_id, rel.to_name) for rel in entity_c.outgoing_relations]}")
-
     # Verify outgoing relations by checking actual targets
     a_outgoing_targets = {rel.to_id for rel in entity_a.outgoing_relations}
     assert entity_b.id in a_outgoing_targets, f"A should depend on B. A's targets: {a_outgoing_targets}, B's ID: {entity_b.id}"
@@ -468,10 +462,6 @@ modified: 2024-01-01
     assert entity_a.id in c_incoming_sources, "C should have incoming relation from A"
     assert entity_b.id in c_incoming_sources, "C should have incoming relation from B"
     
-    # Debug: print actual counts for troubleshooting
-    print(f"Entity A: {len(entity_a.incoming_relations)} incoming, {len(entity_a.outgoing_relations)} outgoing")
-    print(f"Entity B: {len(entity_b.incoming_relations)} incoming, {len(entity_b.outgoing_relations)} outgoing") 
-    print(f"Entity C: {len(entity_c.incoming_relations)} incoming, {len(entity_c.outgoing_relations)} outgoing")
 
 
 @pytest.mark.asyncio
