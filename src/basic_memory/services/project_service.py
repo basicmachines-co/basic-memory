@@ -9,7 +9,7 @@ from typing import Dict, Optional, Sequence
 from loguru import logger
 from sqlalchemy import text
 
-from basic_memory.config import config, app_config, ConfigManager, config_manager
+from basic_memory.config import config, app_config
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas import (
@@ -20,7 +20,7 @@ from basic_memory.schemas import (
 )
 from basic_memory.config import WATCH_STATUS_JSON
 from basic_memory.utils import generate_permalink
-
+from basic_memory.config import config_manager
 
 class ProjectService:
     """Service for managing Basic Memory projects."""
@@ -228,7 +228,6 @@ class ProjectService:
             resolved_path = os.path.abspath(os.path.expanduser(updated_path))
 
             # Update in config
-            config_manager = config_manager
             projects = config_manager.config.projects.copy()
             projects[name] = resolved_path
             config_manager.config.projects = projects
