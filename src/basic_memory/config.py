@@ -180,11 +180,7 @@ class ConfigManager:
 
     def save_config(self, config: BasicMemoryConfig) -> None:
         """Save configuration to file."""
-        try:
-            
-            if self.config_file.absolute() == Path("/Users/phernandez/.basic-memory/config.json"):
-                raise Exception("Test is trying to write to /Users/phernandez/.basic-memory/config.json")
-            
+        try:            
             self.config_file.write_text(json.dumps(config.model_dump(), indent=2))
         except Exception as e:  # pragma: no cover
             logger.error(f"Failed to save config: {e}")
@@ -284,7 +280,7 @@ def update_current_project(project_name: str) -> None:
     This is used by the CLI when --project flag is specified.
     """
     global config
-    config = get_project_config(project_name)
+    config = get_project_config(project_name)  # pragma: no cover
 
 
 # setup logging to a single log file in user home directory

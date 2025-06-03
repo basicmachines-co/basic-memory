@@ -367,7 +367,6 @@ modified: 2024-01-01
     assert "design" in categories
 
 
-@pytest.mark.skip("fails during make-test flow")
 @pytest.mark.asyncio
 async def test_sync_entity_with_order_dependent_relations(
     sync_service: SyncService, project_config: ProjectConfig
@@ -438,16 +437,41 @@ modified: 2024-01-01
     entity_b = await sync_service.entity_service.repository.get_by_permalink("concept/entity-b")
     entity_c = await sync_service.entity_service.repository.get_by_permalink("concept/entity-c")
 
-    assert len(entity_a.outgoing_relations) == 2  # Should depend on B and C
+    # Debug: print entity IDs and relations
+    print(f"\nEntity IDs: A={entity_a.id}, B={entity_b.id}, C={entity_c.id}")
+    print(f"Entity A outgoing relations: {[(rel.relation_type, rel.to_id, rel.to_name) for rel in entity_a.outgoing_relations]}")
+    print(f"Entity B outgoing relations: {[(rel.relation_type, rel.to_id, rel.to_name) for rel in entity_b.outgoing_relations]}")
+    print(f"Entity C outgoing relations: {[(rel.relation_type, rel.to_id, rel.to_name) for rel in entity_c.outgoing_relations]}")
 
-    # FIXME this assertion fails
-    # assert len(entity_a.incoming_relations) == 1  # C depends on A
+    # Verify outgoing relations by checking actual targets
+    a_outgoing_targets = {rel.to_id for rel in entity_a.outgoing_relations}
+    assert entity_b.id in a_outgoing_targets, f"A should depend on B. A's targets: {a_outgoing_targets}, B's ID: {entity_b.id}"
+    assert entity_c.id in a_outgoing_targets, f"A should depend on C. A's targets: {a_outgoing_targets}, C's ID: {entity_c.id}"
+    assert len(entity_a.outgoing_relations) == 2, "A should have exactly 2 outgoing relations"
 
-    assert len(entity_b.outgoing_relations) == 1  # Should depend on C
-    assert len(entity_b.incoming_relations) == 1  # A depends on B
+    b_outgoing_targets = {rel.to_id for rel in entity_b.outgoing_relations}
+    assert entity_c.id in b_outgoing_targets, "B should depend on C"
+    assert len(entity_b.outgoing_relations) == 1, "B should have exactly 1 outgoing relation"
 
-    assert len(entity_c.outgoing_relations) == 1  # Should depend on A
-    assert len(entity_c.incoming_relations) == 2  # A and B depend on C
+    c_outgoing_targets = {rel.to_id for rel in entity_c.outgoing_relations}
+    assert entity_a.id in c_outgoing_targets, "C should depend on A"
+    assert len(entity_c.outgoing_relations) == 1, "C should have exactly 1 outgoing relation"
+
+    # Verify incoming relations by checking actual sources
+    a_incoming_sources = {rel.from_id for rel in entity_a.incoming_relations}
+    assert entity_c.id in a_incoming_sources, "A should have incoming relation from C"
+    
+    b_incoming_sources = {rel.from_id for rel in entity_b.incoming_relations}
+    assert entity_a.id in b_incoming_sources, "B should have incoming relation from A"
+    
+    c_incoming_sources = {rel.from_id for rel in entity_c.incoming_relations}
+    assert entity_a.id in c_incoming_sources, "C should have incoming relation from A"
+    assert entity_b.id in c_incoming_sources, "C should have incoming relation from B"
+    
+    # Debug: print actual counts for troubleshooting
+    print(f"Entity A: {len(entity_a.incoming_relations)} incoming, {len(entity_a.outgoing_relations)} outgoing")
+    print(f"Entity B: {len(entity_b.incoming_relations)} incoming, {len(entity_b.outgoing_relations)} outgoing") 
+    print(f"Entity C: {len(entity_c.incoming_relations)} incoming, {len(entity_c.outgoing_relations)} outgoing")
 
 
 @pytest.mark.asyncio

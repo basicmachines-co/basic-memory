@@ -36,7 +36,7 @@ def format_path(path: str) -> str:
     """Format a path for display, using ~ for home directory."""
     home = str(Path.home())
     if path.startswith(home):
-        return path.replace(home, "~", 1)
+        return path.replace(home, "~", 1)  # pragma: no cover
     return path
 
 

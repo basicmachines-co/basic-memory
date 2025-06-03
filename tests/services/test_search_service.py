@@ -199,6 +199,50 @@ async def test_search_entity_type(search_service, test_graph):
 
 
 @pytest.mark.asyncio
+async def test_extract_entity_tags_exception_handling(search_service):
+    """Test the _extract_entity_tags method exception handling (lines 147-151)."""
+    from basic_memory.models.knowledge import Entity
+    
+    # Create entity with string tags that will cause parsing to fail and fall back to single tag
+    entity_with_invalid_tags = Entity(
+        title="Test Entity",
+        entity_type="test",
+        entity_metadata={"tags": "just a string"},  # This will fail ast.literal_eval
+        content_type="text/markdown",
+        file_path="test/test-entity.md",
+        project_id=1
+    )
+    
+    # This should trigger the except block on lines 147-149
+    result = search_service._extract_entity_tags(entity_with_invalid_tags)
+    assert result == ['just a string']
+    
+    # Test with empty string (should return empty list) - covers line 149
+    entity_with_empty_tags = Entity(
+        title="Test Entity Empty",
+        entity_type="test", 
+        entity_metadata={"tags": ""},
+        content_type="text/markdown",
+        file_path="test/test-entity-empty.md",
+        project_id=1
+    )
+    
+    result = search_service._extract_entity_tags(entity_with_empty_tags)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_without_permalink(search_service, sample_entity):
+    """Test deleting an entity that has no permalink (edge case)."""
+    
+    # Set the entity permalink to None to trigger the else branch on line 355
+    sample_entity.permalink = None
+    
+    # This should trigger the delete_by_entity_id path (line 355) in handle_delete
+    await search_service.handle_delete(sample_entity)
+
+
+@pytest.mark.asyncio
 async def test_no_criteria(search_service, test_graph):
     """Test search with no criteria returns empty list."""
     results = await search_service.search(SearchQuery())

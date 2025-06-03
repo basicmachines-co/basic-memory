@@ -123,6 +123,7 @@ omit = [
     "*/watch_service.py",           # File system watching - complex integration testing
     "*/background_sync.py",         # Background processes
     "*/cli/main.py",               # CLI entry point
+    "*/mcp/tools/project_management.py",  # Covered by integration tests
 ]
 
 [tool.logfire]

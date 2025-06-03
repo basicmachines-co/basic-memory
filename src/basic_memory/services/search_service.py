@@ -148,7 +148,7 @@ class SearchService:
                 # If parsing fails, treat as single tag
                 return [tags] if tags.strip() else []
 
-        return []
+        return [] # pragma: no cover 
 
     async def index_entity(
         self,

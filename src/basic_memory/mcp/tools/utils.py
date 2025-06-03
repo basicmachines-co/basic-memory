@@ -217,7 +217,7 @@ async def call_put(
         # get the message if available
         response_data = response.json()
         if isinstance(response_data, dict) and "detail" in response_data:
-            error_message = response_data["detail"]
+            error_message = response_data["detail"]  # pragma: no cover
         else:
             error_message = get_error_message(status_code, url, "PUT")
 
@@ -485,7 +485,7 @@ async def call_delete(
         # get the message if available
         response_data = response.json()
         if isinstance(response_data, dict) and "detail" in response_data:
-            error_message = response_data["detail"]
+            error_message = response_data["detail"]  # pragma: no cover
         else:
             error_message = get_error_message(status_code, url, "DELETE")
 

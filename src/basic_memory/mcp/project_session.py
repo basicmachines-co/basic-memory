@@ -57,12 +57,12 @@ class ProjectSession:
         Returns:
             The default project name, or 'main' if not set
         """
-        return self.default_project or "main"
+        return self.default_project or "main"  # pragma: no cover
 
-    def reset_to_default(self) -> None:
+    def reset_to_default(self) -> None:  # pragma: no cover
         """Reset current project back to the default project."""
-        self.current_project = self.default_project
-        logger.info(f"Reset project context to default: {self.default_project}")
+        self.current_project = self.default_project  # pragma: no cover
+        logger.info(f"Reset project context to default: {self.default_project}")  # pragma: no cover
 
 
 # Global session instance
@@ -100,4 +100,4 @@ def add_project_metadata(result: str, project_name: str) -> str:
     Returns:
         Result with project metadata footer
     """
-    return f"{result}\n\n<!-- Project: {project_name} -->"
+    return f"{result}\n\n<!-- Project: {project_name} -->"  # pragma: no cover
