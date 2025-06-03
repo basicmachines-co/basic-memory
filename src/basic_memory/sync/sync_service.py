@@ -379,7 +379,7 @@ class SyncService:
             updates = {"file_path": new_path}
 
             # If configured, also update permalink to match new path
-            if self.app_config.update_permalinks_on_move:
+            if self.app_config.update_permalinks_on_move and self.file_service.is_markdown(new_path):
                 # generate new permalink value
                 new_permalink = await self.entity_service.resolve_permalink(new_path)
 

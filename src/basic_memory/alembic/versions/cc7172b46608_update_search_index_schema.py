@@ -56,11 +56,6 @@ def upgrade() -> None:
     );
     """)
 
-    # Print instruction to manually reindex after migration
-    print("\n------------------------------------------------------------------")
-    print("IMPORTANT: After migration completes, manually run the reindex command:")
-    print("basic-memory sync")
-    print("------------------------------------------------------------------\n")
 
 
 def downgrade() -> None:

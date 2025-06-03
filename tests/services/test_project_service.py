@@ -11,7 +11,7 @@ from basic_memory.schemas import (
     SystemStatus,
 )
 from basic_memory.services.project_service import ProjectService
-
+from basic_memory.config import ConfigManager
 
 def test_projects_property(project_service: ProjectService):
     """Test the projects property."""
@@ -63,7 +63,7 @@ def test_current_project_property(project_service: ProjectService):
 
 
 @pytest.mark.asyncio
-async def test_project_operations_sync_methods(project_service: ProjectService, tmp_path):
+async def test_project_operations_sync_methods(app_config, project_service: ProjectService, config_manager: ConfigManager, tmp_path):
     """Test adding, switching, and removing a project using ConfigManager directly.
 
     This test uses the ConfigManager directly instead of the async methods.
@@ -77,7 +77,7 @@ async def test_project_operations_sync_methods(project_service: ProjectService, 
 
     try:
         # Test adding a project (using ConfigManager directly)
-        project_service.config_manager.add_project(test_project_name, test_project_path)
+        config_manager.add_project(test_project_name, test_project_path)
 
         # Verify it was added
         assert test_project_name in project_service.projects
@@ -85,22 +85,22 @@ async def test_project_operations_sync_methods(project_service: ProjectService, 
 
         # Test setting as default
         original_default = project_service.default_project
-        project_service.config_manager.set_default_project(test_project_name)
+        config_manager.set_default_project(test_project_name)
         assert project_service.default_project == test_project_name
 
         # Restore original default
         if original_default:
-            project_service.config_manager.set_default_project(original_default)
+            config_manager.set_default_project(original_default)
 
         # Test removing the project
-        project_service.config_manager.remove_project(test_project_name)
+        config_manager.remove_project(test_project_name)
         assert test_project_name not in project_service.projects
 
     except Exception as e:
         # Clean up in case of error
         if test_project_name in project_service.projects:
             try:
-                project_service.config_manager.remove_project(test_project_name)
+                config_manager.remove_project(test_project_name)
             except Exception:
                 pass
         raise e

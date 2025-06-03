@@ -13,7 +13,7 @@ Basic Memory v0.13.0 is a **major release** that transforms Basic Memory into a 
 - ⚡ **Development builds** automatically published for beta testing
 
 **Key v0.13.0 Accomplishments:**
-- ✅ **Complete Project Management System** - Fluid project switching and cross-project operations
+- ✅ **Complete Project Management System** - Fluid project switching and project-specific operations
 - ✅ **Advanced Note Editing** - Incremental editing with append, prepend, find/replace, and section operations  
 - ✅ **File Management System** - Full move operations with database consistency and rollback protection
 - ✅ **Enhanced Search Capabilities** - Frontmatter tags now searchable, improved content discoverability
@@ -50,7 +50,7 @@ Basic Memory v0.13.0 is a **major release** that transforms Basic Memory into a 
 
 **Key Capabilities:**
 - **Instant Project Switching**: Change project context mid-conversation without restart
-- **Cross-Project Operations**: Optional `project` parameter on all tools for targeted operations
+- **Project-Specific Operations**: Operations work within the currently active project context
 - **Project Discovery**: List all available projects with status indicators
 - **Session Context**: Maintains active project throughout conversation
 - **Unified Database**: All projects share a single SQLite database with proper isolation
@@ -80,7 +80,7 @@ edit_note("config", "find_replace", "v0.13.0", find_text="v0.12.0", expected_rep
 - **Section Replacement**: Replace content under specific markdown headers
 - **Find & Replace**: Simple text replacements with occurrence counting
 - **Smart Error Handling**: Helpful guidance when operations fail
-- **Project Context**: Works across all projects with session awareness
+- **Project Context**: Works within the active project with session awareness
 
 ### 3. Smart File Management 📁
 
@@ -90,8 +90,8 @@ edit_note("config", "find_replace", "v0.13.0", find_text="v0.12.0", expected_rep
 # Simple moves with automatic folder creation
 move_note("my-note", "work/projects/my-note.md")
 
-# Cross-project moves
-move_note("shared-doc", "archive/old-docs/shared-doc.md", project="personal-notes")
+# Organize within the active project
+move_note("shared-doc", "archive/old-docs/shared-doc.md")
 
 # Rename operations
 move_note("old-name", "same-folder/new-name.md")
@@ -101,7 +101,7 @@ move_note("old-name", "same-folder/new-name.md")
 - **Database Consistency**: Updates file paths, permalinks, and checksums automatically
 - **Search Reindexing**: Maintains search functionality after moves
 - **Folder Creation**: Automatically creates destination directories
-- **Cross-Project Moves**: Support for moving notes between projects
+- **Project Isolation**: Operates within the currently active project
 - **Rollback Protection**: Ensures data integrity during failed operations
 - **Link Preservation**: Maintains internal links and references
 
@@ -111,7 +111,7 @@ move_note("old-name", "same-folder/new-name.md")
 
 - **Frontmatter Tag Search**: Tags from YAML frontmatter are now indexed and searchable
 - **Improved Content Discovery**: Search across titles, content, tags, and metadata
-- **Project-Scoped Search**: Search within specific projects or across all projects
+- **Project-Scoped Search**: Search within the currently active project
 - **Better Search Quality**: Enhanced FTS5 indexing with tag content inclusion
 
 **Example:**
@@ -167,10 +167,10 @@ basic-memory auth test-auth
 
 ### Enhanced Existing Tools
 All existing tools now support:
-- **Optional `project` parameter** for cross-project operations
-- **Session context awareness** (uses active project when project not specified)
+- **Session context awareness** (operates within the currently active project)
 - **Enhanced error messages** with project context metadata
 - **Improved response formatting** with project information footers
+- **Project isolation** ensures operations stay within the correct project boundaries
 
 ### Comprehensive Integration Testing 🧪
 
@@ -180,7 +180,7 @@ All existing tools now support:
 - **End-to-End Coverage**: Tests full workflow from MCP client → server → API → database → file system
 - **Real Environment Testing**: Uses actual SQLite databases and file operations (no mocking)
 - **Error Scenario Testing**: Comprehensive coverage of edge cases and failure modes
-- **Cross-Project Testing**: Validates multi-project operations work correctly
+- **Multi-Project Testing**: Validates project isolation and switching work correctly
 
 **Test Coverage by Tool:**
 - `write_note`: 18 integration tests

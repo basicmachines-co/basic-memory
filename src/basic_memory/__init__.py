@@ -2,6 +2,7 @@
 
 try:
     from importlib.metadata import version
+
     __version__ = version("basic-memory")
 except Exception:
     # Fallback if package not installed (e.g., during development)

@@ -661,7 +661,10 @@ Content for move test
 
 @pytest.mark.asyncio
 async def test_sync_null_checksum_cleanup(
-    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    entity_service: EntityService,
+    app_config,
 ):
     """Test handling of entities with null checksums from incomplete syncs."""
     # Create entity with null checksum (simulating incomplete sync)
@@ -702,9 +705,7 @@ modified: 2024-01-01
 
 @pytest.mark.asyncio
 async def test_sync_permalink_resolved(
-    sync_service: SyncService,
-    project_config: ProjectConfig,
-    file_service: FileService,
+    sync_service: SyncService, project_config: ProjectConfig, file_service: FileService, app_config
 ):
     """Test that we resolve duplicate permalinks on sync ."""
     project_dir = project_config.home
@@ -733,13 +734,13 @@ Content for move test
     await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
-    assert "permalink: old/test-move" in file_content
+    assert "permalink: new/moved-file" in file_content
 
     # Create another that has the same permalink
     content = """
 ---
 type: knowledge
-permalink: old/test-move
+permalink: new/moved-file
 ---
 # Test Move
 Content for move test
@@ -753,7 +754,7 @@ Content for move test
 
     # assert permalink is unique
     file_content, _ = await file_service.read_file(old_path)
-    assert "permalink: old/test-move-1" in file_content
+    assert "permalink: new/moved-file-1" in file_content
 
 
 @pytest.mark.asyncio

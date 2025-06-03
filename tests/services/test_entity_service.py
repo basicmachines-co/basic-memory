@@ -1229,18 +1229,13 @@ async def test_move_entity_success(
     app_config = BasicMemoryConfig(update_permalinks_on_move=False)
 
     # Move entity
+    assert entity.permalink == "original/test-note"
     result = await entity_service.move_entity(
         identifier=entity.permalink,
         destination_path="moved/test-note.md",
         project_config=project_config,
         app_config=app_config,
     )
-
-    # Verify result message
-    assert "✅ Note moved successfully" in result
-    assert "original/Test Note.md" in result
-    assert "moved/test-note.md" in result
-    assert "📊 Database and search index updated" in result
 
     # Verify original file no longer exists
     assert not await file_service.exists(original_path)
@@ -1288,10 +1283,6 @@ async def test_move_entity_with_permalink_update(
         app_config=app_config,
     )
 
-    # Verify result message includes permalink update
-    assert "✅ Note moved successfully" in result
-    assert "🔗 Permalink updated:" in result
-    assert original_permalink in result
 
     # Verify entity was found by new path (since permalink changed)
     moved_entity = await entity_service.link_resolver.resolve_link("moved/test-note.md")
@@ -1466,10 +1457,11 @@ async def test_move_entity_by_title(
     entity_service: EntityService,
     file_service: FileService,
     project_config: ProjectConfig,
+    app_config: BasicMemoryConfig,
 ):
     """Test moving entity by title instead of permalink."""
     # Create test entity
-    await entity_service.create_entity(
+    entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
             folder="original",
@@ -1488,8 +1480,9 @@ async def test_move_entity_by_title(
         app_config=app_config,
     )
 
-    # Verify move succeeded
-    assert "✅ Note moved successfully" in result
+    # Verify old path no longer exists
+    new_path = project_config.home / entity.file_path
+    assert not new_path.exists()
 
     # Verify new file exists
     new_path = project_config.home / "moved/test-note.md"

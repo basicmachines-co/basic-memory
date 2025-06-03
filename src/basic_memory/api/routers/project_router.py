@@ -81,11 +81,14 @@ async def list_projects(
     projects = await project_service.list_projects()
     default_project = project_service.default_project
 
-    project_items = [ProjectItem(
-                name=project.name,
-                path=project.path,
-                is_default=project.is_default or False,
-            ) for project in projects]
+    project_items = [
+        ProjectItem(
+            name=project.name,
+            path=project.path,
+            is_default=project.is_default or False,
+        )
+        for project in projects
+    ]
 
     return ProjectList(
         projects=project_items,
@@ -139,14 +142,14 @@ async def remove_project(
     Returns:
         Response confirming the project was removed
     """
-    try: 
+    try:
         old_project = await project_service.get_project(name)
         if not old_project:
-            raise HTTPException(status_code=404, detail=f"Project: '{name}' does not exist")       
+            raise HTTPException(status_code=404, detail=f"Project: '{name}' does not exist")
 
         await project_service.remove_project(name)
 
-        return ProjectStatusResponse(  
+        return ProjectStatusResponse(
             message=f"Project '{name}' removed successfully",
             status="success",
             default=False,

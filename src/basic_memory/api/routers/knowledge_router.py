@@ -150,7 +150,7 @@ async def move_entity(
     project_config: ProjectConfigDep,
     app_config: AppConfigDep,
     search_service: SearchServiceDep,
-) -> str:
+) -> EntityResponse:
     """Move an entity to a new file location with project consistency.
 
     This endpoint moves a note to a different path while maintaining project
@@ -162,7 +162,7 @@ async def move_entity(
 
     try:
         # Move the entity using the service
-        result_message = await entity_service.move_entity(
+        moved_entity = await entity_service.move_entity(
             identifier=data.identifier,
             destination_path=data.destination_path,
             project_config=project_config,
@@ -181,8 +181,8 @@ async def move_entity(
             destination=data.destination_path,
             status_code=200,
         )
-
-        return result_message
+        result = EntityResponse.model_validate(moved_entity)
+        return result
 
     except Exception as e:
         logger.error(f"Error moving entity: {e}")

@@ -49,8 +49,10 @@ async def test_my_mcp_tool(mcp_server, app):
 The `app` fixture ensures FastAPI dependency overrides are active, and
 `mcp_server` provides the MCP server with proper project session initialization.
 """
-
+import os
 from typing import AsyncGenerator
+from unittest import mock
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -69,7 +71,6 @@ from fastapi import FastAPI
 
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_project_config, get_engine_factory, get_app_config
-from basic_memory.config import app_config as basic_memory_app_config
 
 
 # Import MCP tools so they're available for testing
@@ -109,50 +110,66 @@ async def test_project(tmp_path, engine_factory) -> Project:
     project = await project_repository.create(project_data)
     return project
 
+@pytest.fixture
+def config_home(tmp_path, monkeypatch) -> Path:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    return tmp_path
 
 @pytest.fixture(scope="function")
-def app_config(test_project, tmp_path, monkeypatch) -> BasicMemoryConfig:
+def app_config(config_home, test_project, tmp_path, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
     projects = {test_project.name: str(test_project.path)}
-    app_config = BasicMemoryConfig(env="test", projects=projects, default_project=test_project.name)
-
-    # set the home dir to the tmp_path so each test gets it's own config
-    monkeypatch.setenv("HOME", str(tmp_path))
+    app_config = BasicMemoryConfig(env="test", projects=projects, default_project=test_project.name, update_permalinks_on_move=True)
 
     # Set the module app_config instance project list (like regular tests)
-    basic_memory_app_config.projects = projects
-    basic_memory_app_config.default_project = test_project.name
+    monkeypatch.setattr("basic_memory.config.app_config", app_config)
+    return app_config
 
-    # set the config manager
-    basic_memory.config.config_manager = ConfigManager()
-    # save the config to disk
-    basic_memory.config.config_manager.save_config(app_config)
-    
+@pytest.fixture
+def config_manager(app_config: BasicMemoryConfig, config_home, monkeypatch) -> ConfigManager:
+    config_manager = ConfigManager()
+    # Update its paths to use the test directory
+    config_manager.config_dir = config_home / ".basic-memory"
+    config_manager.config_file = config_manager.config_dir / "config.json"
+    config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+    # Override the config directly instead of relying on disk load
+    config_manager.config = app_config
+
+    # Ensure the config file is written to disk
+    config_manager.save_config(app_config)
+
+    # Patch the config_manager in all locations where it's imported
+    monkeypatch.setattr("basic_memory.config.config_manager", config_manager)
+    monkeypatch.setattr("basic_memory.services.project_service.config_manager", config_manager)
+
+    return config_manager
+
+@pytest.fixture
+def project_session(test_project: Project):
     # initialize the project session with the test project
     basic_memory.mcp.project_session.session.initialize(test_project.name)
 
-    return app_config
-
 
 @pytest.fixture(scope="function")
-def project_config(test_project):
+def project_config(test_project, monkeypatch):
     """Create test project configuration."""
-    return ProjectConfig(
+
+    project_config = ProjectConfig(
         name=test_project.name,
         home=Path(test_project.path),
     )
 
+    # override config module project config
+    monkeypatch.setattr("basic_memory.config.config", project_config)
+
+    return project_config
+
+
 
 @pytest.fixture(scope="function")
-def app(app_config, project_config, engine_factory, test_project, monkeypatch) -> FastAPI:
+def app(app_config, project_config, engine_factory, test_project, project_session, config_manager) -> FastAPI:
     """Create test FastAPI application with single project."""
-    # Patch the ConfigManager to use test configuration
-
-    test_projects = {test_project.name: str(test_project.path)}
-    test_default = test_project.name
-
-    monkeypatch.setattr(ConfigManager, "projects", property(lambda self: test_projects))
-    monkeypatch.setattr(ConfigManager, "default_project", property(lambda self: test_default))
 
     app = fastapi_app
     app.dependency_overrides[get_project_config] = lambda: project_config

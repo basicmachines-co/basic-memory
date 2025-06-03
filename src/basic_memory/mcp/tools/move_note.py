@@ -8,6 +8,7 @@ from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.mcp.project_session import get_active_project
+from basic_memory.schemas import EntityResponse
 
 
 @mcp.tool(
@@ -18,7 +19,7 @@ async def move_note(
     destination_path: str,
     project: Optional[str] = None,
 ) -> str:
-    """Move a note to a new file location with database consistency.
+    """Move a note to a new file location within the same project.
 
     Args:
         identifier: Entity identifier (title, permalink, or memory:// URL)
@@ -30,8 +31,11 @@ async def move_note(
 
     Examples:
         - Move to new folder: move_note("My Note", "work/notes/my-note.md")
-        - Move by permalink: move_note("my-note-permalink", "archive/old-notes/my-note.md")
-        - Cross-project move: move_note("My Note", "shared/my-note.md", project="work-project")
+        - Move by permalink: move_note("my-note-permalink", "archive/old-notes/my-note.md") 
+        - Specify project: move_note("My Note", "archive/my-note.md", project="work-project")
+
+    Note: This operation moves notes within the specified project only. Moving notes
+    between different projects is not currently supported.
 
     The move operation:
     - Updates the entity's file_path in the database
@@ -55,9 +59,21 @@ async def move_note(
     # Call the move API endpoint
     url = f"{project_url}/knowledge/move"
     response = await call_post(client, url, json=move_data)
+    result = EntityResponse.model_validate(response.json())
+
+    # 10. Build success message
+    result_lines = [
+        "✅ Note moved successfully",
+        "",
+        f"📁 **{identifier}** → **{result.file_path}**",
+        f"🔗 Permalink: {result.permalink}",
+        "📊 Database and search index updated",
+        "",
+        f"<!-- Project: {active_project.name} -->",
+    ]
 
     # Return the response text which contains the formatted success message
-    result = response.text
+    result = "\n".join(result_lines)
 
     # Log the operation
     logger.info(

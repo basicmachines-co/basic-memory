@@ -37,7 +37,7 @@ async def test_move_note_basic_operation(mcp_server, app):
         assert len(move_result) == 1
         move_text = move_result[0].text
         assert "✅ Note moved successfully" in move_text
-        assert "source/Move Test Note.md" in move_text
+        assert "Move Test Note" in move_text
         assert "destination/moved-note.md" in move_text
         assert "📊 Database and search index updated" in move_text
 
@@ -93,7 +93,7 @@ async def test_move_note_using_permalink(mcp_server, app):
         assert len(move_result) == 1
         move_text = move_result[0].text
         assert "✅ Note moved successfully" in move_text
-        assert "test/Permalink Move Test.md" in move_text
+        assert "test/permalink-move-test" in move_text
         assert "archive/permalink-moved.md" in move_text
 
         # Verify accessibility at new location
@@ -153,7 +153,7 @@ This note demonstrates moving complex content."""
         assert len(move_result) == 1
         move_text = move_result[0].text
         assert "✅ Note moved successfully" in move_text
-        assert "complex/Complex Note.md" in move_text
+        assert "Complex Note" in move_text
         assert "moved/complex-note.md" in move_text
 
         # Verify content preservation including structured data
@@ -201,7 +201,7 @@ async def test_move_note_to_nested_directory(mcp_server, app):
         assert len(move_result) == 1
         move_text = move_result[0].text
         assert "✅ Note moved successfully" in move_text
-        assert "root/Nested Move Test.md" in move_text
+        assert "Nested Move Test" in move_text
         assert "projects/2025/q2/work/nested-note.md" in move_text
 
         # Verify accessibility
@@ -355,7 +355,7 @@ async def test_move_note_error_handling_destination_exists(mcp_server, app):
         # Should contain error message about the failed operation
         error_message = str(exc_info.value)
         assert "move_note" in error_message and (
-            "Invalid request" in error_message or "malformed or invalid" in error_message
+            "Destination already exists: destination/Existing Note.md" in error_message
         )
 
 

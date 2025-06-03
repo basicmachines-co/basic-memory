@@ -9,6 +9,7 @@ from typing import Any, Dict, Literal, Optional, List
 from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from setuptools.command.setopt import config_file
 
 import basic_memory
 from basic_memory.utils import setup_logging, generate_permalink
@@ -151,7 +152,7 @@ class ConfigManager:
         home = os.getenv("HOME", Path.home())
         if isinstance(home, str):
             home = Path(home)
-            
+
         self.config_dir = home / DATA_DIR_NAME
         self.config_file = self.config_dir / CONFIG_FILE_NAME
 
@@ -180,6 +181,10 @@ class ConfigManager:
     def save_config(self, config: BasicMemoryConfig) -> None:
         """Save configuration to file."""
         try:
+            
+            if self.config_file.absolute() == Path("/Users/phernandez/.basic-memory/config.json"):
+                raise Exception("Test is trying to write to /Users/phernandez/.basic-memory/config.json")
+            
             self.config_file.write_text(json.dumps(config.model_dump(), indent=2))
         except Exception as e:  # pragma: no cover
             logger.error(f"Failed to save config: {e}")
@@ -234,11 +239,11 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     """
 
     actual_project_name = None
-    
+
     # load the config from file
     global app_config
     app_config = config_manager.load_config()
-    
+
     # Get project name from environment variable
     os_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
     if os_project_name:  # pragma: no cover

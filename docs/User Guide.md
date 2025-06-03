@@ -425,7 +425,7 @@ Move operations include:
 - **Database Consistency**: Updates file paths, permalinks, and checksums
 - **Search Reindexing**: Maintains search functionality after moves
 - **Folder Creation**: Automatically creates destination directories
-- **Cross-Project Moves**: Support for moving between projects
+- **Project Isolation**: Moves are contained within the current project
 - **Rollback Protection**: Ensures data integrity during failed operations
 
 ### Enhanced Search (New in v0.13.0)
@@ -544,17 +544,19 @@ Basic Memory v0.13.0 introduces **fluid project management** - the ability to sw
 🤖 [Shows recent activity from work-notes project]
 ```
 
-### Cross-Project Operations (New in v0.13.0)
+### Project-Specific Operations (New in v0.13.0)
 
-All MCP tools now support optional project parameters:
+Some MCP tools support optional project parameters for targeting specific projects:
 
 ```
 💬 "Create a note about this meeting in my personal-notes project"
-🤖 [Creates note in personal-notes project while staying in current project context]
+🤖 [Creates note in personal-notes project]
 
-💬 "Search for 'API design' in my work project"
-🤖 [Searches specifically in work project]
+💬 "Switch to my work project"
+🤖 [Switches project context, then all operations work within that project]
 ```
+
+**Note**: Operations like search, move, and edit work within the currently active project. To work with content in different projects, switch to that project first or use the project parameter where supported.
 
 ### Managing Projects
 
@@ -616,7 +618,7 @@ Basic Memory v0.13.0 uses a unified database architecture:
 ### v0.13.0 Workflow Enhancements
 7. **Incremental Editing**: Use edit_note for small changes instead of rewriting entire documents
 8. **File Organization**: Move and reorganize notes as your knowledge base grows
-9. **Cross-Project References**: Create notes in specific projects while working in others
+9. **Project-Specific Creation**: Create notes in specific projects using project parameters
 10. **Search Tags**: Use frontmatter tags to improve content discoverability
 11. **Project Statistics**: Monitor project growth and activity with project info commands
 

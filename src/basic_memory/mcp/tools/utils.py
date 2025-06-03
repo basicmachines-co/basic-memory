@@ -413,7 +413,6 @@ async def call_post(
         else:
             error_message = get_error_message(status_code, url, "POST")
 
-
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
             # Client errors: log as info except for 429 (Too Many Requests)
@@ -489,7 +488,6 @@ async def call_delete(
             error_message = response_data["detail"]
         else:
             error_message = get_error_message(status_code, url, "DELETE")
-
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:

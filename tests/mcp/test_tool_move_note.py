@@ -8,7 +8,7 @@ from basic_memory.mcp.tools.read_note import read_note
 
 
 @pytest.mark.asyncio
-async def test_move_note_success(client):
+async def test_move_note_success(app, client):
     """Test successfully moving a note to a new location."""
     # Create initial note
     await write_note(
@@ -24,7 +24,7 @@ async def test_move_note_success(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
     assert "source/test-note" in result
     assert "target/MovedNote.md" in result
 
@@ -59,7 +59,7 @@ async def test_move_note_with_folder_creation(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify note exists at new location
     content = await read_note("deeply/nested/folder/deep-note")
@@ -95,7 +95,7 @@ Some additional content.
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify moved note preserves all content
     content = await read_note("target/moved-complex")
@@ -123,7 +123,7 @@ async def test_move_note_by_title(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify note exists at new location
     content = await read_note("target/moved-by-title")
@@ -148,7 +148,7 @@ async def test_move_note_by_file_path(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify note exists at new location
     content = await read_note("target/moved-by-path")
@@ -167,7 +167,7 @@ async def test_move_note_nonexistent_note(client):
 
     # Should raise an exception from the API with friendly error message
     error_msg = str(exc_info.value)
-    assert "Invalid request" in error_msg or "malformed" in error_msg
+    assert "Entity not found" in error_msg or "Invalid request" in error_msg or "malformed" in error_msg
 
 
 @pytest.mark.asyncio
@@ -222,7 +222,7 @@ async def test_move_note_destination_exists(client):
 
     # Should raise an exception (400 gets wrapped as malformed request)
     error_msg = str(exc_info.value)
-    assert "Invalid request" in error_msg or "malformed" in error_msg
+    assert "Destination already exists" in error_msg or "Invalid request" in error_msg or "malformed" in error_msg
 
 
 @pytest.mark.asyncio
@@ -244,7 +244,7 @@ async def test_move_note_same_location(client):
 
     # Should raise an exception (400 gets wrapped as malformed request)
     error_msg = str(exc_info.value)
-    assert "Invalid request" in error_msg or "malformed" in error_msg
+    assert "Destination already exists" in error_msg or "same location" in error_msg or "Invalid request" in error_msg or "malformed" in error_msg
 
 
 @pytest.mark.asyncio
@@ -264,7 +264,7 @@ async def test_move_note_rename_only(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify original is gone and new exists
     try:
@@ -297,7 +297,7 @@ async def test_move_note_complex_filename(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify note exists at new location with correct content
     content = await read_note("archive/2025/meetings/meeting-notes-2025")
@@ -323,7 +323,7 @@ async def test_move_note_with_tags(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify tags are preserved in correct YAML format
     content = await read_note("target/moved-tagged-note")
@@ -352,7 +352,9 @@ async def test_move_note_empty_string_destination(client):
     # Should raise validation error (422 gets wrapped as client error)
     error_msg = str(exc_info.value)
     assert (
-        "Client error (422)" in error_msg
+        "String should have at least 1 character" in error_msg
+        or "cannot be empty" in error_msg
+        or "Client error (422)" in error_msg
         or "could not be completed" in error_msg
         or "destination_path cannot be empty" in error_msg
     )
@@ -401,7 +403,7 @@ async def test_move_note_identifier_variations(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify it moved correctly
     content = await read_note("moved/test-document")
@@ -426,7 +428,7 @@ async def test_move_note_preserves_frontmatter(client):
     )
 
     assert isinstance(result, str)
-    assert "moved successfully" in result
+    assert "✅ Note moved successfully" in result
 
     # Verify the moved note has proper frontmatter structure
     content = await read_note("target/moved-custom-note")

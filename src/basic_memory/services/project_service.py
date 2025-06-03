@@ -4,12 +4,12 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, Sequence
 
 from loguru import logger
 from sqlalchemy import text
 
-from basic_memory.config import config_manager, config, app_config, ConfigManager
+from basic_memory.config import config, app_config, ConfigManager, config_manager
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas import (
@@ -39,7 +39,7 @@ class ProjectService:
         Returns:
             Dict mapping project names to their file paths
         """
-        return ConfigManager().projects
+        return config_manager.projects
 
     @property
     def default_project(self) -> str:
@@ -48,7 +48,7 @@ class ProjectService:
         Returns:
             The name of the default project
         """
-        return ConfigManager().default_project
+        return config_manager.default_project
 
     @property
     def current_project(self) -> str:
@@ -57,9 +57,9 @@ class ProjectService:
         Returns:
             The name of the current project
         """
-        return os.environ.get("BASIC_MEMORY_PROJECT", ConfigManager().default_project)
+        return os.environ.get("BASIC_MEMORY_PROJECT", config_manager.default_project)
 
-    async def list_projects(self) -> List[Project]:
+    async def list_projects(self) -> Sequence[Project]:
         return await self.repository.find_all()
 
     async def get_project(self, name: str) -> Optional[Project]:
@@ -83,7 +83,7 @@ class ProjectService:
         resolved_path = os.path.abspath(os.path.expanduser(path))
 
         # First add to config file (this will validate the project doesn't exist)
-        project_config = ConfigManager().add_project(name, resolved_path)
+        project_config = config_manager.add_project(name, resolved_path)
 
         # Then add to database
         project_data = {
@@ -110,7 +110,7 @@ class ProjectService:
             raise ValueError("Repository is required for remove_project")
 
         # First remove from config (this will validate the project exists and is not default)
-        ConfigManager().remove_project(name)
+        config_manager.remove_project(name)
 
         # Then remove from database
         project = await self.repository.get_by_name(name)
@@ -132,7 +132,7 @@ class ProjectService:
             raise ValueError("Repository is required for set_default_project")
 
         # First update config file (this will validate the project exists)
-        ConfigManager().set_default_project(name)
+        config_manager.set_default_project(name)
 
         # Then update database
         project = await self.repository.get_by_name(name)
@@ -160,7 +160,7 @@ class ProjectService:
         db_projects_by_name = {p.name: p for p in db_projects}
 
         # Get all projects from configuration
-        config_projects = ConfigManager().projects
+        config_projects = config_manager.projects
 
         # Add projects that exist in config but not in DB
         for name, path in config_projects.items():
@@ -171,7 +171,7 @@ class ProjectService:
                     "path": path,
                     "permalink": name.lower().replace(" ", "-"),
                     "is_active": True,
-                    "is_default": (name == ConfigManager().default_project),
+                    "is_default": (name == config_manager.default_project),
                 }
                 await self.repository.create(project_data)
 
@@ -179,16 +179,16 @@ class ProjectService:
         for name, project in db_projects_by_name.items():
             if name not in config_projects:
                 logger.info(f"Adding project '{name}' to configuration")
-                ConfigManager().add_project(name, project.path)
+                config_manager.add_project(name, project.path)
 
         # Make sure default project is synchronized
         db_default = next((p for p in db_projects if p.is_default), None)
-        config_default = ConfigManager().default_project
+        config_default = config_manager.default_project
 
         if db_default and db_default.name != config_default:
             # Update config to match DB default
             logger.info(f"Updating default project in config to '{db_default.name}'")
-            ConfigManager().set_default_project(db_default.name)
+            config_manager.set_default_project(db_default.name)
         elif not db_default and config_default in db_projects_by_name:
             # Update DB to match config default
             logger.info(f"Updating default project in database to '{config_default}'")
@@ -214,7 +214,7 @@ class ProjectService:
             raise ValueError("Repository is required for update_project")
 
         # Validate project exists in config
-        if name not in ConfigManager().projects:
+        if name not in config_manager.projects:
             raise ValueError(f"Project '{name}' not found in configuration")
 
         # Get project from database
@@ -228,7 +228,7 @@ class ProjectService:
             resolved_path = os.path.abspath(os.path.expanduser(updated_path))
 
             # Update in config
-            config_manager = ConfigManager()
+            config_manager = config_manager
             projects = config_manager.config.projects.copy()
             projects[name] = resolved_path
             config_manager.config.projects = projects
@@ -253,7 +253,7 @@ class ProjectService:
             if active_projects:
                 new_default = active_projects[0]
                 await self.repository.set_as_default(new_default.id)
-                ConfigManager().set_default_project(new_default.name)
+                config_manager.set_default_project(new_default.name)
                 logger.info(
                     f"Changed default project to '{new_default.name}' as '{name}' was deactivated"
                 )
@@ -285,7 +285,6 @@ class ProjectService:
         db_projects_by_name = {p.name: p for p in db_projects}
 
         # Get default project info
-        config_manager = ConfigManager()
         default_project = config_manager.default_project
 
         # Convert config projects to include database info

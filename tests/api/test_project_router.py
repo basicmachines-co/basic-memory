@@ -111,7 +111,7 @@ async def test_get_project_info_watch_status(test_graph, client, project_config,
 
 
 @pytest.mark.asyncio
-async def test_list_projects_endpoint(test_graph, client, project_config, project_url):
+async def test_list_projects_endpoint(test_config, test_graph, client, project_config, project_url):
     """Test the list projects endpoint returns correctly structured data."""
     # Call the endpoint
     response = await client.get("/projects/projects")

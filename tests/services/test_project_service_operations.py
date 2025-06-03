@@ -44,7 +44,7 @@ async def test_get_project_from_database(project_service: ProjectService, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_add_project_to_config(project_service: ProjectService, tmp_path):
+async def test_add_project_to_config(project_service: ProjectService, tmp_path, config_manager):
     """Test adding a project to the config manager."""
     # Generate unique project name for testing
     test_project_name = f"config-project-{os.urandom(4).hex()}"
@@ -55,7 +55,7 @@ async def test_add_project_to_config(project_service: ProjectService, tmp_path):
 
     try:
         # Add a project to config only (using ConfigManager directly)
-        project_service.config_manager.add_project(test_project_name, test_path)
+        config_manager.add_project(test_project_name, test_path)
 
         # Verify it's in the config
         assert test_project_name in project_service.projects
@@ -64,11 +64,11 @@ async def test_add_project_to_config(project_service: ProjectService, tmp_path):
     finally:
         # Clean up
         if test_project_name in project_service.projects:
-            project_service.config_manager.remove_project(test_project_name)
+            config_manager.remove_project(test_project_name)
 
 
 @pytest.mark.asyncio
-async def test_update_project_path(project_service: ProjectService, tmp_path):
+async def test_update_project_path(project_service: ProjectService, tmp_path, config_manager):
     """Test updating a project's path."""
     # Create a test project
     test_project = f"path-update-test-project-{os.urandom(4).hex()}"
@@ -99,7 +99,7 @@ async def test_update_project_path(project_service: ProjectService, tmp_path):
                 project = await project_service.repository.get_by_name(test_project)
                 if project:
                     await project_service.repository.delete(project.id)
-                project_service.config_manager.remove_project(test_project)
+                config_manager.remove_project(test_project)
             except Exception:
                 pass
 

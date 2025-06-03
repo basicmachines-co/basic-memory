@@ -612,7 +612,7 @@ class EntityService(BaseService[EntityModel]):
         destination_path: str,
         project_config: ProjectConfig,
         app_config: BasicMemoryConfig,
-    ) -> str:
+    ) -> EntityModel:
         """Move entity to new location with database consistency.
 
         Args:
@@ -664,7 +664,6 @@ class EntityService(BaseService[EntityModel]):
 
             # 6. Prepare database updates
             updates = {"file_path": destination_path}
-            permalink_updated = False
 
             # 7. Update permalink if configured
             if app_config.update_permalinks_on_move:
@@ -677,7 +676,6 @@ class EntityService(BaseService[EntityModel]):
                 )
 
                 updates["permalink"] = new_permalink
-                permalink_updated = True
                 logger.info(f"Updated permalink: {old_permalink} -> {new_permalink}")
 
             # 8. Recalculate checksum
@@ -689,27 +687,7 @@ class EntityService(BaseService[EntityModel]):
             if not updated_entity:
                 raise ValueError(f"Failed to update entity in database: {entity.id}")
 
-            # 10. Build success message
-            result_lines = [
-                "✅ Note moved successfully",
-                "",
-                f"📁 **{current_path}** → **{destination_path}**",
-            ]
-
-            if permalink_updated:
-                result_lines.append(
-                    f"🔗 Permalink updated: {old_permalink} → {updates['permalink']}"
-                )
-
-            result_lines.extend(
-                [
-                    "📊 Database and search index updated",
-                    "",
-                    f"<!-- Project: {project_config.name} -->",
-                ]
-            )
-
-            return "\n".join(result_lines)
+            return updated_entity
 
         except Exception as e:
             # Rollback: try to restore original file location if move succeeded

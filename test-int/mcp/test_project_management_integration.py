@@ -346,7 +346,7 @@ Testing statistics accuracy.
 @pytest.mark.asyncio
 async def test_create_project_basic_operation(mcp_server, app):
     """Test creating a new project with basic parameters."""
-    
+
     async with Client(mcp_server) as client:
         # Create a new project
         create_result = await client.call_tool(
@@ -356,10 +356,10 @@ async def test_create_project_basic_operation(mcp_server, app):
                 "project_path": "/tmp/test-new-project",
             },
         )
-        
+
         assert len(create_result) == 1
         create_text = create_result[0].text
-        
+
         # Should show success message and project details
         assert "✓" in create_text  # Success indicator
         assert "test-new-project" in create_text
@@ -368,7 +368,7 @@ async def test_create_project_basic_operation(mcp_server, app):
         assert "Path: /tmp/test-new-project" in create_text
         assert "Project is now available for use" in create_text
         assert "Project: test-project" in create_text  # Should still show current project
-        
+
         # Verify project appears in project list
         list_result = await client.call_tool("list_projects", {})
         list_text = list_result[0].text
@@ -378,27 +378,27 @@ async def test_create_project_basic_operation(mcp_server, app):
 @pytest.mark.asyncio
 async def test_create_project_with_default_flag(mcp_server, app):
     """Test creating a project and setting it as default."""
-    
+
     async with Client(mcp_server) as client:
         # Create a new project and set as default
         create_result = await client.call_tool(
             "create_project",
             {
                 "project_name": "test-default-project",
-                "project_path": "/tmp/test-default-project", 
+                "project_path": "/tmp/test-default-project",
                 "set_default": True,
             },
         )
-        
+
         assert len(create_result) == 1
         create_text = create_result[0].text
-        
+
         # Should show success and default flag
         assert "✓" in create_text
         assert "test-default-project" in create_text
         assert "Set as default project" in create_text
         assert "Project: test-default-project" in create_text  # Should switch to new project
-        
+
         # Verify we switched to the new project
         current_result = await client.call_tool("get_current_project", {})
         current_text = current_result[0].text
@@ -408,7 +408,7 @@ async def test_create_project_with_default_flag(mcp_server, app):
 @pytest.mark.asyncio
 async def test_create_project_duplicate_name(mcp_server, app):
     """Test creating a project with duplicate name shows error."""
-    
+
     async with Client(mcp_server) as client:
         # First create a project
         await client.call_tool(
@@ -418,7 +418,7 @@ async def test_create_project_duplicate_name(mcp_server, app):
                 "project_path": "/tmp/duplicate-test-1",
             },
         )
-        
+
         # Try to create another project with same name
         with pytest.raises(Exception) as exc_info:
             await client.call_tool(
@@ -428,19 +428,21 @@ async def test_create_project_duplicate_name(mcp_server, app):
                     "project_path": "/tmp/duplicate-test-2",
                 },
             )
-        
+
         # Should show error about duplicate name
         error_message = str(exc_info.value)
         assert "create_project" in error_message
-        assert ("duplicate-test" in error_message 
-                or "already exists" in error_message 
-                or "Invalid request" in error_message)
+        assert (
+            "duplicate-test" in error_message
+            or "already exists" in error_message
+            or "Invalid request" in error_message
+        )
 
 
 @pytest.mark.asyncio
 async def test_delete_project_basic_operation(mcp_server, app):
     """Test deleting a project that exists."""
-    
+
     async with Client(mcp_server) as client:
         # First create a project to delete
         await client.call_tool(
@@ -450,11 +452,11 @@ async def test_delete_project_basic_operation(mcp_server, app):
                 "project_path": "/tmp/to-be-deleted",
             },
         )
-        
+
         # Verify it exists
         list_result = await client.call_tool("list_projects", {})
         assert "to-be-deleted" in list_result[0].text
-        
+
         # Delete the project
         delete_result = await client.call_tool(
             "delete_project",
@@ -462,10 +464,10 @@ async def test_delete_project_basic_operation(mcp_server, app):
                 "project_name": "to-be-deleted",
             },
         )
-        
+
         assert len(delete_result) == 1
         delete_text = delete_result[0].text
-        
+
         # Should show success message
         assert "✓" in delete_text
         assert "to-be-deleted" in delete_text
@@ -474,7 +476,7 @@ async def test_delete_project_basic_operation(mcp_server, app):
         assert "Name: to-be-deleted" in delete_text
         assert "Files remain on disk but project is no longer tracked" in delete_text
         assert "Project: test-project" in delete_text  # Should show current project
-        
+
         # Verify project no longer appears in list
         list_result_after = await client.call_tool("list_projects", {})
         assert "to-be-deleted" not in list_result_after[0].text
@@ -483,7 +485,7 @@ async def test_delete_project_basic_operation(mcp_server, app):
 @pytest.mark.asyncio
 async def test_delete_project_not_found(mcp_server, app):
     """Test deleting a non-existent project shows error."""
-    
+
     async with Client(mcp_server) as client:
         # Try to delete non-existent project
         with pytest.raises(Exception) as exc_info:
@@ -493,19 +495,21 @@ async def test_delete_project_not_found(mcp_server, app):
                     "project_name": "non-existent-project",
                 },
             )
-        
+
         # Should show error about non-existent project
         error_message = str(exc_info.value)
         assert "delete_project" in error_message
-        assert ("non-existent-project" in error_message 
-                or "not found" in error_message
-                or "Invalid request" in error_message)
+        assert (
+            "non-existent-project" in error_message
+            or "not found" in error_message
+            or "Invalid request" in error_message
+        )
 
 
 @pytest.mark.asyncio
 async def test_delete_current_project_protection(mcp_server, app):
     """Test that deleting the current project is prevented."""
-    
+
     async with Client(mcp_server) as client:
         # Try to delete the current project (test-project)
         with pytest.raises(Exception) as exc_info:
@@ -515,23 +519,25 @@ async def test_delete_current_project_protection(mcp_server, app):
                     "project_name": "test-project",
                 },
             )
-        
+
         # Should show error about deleting current project
         error_message = str(exc_info.value)
         assert "delete_project" in error_message
-        assert ("currently active" in error_message 
-                or "test-project" in error_message
-                or "Switch to a different project" in error_message)
+        assert (
+            "currently active" in error_message
+            or "test-project" in error_message
+            or "Switch to a different project" in error_message
+        )
 
 
 @pytest.mark.asyncio
 async def test_project_lifecycle_workflow(mcp_server, app):
     """Test complete project lifecycle: create, switch, use, delete."""
-    
+
     async with Client(mcp_server) as client:
         project_name = "lifecycle-test"
         project_path = "/tmp/lifecycle-test"
-        
+
         # 1. Create new project
         create_result = await client.call_tool(
             "create_project",
@@ -542,8 +548,8 @@ async def test_project_lifecycle_workflow(mcp_server, app):
         )
         assert "✓" in create_result[0].text
         assert project_name in create_result[0].text
-        
-        # 2. Switch to the new project  
+
+        # 2. Switch to the new project
         switch_result = await client.call_tool(
             "switch_project",
             {
@@ -551,7 +557,7 @@ async def test_project_lifecycle_workflow(mcp_server, app):
             },
         )
         assert f"✓ Switched to {project_name} project" in switch_result[0].text
-        
+
         # 3. Create content in the new project
         await client.call_tool(
             "write_note",
@@ -562,21 +568,21 @@ async def test_project_lifecycle_workflow(mcp_server, app):
                 "tags": "lifecycle,test",
             },
         )
-        
+
         # 4. Verify project stats show our content
         current_result = await client.call_tool("get_current_project", {})
         current_text = current_result[0].text
         assert f"Current project: {project_name}" in current_text
         assert "entities" in current_text
-        
+
         # 5. Switch back to original project
         await client.call_tool(
-            "switch_project", 
+            "switch_project",
             {
                 "project_name": "test-project",
             },
         )
-        
+
         # 6. Delete the lifecycle test project
         delete_result = await client.call_tool(
             "delete_project",
@@ -587,7 +593,7 @@ async def test_project_lifecycle_workflow(mcp_server, app):
         assert "✓" in delete_result[0].text
         assert f"{project_name}" in delete_result[0].text
         assert "removed successfully" in delete_result[0].text
-        
+
         # 7. Verify project is gone from list
         list_result = await client.call_tool("list_projects", {})
         assert project_name not in list_result[0].text
@@ -596,11 +602,11 @@ async def test_project_lifecycle_workflow(mcp_server, app):
 @pytest.mark.asyncio
 async def test_create_delete_project_edge_cases(mcp_server, app):
     """Test edge cases for create and delete project operations."""
-    
+
     async with Client(mcp_server) as client:
         # Test with special characters in project name (should be handled gracefully)
         special_name = "test-project-with-dashes"
-        
+
         # Create project with special characters
         create_result = await client.call_tool(
             "create_project",
@@ -611,11 +617,11 @@ async def test_create_delete_project_edge_cases(mcp_server, app):
         )
         assert "✓" in create_result[0].text
         assert special_name in create_result[0].text
-        
+
         # Verify it appears in list
         list_result = await client.call_tool("list_projects", {})
         assert special_name in list_result[0].text
-        
+
         # Delete it
         delete_result = await client.call_tool(
             "delete_project",
@@ -625,7 +631,7 @@ async def test_create_delete_project_edge_cases(mcp_server, app):
         )
         assert "✓" in delete_result[0].text
         assert special_name in delete_result[0].text
-        
+
         # Verify it's gone
         list_result_after = await client.call_tool("list_projects", {})
         assert special_name not in list_result_after[0].text

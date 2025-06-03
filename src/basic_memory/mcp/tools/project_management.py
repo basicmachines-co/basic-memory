@@ -187,7 +187,9 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
 
 
 @mcp.tool()
-async def create_project(project_name: str, project_path: str, set_default: bool = False, ctx: Context | None = None) -> str:
+async def create_project(
+    project_name: str, project_path: str, set_default: bool = False, ctx: Context | None = None
+) -> str:
     """Create a new Basic Memory project.
 
     Creates a new project with the specified name and path. The project directory
@@ -210,31 +212,29 @@ async def create_project(project_name: str, project_path: str, set_default: bool
 
     # Create the project request
     project_request = ProjectInfoRequest(
-        name=project_name,
-        path=project_path,
-        set_default=set_default
+        name=project_name, path=project_path, set_default=set_default
     )
-    
+
     # Call API to create project
     response = await call_post(client, "/projects/projects", json=project_request.model_dump())
     status_response = ProjectStatusResponse.model_validate(response.json())
 
     result = f"✓ {status_response.message}\n\n"
-    
+
     if status_response.new_project:
         result += "Project Details:\n"
         result += f"• Name: {status_response.new_project.name}\n"
         result += f"• Path: {status_response.new_project.path}\n"
-        
+
         if set_default:
             result += "• Set as default project\n"
-    
+
     result += "\nProject is now available for use.\n"
-    
+
     # If project was set as default, update session
     if set_default:
         session.set_current_project(project_name)
-        
+
     return add_project_metadata(result, session.get_current_project())
 
 
@@ -254,7 +254,7 @@ async def delete_project(project_name: str, ctx: Context | None = None) -> str:
 
     Example:
         delete_project("old-project")
-        
+
     Warning:
         This action cannot be undone. The project will need to be re-added
         to access its content through Basic Memory again.
@@ -263,34 +263,38 @@ async def delete_project(project_name: str, ctx: Context | None = None) -> str:
         await ctx.info(f"Deleting project: {project_name}")
 
     current_project = session.get_current_project()
-    
+
     # Check if trying to delete current project
     if project_name == current_project:
-        raise ValueError(f"Cannot delete the currently active project '{project_name}'. Switch to a different project first.")
+        raise ValueError(
+            f"Cannot delete the currently active project '{project_name}'. Switch to a different project first."
+        )
 
     # Get project info before deletion to validate it exists
     response = await call_get(client, "/projects/projects")
     project_list = ProjectList.model_validate(response.json())
-    
+
     # Check if project exists
     project_exists = any(p.name == project_name for p in project_list.projects)
     if not project_exists:
         available_projects = [p.name for p in project_list.projects]
-        raise ValueError(f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}")
-    
+        raise ValueError(
+            f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
+        )
+
     # Call API to delete project
     response = await call_delete(client, f"/projects/{project_name}")
     status_response = ProjectStatusResponse.model_validate(response.json())
 
     result = f"✓ {status_response.message}\n\n"
-    
+
     if status_response.old_project:
         result += "Removed project details:\n"
         result += f"• Name: {status_response.old_project.name}\n"
-        if hasattr(status_response.old_project, 'path'):
+        if hasattr(status_response.old_project, "path"):
             result += f"• Path: {status_response.old_project.path}\n"
-    
+
     result += "Files remain on disk but project is no longer tracked by Basic Memory.\n"
     result += "Re-add the project to access its content again.\n"
-    
+
     return add_project_metadata(result, session.get_current_project())
