@@ -16,6 +16,7 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, call_put, call_post, call_delete
 from basic_memory.schemas import ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse, ProjectInfoRequest
+from basic_memory.utils import generate_permalink
 
 
 @mcp.tool()
@@ -77,6 +78,7 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
     if ctx:  # pragma: no cover
         await ctx.info(f"Switching to project: {project_name}")
 
+    project_permalink = generate_permalink(project_name)
     current_project = session.get_current_project()
     try:
         # Validate project exists by getting project list
@@ -84,13 +86,13 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
         project_list = ProjectList.model_validate(response.json())
 
         # Check if project exists
-        project_exists = any(p.name == project_name for p in project_list.projects)
+        project_exists = any(p.permalink == project_permalink for p in project_list.projects)
         if not project_exists:
             available_projects = [p.name for p in project_list.projects]
             return f"Error: Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
 
         # Switch to the project
-        session.set_current_project(project_name)
+        session.set_current_project(project_permalink)
         current_project = session.get_current_project()
         project_config = get_project_config(current_project)
 
@@ -99,11 +101,11 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
             response = await call_get(
                 client,
                 f"{project_config.project_url}/project/info",
-                params={"project_name": project_name},
+                params={"project_name": project_permalink},
             )
             project_info = ProjectInfoResponse.model_validate(response.json())
 
-            result = f"✓ Switched to {project_name} project\n\n"
+            result = f"✓ Switched to {project_permalink} project\n\n"
             result += "Project Summary:\n"
             result += f"• {project_info.statistics.total_entities} entities\n"
             result += f"• {project_info.statistics.total_observations} observations\n"

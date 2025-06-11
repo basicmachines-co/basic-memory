@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.config import config
 from basic_memory.mcp.project_session import session
 from basic_memory.mcp.resources.project_info import project_info
 import json
@@ -24,6 +23,7 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.project_info import ProjectStatusResponse
 from basic_memory.mcp.tools.utils import call_delete
 from basic_memory.mcp.tools.utils import call_put
+from basic_memory.utils import generate_permalink
 
 console = Console()
 
@@ -44,11 +44,8 @@ def format_path(path: str) -> str:
 def list_projects() -> None:
     """List all configured projects."""
     # Use API to list projects
-
-    project_url = config.project_url
-
     try:
-        response = asyncio.run(call_get(client, f"{project_url}/project/projects"))
+        response = asyncio.run(call_get(client, "/projects/projects"))
         result = ProjectList.model_validate(response.json())
 
         table = Table(title="Basic Memory Projects")
@@ -65,7 +62,6 @@ def list_projects() -> None:
         console.print(table)
     except Exception as e:
         console.print(f"[red]Error listing projects: {str(e)}[/red]")
-        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
 
 
@@ -80,16 +76,14 @@ def add_project(
     resolved_path = os.path.abspath(os.path.expanduser(path))
 
     try:
-        project_url = config.project_url
         data = {"name": name, "path": resolved_path, "set_default": set_default}
 
-        response = asyncio.run(call_post(client, f"{project_url}/project/projects", json=data))
+        response = asyncio.run(call_post(client, "/projects/projects", json=data))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error adding project: {str(e)}[/red]")
-        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
 
     # Display usage hint
@@ -105,15 +99,13 @@ def remove_project(
 ) -> None:
     """Remove a project from configuration."""
     try:
-        project_url = config.project_url
-
-        response = asyncio.run(call_delete(client, f"{project_url}/project/projects/{name}"))
+        project_name = generate_permalink(name)
+        response = asyncio.run(call_delete(client, f"/projects/{project_name}"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error removing project: {str(e)}[/red]")
-        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
 
     # Show this message regardless of method used
@@ -126,19 +118,15 @@ def set_default_project(
 ) -> None:
     """Set the default project and activate it for the current session."""
     try:
-        project_url = config.project_url
+        project_name = generate_permalink(name)
 
-        response = asyncio.run(call_put(client, f"{project_url}/project/projects/{name}/default"))
+        response = asyncio.run(call_put(client, f"projects/{project_name}/default"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
-        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
-
-    # Always activate it for the current session
-    os.environ["BASIC_MEMORY_PROJECT"] = name
 
     # Reload configuration to apply the change
     from importlib import reload
@@ -149,21 +137,18 @@ def set_default_project(
     console.print("[green]Project activated for current session[/green]")
 
 
-@project_app.command("sync")
+@project_app.command("sync-config")
 def synchronize_projects() -> None:
-    """Synchronize projects between configuration file and database."""
+    """Synchronize project config between configuration file and database."""
     # Call the API to synchronize projects
 
-    project_url = config.project_url
-
     try:
-        response = asyncio.run(call_post(client, f"{project_url}/project/sync"))
+        response = asyncio.run(call_post(client, "/projects/sync"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:  # pragma: no cover
         console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
-        console.print("[yellow]Note: Make sure the Basic Memory server is running.[/yellow]")
         raise typer.Exit(1)
 
 

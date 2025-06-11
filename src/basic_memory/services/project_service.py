@@ -207,7 +207,7 @@ class ProjectService:
 
         # Get all projects from database
         db_projects = await self.repository.get_active_projects()
-        db_projects_by_name = {p.name: p for p in db_projects}
+        db_projects_by_permalink = {p.permalink: p for p in db_projects}
 
         # Get all projects from configuration and normalize names if needed
         config_projects = config_manager.projects.copy()
@@ -235,7 +235,7 @@ class ProjectService:
 
         # Add projects that exist in config but not in DB
         for name, path in config_projects.items():
-            if name not in db_projects_by_name:
+            if name not in db_projects_by_permalink:
                 logger.info(f"Adding project '{name}' to database")
                 project_data = {
                     "name": name,
@@ -247,7 +247,7 @@ class ProjectService:
                 await self.repository.create(project_data)
 
         # Add projects that exist in DB but not in config to config
-        for name, project in db_projects_by_name.items():
+        for name, project in db_projects_by_permalink.items():
             if name not in config_projects:
                 logger.info(f"Adding project '{name}' to configuration")
                 config_manager.add_project(name, project.path)

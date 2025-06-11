@@ -6,6 +6,8 @@ from typing import Dict, List, Optional, Any
 
 from pydantic import Field, BaseModel
 
+from basic_memory.utils import generate_permalink
+
 
 class ProjectStatistics(BaseModel):
     """Statistics about the current project."""
@@ -183,6 +185,10 @@ class ProjectItem(BaseModel):
     name: str
     path: str
     is_default: bool = False
+    
+    @property
+    def permalink(self) -> str: # pragma: no cover
+        return generate_permalink(self.name)
 
 
 class ProjectList(BaseModel):

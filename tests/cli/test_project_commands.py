@@ -93,8 +93,6 @@ def test_project_default_command(mock_reload, mock_run, cli_env):
 
             # Just verify it runs without exception and environment is set
             assert result.exit_code == 0
-            assert "BASIC_MEMORY_PROJECT" in os.environ
-            assert os.environ["BASIC_MEMORY_PROJECT"] == "test-project"
 
 
 @patch("basic_memory.cli.commands.project.asyncio.run")
@@ -111,7 +109,7 @@ def test_project_sync_command(mock_run, cli_env):
     mock_run.return_value = mock_response
 
     runner = CliRunner()
-    result = runner.invoke(cli_app, ["project", "sync"])
+    result = runner.invoke(cli_app, ["project", "sync-config"])
 
     # Just verify it runs without exception
     assert result.exit_code == 0
@@ -134,7 +132,6 @@ def test_project_failure_exits_with_error(mock_run, cli_env):
     # All should exit with code 1 and show error message
     assert list_result.exit_code == 1
     assert "Error listing projects" in list_result.output
-    assert "Make sure the Basic Memory server is running" in list_result.output
 
     assert add_result.exit_code == 1
     assert "Error adding project" in add_result.output
