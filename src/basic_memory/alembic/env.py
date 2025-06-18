@@ -8,12 +8,12 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from basic_memory.models import Base
-
 # set config.env to "test" for pytest to prevent logging to file in utils.setup_logging()
 os.environ["BASIC_MEMORY_ENV"] = "test"
 
-from basic_memory.config import app_config
+# Import after setting environment variable  # noqa: E402
+from basic_memory.config import app_config  # noqa: E402
+from basic_memory.models import Base  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
