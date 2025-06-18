@@ -620,3 +620,45 @@ async def test_write_note_update_existing_with_different_entity_type(app):
     assert "type: guide" in content
     assert "# Updated Content" in content
     assert "- guide" in content
+
+
+@pytest.mark.asyncio  
+async def test_write_note_respects_frontmatter_entity_type(app):
+    """Test that entity_type in frontmatter is respected when parameter is not provided.
+    
+    This verifies that when write_note is called without entity_type parameter,
+    but the content includes frontmatter with a 'type' field, that type is respected
+    instead of defaulting to 'note'.
+    """
+    note = dedent("""
+        ---
+        title: Test Guide
+        type: guide
+        permalink: guides/test-guide
+        tags:
+        - guide
+        - documentation
+        ---
+        
+        # Guide Content
+        This is a guide
+        """).strip()
+
+    # Call write_note without entity_type parameter - it should respect frontmatter type
+    result = await write_note.fn(
+        title="Test Guide",
+        folder="guides", 
+        content=note
+    )
+
+    assert result
+    assert "# Created note" in result
+    assert "file_path: guides/Test Guide.md" in result
+    assert "permalink: guides/test-guide" in result
+
+    # Verify the entity type from frontmatter is respected (should be "guide", not "note")
+    content = await read_note.fn("guides/test-guide")
+    assert "type: guide" in content
+    assert "# Guide Content" in content
+    assert "- guide" in content
+    assert "- documentation" in content
