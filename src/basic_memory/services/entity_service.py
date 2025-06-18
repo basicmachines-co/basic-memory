@@ -292,57 +292,21 @@ class EntityService(BaseService[EntityModel]):
 
         Creates the entity with null checksum to indicate sync not complete.
         Relations will be added in second pass.
+        
+        Uses UPSERT approach to handle permalink/file_path conflicts cleanly.
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
         model = entity_model_from_markdown(file_path, markdown)
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None
-        # Repository will set project_id automatically
+        
+        # Use UPSERT to handle conflicts cleanly
         try:
-            return await self.repository.add(model)
-        except IntegrityError as e:
-            # Handle different types of UNIQUE constraint failures
-            if "UNIQUE constraint failed: entity.file_path" in str(e):
-                # File path conflict - update existing entity
-                logger.info(
-                    f"Entity already exists for file_path={file_path}, updating instead of creating"
-                )
-                return await self.update_entity_and_observations(file_path, markdown)
-            elif "UNIQUE constraint failed: entity.permalink" in str(e):
-                # Permalink conflict - check if it's the same file or different file
-                existing_entity = await self.repository.get_by_permalink(model.permalink)
-                if existing_entity and existing_entity.file_path == str(file_path):
-                    # Same file - update existing entity
-                    logger.info(
-                        f"Entity already exists for permalink={model.permalink}, updating instead of creating"
-                    )
-                    return await self.update_entity_and_observations(file_path, markdown)
-                else:
-                    # Different file with same permalink - generate unique permalink
-                    logger.info(
-                        f"Permalink conflict for {model.permalink}, generating unique permalink"
-                    )
-                    # Generate unique permalink
-                    base_permalink = model.permalink
-                    suffix = 1
-                    while await self.repository.get_by_permalink(model.permalink):
-                        model.permalink = f"{base_permalink}-{suffix}"
-                        suffix += 1
-                    logger.debug(f"Using unique permalink: {model.permalink}")
-                    # Try to create with unique permalink
-                    try:
-                        return await self.repository.add(model)
-                    except IntegrityError as e:
-                        logger.error(
-                            f"IntegrityError while adding entity with unique permalink: {model.permalink}. Error: {e}"
-                        )
-                        raise EntityCreationError(
-                            f"Failed to create entity with unique permalink: {model.permalink}"
-                        )
-            else:
-                # Re-raise if it's a different integrity error
-                raise
+            return await self.repository.upsert_entity(model)
+        except Exception as e:
+            logger.error(f"Failed to upsert entity for {file_path}: {e}")
+            raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
     async def update_entity_and_observations(
         self, file_path: Path, markdown: EntityMarkdown
