@@ -63,7 +63,7 @@ async def test_write_note_no_tags(app):
     content = await read_note.fn("test/simple-note")
     assert (
         dedent("""
-        --
+        ---
         title: Simple Note
         type: note
         permalink: test/simple-note
