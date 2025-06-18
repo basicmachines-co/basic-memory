@@ -476,3 +476,147 @@ async def test_write_note_permalink_collision_fix_issue_139(app):
         # Original note should still exist
         original_content = await read_note.fn("test/note-1")
         assert "Original content for note 1" in original_content
+
+
+@pytest.mark.asyncio
+async def test_write_note_with_custom_entity_type(app):
+    """Test creating a note with custom entity_type parameter.
+
+    This test verifies the fix for Issue #144 where entity_type parameter
+    was hardcoded to "note" instead of allowing custom types.
+    """
+    result = await write_note.fn(
+        title="Test Guide",
+        folder="guides",
+        content="# Guide Content\nThis is a guide",
+        tags=["guide", "documentation"],
+        entity_type="guide",
+    )
+
+    assert result
+    assert "# Created note" in result
+    assert "file_path: guides/Test Guide.md" in result
+    assert "permalink: guides/test-guide" in result
+    assert "## Tags" in result
+    assert "- guide, documentation" in result
+
+    # Verify the entity type is correctly set in the frontmatter
+    content = await read_note.fn("guides/test-guide")
+    assert (
+        dedent("""
+        ---
+        title: Test Guide
+        type: guide
+        permalink: guides/test-guide
+        tags:
+        - guide
+        - documentation
+        ---
+        
+        # Guide Content
+        This is a guide
+        """).strip()
+        in content
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_note_with_report_entity_type(app):
+    """Test creating a note with entity_type="report"."""
+    result = await write_note.fn(
+        title="Monthly Report",
+        folder="reports",
+        content="# Monthly Report\nThis is a monthly report",
+        tags=["report", "monthly"],
+        entity_type="report",
+    )
+
+    assert result
+    assert "# Created note" in result
+    assert "file_path: reports/Monthly Report.md" in result
+    assert "permalink: reports/monthly-report" in result
+
+    # Verify the entity type is correctly set in the frontmatter
+    content = await read_note.fn("reports/monthly-report")
+    assert "type: report" in content
+    assert "# Monthly Report" in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_with_config_entity_type(app):
+    """Test creating a note with entity_type="config"."""
+    result = await write_note.fn(
+        title="System Config",
+        folder="config",
+        content="# System Configuration\nThis is a config file",
+        entity_type="config",
+    )
+
+    assert result
+    assert "# Created note" in result
+    assert "file_path: config/System Config.md" in result
+    assert "permalink: config/system-config" in result
+
+    # Verify the entity type is correctly set in the frontmatter
+    content = await read_note.fn("config/system-config")
+    assert "type: config" in content
+    assert "# System Configuration" in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_entity_type_default_behavior(app):
+    """Test that the entity_type parameter defaults to "note" when not specified.
+
+    This ensures backward compatibility - existing code that doesn't specify
+    entity_type should continue to work as before.
+    """
+    result = await write_note.fn(
+        title="Default Type Test",
+        folder="test",
+        content="# Default Type Test\nThis should be type 'note'",
+        tags=["test"],
+    )
+
+    assert result
+    assert "# Created note" in result
+    assert "file_path: test/Default Type Test.md" in result
+    assert "permalink: test/default-type-test" in result
+
+    # Verify the entity type defaults to "note"
+    content = await read_note.fn("test/default-type-test")
+    assert "type: note" in content
+    assert "# Default Type Test" in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_update_existing_with_different_entity_type(app):
+    """Test updating an existing note with a different entity_type."""
+    # Create initial note as "note" type
+    result1 = await write_note.fn(
+        title="Changeable Type",
+        folder="test",
+        content="# Initial Content\nThis starts as a note",
+        tags=["test"],
+        entity_type="note",
+    )
+
+    assert result1
+    assert "# Created note" in result1
+
+    # Update the same note with a different entity_type
+    result2 = await write_note.fn(
+        title="Changeable Type",
+        folder="test",
+        content="# Updated Content\nThis is now a guide",
+        tags=["guide"],
+        entity_type="guide",
+    )
+
+    assert result2
+    assert "# Updated note" in result2
+
+    # Verify the entity type was updated
+    content = await read_note.fn("test/changeable-type")
+    assert "type: guide" in content
+    assert "# Updated Content" in content
+    assert "- guide" in content
