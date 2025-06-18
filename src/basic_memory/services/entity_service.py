@@ -117,10 +117,15 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
             )
 
-        # Parse content frontmatter to check for user-specified permalink
+        # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
+
+            # If content has entity_type/type, use it to override the schema entity_type
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
             if "permalink" in content_frontmatter:
                 # Create a minimal EntityMarkdown object for permalink resolution
                 from basic_memory.markdown.schemas import EntityFrontmatter
@@ -172,10 +177,15 @@ class EntityService(BaseService[EntityModel]):
         # Read existing frontmatter from the file if it exists
         existing_markdown = await self.entity_parser.parse_file(file_path)
 
-        # Parse content frontmatter to check for user-specified permalink
+        # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
+
+            # If content has entity_type/type, use it to override the schema entity_type
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
             if "permalink" in content_frontmatter:
                 # Create a minimal EntityMarkdown object for permalink resolution
                 from basic_memory.markdown.schemas import EntityFrontmatter

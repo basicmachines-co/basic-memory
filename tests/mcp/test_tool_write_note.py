@@ -622,10 +622,10 @@ async def test_write_note_update_existing_with_different_entity_type(app):
     assert "- guide" in content
 
 
-@pytest.mark.asyncio  
+@pytest.mark.asyncio
 async def test_write_note_respects_frontmatter_entity_type(app):
     """Test that entity_type in frontmatter is respected when parameter is not provided.
-    
+
     This verifies that when write_note is called without entity_type parameter,
     but the content includes frontmatter with a 'type' field, that type is respected
     instead of defaulting to 'note'.
@@ -645,11 +645,7 @@ async def test_write_note_respects_frontmatter_entity_type(app):
         """).strip()
 
     # Call write_note without entity_type parameter - it should respect frontmatter type
-    result = await write_note.fn(
-        title="Test Guide",
-        folder="guides", 
-        content=note
-    )
+    result = await write_note.fn(title="Test Guide", folder="guides", content=note)
 
     assert result
     assert "# Created note" in result
