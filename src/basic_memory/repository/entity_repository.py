@@ -172,9 +172,47 @@ class EntityRepository(Repository[Entity]):
                 return found
                 
             except IntegrityError:
-                # Permalink conflict with different file - generate unique permalink
+                # Could be either file_path or permalink conflict
                 await session.rollback()
-                return await self._handle_permalink_conflict(entity, session)
+                
+                # Check if it's a file_path conflict (race condition)
+                existing_by_path_check = await session.execute(
+                    select(Entity).where(
+                        Entity.file_path == entity.file_path,
+                        Entity.project_id == entity.project_id
+                    )
+                )
+                race_condition_entity = existing_by_path_check.scalar_one_or_none()
+                
+                if race_condition_entity:
+                    # Race condition: file_path conflict detected after our initial check
+                    # Update the existing entity instead
+                    for key, value in {
+                        'title': entity.title,
+                        'entity_type': entity.entity_type,
+                        'entity_metadata': entity.entity_metadata,
+                        'content_type': entity.content_type,
+                        'permalink': entity.permalink,
+                        'checksum': entity.checksum,
+                        'updated_at': entity.updated_at,
+                    }.items():
+                        setattr(race_condition_entity, key, value)
+                    
+                    await session.flush()
+                    # Return the updated entity with relationships loaded
+                    query = (
+                        select(Entity)
+                        .where(Entity.file_path == entity.file_path)
+                        .options(*self.get_load_options())
+                    )
+                    result = await session.execute(query)
+                    found = result.scalar_one_or_none()
+                    if not found:  # pragma: no cover
+                        raise RuntimeError(f"Failed to retrieve entity after race condition update: {entity.file_path}")
+                    return found
+                else:
+                    # Must be permalink conflict - generate unique permalink
+                    return await self._handle_permalink_conflict(entity, session)
 
     async def _handle_permalink_conflict(self, entity: Entity, session: AsyncSession) -> Entity:
         """Handle permalink conflicts by generating a unique permalink."""

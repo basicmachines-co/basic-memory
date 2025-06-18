@@ -147,6 +147,65 @@ async def test_upsert_entity_multiple_permalink_conflicts(entity_repository: Ent
 
 
 @pytest.mark.asyncio
+async def test_upsert_entity_race_condition_file_path(entity_repository: EntityRepository):
+    """Test that upsert handles race condition where file_path conflict occurs after initial check."""
+    from unittest.mock import patch
+    from sqlalchemy.exc import IntegrityError
+    
+    # Create an entity first
+    entity1 = Entity(
+        project_id=entity_repository.project_id,
+        title="Original Entity",
+        entity_type="note",
+        permalink="test/original",
+        file_path="test/race-file.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    result1 = await entity_repository.upsert_entity(entity1)
+    original_id = result1.id
+    
+    # Create another entity with different file_path and permalink
+    entity2 = Entity(
+        project_id=entity_repository.project_id,
+        title="Race Condition Test",
+        entity_type="note", 
+        permalink="test/race-entity",
+        file_path="test/different-file.md",  # Different initially
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    # Now simulate race condition: change file_path to conflict after the initial check
+    original_add = entity_repository.session_maker().add
+    call_count = 0
+    
+    def mock_add(obj):
+        nonlocal call_count
+        if isinstance(obj, Entity) and call_count == 0:
+            call_count += 1
+            # Simulate race condition by changing file_path to conflict
+            obj.file_path = "test/race-file.md"  # Same as entity1
+            # This should trigger IntegrityError for file_path constraint
+            raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)
+        return original_add(obj)
+    
+    # Mock session.add to simulate the race condition
+    with patch.object(entity_repository.session_maker().__class__, 'add', side_effect=mock_add):
+        # This should handle the race condition gracefully by updating the existing entity
+        result2 = await entity_repository.upsert_entity(entity2)
+        
+        # Should return the updated original entity (same ID)
+        assert result2.id == original_id
+        assert result2.title == "Race Condition Test"  # Updated title
+        assert result2.file_path == "test/race-file.md"  # Same file path
+        assert result2.permalink == "test/race-entity"  # Updated permalink
+
+
+@pytest.mark.asyncio
 async def test_upsert_entity_gap_in_suffixes(entity_repository: EntityRepository):
     """Test that upsert finds the next available suffix even with gaps."""
     # Manually create entities with non-sequential suffixes
