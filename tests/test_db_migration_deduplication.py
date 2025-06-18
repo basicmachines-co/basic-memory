@@ -1,10 +1,8 @@
 """Tests for database migration deduplication functionality."""
 
 import pytest
-from pathlib import Path
-from unittest.mock import patch, AsyncMock, call, MagicMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
-from basic_memory.config import BasicMemoryConfig
 from basic_memory import db
 
 

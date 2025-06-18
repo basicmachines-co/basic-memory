@@ -99,8 +99,8 @@ async def get_or_create_db(
         # Run migrations automatically unless explicitly disabled
         if ensure_migrations:
             if app_config is None:
-                from basic_memory.config import get_basic_memory_config
-                app_config = get_basic_memory_config()
+                from basic_memory.config import app_config as global_app_config
+                app_config = global_app_config
             await run_migrations(app_config, db_type)
 
     # These checks should never fail since we just created the engine and session maker
