@@ -153,6 +153,14 @@ class ProjectService:
             logger.error(f"Project '{name}' exists in config but not in database")
 
         logger.info(f"Project '{name}' set as default in configuration and database")
+        
+        # Refresh MCP session to pick up the new default project
+        try:
+            from basic_memory.mcp.project_session import session
+            session.refresh_from_config()
+        except ImportError:
+            # MCP components might not be available in all contexts (e.g., CLI-only usage)
+            logger.debug("MCP session not available, skipping session refresh")
 
     async def _ensure_single_default_project(self) -> None:
         """Ensure only one project has is_default=True.
@@ -273,6 +281,14 @@ class ProjectService:
                 await self.repository.set_as_default(project.id)
 
         logger.info("Project synchronization complete")
+        
+        # Refresh MCP session to ensure it's in sync with current config
+        try:
+            from basic_memory.mcp.project_session import session
+            session.refresh_from_config()
+        except ImportError:
+            # MCP components might not be available in all contexts
+            logger.debug("MCP session not available, skipping session refresh")
 
     async def update_project(  # pragma: no cover
         self, name: str, updated_path: Optional[str] = None, is_active: Optional[bool] = None
