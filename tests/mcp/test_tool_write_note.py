@@ -418,59 +418,53 @@ async def test_write_note_preserves_content_frontmatter(app):
 @pytest.mark.asyncio
 async def test_write_note_permalink_collision_fix_issue_139(app):
     """Test fix for GitHub Issue #139: UNIQUE constraint failed: entity.permalink.
-    
+
     This reproduces the exact scenario described in the issue:
-    1. Create a note with title "Note 1" 
+    1. Create a note with title "Note 1"
     2. Create another note with title "Note 2"
     3. Try to create/replace first note again with same title "Note 1"
-    
+
     Before the fix, step 3 would fail with UNIQUE constraint error.
     After the fix, it should either update the existing note or create with unique permalink.
     """
     # Step 1: Create first note
     result1 = await write_note.fn(
-        title="Note 1",
-        folder="test",
-        content="Original content for note 1"
+        title="Note 1", folder="test", content="Original content for note 1"
     )
     assert "# Created note" in result1
     assert "permalink: test/note-1" in result1
-    
+
     # Step 2: Create second note with different title
-    result2 = await write_note.fn(
-        title="Note 2", 
-        folder="test",
-        content="Content for note 2"
-    )
+    result2 = await write_note.fn(title="Note 2", folder="test", content="Content for note 2")
     assert "# Created note" in result2
     assert "permalink: test/note-2" in result2
-    
+
     # Step 3: Try to create/replace first note again
     # This scenario would trigger the UNIQUE constraint failure before the fix
     result3 = await write_note.fn(
         title="Note 1",  # Same title as first note
-        folder="test",   # Same folder as first note
-        content="Replacement content for note 1"  # Different content
+        folder="test",  # Same folder as first note
+        content="Replacement content for note 1",  # Different content
     )
-    
+
     # This should not raise a UNIQUE constraint failure error
     # It should succeed and either:
     # 1. Update the existing note (preferred behavior)
     # 2. Create a new note with unique permalink (fallback behavior)
-    
+
     assert result3 is not None
-    assert ("Updated note" in result3 or "Created note" in result3)
-    
+    assert "Updated note" in result3 or "Created note" in result3
+
     # The result should contain either the original permalink or a unique one
-    assert ("permalink: test/note-1" in result3 or "permalink: test/note-1-1" in result3)
-    
+    assert "permalink: test/note-1" in result3 or "permalink: test/note-1-1" in result3
+
     # Verify we can read back the content
     if "permalink: test/note-1" in result3:
         # Updated existing note case
         content = await read_note.fn("test/note-1")
         assert "Replacement content for note 1" in content
     else:
-        # Created new note with unique permalink case  
+        # Created new note with unique permalink case
         content = await read_note.fn("test/note-1-1")
         assert "Replacement content for note 1" in content
         # Original note should still exist
