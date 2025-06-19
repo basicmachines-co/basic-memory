@@ -1,13 +1,14 @@
 """Database management commands."""
 
 import asyncio
+from pathlib import Path
 
 import typer
 from loguru import logger
 
 from basic_memory import db
 from basic_memory.cli.app import app
-from basic_memory.config import app_config
+from basic_memory.config import app_config, config_manager
 
 
 @app.command()
@@ -24,6 +25,12 @@ def reset(
         if db_path.exists():
             db_path.unlink()
             logger.info(f"Database file deleted: {db_path}")
+
+        # Reset project configuration
+        config_manager.config.projects = {"main": str(Path.home() / "basic-memory")}
+        config_manager.config.default_project = "main"
+        config_manager.save_config(config_manager.config)
+        logger.info("Project configuration reset to default")
 
         # Create a new empty database
         asyncio.run(db.run_migrations(app_config))
