@@ -228,11 +228,20 @@ Basic Memory uses `uv-dynamic-versioning` for automatic version management based
 - Includes comprehensive quality checks (lint, format, type-check, tests)
 - Automatically updates version in `__init__.py`
 - Creates git tag and pushes to GitHub
-- Triggers GitHub Actions workflow for PyPI publication
-- Users install with: `pip install basic-memory`
+- Triggers GitHub Actions workflow for:
+  - PyPI publication
+  - Homebrew formula update (requires HOMEBREW_TOKEN secret)
 
 **Manual method (legacy):**
 - Create version tag: `git tag v0.13.0 && git push origin v0.13.0`
+
+#### Homebrew Formula Updates
+- Automatically triggered after successful PyPI release
+- Updates formula in `basicmachines-co/homebrew-basic-memory` repo
+- Requires `HOMEBREW_TOKEN` secret in GitHub repository settings:
+  - Create a fine-grained Personal Access Token with `Contents: Read and Write` and `Actions: Read` scopes on `basicmachines-co/homebrew-basic-memory`
+  - Add as repository secret named `HOMEBREW_TOKEN` in `basicmachines-co/basic-memory`
+- Formula updates include new version URL and SHA256 checksum
 
 ### For Development
 - **Automated releases**: Use `just release v0.13.x` for stable releases and `just beta v0.13.0b1` for beta releases
@@ -241,3 +250,6 @@ Basic Memory uses `uv-dynamic-versioning` for automatic version management based
 - **Configuration**: `pyproject.toml` uses `dynamic = ["version"]`
 - **Release automation**: `__init__.py` updated automatically during release process
 - **CI/CD**: GitHub Actions handles building and PyPI publication
+
+## Development Notes
+- make sure you sign off on commits

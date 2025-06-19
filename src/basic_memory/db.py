@@ -23,6 +23,7 @@ from basic_memory.repository.search_repository import SearchRepository
 # Module level state
 _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
+_migrations_completed: bool = False
 
 
 class DatabaseType(Enum):
@@ -72,18 +73,35 @@ async def scoped_session(
         await factory.remove()
 
 
+def _create_engine_and_session(
+    db_path: Path, db_type: DatabaseType = DatabaseType.FILESYSTEM
+) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    """Internal helper to create engine and session maker."""
+    db_url = DatabaseType.get_db_url(db_path, db_type)
+    logger.debug(f"Creating engine for db_url: {db_url}")
+    engine = create_async_engine(db_url, connect_args={"check_same_thread": False})
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    return engine, session_maker
+
+
 async def get_or_create_db(
     db_path: Path,
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
+    ensure_migrations: bool = True,
+    app_config: Optional["BasicMemoryConfig"] = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
     """Get or create database engine and session maker."""
     global _engine, _session_maker
 
     if _engine is None:
-        db_url = DatabaseType.get_db_url(db_path, db_type)
-        logger.debug(f"Creating engine for db_url: {db_url}")
-        _engine = create_async_engine(db_url, connect_args={"check_same_thread": False})
-        _session_maker = async_sessionmaker(_engine, expire_on_commit=False)
+        _engine, _session_maker = _create_engine_and_session(db_path, db_type)
+        
+        # Run migrations automatically unless explicitly disabled
+        if ensure_migrations:
+            if app_config is None:
+                from basic_memory.config import app_config as global_app_config
+                app_config = global_app_config
+            await run_migrations(app_config, db_type)
 
     # These checks should never fail since we just created the engine and session maker
     # if they were None, but we'll check anyway for the type checker
@@ -100,12 +118,13 @@ async def get_or_create_db(
 
 async def shutdown_db() -> None:  # pragma: no cover
     """Clean up database connections."""
-    global _engine, _session_maker
+    global _engine, _session_maker, _migrations_completed
 
     if _engine:
         await _engine.dispose()
         _engine = None
         _session_maker = None
+        _migrations_completed = False
 
 
 @asynccontextmanager
@@ -119,7 +138,7 @@ async def engine_session_factory(
     for each test. For production use, use get_or_create_db() instead.
     """
 
-    global _engine, _session_maker
+    global _engine, _session_maker, _migrations_completed
 
     db_url = DatabaseType.get_db_url(db_path, db_type)
     logger.debug(f"Creating engine for db_url: {db_url}")
@@ -143,12 +162,20 @@ async def engine_session_factory(
             await _engine.dispose()
             _engine = None
             _session_maker = None
+            _migrations_completed = False
 
 
 async def run_migrations(
-    app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM
+    app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM, force: bool = False
 ):  # pragma: no cover
     """Run any pending alembic migrations."""
+    global _migrations_completed
+    
+    # Skip if migrations already completed unless forced
+    if _migrations_completed and not force:
+        logger.debug("Migrations already completed in this session, skipping")
+        return
+        
     logger.info("Running database migrations...")
     try:
         # Get the absolute path to the alembic directory relative to this file
@@ -170,11 +197,18 @@ async def run_migrations(
         command.upgrade(config, "head")
         logger.info("Migrations completed successfully")
 
-        _, session_maker = await get_or_create_db(app_config.database_path, database_type)
+        # Get session maker - ensure we don't trigger recursive migration calls
+        if _session_maker is None:
+            _, session_maker = _create_engine_and_session(app_config.database_path, database_type)
+        else:
+            session_maker = _session_maker
 
         # initialize the search Index schema
         # the project_id is not used for init_search_index, so we pass a dummy value
         await SearchRepository(session_maker, 1).init_search_index()
+        
+        # Mark migrations as completed
+        _migrations_completed = True
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise

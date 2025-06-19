@@ -117,10 +117,15 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
             )
 
-        # Parse content frontmatter to check for user-specified permalink
+        # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
+
+            # If content has entity_type/type, use it to override the schema entity_type
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
             if "permalink" in content_frontmatter:
                 # Create a minimal EntityMarkdown object for permalink resolution
                 from basic_memory.markdown.schemas import EntityFrontmatter
@@ -172,10 +177,15 @@ class EntityService(BaseService[EntityModel]):
         # Read existing frontmatter from the file if it exists
         existing_markdown = await self.entity_parser.parse_file(file_path)
 
-        # Parse content frontmatter to check for user-specified permalink
+        # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
+
+            # If content has entity_type/type, use it to override the schema entity_type
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
             if "permalink" in content_frontmatter:
                 # Create a minimal EntityMarkdown object for permalink resolution
                 from basic_memory.markdown.schemas import EntityFrontmatter
@@ -292,27 +302,21 @@ class EntityService(BaseService[EntityModel]):
 
         Creates the entity with null checksum to indicate sync not complete.
         Relations will be added in second pass.
+        
+        Uses UPSERT approach to handle permalink/file_path conflicts cleanly.
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
         model = entity_model_from_markdown(file_path, markdown)
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None
-        # Repository will set project_id automatically
+        
+        # Use UPSERT to handle conflicts cleanly
         try:
-            return await self.repository.add(model)
-        except IntegrityError as e:
-            # Handle race condition where entity was created by another process
-            if "UNIQUE constraint failed: entity.file_path" in str(
-                e
-            ) or "UNIQUE constraint failed: entity.permalink" in str(e):
-                logger.info(
-                    f"Entity already exists for file_path={file_path} (file_path or permalink conflict), updating instead of creating"
-                )
-                return await self.update_entity_and_observations(file_path, markdown)
-            else:
-                # Re-raise if it's a different integrity error
-                raise
+            return await self.repository.upsert_entity(model)
+        except Exception as e:
+            logger.error(f"Failed to upsert entity for {file_path}: {e}")
+            raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
     async def update_entity_and_observations(
         self, file_path: Path, markdown: EntityMarkdown

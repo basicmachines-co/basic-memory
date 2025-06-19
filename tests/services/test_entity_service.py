@@ -870,14 +870,11 @@ async def test_edit_entity_with_observations_and_relations(
 
 
 @pytest.mark.asyncio
-async def test_create_entity_from_markdown_race_condition_handling(
+async def test_create_entity_from_markdown_with_upsert(
     entity_service: EntityService, file_service: FileService
 ):
-    """Test that create_entity_from_markdown handles race condition with IntegrityError (lines 304-311)."""
-    from unittest.mock import patch
-    from sqlalchemy.exc import IntegrityError
-
-    file_path = Path("test/race-condition.md")
+    """Test that create_entity_from_markdown uses UPSERT approach for conflict resolution."""
+    file_path = Path("test/upsert-test.md")
 
     # Create a mock EntityMarkdown object
     from basic_memory.markdown.schemas import (
@@ -886,7 +883,7 @@ async def test_create_entity_from_markdown_race_condition_handling(
     )
     from datetime import datetime, timezone
 
-    frontmatter = EntityFrontmatter(metadata={"title": "Race Condition Test", "type": "test"})
+    frontmatter = EntityFrontmatter(metadata={"title": "UPSERT Test", "type": "test"})
     markdown = RealEntityMarkdown(
         frontmatter=frontmatter,
         observations=[],
@@ -895,63 +892,26 @@ async def test_create_entity_from_markdown_race_condition_handling(
         modified=datetime.now(timezone.utc),
     )
 
-    # Mock the repository.add to raise IntegrityError on first call, then succeed on second
-    original_add = entity_service.repository.add
+    # Call the method - should succeed without complex exception handling
+    result = await entity_service.create_entity_from_markdown(file_path, markdown)
 
-    call_count = 0
-
-    async def mock_add(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            # Simulate race condition - another process created the entity
-            raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)
-        else:
-            return await original_add(*args, **kwargs)
-
-    # Mock update method to return a dummy entity
-    async def mock_update(*args, **kwargs):
-        from basic_memory.models import Entity
-        from datetime import datetime, timezone
-
-        return Entity(
-            id=1,
-            title="Race Condition Test",
-            entity_type="test",
-            file_path=str(file_path),
-            permalink="test/race-condition-test",
-            content_type="text/markdown",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-
-    with (
-        patch.object(entity_service.repository, "add", side_effect=mock_add),
-        patch.object(
-            entity_service, "update_entity_and_observations", side_effect=mock_update
-        ) as mock_update_call,
-    ):
-        # Call the method
-        result = await entity_service.create_entity_from_markdown(file_path, markdown)
-
-        # Verify it handled the race condition gracefully
-        assert result is not None
-        assert result.title == "Race Condition Test"
-        assert result.file_path == str(file_path)
-
-        # Verify that update_entity_and_observations was called as fallback
-        mock_update_call.assert_called_once_with(file_path, markdown)
+    # Verify it created the entity successfully using the UPSERT approach
+    assert result is not None
+    assert result.title == "UPSERT Test"
+    assert result.file_path == str(file_path)
+    # create_entity_from_markdown sets checksum to None (incomplete sync)
+    assert result.checksum is None
 
 
 @pytest.mark.asyncio
-async def test_create_entity_from_markdown_integrity_error_reraise(
+async def test_create_entity_from_markdown_error_handling(
     entity_service: EntityService, file_service: FileService
 ):
-    """Test that create_entity_from_markdown re-raises IntegrityError for non-race-condition cases."""
+    """Test that create_entity_from_markdown handles repository errors gracefully."""
     from unittest.mock import patch
-    from sqlalchemy.exc import IntegrityError
+    from basic_memory.services.exceptions import EntityCreationError
 
-    file_path = Path("test/integrity-error.md")
+    file_path = Path("test/error-test.md")
 
     # Create a mock EntityMarkdown object
     from basic_memory.markdown.schemas import (
@@ -960,7 +920,7 @@ async def test_create_entity_from_markdown_integrity_error_reraise(
     )
     from datetime import datetime, timezone
 
-    frontmatter = EntityFrontmatter(metadata={"title": "Integrity Error Test", "type": "test"})
+    frontmatter = EntityFrontmatter(metadata={"title": "Error Test", "type": "test"})
     markdown = RealEntityMarkdown(
         frontmatter=frontmatter,
         observations=[],
@@ -969,16 +929,14 @@ async def test_create_entity_from_markdown_integrity_error_reraise(
         modified=datetime.now(timezone.utc),
     )
 
-    # Mock the repository.add to raise a different IntegrityError (not file_path/permalink constraint)
-    async def mock_add(*args, **kwargs):
-        # Simulate a different constraint violation
-        raise IntegrityError("UNIQUE constraint failed: entity.some_other_field", None, None)
+    # Mock the repository.upsert_entity to raise a general error
+    async def mock_upsert(*args, **kwargs):
+        # Simulate a general database error
+        raise Exception("Database connection failed")
 
-    with patch.object(entity_service.repository, "add", side_effect=mock_add):
-        # Should re-raise the IntegrityError since it's not a file_path/permalink constraint
-        with pytest.raises(
-            IntegrityError, match="UNIQUE constraint failed: entity.some_other_field"
-        ):
+    with patch.object(entity_service.repository, "upsert_entity", side_effect=mock_upsert):
+        # Should wrap the error in EntityCreationError
+        with pytest.raises(EntityCreationError, match="Failed to create entity"):
             await entity_service.create_entity_from_markdown(file_path, markdown)
 
 

@@ -1,5 +1,79 @@
 # CHANGELOG
 
+## v0.13.6 (2025-06-18)
+
+### Bug Fixes
+
+- **Custom Entity Types** - Support for custom entity types in write_note
+  ([`7789864`](https://github.com/basicmachines-co/basic-memory/commit/77898644933589c2da9bdd60571d54137a5309ed))
+  - Fixed `entity_type` parameter for `write_note` MCP tool to respect value passed in
+  - Frontmatter `type` field automatically respected when no explicit parameter provided
+  - Maintains backward compatibility with default "note" type
+
+- **#139**: Fix "UNIQUE constraint failed: entity.permalink" database error
+  ([`c6215fd`](https://github.com/basicmachines-co/basic-memory/commit/c6215fd819f9564ead91cf3a950f855241446096))
+  - Implement SQLAlchemy UPSERT strategy to handle permalink conflicts gracefully
+  - Eliminates crashes when creating notes with existing titles in same folders
+  - Seamlessly updates existing entities instead of failing with constraint errors
+
+- **Database Migration Performance** - Eliminate redundant migration initialization
+  ([`84d2aaf`](https://github.com/basicmachines-co/basic-memory/commit/84d2aaf6414dd083af4b0df73f6c8139b63468f6))
+  - Fix duplicate migration calls that slowed system startup
+  - Improve performance with multiple projects (tested with 28+ projects)
+  - Add migration deduplication safeguards with comprehensive test coverage
+
+- **User Experience** - Correct spelling error in continue_conversation prompt
+  ([`b4c26a6`](https://github.com/basicmachines-co/basic-memory/commit/b4c26a613379e6f2ba655efe3d7d8d40c27999e5))
+  - Fix "Chose a folder" → "Choose a folder" in MCP prompt instructions
+  - Improve grammar and clarity in user-facing prompt text
+
+### Documentation
+
+- **Website Updates** - Add new website and community links to README
+  ([`3fdce68`](https://github.com/basicmachines-co/basic-memory/commit/3fdce683d7ad8b6f4855d7138d5ff2136d4c07bc))
+
+- **Project Documentation** - Update README.md and CLAUDE.md with latest project information
+  ([`782cb2d`](https://github.com/basicmachines-co/basic-memory/commit/782cb2df28803482d209135a054e67cc32d7363e))
+
+### Technical Improvements
+
+- **Comprehensive Test Coverage** - Add extensive test suites for new features
+  - Custom entity type validation with 8 new test scenarios
+  - UPSERT behavior testing with edge case coverage
+  - Migration deduplication testing with 6 test scenarios
+  - Database constraint handling validation
+
+- **Code Quality** - Enhanced error handling and validation
+  - Improved SQLAlchemy patterns with modern UPSERT operations
+  - Better conflict resolution strategies for entity management
+  - Strengthened database consistency guarantees
+
+### Performance
+
+- **Database Operations** - Faster startup and improved scalability
+  - Reduced migration overhead for multi-project setups
+  - Optimized conflict resolution for entity creation
+  - Enhanced performance with growing knowledge bases
+
+### Migration Guide
+
+This release includes automatic database improvements. No manual migration required:
+
+- Existing notes and entity types continue working unchanged
+- New `entity_type` parameter is optional and backward compatible
+- Database performance improvements apply automatically
+- All existing MCP tool behavior preserved
+
+### Installation
+
+```bash
+# Latest stable release
+uv tool install basic-memory
+
+# Update existing installation
+uv tool upgrade basic-memory
+```
+
 ## v0.13.5 (2025-06-11)
 
 ### Bug Fixes

@@ -27,6 +27,7 @@ async def write_note(
     content: str,
     folder: str,
     tags=None,  # Remove type hint completely to avoid schema issues
+    entity_type: str = "note",
     project: Optional[str] = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
@@ -58,6 +59,7 @@ async def write_note(
                 Use forward slashes (/) as separators. Examples: "notes", "projects/2025", "research/ml"
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
+        entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
         project: Optional project name to write to. If not provided, uses current active project.
 
     Returns:
@@ -84,7 +86,7 @@ async def write_note(
     entity = Entity(
         title=title,
         folder=folder,
-        entity_type="note",
+        entity_type=entity_type,
         content_type="text/markdown",
         content=content,
         entity_metadata=metadata,

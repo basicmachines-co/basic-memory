@@ -17,17 +17,21 @@ from basic_memory.repository import ProjectRepository
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
-    """Run database migrations to ensure schema is up to date.
+    """Initialize database with migrations handled automatically by get_or_create_db.
 
     Args:
         app_config: The Basic Memory project configuration
+        
+    Note:
+        Database migrations are now handled automatically when the database 
+        connection is first established via get_or_create_db().
     """
+    # Trigger database initialization and migrations by getting the database connection
     try:
-        logger.info("Running database migrations...")
-        await db.run_migrations(app_config)
-        logger.info("Migrations completed successfully")
+        await db.get_or_create_db(app_config.database_path)
+        logger.info("Database initialization completed")
     except Exception as e:
-        logger.error(f"Error running migrations: {e}")
+        logger.error(f"Error initializing database: {e}")
         # Allow application to continue - it might still work
         # depending on what the error was, and will fail with a
         # more specific error if the database is actually unusable
@@ -44,9 +48,9 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
     """
     logger.info("Reconciling projects from config with database...")
 
-    # Get database session
+    # Get database session - migrations handled centrally
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM, ensure_migrations=False
     )
     project_repository = ProjectRepository(session_maker)
 
@@ -65,9 +69,9 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
 
 
 async def migrate_legacy_projects(app_config: BasicMemoryConfig):
-    # Get database session
+    # Get database session - migrations handled centrally
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM, ensure_migrations=False
     )
     logger.info("Migrating legacy projects...")
     project_repository = ProjectRepository(session_maker)
@@ -134,9 +138,9 @@ async def initialize_file_sync(
     # delay import
     from basic_memory.sync import WatchService
 
-    # Load app configuration
+    # Load app configuration - migrations handled centrally
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM, ensure_migrations=False
     )
     project_repository = ProjectRepository(session_maker)
 

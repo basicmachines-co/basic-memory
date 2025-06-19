@@ -52,3 +52,42 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_TOKEN }}
+
+  homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+<<<<<<< HEAD
+=======
+    permissions:
+      contents: write
+      actions: read
+>>>>>>> 2b8ca1a (Update README with new website and community links)
+    steps:
+      - name: Update Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          # Formula name in homebrew-basic-memory repo
+          formula-name: basic-memory
+          # The tap repository
+          homebrew-tap: basicmachines-co/homebrew-basic-memory
+          # Base branch of the tap repository
+          base-branch: main
+          # Download URL will be automatically constructed from the tag
+          download-url: https://github.com/basicmachines-co/basic-memory/archive/refs/tags/${{ github.ref_name }}.tar.gz
+          # Commit message for the formula update
+          commit-message: |
+            {{formulaName}} {{version}}
+<<<<<<< HEAD
+            
+            Created by https://github.com/basicmachines-co/basic-memory/actions/runs/${{ github.run_id }}
+        env:
+          # Personal Access Token with repo scope for homebrew-basic-memory repo
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+=======
+
+            Created by https://github.com/basicmachines-co/basic-memory/actions/runs/${{ github.run_id }}
+        env:
+          # Personal Access Token with repo scope for homebrew-basic-memory repo
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+>>>>>>> 2b8ca1a (Update README with new website and community links)

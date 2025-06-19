@@ -17,20 +17,21 @@ from basic_memory.services.initialization import (
 
 
 @pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.run_migrations")
-async def test_initialize_database(mock_run_migrations, project_config):
+@patch("basic_memory.services.initialization.db.get_or_create_db")
+async def test_initialize_database(mock_get_or_create_db, app_config):
     """Test initializing the database."""
-    await initialize_database(project_config)
-    mock_run_migrations.assert_called_once_with(project_config)
+    mock_get_or_create_db.return_value = (MagicMock(), MagicMock())
+    await initialize_database(app_config)
+    mock_get_or_create_db.assert_called_once_with(app_config.database_path)
 
 
 @pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.run_migrations")
-async def test_initialize_database_error(mock_run_migrations, project_config):
+@patch("basic_memory.services.initialization.db.get_or_create_db")
+async def test_initialize_database_error(mock_get_or_create_db, app_config):
     """Test handling errors during database initialization."""
-    mock_run_migrations.side_effect = Exception("Test error")
-    await initialize_database(project_config)
-    mock_run_migrations.assert_called_once_with(project_config)
+    mock_get_or_create_db.side_effect = Exception("Test error")
+    await initialize_database(app_config)
+    mock_get_or_create_db.assert_called_once_with(app_config.database_path)
 
 
 @pytest.mark.asyncio
