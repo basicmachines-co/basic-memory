@@ -72,6 +72,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to sync changes in real time. default (True)",
     )
 
+    filename_format: Literal["original", "kebab-case"] = Field(
+        default="kebab-case",
+        description="Format for generated filenames. 'original' preserves spaces and special chars, 'kebab-case' converts them to hyphens for consistency with permalinks",
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",

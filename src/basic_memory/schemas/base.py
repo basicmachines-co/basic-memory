@@ -22,7 +22,7 @@ from dateparser import parse
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, sanitize_filename
 
 
 def to_snake_case(name: str) -> str:
@@ -187,10 +187,20 @@ class Entity(BaseModel):
     @property
     def file_path(self):
         """Get the file path for this entity based on its permalink."""
+        # Import here to avoid circular dependency
+        try:
+            from basic_memory.config import app_config
+            use_kebab_case = app_config.filename_format == "kebab-case"
+        except ImportError:
+            # Fallback to original behavior if config not available
+            use_kebab_case = True
+        
+        filename = sanitize_filename(self.title) if use_kebab_case else self.title
+        
         if self.content_type == "text/markdown":
-            return f"{self.folder}/{self.title}.md" if self.folder else f"{self.title}.md"
+            return f"{self.folder}/{filename}.md" if self.folder else f"{filename}.md"
         else:
-            return f"{self.folder}/{self.title}" if self.folder else self.title
+            return f"{self.folder}/{filename}" if self.folder else filename
 
     @property
     def permalink(self) -> Permalink:
