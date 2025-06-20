@@ -1,6 +1,7 @@
 # Docker Setup Guide
 
-Basic Memory can be run in Docker containers to provide a consistent, isolated environment for your knowledge management system. This is particularly useful for integrating with existing Dockerized MCP servers or for deployment scenarios.
+Basic Memory can be run in Docker containers to provide a consistent, isolated environment for your knowledge management
+system. This is particularly useful for integrating with existing Dockerized MCP servers or for deployment scenarios.
 
 ## Quick Start
 
@@ -36,7 +37,6 @@ docker run -d \
   --name basic-memory-server \
   -v /path/to/your/obsidian-vault:/data/knowledge:rw \
   -v basic-memory-config:/root/.basic-memory:rw \
-  -e BASIC_MEMORY_PROJECTS='{"main": "/data/knowledge"}' \
   -e BASIC_MEMORY_DEFAULT_PROJECT=main \
   basic-memory
 ```
@@ -59,11 +59,75 @@ Basic Memory requires several volume mounts for proper operation:
    ```
    Persistent storage for configuration and SQLite database.
 
+You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json after Basic Memory starts.
+
 3. **Multiple Projects** (Optional):
    ```yaml
    - /path/to/project1:/data/projects/project1:rw
    - /path/to/project2:/data/projects/project2:rw
    ```
+
+You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json
+
+## CLI Commands via Docker
+
+You can run Basic Memory CLI commands inside the container using `docker exec`:
+
+### Basic Commands
+
+```bash
+# Check status
+docker exec basic-memory-server basic-memory status
+
+# Sync files
+docker exec basic-memory-server basic-memory sync
+
+# Show help
+docker exec basic-memory-server basic-memory --help
+```
+
+### Managing Projects with Volume Mounts
+
+When using Docker volumes, you'll need to configure projects to point to your mounted directories:
+
+1. **Check current configuration:**
+   ```bash
+   docker exec basic-memory-server cat /root/.basic-memory/config.json
+   ```
+
+2. **Add a project for your mounted volume:**
+   ```bash
+   # If you mounted /path/to/your/vault to /data/knowledge
+   docker exec basic-memory-server basic-memory project create my-vault /data/knowledge
+   
+   # Set it as default
+   docker exec basic-memory-server basic-memory project set-default my-vault
+   ```
+
+3. **Sync the new project:**
+   ```bash
+   docker exec basic-memory-server basic-memory sync
+   ```
+
+### Example: Setting up an Obsidian Vault
+
+If you mounted your Obsidian vault like this in docker-compose.yml:
+```yaml
+volumes:
+  - /Users/yourname/Documents/ObsidianVault:/data/obsidian:rw
+```
+
+Then configure it:
+```bash
+# Create project pointing to mounted vault
+docker exec basic-memory-server basic-memory project create obsidian /data/obsidian
+
+# Set as default
+docker exec basic-memory-server basic-memory project set-default obsidian
+
+# Sync to index all files
+docker exec basic-memory-server basic-memory sync
+```
 
 ### Environment Variables
 
@@ -71,101 +135,18 @@ Configure Basic Memory using environment variables:
 
 ```yaml
 environment:
-  # Project configuration (JSON format)
-  - BASIC_MEMORY_PROJECTS={"main": "/data/knowledge", "work": "/data/projects/work"}
-  
+
   # Default project
   - BASIC_MEMORY_DEFAULT_PROJECT=main
-  
+
   # Enable real-time sync
   - BASIC_MEMORY_SYNC_CHANGES=true
-  
+
   # Logging level
   - BASIC_MEMORY_LOG_LEVEL=INFO
-  
+
   # Sync delay in milliseconds
   - BASIC_MEMORY_SYNC_DELAY=1000
-```
-
-## MCP Server Transport Options
-
-### STDIO Transport (Default)
-
-Best for MCP client integration:
-
-```yaml
-command: ["basic-memory", "mcp"]
-```
-
-No port exposure needed. Communicates via standard input/output.
-
-### HTTP Transport
-
-For HTTP-based integrations:
-
-```yaml
-command: ["basic-memory", "mcp", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
-ports:
-  - "8000:8000"
-```
-
-## Use Cases
-
-### 1. Obsidian Vault Integration
-
-Mount your existing Obsidian vault:
-
-```yaml
-version: '3.8'
-services:
-  basic-memory:
-    build: .
-    volumes:
-      - /Users/yourname/Documents/ObsidianVault:/data/knowledge:rw
-      - basic-memory-config:/root/.basic-memory:rw
-    environment:
-      - BASIC_MEMORY_PROJECTS={"obsidian": "/data/knowledge"}
-      - BASIC_MEMORY_DEFAULT_PROJECT=obsidian
-```
-
-### 2. Multiple Knowledge Bases
-
-Support multiple projects:
-
-```yaml
-version: '3.8'
-services:
-  basic-memory:
-    build: .
-    volumes:
-      - /path/to/personal-notes:/data/projects/personal:rw
-      - /path/to/work-notes:/data/projects/work:rw
-      - basic-memory-config:/root/.basic-memory:rw
-    environment:
-      - BASIC_MEMORY_PROJECTS={"personal": "/data/projects/personal", "work": "/data/projects/work"}
-      - BASIC_MEMORY_DEFAULT_PROJECT=personal
-```
-
-### 3. MCP Server Integration
-
-For integration with existing MCP server setups:
-
-```yaml
-version: '3.8'
-services:
-  mcp-server:
-    image: your-mcp-server
-    depends_on:
-      - basic-memory
-    # ... your MCP server configuration
-    
-  basic-memory:
-    build: .
-    volumes:
-      - ./knowledge:/data/knowledge:rw
-    command: ["basic-memory", "mcp", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
-    ports:
-      - "8000:8000"
 ```
 
 ## File Permissions
@@ -196,21 +177,21 @@ When using Docker Desktop on Windows, ensure the directories are shared:
 ### Common Issues
 
 1. **File Watching Not Working:**
-   - Ensure volume mounts are read-write (`:rw`)
-   - Check directory permissions
-   - On Linux, may need to increase inotify limits:
-     ```bash
-     echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf
-     sudo sysctl -p
-     ```
+    - Ensure volume mounts are read-write (`:rw`)
+    - Check directory permissions
+    - On Linux, may need to increase inotify limits:
+      ```bash
+      echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf
+      sudo sysctl -p
+      ```
 
 2. **Configuration Not Persisting:**
-   - Use named volumes for `/root/.basic-memory`
-   - Check volume mount permissions
+    - Use named volumes for `/root/.basic-memory`
+    - Check volume mount permissions
 
 3. **Network Connectivity:**
-   - For HTTP transport, ensure port 8000 is exposed
-   - Check firewall settings
+    - For HTTP transport, ensure port 8000 is exposed
+    - Check firewall settings
 
 ### Debug Mode
 
@@ -222,51 +203,11 @@ environment:
 ```
 
 View logs:
+
 ```bash
 docker-compose logs -f basic-memory
 ```
 
-## Advanced Configuration
-
-### Custom Entry Point
-
-Use the provided entrypoint script for better configuration management:
-
-```dockerfile
-# In your custom Dockerfile
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["basic-memory", "mcp"]
-```
-
-### Health Checks
-
-Monitor container health:
-
-```yaml
-healthcheck:
-  test: ["CMD", "basic-memory", "--version"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 30s
-```
-
-### Resource Limits
-
-Set appropriate resource limits:
-
-```yaml
-deploy:
-  resources:
-    limits:
-      memory: 512M
-      cpus: '0.5'
-    reservations:
-      memory: 256M
-      cpus: '0.25'
-```
 
 ## Security Considerations
 
@@ -277,85 +218,37 @@ deploy:
    Ensure mounted directories have appropriate permissions and don't expose sensitive data.
 
 3. **Network Security:**
-   If using HTTP transport, consider using reverse proxy with SSL/TLS.
+   If using HTTP transport, consider using reverse proxy with SSL/TLS and authentication if the endpoint is available on
+   a network.
 
-4. **Secrets Management:**
-   Use Docker secrets or environment files for sensitive configuration.
+4. **IMPORTANT:** the https have no auhorization. They should not be exposed on a public network.  
 
 ## Integration Examples
 
 ### Claude Desktop with Docker
 
-Configure Claude Desktop to use the containerized Basic Memory:
+The recommended way to connect Claude Desktop to the containerized Basic Memory is using `mcp-proxy`, which converts the HTTP transport to STDIO that Claude Desktop expects:
 
-```json
-{
-  "mcpServers": {
-    "basic-memory": {
-      "command": "docker",
-      "args": [
-        "exec",
-        "basic-memory-server",
-        "basic-memory",
-        "mcp"
-      ]
-    }
-  }
-}
-```
+1. **Start the Docker container:**
+   ```bash
+   docker-compose up -d
+   ```
 
-### VS Code with Docker
+2. **Configure Claude Desktop** to use mcp-proxy:
+   ```json
+   {
+     "mcpServers": {
+       "basic-memory": {
+         "command": "uvx",
+         "args": [
+           "mcp-proxy",
+           "http://localhost:8000/mcp"
+         ]
+       }
+     }
+   }
+   ```
 
-For VS Code MCP integration:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "basic-memory": {
-        "command": "docker",
-        "args": ["exec", "basic-memory-server", "basic-memory", "mcp"]
-      }
-    }
-  }
-}
-```
-
-## Building Custom Images
-
-### Using uv for Faster Builds
-
-```dockerfile
-FROM python:3.12-slim
-
-# Install uv for faster dependency resolution
-RUN pip install uv
-
-WORKDIR /app
-COPY pyproject.toml ./
-RUN uv pip install --system .
-
-COPY . .
-CMD ["basic-memory", "mcp"]
-```
-
-### Multi-Stage Build
-
-```dockerfile
-# Build stage
-FROM python:3.12-slim as builder
-RUN pip install uv
-WORKDIR /app
-COPY . .
-RUN uv pip install --system .
-
-# Runtime stage
-FROM python:3.12-slim
-WORKDIR /app
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin/basic-memory /usr/local/bin/
-CMD ["basic-memory", "mcp"]
-```
 
 ## Support
 
@@ -364,6 +257,7 @@ For Docker-specific issues:
 1. Check the [troubleshooting section](#troubleshooting) above
 2. Review container logs: `docker-compose logs basic-memory`
 3. Verify volume mounts: `docker inspect basic-memory-server`
-4. Test file permissions: `docker exec basic-memory-server ls -la /data/knowledge`
+4. Test file permissions: `docker exec basic-memory-server ls -la /root`
 
-For general Basic Memory support, see the main [README](../README.md) and [documentation](https://memory.basicmachines.co/).
+For general Basic Memory support, see the main [README](../README.md)
+and [documentation](https://memory.basicmachines.co/).

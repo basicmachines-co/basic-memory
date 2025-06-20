@@ -10,21 +10,20 @@ services:
     
     # Volume mounts for knowledge directories and persistent data
     volumes:
-      # REQUIRED: Mount your Obsidian vault or knowledge directory
-      # Change './obsidian-vault' to your actual directory path
-      # Example: - /Users/yourname/Documents/ObsidianVault:/data/knowledge:rw
-      - ./obsidian-vault:/data/knowledge:rw
-      
-      # RECOMMENDED: Persistent storage for configuration and database
+
+      # Persistent storage for configuration and database
       - basic-memory-config:/root/.basic-memory:rw
-      
+
+      # The default project will be at /root/basic-memory
+
       # OPTIONAL: Mount additional knowledge directories for multiple projects
       # - ./work-notes:/data/projects/work:rw
       # - ./personal-notes:/data/projects/personal:rw
-    
+
+      # You can edit the project config manually in
+      #  /root/.basic-memory/config.json
     environment:
-      # Project configuration - maps project names to container paths
-      - BASIC_MEMORY_PROJECTS={"main": "/data/knowledge"}
+      # Project configuration
       - BASIC_MEMORY_DEFAULT_PROJECT=main
       
       # Enable real-time file synchronization (recommended for Docker)
@@ -40,16 +39,9 @@ services:
     ports:
       - "8000:8000"
     
-    # Command options:
-    
-    # Option 1: STDIO transport (default, recommended for MCP clients)
-    command: ["basic-memory", "mcp"]
-    
-    # Option 2: HTTP Server-Sent Events transport (uncomment to use)
-    # command: ["basic-memory", "mcp", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
-    
-    # Option 3: HTTP streamable transport (uncomment to use)
-    # command: ["basic-memory", "mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+    # Command with SSE transport (configurable via environment variables above)
+    # IMPORTANT: The SSE and streamable-http endpoints are not secured
+    command: ["basic-memory", "mcp", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
     
     # Container management
     restart: unless-stopped
