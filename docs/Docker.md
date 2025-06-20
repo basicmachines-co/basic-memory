@@ -49,7 +49,7 @@ Basic Memory provides pre-built Docker images on Docker Hub that are automatical
    ```yaml
    volumes:
      # Change './obsidian-vault' to your actual directory path
-     - /path/to/your/obsidian-vault:/data/knowledge:rw
+     - /path/to/your/obsidian-vault:/app/data:rw
    ```
 
 3. **Start the container:**
@@ -66,8 +66,8 @@ docker build -t basic-memory .
 # Run with volume mounting
 docker run -d \
   --name basic-memory-server \
-  -v /path/to/your/obsidian-vault:/data/knowledge:rw \
-  -v basic-memory-config:/root/.basic-memory:rw \
+  -v /path/to/your/obsidian-vault:/app/data:rw \
+  -v basic-memory-config:/home/basicmemory/.basic-memory:rw \
   -e BASIC_MEMORY_DEFAULT_PROJECT=main \
   basic-memory
 ```
@@ -80,25 +80,25 @@ Basic Memory requires several volume mounts for proper operation:
 
 1. **Knowledge Directory** (Required):
    ```yaml
-   - /path/to/your/obsidian-vault:/data/knowledge:rw
+   - /path/to/your/obsidian-vault:/app/data:rw
    ```
    Mount your Obsidian vault or knowledge base directory.
 
 2. **Configuration and Database** (Recommended):
    ```yaml
-   - basic-memory-config:/root/.basic-memory:rw
+   - basic-memory-config:/home/basicmemory/.basic-memory:rw
    ```
    Persistent storage for configuration and SQLite database.
 
-You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json after Basic Memory starts.
+You can edit the basic-memory config.json file located in the /home/basicmemory/.basic-memory/config.json after Basic Memory starts.
 
 3. **Multiple Projects** (Optional):
    ```yaml
-   - /path/to/project1:/data/projects/project1:rw
-   - /path/to/project2:/data/projects/project2:rw
+   - /path/to/project1:/app/data/project1:rw
+   - /path/to/project2:/app/data/project2:rw
    ```
 
-You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json
+You can edit the basic-memory config.json file located in the /home/basicmemory/.basic-memory/config.json
 
 ## CLI Commands via Docker
 
@@ -123,13 +123,13 @@ When using Docker volumes, you'll need to configure projects to point to your mo
 
 1. **Check current configuration:**
    ```bash
-   docker exec basic-memory-server cat /root/.basic-memory/config.json
+   docker exec basic-memory-server cat /home/basicmemory/.basic-memory/config.json
    ```
 
 2. **Add a project for your mounted volume:**
    ```bash
-   # If you mounted /path/to/your/vault to /data/knowledge
-   docker exec basic-memory-server basic-memory project create my-vault /data/knowledge
+   # If you mounted /path/to/your/vault to /app/data
+   docker exec basic-memory-server basic-memory project create my-vault /app/data
    
    # Set it as default
    docker exec basic-memory-server basic-memory project set-default my-vault
@@ -145,13 +145,13 @@ When using Docker volumes, you'll need to configure projects to point to your mo
 If you mounted your Obsidian vault like this in docker-compose.yml:
 ```yaml
 volumes:
-  - /Users/yourname/Documents/ObsidianVault:/data/obsidian:rw
+  - /Users/yourname/Documents/ObsidianVault:/app/data:rw
 ```
 
 Then configure it:
 ```bash
 # Create project pointing to mounted vault
-docker exec basic-memory-server basic-memory project create obsidian /data/obsidian
+docker exec basic-memory-server basic-memory project create obsidian /app/data
 
 # Set as default
 docker exec basic-memory-server basic-memory project set-default obsidian
@@ -217,7 +217,7 @@ When using Docker Desktop on Windows, ensure the directories are shared:
       ```
 
 2. **Configuration Not Persisting:**
-    - Use named volumes for `/root/.basic-memory`
+    - Use named volumes for `/home/basicmemory/.basic-memory`
     - Check volume mount permissions
 
 3. **Network Connectivity:**
@@ -242,8 +242,8 @@ docker-compose logs -f basic-memory
 
 ## Security Considerations
 
-1. **Use Non-Root User:**
-   The default Dockerfile runs as root. Consider creating a custom Dockerfile with a non-root user for production.
+1. **Non-Root User:**
+   The Dockerfile runs as a non-root user (`basicmemory`) for security.
 
 2. **Volume Permissions:**
    Ensure mounted directories have appropriate permissions and don't expose sensitive data.
@@ -288,7 +288,7 @@ For Docker-specific issues:
 1. Check the [troubleshooting section](#troubleshooting) above
 2. Review container logs: `docker-compose logs basic-memory`
 3. Verify volume mounts: `docker inspect basic-memory-server`
-4. Test file permissions: `docker exec basic-memory-server ls -la /root`
+4. Test file permissions: `docker exec basic-memory-server ls -la /home/basicmemory`
 
 For general Basic Memory support, see the main [README](../README.md)
 and [documentation](https://memory.basicmachines.co/).
