@@ -120,7 +120,7 @@ def set_default_project(
     try:
         project_name = generate_permalink(name)
 
-        response = asyncio.run(call_put(client, f"projects/{project_name}/default"))
+        response = asyncio.run(call_put(client, f"/projects/{project_name}/default"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
@@ -128,12 +128,8 @@ def set_default_project(
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
         raise typer.Exit(1)
 
-    # Reload configuration to apply the change
-    from importlib import reload
-    from basic_memory import config as config_module
-
-    reload(config_module)
-
+    # The API call above should have updated both config and MCP session
+    # No need for manual reload - the project service handles this automatically
     console.print("[green]Project activated for current session[/green]")
 
 

@@ -21,9 +21,9 @@ async def initialize_database(app_config: BasicMemoryConfig) -> None:
 
     Args:
         app_config: The Basic Memory project configuration
-        
+
     Note:
-        Database migrations are now handled automatically when the database 
+        Database migrations are now handled automatically when the database
         connection is first established via get_or_create_db().
     """
     # Trigger database initialization and migrations by getting the database connection
@@ -50,7 +50,9 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
 
     # Get database session - migrations handled centrally
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM, ensure_migrations=False
+        db_path=app_config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+        ensure_migrations=False,
     )
     project_repository = ProjectRepository(session_maker)
 
@@ -71,7 +73,9 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
 async def migrate_legacy_projects(app_config: BasicMemoryConfig):
     # Get database session - migrations handled centrally
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM, ensure_migrations=False
+        db_path=app_config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+        ensure_migrations=False,
     )
     logger.info("Migrating legacy projects...")
     project_repository = ProjectRepository(session_maker)
@@ -140,7 +144,9 @@ async def initialize_file_sync(
 
     # Load app configuration - migrations handled centrally
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM, ensure_migrations=False
+        db_path=app_config.database_path,
+        db_type=db.DatabaseType.FILESYSTEM,
+        ensure_migrations=False,
     )
     project_repository = ProjectRepository(session_maker)
 

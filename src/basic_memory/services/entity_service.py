@@ -302,7 +302,7 @@ class EntityService(BaseService[EntityModel]):
 
         Creates the entity with null checksum to indicate sync not complete.
         Relations will be added in second pass.
-        
+
         Uses UPSERT approach to handle permalink/file_path conflicts cleanly.
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
@@ -310,7 +310,7 @@ class EntityService(BaseService[EntityModel]):
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None
-        
+
         # Use UPSERT to handle conflicts cleanly
         try:
             return await self.repository.upsert_entity(model)
