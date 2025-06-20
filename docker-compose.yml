@@ -5,23 +5,30 @@ version: '3.8'
 
 services:
   basic-memory:
-    build: .
+    # Use pre-built image (recommended for most users)
+    image: basicmachines/basic-memory:latest
+    
+    # Uncomment to build locally instead:
+    # build: .
+    
     container_name: basic-memory-server
     
     # Volume mounts for knowledge directories and persistent data
     volumes:
 
       # Persistent storage for configuration and database
-      - basic-memory-config:/root/.basic-memory:rw
+      - basic-memory-config:/home/basicmemory/.basic-memory:rw
 
-      # The default project will be at /root/basic-memory
+      # Mount your knowledge directory (required)
+      # Change './knowledge' to your actual Obsidian vault or knowledge directory
+      - ./knowledge:/app/data:rw
 
       # OPTIONAL: Mount additional knowledge directories for multiple projects
-      # - ./work-notes:/data/projects/work:rw
-      # - ./personal-notes:/data/projects/personal:rw
+      # - ./work-notes:/app/data/work:rw
+      # - ./personal-notes:/app/data/personal:rw
 
-      # You can edit the project config manually in
-      #  /root/.basic-memory/config.json
+      # You can edit the project config manually in the mounted config volume
+      # The default project will be configured to use /app/data
     environment:
       # Project configuration
       - BASIC_MEMORY_DEFAULT_PROJECT=main
