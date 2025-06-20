@@ -1728,3 +1728,69 @@ async def test_move_entity_with_complex_observations(
     assert "Branch Strategy" in relation_targets
     assert "Multiple" in relation_targets
     assert "Links" in relation_targets
+
+
+@pytest.mark.asyncio
+async def test_move_entity_with_null_permalink_generates_permalink(
+    entity_service: EntityService,
+    project_config: ProjectConfig,
+    entity_repository: EntityRepository,
+):
+    """Test that moving entity with null permalink generates a new permalink automatically.
+    
+    This tests the fix for issue #155 where entities with null permalinks from the database 
+    migration would fail validation when being moved. The fix ensures that entities with 
+    null permalinks get a generated permalink during move operations, regardless of the 
+    update_permalinks_on_move setting.
+    """
+    # Create entity through direct database insertion to simulate migrated entity with null permalink
+    from basic_memory.models.knowledge import Entity as EntityModel
+    from datetime import datetime, timezone
+    
+    # Create an entity with null permalink directly in database (simulating migrated data)
+    entity_data = {
+        "title": "Test Entity",
+        "file_path": "test/null-permalink-entity.md",
+        "entity_type": "note",
+        "content_type": "text/markdown",
+        "permalink": None,  # This is the key - null permalink from migration
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+    }
+    
+    # Create the entity directly in database
+    created_entity = await entity_repository.create(entity_data)
+    assert created_entity.permalink is None
+    
+    # Create the physical file
+    file_path = project_config.home / created_entity.file_path
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text("# Test Entity\n\nContent here.")
+    
+    # Configure move without permalink updates (the default setting that previously triggered the bug)
+    app_config = BasicMemoryConfig(update_permalinks_on_move=False)
+    
+    # Move entity - this should now succeed and generate a permalink
+    moved_entity = await entity_service.move_entity(
+        identifier=created_entity.title,  # Use title since permalink is None
+        destination_path="moved/test-entity.md",
+        project_config=project_config,
+        app_config=app_config,
+    )
+    
+    # Verify the move succeeded and a permalink was generated
+    assert moved_entity is not None
+    assert moved_entity.file_path == "moved/test-entity.md"
+    assert moved_entity.permalink is not None
+    assert moved_entity.permalink != ""
+    
+    # Verify the moved entity can be used to create an EntityResponse without validation errors
+    from basic_memory.schemas.response import EntityResponse
+    response = EntityResponse.model_validate(moved_entity)
+    assert response.permalink == moved_entity.permalink
+    
+    # Verify the physical file was moved
+    old_path = project_config.home / "test/null-permalink-entity.md"
+    new_path = project_config.home / "moved/test-entity.md"
+    assert not old_path.exists()
+    assert new_path.exists()

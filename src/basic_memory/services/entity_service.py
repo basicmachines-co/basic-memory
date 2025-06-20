@@ -682,8 +682,8 @@ class EntityService(BaseService[EntityModel]):
             # 6. Prepare database updates
             updates = {"file_path": destination_path}
 
-            # 7. Update permalink if configured
-            if app_config.update_permalinks_on_move:
+            # 7. Update permalink if configured or if entity has null permalink
+            if app_config.update_permalinks_on_move or old_permalink is None:
                 # Generate new permalink from destination path
                 new_permalink = await self.resolve_permalink(destination_path)
 
@@ -693,7 +693,10 @@ class EntityService(BaseService[EntityModel]):
                 )
 
                 updates["permalink"] = new_permalink
-                logger.info(f"Updated permalink: {old_permalink} -> {new_permalink}")
+                if old_permalink is None:
+                    logger.info(f"Generated permalink for entity with null permalink: {new_permalink}")
+                else:
+                    logger.info(f"Updated permalink: {old_permalink} -> {new_permalink}")
 
             # 8. Recalculate checksum
             new_checksum = await self.file_service.compute_checksum(destination_path)
