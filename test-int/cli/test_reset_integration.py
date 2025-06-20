@@ -77,7 +77,7 @@ async def test_reset_config_file_behavior(config_manager):
 async def test_reset_command_source_code_validation():
     """Validate that the reset command source contains the required fix."""
     # This test ensures the fix for issue #151 is present in the source code
-    reset_source_path = Path("/Users/phernandez/dev/basicmachines/basic-memory/src/basic_memory/cli/commands/db.py")
+    reset_source_path = Path(__file__).parent.parent.parent / "src" / "basic_memory" / "cli" / "commands" / "db.py"
     reset_source = reset_source_path.read_text()
     
     # Verify the key components of the fix are present
