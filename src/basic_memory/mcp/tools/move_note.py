@@ -7,9 +7,151 @@ from loguru import logger
 
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_post
+from basic_memory.mcp.tools.utils import call_post, call_get
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas import EntityResponse
+from basic_memory.schemas.project_info import ProjectList
+
+
+async def _detect_cross_project_move_attempt(
+    identifier: str, destination_path: str, current_project: str
+) -> Optional[str]:
+    """Detect potential cross-project move attempts and return guidance.
+    
+    Args:
+        identifier: The note identifier being moved
+        destination_path: The destination path
+        current_project: The current active project
+        
+    Returns:
+        Error message with guidance if cross-project move is detected, None otherwise
+    """
+    try:
+        # Get list of all available projects to check against
+        response = await call_get(client, "/projects/projects")
+        project_list = ProjectList.model_validate(response.json())
+        project_names = [p.name.lower() for p in project_list.projects]
+        
+        # Check if destination path contains any project names
+        dest_lower = destination_path.lower()
+        path_parts = dest_lower.split("/")
+        
+        # Look for project names in the destination path
+        for part in path_parts:
+            if part in project_names and part != current_project.lower():
+                # Found a different project name in the path
+                matching_project = next(p.name for p in project_list.projects if p.name.lower() == part)
+                return _format_cross_project_error_response(
+                    identifier, destination_path, current_project, matching_project
+                )
+        
+        # Check if the destination path looks like it might be trying to reference another project
+        # (e.g., contains common project-like patterns)
+        if any(keyword in dest_lower for keyword in ["project", "workspace", "repo"]):
+            # This might be a cross-project attempt, but we can't be sure
+            # Return a general guidance message
+            available_projects = [p.name for p in project_list.projects if p.name != current_project]
+            if available_projects:
+                return _format_potential_cross_project_guidance(
+                    identifier, destination_path, current_project, available_projects
+                )
+    
+    except Exception as e:
+        # If we can't detect, don't interfere with normal error handling
+        logger.debug(f"Could not check for cross-project move: {e}")
+        return None
+    
+    return None
+
+
+def _format_cross_project_error_response(
+    identifier: str, destination_path: str, current_project: str, target_project: str
+) -> str:
+    """Format error response for detected cross-project move attempts."""
+    return dedent(f"""
+        # Move Failed - Cross-Project Move Not Supported
+        
+        Cannot move '{identifier}' to '{destination_path}' because it appears to reference a different project ('{target_project}').
+        
+        **Current project:** {current_project}
+        **Target project:** {target_project}
+        
+        ## Cross-project moves are not supported directly
+        
+        Notes can only be moved within the same project. To move content between projects, use this workflow:
+        
+        ### Recommended approach:
+        ```
+        # 1. Read the note content from current project
+        read_note("{identifier}")
+        
+        # 2. Switch to the target project
+        switch_project("{target_project}")
+        
+        # 3. Create the note in the target project
+        write_note("Note Title", "content from step 1", "target-folder")
+        
+        # 4. Switch back to original project (optional)
+        switch_project("{current_project}")
+        
+        # 5. Delete the original note if desired
+        delete_note("{identifier}")
+        ```
+        
+        ### Alternative: Stay in current project
+        If you want to move the note within the **{current_project}** project only:
+        ```
+        move_note("{identifier}", "new-folder/new-name.md")
+        ```
+        
+        ## Available projects:
+        Use `list_projects()` to see all available projects and `switch_project("project-name")` to change projects.
+        """).strip()
+
+
+def _format_potential_cross_project_guidance(
+    identifier: str, destination_path: str, current_project: str, available_projects: list[str]
+) -> str:
+    """Format guidance for potentially cross-project moves."""
+    other_projects = ", ".join(available_projects[:3])  # Show first 3 projects
+    if len(available_projects) > 3:
+        other_projects += f" (and {len(available_projects) - 3} others)"
+    
+    return dedent(f"""
+        # Move Failed - Check Project Context
+        
+        Cannot move '{identifier}' to '{destination_path}' within the current project '{current_project}'.
+        
+        ## If you intended to move within the current project:
+        The destination path should be relative to the project root:
+        ```
+        move_note("{identifier}", "folder/filename.md")
+        ```
+        
+        ## If you intended to move to a different project:
+        Cross-project moves require switching projects first. Available projects: {other_projects}
+        
+        ### To move to another project:
+        ```
+        # 1. Read the content
+        read_note("{identifier}")
+        
+        # 2. Switch to target project
+        switch_project("target-project-name")
+        
+        # 3. Create note in target project
+        write_note("Title", "content", "folder")
+        
+        # 4. Switch back and delete original if desired
+        switch_project("{current_project}")
+        delete_note("{identifier}")
+        ```
+        
+        ### To see all projects:
+        ```
+        list_projects()
+        ```
+        """).strip()
 
 
 def _format_move_error_response(error_message: str, identifier: str, destination_path: str) -> str:
@@ -257,6 +399,14 @@ async def move_note(
 
     active_project = get_active_project(project)
     project_url = active_project.project_url
+
+    # Check for potential cross-project move attempts
+    cross_project_error = await _detect_cross_project_move_attempt(
+        identifier, destination_path, active_project.name
+    )
+    if cross_project_error:
+        logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
+        return cross_project_error
 
     try:
         # Prepare move request
