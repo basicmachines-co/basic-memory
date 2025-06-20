@@ -27,7 +27,7 @@ __pycache__/
 *.pyd
 .Python
 
-# Virtual environments
+# Virtual environments (uv creates these during build)
 .venv/
 venv/
 .env
