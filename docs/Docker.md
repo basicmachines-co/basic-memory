@@ -15,7 +15,7 @@ Basic Memory provides pre-built Docker images on Docker Hub that are automatical
      --name basic-memory-server \
      -p 8000:8000 \
      -v /path/to/your/obsidian-vault:/app/data:rw \
-     -v basic-memory-config:/home/basicmemory/.basic-memory:rw \
+     -v basic-memory-config:/root/.basic-memory:rw \
      basicmachines/basic-memory:latest
    ```
 
@@ -30,7 +30,7 @@ Basic Memory provides pre-built Docker images on Docker Hub that are automatical
          - "8000:8000"
        volumes:
          - /path/to/your/obsidian-vault:/app/data:rw
-         - basic-memory-config:/home/basicmemory/.basic-memory:rw
+         - basic-memory-config:/root/.basic-memory:rw
        environment:
          - BASIC_MEMORY_DEFAULT_PROJECT=main
        restart: unless-stopped
@@ -67,7 +67,7 @@ docker build -t basic-memory .
 docker run -d \
   --name basic-memory-server \
   -v /path/to/your/obsidian-vault:/app/data:rw \
-  -v basic-memory-config:/home/basicmemory/.basic-memory:rw \
+  -v basic-memory-config:/root/.basic-memory:rw \
   -e BASIC_MEMORY_DEFAULT_PROJECT=main \
   basic-memory
 ```
@@ -86,11 +86,11 @@ Basic Memory requires several volume mounts for proper operation:
 
 2. **Configuration and Database** (Recommended):
    ```yaml
-   - basic-memory-config:/home/basicmemory/.basic-memory:rw
+   - basic-memory-config:/root/.basic-memory:rw
    ```
    Persistent storage for configuration and SQLite database.
 
-You can edit the basic-memory config.json file located in the /home/basicmemory/.basic-memory/config.json after Basic Memory starts.
+You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json after Basic Memory starts.
 
 3. **Multiple Projects** (Optional):
    ```yaml
@@ -98,7 +98,7 @@ You can edit the basic-memory config.json file located in the /home/basicmemory/
    - /path/to/project2:/app/data/project2:rw
    ```
 
-You can edit the basic-memory config.json file located in the /home/basicmemory/.basic-memory/config.json
+You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json
 
 ## CLI Commands via Docker
 
@@ -123,7 +123,7 @@ When using Docker volumes, you'll need to configure projects to point to your mo
 
 1. **Check current configuration:**
    ```bash
-   docker exec basic-memory-server cat /home/basicmemory/.basic-memory/config.json
+   docker exec basic-memory-server cat /root/.basic-memory/config.json
    ```
 
 2. **Add a project for your mounted volume:**
@@ -217,7 +217,7 @@ When using Docker Desktop on Windows, ensure the directories are shared:
       ```
 
 2. **Configuration Not Persisting:**
-    - Use named volumes for `/home/basicmemory/.basic-memory`
+    - Use named volumes for `/root/.basic-memory`
     - Check volume mount permissions
 
 3. **Network Connectivity:**
@@ -242,8 +242,8 @@ docker-compose logs -f basic-memory
 
 ## Security Considerations
 
-1. **Non-Root User:**
-   The Dockerfile runs as a non-root user (`basicmemory`) for security.
+1. **Docker Security:**
+   The container runs as root for simplicity. For production, consider additional security measures.
 
 2. **Volume Permissions:**
    Ensure mounted directories have appropriate permissions and don't expose sensitive data.
@@ -288,7 +288,7 @@ For Docker-specific issues:
 1. Check the [troubleshooting section](#troubleshooting) above
 2. Review container logs: `docker-compose logs basic-memory`
 3. Verify volume mounts: `docker inspect basic-memory-server`
-4. Test file permissions: `docker exec basic-memory-server ls -la /home/basicmemory`
+4. Test file permissions: `docker exec basic-memory-server ls -la /root`
 
 For general Basic Memory support, see the main [README](../README.md)
 and [documentation](https://memory.basicmachines.co/).

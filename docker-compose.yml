@@ -5,11 +5,7 @@ version: '3.8'
 
 services:
   basic-memory:
-    # Use pre-built image (recommended for most users)
-    image: basicmachines/basic-memory:latest
-    
-    # Uncomment to build locally instead:
-    # build: .
+    build: .
     
     container_name: basic-memory-server
     
@@ -17,7 +13,7 @@ services:
     volumes:
 
       # Persistent storage for configuration and database
-      - basic-memory-config:/home/basicmemory/.basic-memory:rw
+      - basic-memory-config:/root/.basic-memory:rw
 
       # Mount your knowledge directory (required)
       # Change './knowledge' to your actual Obsidian vault or knowledge directory
