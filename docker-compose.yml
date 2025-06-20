@@ -5,7 +5,11 @@ version: '3.8'
 
 services:
   basic-memory:
-    build: .
+    # Use pre-built image (recommended for most users)
+    image: basicmachines/basic-memory:latest
+    
+    # Uncomment to build locally instead:
+    # build: .
     
     container_name: basic-memory-server
     

@@ -57,7 +57,7 @@ Basic Memory provides pre-built Docker images on Docker Hub that are automatical
    docker-compose up -d
    ```
 
-### Option 2: Using Docker CLI
+### Option 3: Using Docker CLI
 
 ```bash
 # Build the image
@@ -252,7 +252,7 @@ docker-compose logs -f basic-memory
    If using HTTP transport, consider using reverse proxy with SSL/TLS and authentication if the endpoint is available on
    a network.
 
-4. **IMPORTANT:** the https have no auhorization. They should not be exposed on a public network.  
+4. **IMPORTANT:** The HTTP endpoints have no authorization. They should not be exposed on a public network.  
 
 ## Integration Examples
 
