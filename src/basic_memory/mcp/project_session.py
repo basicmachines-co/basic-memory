@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 from loguru import logger
 
-from basic_memory.config import ProjectConfig, get_project_config
+from basic_memory.config import ProjectConfig, get_project_config, config_manager
 
 
 @dataclass
@@ -63,6 +63,21 @@ class ProjectSession:
         """Reset current project back to the default project."""
         self.current_project = self.default_project  # pragma: no cover
         logger.info(f"Reset project context to default: {self.default_project}")  # pragma: no cover
+
+    def refresh_from_config(self) -> None:
+        """Refresh session state from current configuration.
+        
+        This method reloads the default project from config and reinitializes
+        the session. This should be called when the default project is changed
+        via CLI or API to ensure MCP session stays in sync.
+        """
+        # Reload config to get latest default project
+        current_config = config_manager.load_config()
+        new_default = current_config.default_project
+        
+        # Reinitialize with new default
+        self.initialize(new_default)
+        logger.info(f"Refreshed project session from config, new default: {new_default}")
 
 
 # Global session instance

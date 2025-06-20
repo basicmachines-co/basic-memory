@@ -411,6 +411,31 @@ Development versions are automatically published on every commit to main with ve
 pip install basic-memory --pre --force-reinstall
 ```
 
+### Docker
+
+Run Basic Memory in a container with volume mounting for your Obsidian vault:
+
+```bash
+# Clone and start with Docker Compose
+git clone https://github.com/basicmachines-co/basic-memory.git
+cd basic-memory
+
+# Edit docker-compose.yml to point to your Obsidian vault
+# Then start the container
+docker-compose up -d
+```
+
+Or use Docker directly:
+```bash
+docker run -d \
+  --name basic-memory-server \
+  -v /path/to/your/obsidian-vault:/data/knowledge:rw \
+  -v basic-memory-config:/root/.basic-memory:rw \
+  ghcr.io/basicmachines-co/basic-memory:latest
+```
+
+See [Docker Setup Guide](docs/Docker.md) for detailed configuration options, multiple project setup, and integration examples.
+
 ## License
 
 AGPL-3.0

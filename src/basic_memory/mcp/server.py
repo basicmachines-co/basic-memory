@@ -105,6 +105,5 @@ auth_settings, auth_provider = create_auth_config()
 # Create the shared server instance
 mcp = FastMCP(
     name="Basic Memory",
-    log_level="DEBUG",
     auth=auth_provider,
 )

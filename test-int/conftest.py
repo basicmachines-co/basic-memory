@@ -148,6 +148,7 @@ def config_manager(app_config: BasicMemoryConfig, config_home, monkeypatch) -> C
     # Patch the config_manager in all locations where it's imported
     monkeypatch.setattr("basic_memory.config.config_manager", config_manager)
     monkeypatch.setattr("basic_memory.services.project_service.config_manager", config_manager)
+    monkeypatch.setattr("basic_memory.mcp.project_session.config_manager", config_manager)
 
     return config_manager
 

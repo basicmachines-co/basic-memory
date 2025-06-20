@@ -95,11 +95,12 @@ async def get_or_create_db(
 
     if _engine is None:
         _engine, _session_maker = _create_engine_and_session(db_path, db_type)
-        
+
         # Run migrations automatically unless explicitly disabled
         if ensure_migrations:
             if app_config is None:
                 from basic_memory.config import app_config as global_app_config
+
                 app_config = global_app_config
             await run_migrations(app_config, db_type)
 
@@ -170,12 +171,12 @@ async def run_migrations(
 ):  # pragma: no cover
     """Run any pending alembic migrations."""
     global _migrations_completed
-    
+
     # Skip if migrations already completed unless forced
     if _migrations_completed and not force:
         logger.debug("Migrations already completed in this session, skipping")
         return
-        
+
     logger.info("Running database migrations...")
     try:
         # Get the absolute path to the alembic directory relative to this file
@@ -206,7 +207,7 @@ async def run_migrations(
         # initialize the search Index schema
         # the project_id is not used for init_search_index, so we pass a dummy value
         await SearchRepository(session_maker, 1).init_search_index()
-        
+
         # Mark migrations as completed
         _migrations_completed = True
     except Exception as e:  # pragma: no cover
