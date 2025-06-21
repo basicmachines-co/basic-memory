@@ -1,9 +1,11 @@
 """MCP server command with streamable HTTP transport."""
 
 import asyncio
-import typer
+from loguru import logger
+
 
 from basic_memory.cli.app import app
+from basic_memory.config import app_config
 
 # Import mcp instance
 from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
@@ -13,40 +15,14 @@ import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
 
 # Import prompts to register them
 import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
-from loguru import logger
 
 
 @app.command()
-def mcp(
-    transport: str = typer.Option("stdio", help="Transport type: stdio, streamable-http, or sse"),
-    host: str = typer.Option(
-        "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
-    ),
-    port: int = typer.Option(8000, help="Port for HTTP transports"),
-    path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
-):  # pragma: no cover
-    """Run the MCP server with configurable transport options.
-
-    This command starts an MCP server using one of three transport options:
-
-    - stdio: Standard I/O (good for local usage)
-    - streamable-http: Recommended for web deployments (default)
-    - sse: Server-Sent Events (for compatibility with existing clients)
+def mcp():  # pragma: no cover
+    """
+    Run the MCP server with stdio transport.
     """
 
-    # Check if OAuth is enabled
-    import os
-
-    auth_enabled = os.getenv("FASTMCP_AUTH_ENABLED", "false").lower() == "true"
-    if auth_enabled:
-        logger.info("OAuth authentication is ENABLED")
-        logger.info(f"Issuer URL: {os.getenv('FASTMCP_AUTH_ISSUER_URL', 'http://localhost:8000')}")
-        if os.getenv("FASTMCP_AUTH_REQUIRED_SCOPES"):
-            logger.info(f"Required scopes: {os.getenv('FASTMCP_AUTH_REQUIRED_SCOPES')}")
-    else:
-        logger.info("OAuth authentication is DISABLED")
-
-    from basic_memory.config import app_config
     from basic_memory.services.initialization import initialize_file_sync
 
     # Start the MCP server with the specified transport
@@ -73,18 +49,8 @@ def mcp(
         logger.info("Started file sync in background")
 
     # Now run the MCP server (blocks)
-    logger.info(f"Starting MCP server with {transport.upper()} transport")
+    logger.info("Starting MCP server with stdio transport")
 
-    if transport == "stdio":
-        mcp_server.run(
-            transport=transport,
-            log_level="INFO",
-        )
-    elif transport == "streamable-http" or transport == "sse":
-        mcp_server.run(
-            transport=transport,
-            host=host,
-            port=port,
-            path=path,
-            log_level="INFO",
-        )
+    mcp_server.run(
+        transport="stdio",
+    )
