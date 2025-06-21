@@ -125,8 +125,8 @@ async def mcp_discovery():
         # This server's MCP endpoints
         "endpoints": {
             "mcp_server": "http://localhost:8000/mcp",
-            "health": "http://localhost:8000/health",
-            "discovery": "http://localhost:8000/mcp",
+            "health": "http://localhost:8000/health", 
+            "discovery": "http://localhost:8000/discovery",
         },
         "capabilities": ["resources", "tools", "prompts", "search"],
         # Additional metadata
