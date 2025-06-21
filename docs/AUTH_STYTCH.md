@@ -119,13 +119,9 @@ https://stytch.com/dashboard/organizations?organization_id=organization-test-b0d
    - Simplify to FastMCP BearerAuth with Stytch JWKS validation
 
 2. **Update MCP Server Configuration**:
-   ```python
-   # Simplified auth configuration
-   FASTMCP_AUTH_ENABLED=true
-   FASTMCP_AUTH_PROVIDER=cloud
-   FASTMCP_AUTH_JWKS_URI=https://api.stytch.com/v1/sessions/jwks/{project_id}
-   FASTMCP_AUTH_ISSUER=https://api.stytch.com
-   ```
+   - implement auth endpoints to deleage to cloud web app
+   - add cors 
+   - basic memory validates JWT in requests
 
 ### Phase 4: Cloud Integration
 
