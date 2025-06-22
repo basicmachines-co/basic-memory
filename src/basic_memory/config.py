@@ -337,12 +337,15 @@ def setup_basic_memory_logging():  # pragma: no cover
         # print("Skipping duplicate logging setup")
         return
 
+    # Check for console logging environment variable
+    console_logging = os.getenv("BASIC_MEMORY_CONSOLE_LOGGING", "false").lower() == "true"
+
     setup_logging(
         env=config_manager.config.env,
         home_dir=user_home,  # Use user home for logs
         log_level=config_manager.load_config().log_level,
         log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",
-        console=False,
+        console=console_logging,
     )
 
     logger.info(f"Basic Memory {basic_memory.__version__} (Project: {config.project})")

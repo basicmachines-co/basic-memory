@@ -49,8 +49,8 @@ import basic_memory.mcp.tools  # noqa: E402, F401
 import basic_memory.mcp.prompts  # noqa: E402, F401
 
 # Access auth settings from the MCP server's auth provider
-mcp.auth = BasicMemoryBearerAuthProvider()
-auth_settings = mcp.auth.auth_settings
+auth_provider = BasicMemoryBearerAuthProvider()
+mcp.auth = auth_provider
 
 
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
@@ -66,8 +66,8 @@ async def oauth_protected_resource(request):
 
     return JSONResponse(
         {
-            "resource": auth_settings.mcp_server_url,
-            "authorization_servers": [auth_settings.oauth_server_base_url],
+            "resource": auth_provider.auth_settings.mcp_server_url,
+            "authorization_servers": [auth_provider.auth_settings.oauth_server_base_url],
             "scopes_supported": ["basic_memory:read", "basic_memory:write"],
             "bearer_methods_supported": ["header"],
             "resource_documentation": "https://github.com/basicmachines-co/basic-memory",
