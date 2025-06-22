@@ -21,7 +21,9 @@ async def oauth_authorization_server(request):
     from fastapi.responses import JSONResponse
     from loguru import logger
 
-    oauth_server_base = "http://localhost:3000"
+    oauth_server_base = (
+        "https://test.stytch.com/v1/public/project-test-6d902c62-fc8f-40ea-a4b1-c260966d4655"
+    )
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -97,7 +99,7 @@ async def oauth_client_registration(request):
             body = await request.body()
             logger.info(f"Proxying client registration to {oauth_server_base}")
             response = await client.post(
-                f"{oauth_server_base}/api/oauth/register",
+                f"{oauth_server_base}/oauth2/register",
                 content=body,
                 headers={"content-type": "application/json"},
             )

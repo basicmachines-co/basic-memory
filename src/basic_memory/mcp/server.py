@@ -11,6 +11,7 @@ from fastmcp import FastMCP
 from fastmcp.utilities.logging import configure_logging as mcp_configure_logging
 
 from basic_memory.config import app_config
+from basic_memory.mcp.auth import StytchBearerAuthProvider
 from basic_memory.services.initialization import initialize_app
 from basic_memory.mcp.project_session import session
 
@@ -37,9 +38,9 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:  # pragma:
         pass
 
 
-# Create the shared server instance
+# Create the shared server instance with custom Stytch auth
 mcp = FastMCP(
     name="Basic Memory",
-    auth=None,
+    auth=StytchBearerAuthProvider(),
     lifespan=app_lifespan,
 )
