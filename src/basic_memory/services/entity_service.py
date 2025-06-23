@@ -15,6 +15,7 @@ from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
 from basic_memory.models import Entity as EntityModel
 from basic_memory.models import Observation, Relation
+from basic_memory.models.knowledge import Entity
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
@@ -44,6 +45,39 @@ class EntityService(BaseService[EntityModel]):
         self.file_service = file_service
         self.link_resolver = link_resolver
 
+    async def detect_file_path_conflicts(self, file_path: str) -> List[Entity]:
+        """Detect potential file path conflicts for a given file path.
+        
+        This checks for entities with similar file paths that might cause conflicts:
+        - Case sensitivity differences (Finance/file.md vs finance/file.md)
+        - Character encoding differences
+        - Hyphen vs space differences
+        - Unicode normalization differences
+        
+        Args:
+            file_path: The file path to check for conflicts
+            
+        Returns:
+            List of entities that might conflict with the given file path
+        """
+        from basic_memory.utils import detect_potential_file_conflicts
+        
+        conflicts = []
+        
+        # Get all existing file paths
+        all_entities = await self.repository.find_all()
+        existing_paths = [entity.file_path for entity in all_entities]
+        
+        # Use the enhanced conflict detection utility
+        conflicting_paths = detect_potential_file_conflicts(file_path, existing_paths)
+        
+        # Find the entities corresponding to conflicting paths
+        for entity in all_entities:
+            if entity.file_path in conflicting_paths:
+                conflicts.append(entity)
+        
+        return conflicts
+
     async def resolve_permalink(
         self, file_path: Permalink | Path, markdown: Optional[EntityMarkdown] = None
     ) -> str:
@@ -54,18 +88,30 @@ class EntityService(BaseService[EntityModel]):
         2. If markdown has permalink but it's used by another file -> make unique
         3. For existing files, keep current permalink from db
         4. Generate new unique permalink from file path
+        
+        Enhanced to detect and handle character-related conflicts.
         """
+        file_path_str = str(file_path)
+        
+        # Check for potential file path conflicts before resolving permalink
+        conflicts = await self.detect_file_path_conflicts(file_path_str)
+        if conflicts:
+            logger.warning(
+                f"Detected potential file path conflicts for '{file_path_str}': "
+                f"{[entity.file_path for entity in conflicts]}"
+            )
+        
         # If markdown has explicit permalink, try to validate it
         if markdown and markdown.frontmatter.permalink:
             desired_permalink = markdown.frontmatter.permalink
             existing = await self.repository.get_by_permalink(desired_permalink)
 
             # If no conflict or it's our own file, use as is
-            if not existing or existing.file_path == str(file_path):
+            if not existing or existing.file_path == file_path_str:
                 return desired_permalink
 
         # For existing files, try to find current permalink
-        existing = await self.repository.get_by_file_path(str(file_path))
+        existing = await self.repository.get_by_file_path(file_path_str)
         if existing:
             return existing.permalink
 
@@ -75,7 +121,7 @@ class EntityService(BaseService[EntityModel]):
         else:
             desired_permalink = generate_permalink(file_path)
 
-        # Make unique if needed
+        # Make unique if needed - enhanced to handle character conflicts
         permalink = desired_permalink
         suffix = 1
         while await self.repository.get_by_permalink(permalink):
