@@ -142,7 +142,7 @@ class EntityRepository(Repository[Entity]):
                 await session.flush()
                 # Return with relationships loaded
                 query = (
-                    select(Entity)
+                    self.select()
                     .where(Entity.file_path == entity.file_path)
                     .options(*self.get_load_options())
                 )
@@ -162,7 +162,7 @@ class EntityRepository(Repository[Entity]):
 
                 # Return with relationships loaded
                 query = (
-                    select(Entity)
+                    self.select()
                     .where(Entity.file_path == entity.file_path)
                     .options(*self.get_load_options())
                 )
@@ -203,7 +203,7 @@ class EntityRepository(Repository[Entity]):
                     await session.flush()
                     # Return the updated entity with relationships loaded
                     query = (
-                        select(Entity)
+                        self.select()
                         .where(Entity.file_path == entity.file_path)
                         .options(*self.get_load_options())
                     )
@@ -243,7 +243,7 @@ class EntityRepository(Repository[Entity]):
 
         # Return the inserted entity with relationships loaded
         query = (
-            select(Entity)
+            self.select()
             .where(Entity.file_path == entity.file_path)
             .options(*self.get_load_options())
         )
