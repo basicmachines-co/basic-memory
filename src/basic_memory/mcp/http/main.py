@@ -60,8 +60,49 @@ mcp.auth = auth_provider
 # We'll add the OAuth protected resource route after creating the FastAPI app
 
 
+# Custom middleware to handle /mcp and /mcp/ without redirects
+class NoRedirectMiddleware:
+    def __init__(self, app):
+        self.app = app
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/mcp":
+            # Rewrite path to include trailing slash without redirect
+            scope["path"] = "/mcp/"
+            scope["raw_path"] = b"/mcp/"
+        await self.app(scope, receive, send)
+
+
+# Middleware to handle Fly.io proxy headers and prevent HTTPS redirects
+class FlyProxyMiddleware:
+    def __init__(self, app):
+        self.app = app
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            
+            # Handle Fly.io proxy headers
+            if b"x-forwarded-proto" in headers:
+                proto = headers[b"x-forwarded-proto"].decode()
+                if proto == "https":
+                    scope["scheme"] = "https"
+            
+            if b"x-forwarded-ssl" in headers:
+                ssl = headers[b"x-forwarded-ssl"].decode()
+                if ssl == "on":
+                    scope["scheme"] = "https"
+            
+        await self.app(scope, receive, send)
+
 # Create the MCP app directly as our main app with trailing slash path
-app = mcp.http_app(path="/mcp/")
+app = mcp.http_app(path="/mcp")
+
+# Add proxy middleware first to handle Fly.io headers
+app.add_middleware(FlyProxyMiddleware)
+
+# Add the no-redirect middleware second
+app.add_middleware(NoRedirectMiddleware)
 
 # Add CORS middleware to the MCP app
 app.add_middleware(
@@ -71,6 +112,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add OAuth authorization server metadata route to override MCP's hardcoded route
+async def oauth_authorization_server_metadata(request):
+    """OAuth 2.1 Authorization Server Metadata with public client support."""
+    return JSONResponse({
+        "issuer": auth_provider.auth_settings.oauth_server_base_url,
+        "authorization_endpoint": f"{auth_provider.auth_settings.oauth_server_base_url}/authorize",
+        "token_endpoint": f"{auth_provider.auth_settings.oauth_server_base_url}/token",
+        "registration_endpoint": auth_provider.get_stytch_registration_endpoint(),
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],  # Support both confidential and public clients
+        "code_challenge_methods_supported": ["S256"],
+        "scopes_supported": ["basic_memory:read", "basic_memory:write"],
+        "service_documentation": "https://github.com/basicmachines-co/basic-memory",
+    })
 
 # Add OAuth protected resource route to MCP app
 async def oauth_protected_resource(request):
@@ -83,9 +140,17 @@ async def oauth_protected_resource(request):
         "resource_documentation": "https://github.com/basicmachines-co/basic-memory",
     })
 
-# Add the route to the Starlette app
-oauth_route = Route("/.well-known/oauth-protected-resource", oauth_protected_resource, methods=["GET"])
-app.router.routes.append(oauth_route)
+# Add custom routes to the Starlette app (these will override MCP's default routes)
+oauth_auth_server_route = Route("/.well-known/oauth-authorization-server", oauth_authorization_server_metadata, methods=["GET"])
+oauth_protected_route = Route("/.well-known/oauth-protected-resource", oauth_protected_resource, methods=["GET"])
+
+# Insert at the beginning to override MCP's routes
+app.router.routes.insert(0, oauth_auth_server_route)
+app.router.routes.insert(1, oauth_protected_route)
+
+print(f"MCP app type: {type(app)}")
+print(f"MCP app routes: {getattr(app, 'routes', 'No routes attribute')}")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)
