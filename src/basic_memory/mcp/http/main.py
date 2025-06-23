@@ -34,8 +34,11 @@ Usage:
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from starlette.routing import Route
+from starlette.responses import JSONResponse
 
 from basic_memory.mcp.http.auth import BasicMemoryBearerAuthProvider
 
@@ -57,16 +60,10 @@ mcp.auth = auth_provider
 # We'll add the OAuth protected resource route after creating the FastAPI app
 
 
-# Create the MCP app first
-mcp_app = mcp.http_app()
+# Create the MCP app directly as our main app with trailing slash path
+app = mcp.http_app(path="/mcp/")
 
-# Create parent FastAPI app with MCP's lifespan
-app = FastAPI(
-    title="Basic Memory MCP Http ",
-    lifespan=mcp_app.lifespan
-)
-
-# Add CORS middleware to the parent app
+# Add CORS middleware to the MCP app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -75,20 +72,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add OAuth protected resource route to parent app
-@app.get("/.well-known/oauth-protected-resource")
-async def oauth_protected_resource():
+# Add OAuth protected resource route to MCP app
+async def oauth_protected_resource(request):
     """OAuth 2.0 protected resource metadata (RFC 8707)."""
-    return {
+    return JSONResponse({
         "resource": auth_provider.auth_settings.mcp_server_url,
         "authorization_servers": [auth_provider.auth_settings.oauth_server_base_url],
         "scopes_supported": ["basic_memory:read", "basic_memory:write"],
         "bearer_methods_supported": ["header"],
         "resource_documentation": "https://github.com/basicmachines-co/basic-memory",
-    }
+    })
 
-# Mount the MCP app - it will be available at /mcp
-app.mount("/", mcp_app)
+# Add the route to the Starlette app
+oauth_route = Route("/.well-known/oauth-protected-resource", oauth_protected_resource, methods=["GET"])
+app.router.routes.append(oauth_route)
 
 if __name__ == "__main__":
     uvicorn.run(app, host=mcp.settings.host, port=mcp.settings.port)

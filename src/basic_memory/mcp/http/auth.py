@@ -1,5 +1,7 @@
 """Custom authentication providers for Basic Memory MCP server."""
 
+from loguru import logger
+from mcp.server.auth.provider import AccessToken
 from fastmcp.server.auth.providers.bearer_env import (
     EnvBearerAuthProviderSettings,
     EnvBearerAuthProvider,
@@ -48,6 +50,12 @@ class BasicMemoryBearerAuthProvider(EnvBearerAuthProvider):
         settings = AuthSettings()  # pyright: ignore [reportCallIssue]
         self.auth_settings = settings
 
+        logger.info(f"Auth Provider initialized with:")
+        logger.info(f"  JWKS URI: {settings.jwks_uri}")
+        logger.info(f"  Audience: {settings.audience}")
+        logger.info(f"  Required Scopes: {settings.required_scopes}")
+        logger.info(f"  Issuer URN: {settings.issuer_urn}")
+
         super().__init__(
             jwks_uri=settings.jwks_uri,
             audience=settings.audience,
@@ -56,3 +64,20 @@ class BasicMemoryBearerAuthProvider(EnvBearerAuthProvider):
 
         # Override the issuer with issuer_urn
         self.issuer = settings.issuer_urn
+        logger.info(f"Auth Provider issuer set to: {self.issuer}")
+    
+    async def load_access_token(self, token: str) -> AccessToken | None:
+        """Override to add debug logging for JWT validation."""
+        logger.info(f"JWT validation attempt with token: {token[:50]}...")
+        
+        try:
+            result = await super().load_access_token(token)
+            if result:
+                logger.info(f"JWT validation SUCCESS: client_id={result.client_id}, scopes={result.scopes}")
+                return result
+            else:
+                logger.warning("JWT validation FAILED: token invalid or expired")
+                return None
+        except Exception as e:
+            logger.error(f"JWT validation ERROR: {e}")
+            return None
