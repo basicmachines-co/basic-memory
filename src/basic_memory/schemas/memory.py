@@ -134,7 +134,7 @@ class RelationSummary(BaseModel):
     file_path: str
     permalink: str
     relation_type: str
-    from_entity: str
+    from_entity: Optional[str] = None
     to_entity: Optional[str] = None
     created_at: datetime
 
