@@ -4,7 +4,9 @@ import pytest
 from datetime import datetime, timezone
 
 from basic_memory.models.knowledge import Entity
+from basic_memory.models.project import Project
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.project_repository import ProjectRepository
 
 
 @pytest.mark.asyncio
@@ -244,5 +246,207 @@ async def test_upsert_entity_gap_in_suffixes(entity_repository: EntityRepository
 
     # Should get the next available suffix - our implementation finds gaps
     # so it should be "test/gap-2" (filling the gap)
-    assert result.permalink == "test/gap-2"
+    assert result.permalink == "test/gap-2"  
     assert result.title == "Gap Filler"
+
+
+@pytest.mark.asyncio
+async def test_upsert_entity_project_scoping_isolation(session_maker):
+    """Test that upsert_entity properly scopes entities by project_id.
+    
+    This test ensures that the fix for issue #167 works correctly by verifying:
+    1. Entities with same permalinks/file_paths can exist in different projects
+    2. Upsert operations properly scope queries by project_id
+    3. No "multiple rows" errors occur when similar entities exist across projects
+    """
+    # Create two separate projects
+    project_repository = ProjectRepository(session_maker)
+    
+    project1_data = {
+        "name": "project-1",
+        "description": "First test project",
+        "path": "/tmp/project1",
+        "is_active": True,
+        "is_default": False,
+    }
+    project1 = await project_repository.create(project1_data)
+    
+    project2_data = {
+        "name": "project-2", 
+        "description": "Second test project",
+        "path": "/tmp/project2",
+        "is_active": True,
+        "is_default": False,
+    }
+    project2 = await project_repository.create(project2_data)
+    
+    # Create entity repositories for each project
+    repo1 = EntityRepository(session_maker, project_id=project1.id)
+    repo2 = EntityRepository(session_maker, project_id=project2.id)
+    
+    # Create entities with identical permalinks and file_paths in different projects
+    entity1 = Entity(
+        project_id=project1.id,
+        title="Shared Entity",
+        entity_type="note",
+        permalink="docs/shared-name",
+        file_path="docs/shared-name.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    entity2 = Entity(
+        project_id=project2.id,
+        title="Shared Entity",
+        entity_type="note", 
+        permalink="docs/shared-name",  # Same permalink
+        file_path="docs/shared-name.md",  # Same file_path
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    # These should succeed without "multiple rows" errors
+    result1 = await repo1.upsert_entity(entity1)
+    result2 = await repo2.upsert_entity(entity2)
+    
+    # Verify both entities were created successfully
+    assert result1.id is not None
+    assert result2.id is not None
+    assert result1.id != result2.id  # Different entities
+    assert result1.project_id == project1.id
+    assert result2.project_id == project2.id
+    assert result1.permalink == "docs/shared-name"
+    assert result2.permalink == "docs/shared-name"
+    
+    # Test updating entities in different projects (should also work without conflicts)
+    entity1_update = Entity(
+        project_id=project1.id,
+        title="Updated Shared Entity",
+        entity_type="note",
+        permalink="docs/shared-name",
+        file_path="docs/shared-name.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    entity2_update = Entity(
+        project_id=project2.id,
+        title="Also Updated Shared Entity",
+        entity_type="note",
+        permalink="docs/shared-name",
+        file_path="docs/shared-name.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    # Updates should work without conflicts
+    updated1 = await repo1.upsert_entity(entity1_update)
+    updated2 = await repo2.upsert_entity(entity2_update)
+    
+    # Should update existing entities (same IDs)
+    assert updated1.id == result1.id
+    assert updated2.id == result2.id
+    assert updated1.title == "Updated Shared Entity"
+    assert updated2.title == "Also Updated Shared Entity"
+    
+    # Verify cross-project queries don't interfere
+    found_in_project1 = await repo1.get_by_permalink("docs/shared-name")
+    found_in_project2 = await repo2.get_by_permalink("docs/shared-name")
+    
+    assert found_in_project1 is not None
+    assert found_in_project2 is not None
+    assert found_in_project1.id == updated1.id
+    assert found_in_project2.id == updated2.id
+    assert found_in_project1.title == "Updated Shared Entity"
+    assert found_in_project2.title == "Also Updated Shared Entity"
+
+
+@pytest.mark.asyncio
+async def test_upsert_entity_permalink_conflict_within_project_only(session_maker):
+    """Test that permalink conflicts only occur within the same project.
+    
+    This ensures that the project scoping fix allows entities with identical
+    permalinks to exist across different projects without triggering 
+    permalink conflict resolution.
+    """
+    # Create two separate projects
+    project_repository = ProjectRepository(session_maker)
+    
+    project1_data = {
+        "name": "conflict-project-1",
+        "description": "First conflict test project",
+        "path": "/tmp/conflict1",
+        "is_active": True,
+        "is_default": False,
+    }
+    project1 = await project_repository.create(project1_data)
+    
+    project2_data = {
+        "name": "conflict-project-2",
+        "description": "Second conflict test project", 
+        "path": "/tmp/conflict2",
+        "is_active": True,
+        "is_default": False,
+    }
+    project2 = await project_repository.create(project2_data)
+    
+    # Create entity repositories for each project
+    repo1 = EntityRepository(session_maker, project_id=project1.id)
+    repo2 = EntityRepository(session_maker, project_id=project2.id)
+    
+    # Create first entity in project1
+    entity1 = Entity(
+        project_id=project1.id,
+        title="Original Entity",
+        entity_type="note",
+        permalink="test/conflict-permalink",
+        file_path="test/original.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    result1 = await repo1.upsert_entity(entity1)
+    assert result1.permalink == "test/conflict-permalink"
+    
+    # Create entity with same permalink in project2 (should NOT get suffix)
+    entity2 = Entity(
+        project_id=project2.id,
+        title="Cross-Project Entity",
+        entity_type="note",
+        permalink="test/conflict-permalink",  # Same permalink, different project
+        file_path="test/cross-project.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    result2 = await repo2.upsert_entity(entity2)
+    # Should keep original permalink (no suffix) since it's in a different project
+    assert result2.permalink == "test/conflict-permalink"
+    
+    # Now create entity with same permalink in project1 (should get suffix)
+    entity3 = Entity(
+        project_id=project1.id,
+        title="Conflict Entity",
+        entity_type="note",
+        permalink="test/conflict-permalink",  # Same permalink, same project
+        file_path="test/conflict.md",
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    
+    result3 = await repo1.upsert_entity(entity3)
+    # Should get suffix since it conflicts within the same project
+    assert result3.permalink == "test/conflict-permalink-1"
+    
+    # Verify all entities exist correctly
+    assert result1.id != result2.id != result3.id
+    assert result1.project_id == project1.id
+    assert result2.project_id == project2.id
+    assert result3.project_id == project1.id
