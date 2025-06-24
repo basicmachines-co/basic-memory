@@ -359,3 +359,42 @@ async def test_edit_note_find_replace_empty_find_text(client):
     assert isinstance(result, str)
     assert "# Edit Failed" in result
     # Should contain helpful guidance about the error
+
+
+@pytest.mark.asyncio
+async def test_edit_note_preserves_permalink_when_frontmatter_missing(client):
+    """Test that editing a note preserves the permalink when frontmatter doesn't contain one.
+    
+    This is a regression test for issue #170 where edit_note would fail with a validation error
+    because the permalink was being set to None when the markdown file didn't have a permalink
+    in its frontmatter.
+    """
+    # Create initial note
+    await write_note.fn(
+        title="Test Note",
+        folder="test",
+        content="# Test Note\nOriginal content here.",
+    )
+
+    # Verify the note was created with a permalink
+    first_result = await edit_note.fn(
+        identifier="test/test-note",
+        operation="append",
+        content="\nFirst edit.",
+    )
+    
+    assert isinstance(first_result, str)
+    assert "permalink: test/test-note" in first_result
+    
+    # Perform another edit - this should preserve the permalink even if the 
+    # file doesn't have a permalink in its frontmatter
+    second_result = await edit_note.fn(
+        identifier="test/test-note",
+        operation="append", 
+        content="\nSecond edit.",
+    )
+
+    assert isinstance(second_result, str)
+    assert "Edited note (append)" in second_result
+    assert "permalink: test/test-note" in second_result
+    # The edit should succeed without validation errors
