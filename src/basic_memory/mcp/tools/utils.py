@@ -525,11 +525,16 @@ def check_migration_status() -> Optional[str]:
         return None
 
 
-async def wait_for_migration_or_return_status(timeout: float = 5.0) -> Optional[str]:
+async def wait_for_migration_or_return_status(
+    timeout: float = 5.0, project_name: Optional[str] = None
+) -> Optional[str]:
     """Wait briefly for sync/migration to complete, or return status message.
 
     Args:
         timeout: Maximum time to wait for sync completion
+        project_name: Optional project name to check specific project status.
+                     If provided, only checks that project's readiness.
+                     If None, uses global status check (legacy behavior).
 
     Returns:
         Status message if sync is still in progress, None if ready
@@ -538,18 +543,36 @@ async def wait_for_migration_or_return_status(timeout: float = 5.0) -> Optional[
         from basic_memory.services.sync_status_service import sync_status_tracker
         import asyncio
 
-        if sync_status_tracker.is_ready:
+        # Check if we should use project-specific or global status
+        def is_ready() -> bool:
+            if project_name:
+                return sync_status_tracker.is_project_ready(project_name)
+            return sync_status_tracker.is_ready
+
+        if is_ready():
             return None
 
         # Wait briefly for sync to complete
         start_time = asyncio.get_event_loop().time()
         while (asyncio.get_event_loop().time() - start_time) < timeout:
-            if sync_status_tracker.is_ready:
+            if is_ready():
                 return None
             await asyncio.sleep(0.1)  # Check every 100ms
 
         # Still not ready after timeout
-        return sync_status_tracker.get_summary()
+        if project_name:
+            # For project-specific checks, get project status details
+            project_status = sync_status_tracker.get_project_status(project_name)
+            if project_status and project_status.status.value == "failed":
+                error_msg = project_status.error or "Unknown sync error"
+                return f"❌ Sync failed for project '{project_name}': {error_msg}"
+            elif project_status:
+                return f"🔄 Project '{project_name}' is still syncing: {project_status.message}"
+            else:
+                return f"⚠️ Project '{project_name}' status unknown"
+        else:
+            # Fall back to global summary for legacy calls
+            return sync_status_tracker.get_summary()
     except Exception:  # pragma: no cover
         # If there's any error, assume ready
         return None
