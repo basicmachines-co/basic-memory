@@ -120,23 +120,82 @@ class SearchRepository:
             logger.error(f"Error initializing search index: {e}")
             raise e
 
-    def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
-        """Prepare a search term for FTS5 query.
-
+    def _prepare_boolean_query(self, query: str) -> str:
+        """Prepare a Boolean query by quoting individual terms while preserving operators.
+        
         Args:
-            term: The search term to prepare
-            is_prefix: Whether to add prefix search capability (* suffix)
-
-        For FTS5:
-        - Boolean operators (AND, OR, NOT) are preserved for complex queries
-        - Terms with FTS5 special characters are quoted to prevent syntax errors
-        - Simple terms get prefix wildcards for better matching
+            query: A Boolean query like "tier1-test AND unicode" or "(hello OR world) NOT test"
+            
+        Returns:
+            A properly formatted Boolean query with quoted terms that need quoting
         """
-        # Check for explicit boolean operators - if present, return the term as is
-        boolean_operators = [" AND ", " OR ", " NOT "]
-        if any(op in f" {term} " for op in boolean_operators):
+        import re
+        
+        # Define Boolean operators and their boundaries
+        boolean_pattern = r'\b(AND|OR|NOT)\b'
+        
+        # Split the query by Boolean operators, keeping the operators
+        parts = re.split(f'({boolean_pattern})', query)
+        
+        processed_parts = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+                
+            # If it's a Boolean operator, keep it as is
+            if re.match(boolean_pattern, part):
+                processed_parts.append(part)
+            else:
+                # This is a search term (may include parentheses)
+                # Handle parentheses separately
+                if part.startswith('(') and part.endswith(')'):
+                    # Extract the term inside parentheses
+                    inner_term = part[1:-1].strip()
+                    # Recursively process the inner term if it contains Boolean operators
+                    if any(op in f" {inner_term} " for op in [" AND ", " OR ", " NOT "]):
+                        processed_inner = self._prepare_boolean_query(inner_term)
+                        processed_parts.append(f"({processed_inner})")
+                    else:
+                        # Single term in parentheses - for Boolean queries, don't add prefix wildcards
+                        prepared_term = self._prepare_single_term(inner_term, is_prefix=False)
+                        processed_parts.append(f"({prepared_term})")
+                elif part.startswith('('):
+                    # Opening parenthesis with term - for Boolean queries, don't add prefix wildcards
+                    paren_match = re.match(r'\((.+)', part)
+                    if paren_match:
+                        inner_term = paren_match.group(1).strip()
+                        prepared_term = self._prepare_single_term(inner_term, is_prefix=False)
+                        processed_parts.append(f"({prepared_term}")
+                elif part.endswith(')'):
+                    # Closing parenthesis with term - for Boolean queries, don't add prefix wildcards
+                    paren_match = re.match(r'(.+)\)', part)
+                    if paren_match:
+                        inner_term = paren_match.group(1).strip()
+                        prepared_term = self._prepare_single_term(inner_term, is_prefix=False)
+                        processed_parts.append(f"{prepared_term})")
+                else:
+                    # Regular term - for Boolean queries, don't add prefix wildcards
+                    prepared_term = self._prepare_single_term(part, is_prefix=False)
+                    processed_parts.append(prepared_term)
+        
+        return " ".join(processed_parts)
+    
+    def _prepare_single_term(self, term: str, is_prefix: bool = True) -> str:
+        """Prepare a single search term (no Boolean operators).
+        
+        Args:
+            term: A single search term
+            is_prefix: Whether to add prefix search capability (* suffix)
+            
+        Returns:
+            A properly formatted single term
+        """
+        if not term or not term.strip():
             return term
-
+            
+        term = term.strip()
+        
         # Check if term is already a proper wildcard pattern (alphanumeric + *)
         # e.g., "hello*", "test*world" - these should be left alone
         if "*" in term and all(c.isalnum() or c in "*_-" for c in term):
@@ -218,6 +277,26 @@ class SearchRepository:
 
         return term
 
+    def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
+        """Prepare a search term for FTS5 query.
+
+        Args:
+            term: The search term to prepare
+            is_prefix: Whether to add prefix search capability (* suffix)
+
+        For FTS5:
+        - Boolean operators (AND, OR, NOT) are preserved for complex queries
+        - Terms with FTS5 special characters are quoted to prevent syntax errors
+        - Simple terms get prefix wildcards for better matching
+        """
+        # Check for explicit boolean operators - if present, process as Boolean query
+        boolean_operators = [" AND ", " OR ", " NOT "]
+        if any(op in f" {term} " for op in boolean_operators):
+            return self._prepare_boolean_query(term)
+
+        # For non-Boolean queries, use the single term preparation logic
+        return self._prepare_single_term(term, is_prefix)
+
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -242,19 +321,10 @@ class SearchRepository:
                 # For wildcard searches, don't add any text conditions - return all results
                 pass
             else:
-                # Check for explicit boolean operators - only detect them in proper boolean contexts
-                has_boolean = any(op in f" {search_text} " for op in [" AND ", " OR ", " NOT "])
-
-                if has_boolean:
-                    # If boolean operators are present, use the raw query
-                    # No need to prepare it, FTS5 will understand the operators
-                    params["text"] = search_text
-                    conditions.append("(title MATCH :text OR content_stems MATCH :text)")
-                else:
-                    # Standard search with term preparation
-                    processed_text = self._prepare_search_term(search_text.strip())
-                    params["text"] = processed_text
-                    conditions.append("(title MATCH :text OR content_stems MATCH :text)")
+                # Use _prepare_search_term to handle both Boolean and non-Boolean queries
+                processed_text = self._prepare_search_term(search_text.strip())
+                params["text"] = processed_text
+                conditions.append("(title MATCH :text OR content_stems MATCH :text)")
 
         # Handle title match search
         if title:

@@ -329,6 +329,21 @@ class TestSearchTermPreparation:
             == "(hello AND world) OR test"
         )
 
+    def test_hyphenated_terms_with_boolean_operators(self, search_repository):
+        """Hyphenated terms with Boolean operators should be properly quoted."""
+        # Test the specific case from the GitHub issue
+        result = search_repository._prepare_search_term("tier1-test AND unicode")
+        assert result == '"tier1-test" AND unicode'
+        
+        # Test other hyphenated Boolean combinations
+        assert search_repository._prepare_search_term("multi-word OR single") == '"multi-word" OR single'
+        assert search_repository._prepare_search_term("well-formed NOT badly-formed") == '"well-formed" NOT "badly-formed"'
+        assert search_repository._prepare_search_term("test-case AND (hello OR world)") == '"test-case" AND (hello OR world)'
+        
+        # Test mixed special characters with Boolean operators
+        assert search_repository._prepare_search_term("config.json AND test-file") == '"config.json" AND "test-file"'
+        assert search_repository._prepare_search_term("C++ OR python-script") == '"C++" OR "python-script"'
+
     def test_programming_terms_should_work(self, search_repository):
         """Programming-related terms with special chars should be searchable."""
         # These should be quoted to handle special characters safely
