@@ -1,6 +1,7 @@
 """Repository for search operations."""
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -129,13 +130,11 @@ class SearchRepository:
         Returns:
             A properly formatted Boolean query with quoted terms that need quoting
         """
-        import re
-        
         # Define Boolean operators and their boundaries
-        boolean_pattern = r'\b(AND|OR|NOT)\b'
+        boolean_pattern = r'(\bAND\b|\bOR\b|\bNOT\b)'
         
         # Split the query by Boolean operators, keeping the operators
-        parts = re.split(f'({boolean_pattern})', query)
+        parts = re.split(boolean_pattern, query)
         
         processed_parts = []
         for part in parts:
@@ -144,40 +143,12 @@ class SearchRepository:
                 continue
                 
             # If it's a Boolean operator, keep it as is
-            if re.match(boolean_pattern, part):
+            if part in ['AND', 'OR', 'NOT']:
                 processed_parts.append(part)
             else:
-                # This is a search term (may include parentheses)
-                # Handle parentheses separately
-                if part.startswith('(') and part.endswith(')'):
-                    # Extract the term inside parentheses
-                    inner_term = part[1:-1].strip()
-                    # Recursively process the inner term if it contains Boolean operators
-                    if any(op in f" {inner_term} " for op in [" AND ", " OR ", " NOT "]):
-                        processed_inner = self._prepare_boolean_query(inner_term)
-                        processed_parts.append(f"({processed_inner})")
-                    else:
-                        # Single term in parentheses - for Boolean queries, don't add prefix wildcards
-                        prepared_term = self._prepare_single_term(inner_term, is_prefix=False)
-                        processed_parts.append(f"({prepared_term})")
-                elif part.startswith('('):
-                    # Opening parenthesis with term - for Boolean queries, don't add prefix wildcards
-                    paren_match = re.match(r'\((.+)', part)
-                    if paren_match:
-                        inner_term = paren_match.group(1).strip()
-                        prepared_term = self._prepare_single_term(inner_term, is_prefix=False)
-                        processed_parts.append(f"({prepared_term}")
-                elif part.endswith(')'):
-                    # Closing parenthesis with term - for Boolean queries, don't add prefix wildcards
-                    paren_match = re.match(r'(.+)\)', part)
-                    if paren_match:
-                        inner_term = paren_match.group(1).strip()
-                        prepared_term = self._prepare_single_term(inner_term, is_prefix=False)
-                        processed_parts.append(f"{prepared_term})")
-                else:
-                    # Regular term - for Boolean queries, don't add prefix wildcards
-                    prepared_term = self._prepare_single_term(part, is_prefix=False)
-                    processed_parts.append(prepared_term)
+                # This is a search term - for Boolean queries, don't add prefix wildcards
+                prepared_term = self._prepare_single_term(part, is_prefix=False)
+                processed_parts.append(prepared_term)
         
         return " ".join(processed_parts)
     
