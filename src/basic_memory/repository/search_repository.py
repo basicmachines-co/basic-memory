@@ -146,11 +146,72 @@ class SearchRepository:
             if part in ['AND', 'OR', 'NOT']:
                 processed_parts.append(part)
             else:
-                # This is a search term - for Boolean queries, don't add prefix wildcards
-                prepared_term = self._prepare_single_term(part, is_prefix=False)
-                processed_parts.append(prepared_term)
+                # Handle parentheses specially - they should be preserved for grouping
+                if '(' in part or ')' in part:
+                    # Parse parenthetical expressions carefully
+                    processed_part = self._prepare_parenthetical_term(part)
+                    processed_parts.append(processed_part)
+                else:
+                    # This is a search term - for Boolean queries, don't add prefix wildcards
+                    prepared_term = self._prepare_single_term(part, is_prefix=False)
+                    processed_parts.append(prepared_term)
         
         return " ".join(processed_parts)
+    
+    def _prepare_parenthetical_term(self, term: str) -> str:
+        """Prepare a term that contains parentheses, preserving the parentheses for grouping.
+        
+        Args:
+            term: A term that may contain parentheses like "(hello" or "world)" or "(hello OR world)"
+            
+        Returns:
+            A properly formatted term with parentheses preserved
+        """
+        # Handle terms that start/end with parentheses but may contain quotable content
+        result = ""
+        i = 0
+        while i < len(term):
+            if term[i] in '()':
+                # Preserve parentheses as-is
+                result += term[i]
+                i += 1
+            else:
+                # Find the next parenthesis or end of string
+                start = i
+                while i < len(term) and term[i] not in '()':
+                    i += 1
+                
+                # Extract the content between parentheses
+                content = term[start:i].strip()
+                if content:
+                    # Only quote if it actually needs quoting (has hyphens, special chars, etc)
+                    # but don't quote if it's just simple words
+                    if self._needs_quoting(content):
+                        escaped_content = content.replace('"', '""')
+                        result += f'"{escaped_content}"'
+                    else:
+                        result += content
+        
+        return result
+    
+    def _needs_quoting(self, term: str) -> bool:
+        """Check if a term needs to be quoted for FTS5 safety.
+        
+        Args:
+            term: The term to check
+            
+        Returns:
+            True if the term should be quoted
+        """
+        if not term or not term.strip():
+            return False
+            
+        # Characters that indicate we should quote (excluding parentheses which are valid syntax)
+        needs_quoting_chars = [" ", ".", ":", ";", ",", "<", ">", "?", "/", "-", "'", '"', 
+                              "[", "]", "{", "}", "+", "!", "@", "#", "$", "%", "^", "&", 
+                              "=", "|", "\\", "~", "`"]
+        
+        return any(c in term for c in needs_quoting_chars)
     
     def _prepare_single_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a single search term (no Boolean operators).
