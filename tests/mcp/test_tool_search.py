@@ -253,7 +253,7 @@ class TestSearchErrorFormatting:
 
         assert "# Search Failed" in result
         assert "Error searching for 'test query': unknown error" in result
-        assert "General troubleshooting" in result
+        assert "## Troubleshooting steps:" in result
 
 
 class TestSearchToolErrorHandling:
