@@ -532,3 +532,51 @@ class TestSearchTermPreparation:
         # Test whitespace-only search
         results_whitespace = await search_repository.search(search_text="   ")
         assert isinstance(results_whitespace, list)  # Should not crash
+
+    def test_boolean_query_empty_parts_coverage(self, search_repository):
+        """Test Boolean query parsing with empty parts (line 143 coverage)."""
+        # Create queries that will result in empty parts after splitting
+        result1 = search_repository._prepare_boolean_query("hello AND  AND world")  # Double operator
+        assert "hello" in result1 and "world" in result1
+        
+        result2 = search_repository._prepare_boolean_query("  OR test")  # Leading operator
+        assert "test" in result2
+        
+        result3 = search_repository._prepare_boolean_query("test OR  ")  # Trailing operator
+        assert "test" in result3
+
+    def test_parenthetical_term_quote_escaping(self, search_repository):
+        """Test quote escaping in parenthetical terms (lines 190-191 coverage)."""
+        # Test term with quotes that needs escaping
+        result = search_repository._prepare_parenthetical_term('(say "hello" world)')
+        # Should escape quotes by doubling them
+        assert '""hello""' in result
+        
+        # Test term with single quotes
+        result2 = search_repository._prepare_parenthetical_term('(it\'s working)')
+        assert "it's working" in result2
+
+    def test_needs_quoting_empty_input(self, search_repository):
+        """Test _needs_quoting with empty inputs (line 207 coverage)."""
+        # Test empty string
+        assert search_repository._needs_quoting("") == False
+        
+        # Test whitespace-only string
+        assert search_repository._needs_quoting("   ") == False
+        
+        # Test None-like cases
+        assert search_repository._needs_quoting("\t") == False
+
+    def test_prepare_single_term_empty_input(self, search_repository):
+        """Test _prepare_single_term with empty inputs (line 227 coverage)."""
+        # Test empty string
+        result1 = search_repository._prepare_single_term("")
+        assert result1 == ""
+        
+        # Test whitespace-only string
+        result2 = search_repository._prepare_single_term("   ")
+        assert result2 == "   "  # Should return as-is
+        
+        # Test string that becomes empty after strip
+        result3 = search_repository._prepare_single_term("\t\n")
+        assert result3 == "\t\n"  # Should return original
