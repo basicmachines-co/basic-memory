@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import search_notes, _format_search_error_response
+from basic_memory.schemas.search import SearchResponse
 
 
 @pytest.mark.asyncio
@@ -23,9 +24,14 @@ async def test_search_text(client):
     # Search for it
     response = await search_notes.fn(query="searchable")
 
-    # Verify results
-    assert len(response.results) > 0
-    assert any(r.permalink == "test/test-search-note" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify SearchResponse
+        assert len(response.results) > 0
+        assert any(r.permalink == "test/test-search-note" for r in response.results)
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 @pytest.mark.asyncio
@@ -43,9 +49,14 @@ async def test_search_title(client):
     # Search for it
     response = await search_notes.fn(query="Search Note", search_type="title")
 
-    # Verify results
-    assert len(response.results) > 0
-    assert any(r.permalink == "test/test-search-note" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, str):
+        # If search failed and returned error message, test should fail with informative message  
+        pytest.fail(f"Search failed with error: {response}")
+    else:
+        # Success case - verify SearchResponse
+        assert len(response.results) > 0
+        assert any(r.permalink == "test/test-search-note" for r in response.results)
 
 
 @pytest.mark.asyncio
@@ -63,9 +74,14 @@ async def test_search_permalink(client):
     # Search for it
     response = await search_notes.fn(query="test/test-search-note", search_type="permalink")
 
-    # Verify results
-    assert len(response.results) > 0
-    assert any(r.permalink == "test/test-search-note" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify SearchResponse
+        assert len(response.results) > 0
+        assert any(r.permalink == "test/test-search-note" for r in response.results)
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 @pytest.mark.asyncio
@@ -83,9 +99,14 @@ async def test_search_permalink_match(client):
     # Search for it
     response = await search_notes.fn(query="test/test-search-*", search_type="permalink")
 
-    # Verify results
-    assert len(response.results) > 0
-    assert any(r.permalink == "test/test-search-note" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify SearchResponse
+        assert len(response.results) > 0
+        assert any(r.permalink == "test/test-search-note" for r in response.results)
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 @pytest.mark.asyncio
@@ -103,9 +124,14 @@ async def test_search_pagination(client):
     # Search for it
     response = await search_notes.fn(query="searchable", page=1, page_size=1)
 
-    # Verify results
-    assert len(response.results) == 1
-    assert any(r.permalink == "test/test-search-note" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify SearchResponse
+        assert len(response.results) == 1
+        assert any(r.permalink == "test/test-search-note" for r in response.results)
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 @pytest.mark.asyncio
@@ -121,8 +147,13 @@ async def test_search_with_type_filter(client):
     # Search with type filter
     response = await search_notes.fn(query="type", types=["note"])
 
-    # Verify all results are entities
-    assert all(r.type == "entity" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify all results are entities
+        assert all(r.type == "entity" for r in response.results)
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 @pytest.mark.asyncio
@@ -138,8 +169,13 @@ async def test_search_with_entity_type_filter(client):
     # Search with entity type filter
     response = await search_notes.fn(query="type", entity_types=["entity"])
 
-    # Verify all results are entities
-    assert all(r.type == "entity" for r in response.results)
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify all results are entities
+        assert all(r.type == "entity" for r in response.results)
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 @pytest.mark.asyncio
@@ -156,8 +192,13 @@ async def test_search_with_date_filter(client):
     one_hour_ago = datetime.now() - timedelta(hours=1)
     response = await search_notes.fn(query="recent", after_date=one_hour_ago.isoformat())
 
-    # Verify we get results within timeframe
-    assert len(response.results) > 0
+    # Verify results - handle both success and error cases
+    if isinstance(response, SearchResponse):
+        # Success case - verify we get results within timeframe
+        assert len(response.results) > 0
+    else:
+        # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
 
 
 class TestSearchErrorFormatting:
