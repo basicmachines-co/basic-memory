@@ -45,13 +45,18 @@ def _format_search_error_response(error_message: str, query: str, search_type: s
             - Boolean OR: `meeting OR discussion`
             - Boolean NOT: `project NOT archived`
             - Grouped: `(project OR planning) AND notes`
+            - Exact phrases: `"weekly standup meeting"`
+            - Content-specific: `tag:example` or `category:observation`
 
             ## Try again with:
             ```
-            search_notes("INSERT_CLEAN_QUERY_HERE")
+            search_notes("{clean_query}")
             ```
 
-            Replace INSERT_CLEAN_QUERY_HERE with your simplified search terms.
+            ## Alternative search strategies:
+            - Break into simpler terms: `search_notes("{' '.join(clean_query.split()[:2])}")`
+            - Try different search types: `search_notes("{clean_query}", search_type="title")`
+            - Use filtering: `search_notes("{clean_query}", types=["entity"])`
             """).strip()
 
     # Project not found errors (check before general "not found")
@@ -85,24 +90,39 @@ def _format_search_error_response(error_message: str, query: str, search_type: s
 
             No content found matching '{query}' in the current project.
 
-            ## Suggestions to try:
+            ## Search strategy suggestions:
             1. **Broaden your search**: Try fewer or more general terms
                - Instead of: `{query}`
                - Try: `{simplified_query}`
 
-            2. **Check spelling**: Verify terms are spelled correctly
-            3. **Try different search types**:
-               - Text search: `search_notes("{query}", search_type="text")`
-               - Title search: `search_notes("{query}", search_type="title")`
-               - Permalink search: `search_notes("{query}", search_type="permalink")`
+            2. **Check spelling and try variations**:
+               - Verify terms are spelled correctly
+               - Try synonyms or related terms
 
-            4. **Use boolean operators**:
-               - Try OR search for broader results
+            3. **Use different search approaches**:
+               - **Text search**: `search_notes("{query}", search_type="text")` (searches full content)
+               - **Title search**: `search_notes("{query}", search_type="title")` (searches only titles)
+               - **Permalink search**: `search_notes("{query}", search_type="permalink")` (searches file paths)
 
-            ## Check what content exists:
-            - Recent activity: `recent_activity(timeframe="7d")`
-            - List files: `list_directory("/")`
-            - Browse by folder: `list_directory("/notes")` or `list_directory("/docs")`
+            4. **Try boolean operators for broader results**:
+               - OR search: `search_notes("{' OR '.join(query.split()[:3])}")`
+               - Remove restrictive terms: Focus on the most important keywords
+
+            5. **Use filtering to narrow scope**:
+               - By content type: `search_notes("{query}", types=["entity"])`
+               - By recent content: `search_notes("{query}", after_date="1 week")`
+               - By entity type: `search_notes("{query}", entity_types=["observation"])`
+
+            6. **Try advanced search patterns**:
+               - Tag search: `search_notes("tag:your-tag")`
+               - Category search: `search_notes("category:observation")`
+               - Pattern matching: `search_notes("*{query}*", search_type="permalink")`
+
+            ## Explore what content exists:
+            - **Recent activity**: `recent_activity(timeframe="7d")` - See what's been updated recently
+            - **List directories**: `list_directory("/")` - Browse all content
+            - **Browse by folder**: `list_directory("/notes")` or `list_directory("/docs")`
+            - **Check project**: `get_current_project()` - Verify you're in the right project
             """).strip()
 
     # Server/API errors
@@ -151,25 +171,36 @@ You don't have permission to search in the current project: {error_message}
 
 Error searching for '{query}': {error_message}
 
-## General troubleshooting:
-1. **Check your query**: Ensure it uses valid search syntax
-2. **Try simpler terms**: Use basic words without special characters
+## Troubleshooting steps:
+1. **Simplify your query**: Try basic words without special characters
+2. **Check search syntax**: Ensure boolean operators are correctly formatted
 3. **Verify project access**: Make sure you can access the current project
-4. **Check recent activity**: `recent_activity(timeframe="7d")` to see if content exists
+4. **Test with simple search**: Try `search_notes("test")` to verify search is working
 
-## Alternative approaches:
-- Browse files: `list_directory("/")`
-- Try different search type: `search_notes("{query}", search_type="title")`
-- Search with filters: `search_notes("{query}", types=["entity"])`
+## Alternative search approaches:
+- **Different search types**: 
+  - Title only: `search_notes("{query}", search_type="title")`
+  - Permalink patterns: `search_notes("{query}*", search_type="permalink")`
+- **With filters**: `search_notes("{query}", types=["entity"])`
+- **Recent content**: `search_notes("{query}", after_date="1 week")`
+- **Boolean variations**: `search_notes("{' OR '.join(query.split()[:2])}")`
 
-## Need help?
-- View recent changes: `recent_activity()`
-- List projects: `list_projects()` 
-- Check current project: `get_current_project()`"""
+## Explore your content:
+- **Browse files**: `list_directory("/")` - See all available content
+- **Recent activity**: `recent_activity(timeframe="7d")` - Check what's been updated
+- **Project info**: `get_current_project()` - Verify current project
+- **All projects**: `list_projects()` - Switch to different project if needed
+
+## Search syntax reference:
+- **Basic**: `keyword` or `multiple words`
+- **Boolean**: `term1 AND term2`, `term1 OR term2`, `term1 NOT term2`
+- **Phrases**: `"exact phrase"`
+- **Grouping**: `(term1 OR term2) AND term3`
+- **Patterns**: `tag:example`, `category:observation`"""
 
 
 @mcp.tool(
-    description="Search across all content in the knowledge base.",
+    description="Search across all content in the knowledge base with advanced syntax support.",
 )
 async def search_notes(
     query: str,
@@ -181,24 +212,60 @@ async def search_notes(
     after_date: Optional[str] = None,
     project: Optional[str] = None,
 ) -> SearchResponse | str:
-    """Search across all content in the knowledge base.
+    """Search across all content in the knowledge base with comprehensive syntax support.
 
     This tool searches the knowledge base using full-text search, pattern matching,
     or exact permalink lookup. It supports filtering by content type, entity type,
-    and date.
+    and date, with advanced boolean and phrase search capabilities.
+
+    ## Search Syntax Examples
+
+    ### Basic Searches
+    - `search_notes("keyword")` - Find any content containing "keyword"
+    - `search_notes("exact phrase")` - Search for exact phrase match
+
+    ### Advanced Boolean Searches  
+    - `search_notes("term1 term2")` - Find content with both terms (implicit AND)
+    - `search_notes("term1 AND term2")` - Explicit AND search (both terms required)
+    - `search_notes("term1 OR term2")` - Either term can be present
+    - `search_notes("term1 NOT term2")` - Include term1 but exclude term2
+    - `search_notes("(project OR planning) AND notes")` - Grouped boolean logic
+
+    ### Content-Specific Searches
+    - `search_notes("tag:example")` - Search within specific tags (if supported by content)
+    - `search_notes("category:observation")` - Filter by observation categories
+    - `search_notes("author:username")` - Find content by author (if metadata available)
+
+    ### Search Type Examples
+    - `search_notes("Meeting", search_type="title")` - Search only in titles
+    - `search_notes("docs/meeting-*", search_type="permalink")` - Pattern match permalinks
+    - `search_notes("keyword", search_type="text")` - Full-text search (default)
+
+    ### Filtering Options
+    - `search_notes("query", types=["entity"])` - Search only entities
+    - `search_notes("query", types=["note", "person"])` - Multiple content types
+    - `search_notes("query", entity_types=["observation"])` - Filter by entity type
+    - `search_notes("query", after_date="2024-01-01")` - Recent content only
+    - `search_notes("query", after_date="1 week")` - Relative date filtering
+
+    ### Advanced Pattern Examples
+    - `search_notes("project AND (meeting OR discussion)")` - Complex boolean logic
+    - `search_notes("\"exact phrase\" AND keyword")` - Combine phrase and keyword search
+    - `search_notes("bug NOT fixed")` - Exclude resolved issues
+    - `search_notes("docs/2024-*", search_type="permalink")` - Year-based permalink search
 
     Args:
-        query: The search query string
+        query: The search query string (supports boolean operators, phrases, patterns)
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of: "text", "title", "permalink" (default: "text")
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
-        after_date: Optional date filter for recent content (e.g., "1 week", "2d")
+        after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
         project: Optional project name to search in. If not provided, uses current active project.
 
     Returns:
-        SearchResponse with results and pagination info
+        SearchResponse with results and pagination info, or helpful error guidance if search fails
 
     Examples:
         # Basic text search
@@ -216,16 +283,19 @@ async def search_notes(
         # Boolean search with grouping
         results = await search_notes("(project OR planning) AND notes")
 
+        # Exact phrase search
+        results = await search_notes("\"weekly standup meeting\"")
+
         # Search with type filter
         results = await search_notes(
             query="meeting notes",
             types=["entity"],
         )
 
-        # Search with entity type filter, e.g., note vs
+        # Search with entity type filter
         results = await search_notes(
             query="meeting notes",
-            types=["entity"],
+            entity_types=["observation"],
         )
 
         # Search for recent content
@@ -242,6 +312,13 @@ async def search_notes(
 
         # Search in specific project
         results = await search_notes("meeting notes", project="work-project")
+
+        # Complex search with multiple filters
+        results = await search_notes(
+            query="(bug OR issue) AND NOT resolved",
+            types=["entity"],
+            after_date="2024-01-01"
+        )
     """
     # Create a SearchQuery object based on the parameters
     search_query = SearchQuery()
