@@ -123,31 +123,31 @@ class SearchRepository:
 
     def _prepare_boolean_query(self, query: str) -> str:
         """Prepare a Boolean query by quoting individual terms while preserving operators.
-        
+
         Args:
             query: A Boolean query like "tier1-test AND unicode" or "(hello OR world) NOT test"
-            
+
         Returns:
             A properly formatted Boolean query with quoted terms that need quoting
         """
         # Define Boolean operators and their boundaries
-        boolean_pattern = r'(\bAND\b|\bOR\b|\bNOT\b)'
-        
+        boolean_pattern = r"(\bAND\b|\bOR\b|\bNOT\b)"
+
         # Split the query by Boolean operators, keeping the operators
         parts = re.split(boolean_pattern, query)
-        
+
         processed_parts = []
         for part in parts:
             part = part.strip()
             if not part:
                 continue
-                
+
             # If it's a Boolean operator, keep it as is
-            if part in ['AND', 'OR', 'NOT']:
+            if part in ["AND", "OR", "NOT"]:
                 processed_parts.append(part)
             else:
                 # Handle parentheses specially - they should be preserved for grouping
-                if '(' in part or ')' in part:
+                if "(" in part or ")" in part:
                     # Parse parenthetical expressions carefully
                     processed_part = self._prepare_parenthetical_term(part)
                     processed_parts.append(processed_part)
@@ -155,15 +155,15 @@ class SearchRepository:
                     # This is a search term - for Boolean queries, don't add prefix wildcards
                     prepared_term = self._prepare_single_term(part, is_prefix=False)
                     processed_parts.append(prepared_term)
-        
+
         return " ".join(processed_parts)
-    
+
     def _prepare_parenthetical_term(self, term: str) -> str:
         """Prepare a term that contains parentheses, preserving the parentheses for grouping.
-        
+
         Args:
             term: A term that may contain parentheses like "(hello" or "world)" or "(hello OR world)"
-            
+
         Returns:
             A properly formatted term with parentheses preserved
         """
@@ -171,16 +171,16 @@ class SearchRepository:
         result = ""
         i = 0
         while i < len(term):
-            if term[i] in '()':
+            if term[i] in "()":
                 # Preserve parentheses as-is
                 result += term[i]
                 i += 1
             else:
                 # Find the next parenthesis or end of string
                 start = i
-                while i < len(term) and term[i] not in '()':
+                while i < len(term) and term[i] not in "()":
                     i += 1
-                
+
                 # Extract the content between parentheses
                 content = term[start:i].strip()
                 if content:
@@ -191,43 +191,71 @@ class SearchRepository:
                         result += f'"{escaped_content}"'
                     else:
                         result += content
-        
+
         return result
-    
+
     def _needs_quoting(self, term: str) -> bool:
         """Check if a term needs to be quoted for FTS5 safety.
-        
+
         Args:
             term: The term to check
-            
+
         Returns:
             True if the term should be quoted
         """
         if not term or not term.strip():
             return False
-            
+
         # Characters that indicate we should quote (excluding parentheses which are valid syntax)
-        needs_quoting_chars = [" ", ".", ":", ";", ",", "<", ">", "?", "/", "-", "'", '"', 
-                              "[", "]", "{", "}", "+", "!", "@", "#", "$", "%", "^", "&", 
-                              "=", "|", "\\", "~", "`"]
-        
+        needs_quoting_chars = [
+            " ",
+            ".",
+            ":",
+            ";",
+            ",",
+            "<",
+            ">",
+            "?",
+            "/",
+            "-",
+            "'",
+            '"',
+            "[",
+            "]",
+            "{",
+            "}",
+            "+",
+            "!",
+            "@",
+            "#",
+            "$",
+            "%",
+            "^",
+            "&",
+            "=",
+            "|",
+            "\\",
+            "~",
+            "`",
+        ]
+
         return any(c in term for c in needs_quoting_chars)
-    
+
     def _prepare_single_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a single search term (no Boolean operators).
-        
+
         Args:
             term: A single search term
             is_prefix: Whether to add prefix search capability (* suffix)
-            
+
         Returns:
             A properly formatted single term
         """
         if not term or not term.strip():
             return term
-            
+
         term = term.strip()
-        
+
         # Check if term is already a proper wildcard pattern (alphanumeric + *)
         # e.g., "hello*", "test*world" - these should be left alone
         if "*" in term and all(c.isalnum() or c in "*_-" for c in term):

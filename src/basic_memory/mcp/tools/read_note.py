@@ -54,7 +54,7 @@ async def read_note(
 
     # Get the active project first to check project-specific sync status
     active_project = get_active_project(project)
-    
+
     # Check migration status and wait briefly if needed
     from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
 

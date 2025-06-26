@@ -133,10 +133,10 @@ class SyncStatusTracker:
 
     def is_project_ready(self, project_name: str) -> bool:
         """Check if a specific project is ready for operations.
-        
+
         Args:
             project_name: Name of the project to check
-            
+
         Returns:
             True if the project is ready (completed, watching, or not tracked),
             False if the project is syncing, scanning, or failed
@@ -145,12 +145,8 @@ class SyncStatusTracker:
         if not project_status:
             # Project not tracked = ready (likely hasn't been synced yet)
             return True
-            
-        return project_status.status in (
-            SyncStatus.COMPLETED, 
-            SyncStatus.WATCHING, 
-            SyncStatus.IDLE
-        )
+
+        return project_status.status in (SyncStatus.COMPLETED, SyncStatus.WATCHING, SyncStatus.IDLE)
 
     def get_project_status(self, project_name: str) -> Optional[ProjectSyncStatus]:
         """Get status for a specific project."""
