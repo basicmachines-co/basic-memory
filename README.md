@@ -6,6 +6,7 @@
 ![](https://badge.mcpx.dev?type=server 'MCP Server')
 ![](https://badge.mcpx.dev?type=dev 'MCP Dev')
 [![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
+[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=basic-memory&config=eyJjb21tYW5kIjoiL1VzZXJzL2RyZXcvLmxvY2FsL2Jpbi91dnggYmFzaWMtbWVtb3J5IG1jcCJ9)
 
 # Basic Memory
 
@@ -218,7 +219,7 @@ title: <Entity title>
 type: <The type of Entity> (e.g. note)
 permalink: <a uri slug>
 
-- <optional metadata> (such as tags) 
+- <optional metadata> (such as tags)
 ```
 
 ### Observations
