@@ -108,6 +108,9 @@ class ProjectService:
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 
+        # Signal watch service restart since project list changed
+        self._signal_watch_service_restart()
+
     async def remove_project(self, name: str) -> None:
         """Remove a project from configuration and database.
 
@@ -129,6 +132,9 @@ class ProjectService:
             await self.repository.delete(project.id)
 
         logger.info(f"Project '{name}' removed from configuration and database")
+
+        # Signal watch service restart since project list changed
+        self._signal_watch_service_restart()
 
     async def set_default_project(self, name: str) -> None:
         """Set the default project in configuration and database.
@@ -283,6 +289,14 @@ class ProjectService:
 
         logger.info("Project synchronization complete")
 
+        # Signal watch service restart if projects changed
+        projects_changed = len(config_projects) != len(db_projects_by_permalink) or set(
+            config_projects.keys()
+        ) != set(db_projects_by_permalink.keys())
+
+        if projects_changed:
+            self._signal_watch_service_restart()
+
         # Refresh MCP session to ensure it's in sync with current config
         try:
             from basic_memory.mcp.project_session import session
@@ -291,6 +305,16 @@ class ProjectService:
         except ImportError:
             # MCP components might not be available in all contexts
             logger.debug("MCP session not available, skipping session refresh")
+
+    def _signal_watch_service_restart(self) -> None:
+        """Signal the watch service to restart by creating a restart signal file."""
+        restart_signal_path = Path.home() / ".basic-memory" / "restart-watch-service"
+        try:
+            restart_signal_path.parent.mkdir(parents=True, exist_ok=True)
+            restart_signal_path.write_text(str(datetime.now()))
+            logger.info("Signaled watch service restart")
+        except Exception as e:
+            logger.warning(f"Failed to signal watch service restart: {e}")
 
     async def update_project(  # pragma: no cover
         self, name: str, updated_path: Optional[str] = None, is_active: Optional[bool] = None

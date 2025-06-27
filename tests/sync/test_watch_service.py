@@ -448,3 +448,63 @@ def test_is_project_path(watch_service, tmp_path):
 
     # Test the project path itself
     assert watch_service.is_project_path(project, project_path) is False
+
+
+@pytest.mark.asyncio
+async def test_check_restart_signal_no_signal(app_config, project_repository):
+    """Test check_restart_signal when no signal file exists."""
+    watch_service = WatchService(app_config, project_repository)
+
+    # Ensure no signal file exists
+    if watch_service.restart_signal_path.exists():
+        watch_service.restart_signal_path.unlink()
+
+    # Should return False when no signal file exists
+    result = await watch_service.check_restart_signal()
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_restart_signal_with_signal(app_config, project_repository):
+    """Test check_restart_signal when signal file exists."""
+    watch_service = WatchService(app_config, project_repository)
+
+    try:
+        # Create signal file
+        watch_service.restart_signal_path.parent.mkdir(parents=True, exist_ok=True)
+        watch_service.restart_signal_path.write_text("test signal")
+
+        # Should return True and remove the signal file
+        result = await watch_service.check_restart_signal()
+        assert result is True
+        assert not watch_service.restart_signal_path.exists()
+
+    finally:
+        # Cleanup
+        if watch_service.restart_signal_path.exists():
+            watch_service.restart_signal_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_check_restart_signal_error_handling(app_config, project_repository):
+    """Test check_restart_signal handles errors gracefully."""
+    watch_service = WatchService(app_config, project_repository)
+
+    # Create a directory where the signal file should be (to cause an error)
+    watch_service.restart_signal_path.parent.mkdir(parents=True, exist_ok=True)
+    if watch_service.restart_signal_path.exists():
+        watch_service.restart_signal_path.unlink()
+    watch_service.restart_signal_path.mkdir()
+
+    try:
+        # Should handle the error and return False
+        result = await watch_service.check_restart_signal()
+        assert result is False
+
+    finally:
+        # Cleanup
+        if watch_service.restart_signal_path.exists():
+            if watch_service.restart_signal_path.is_dir():
+                watch_service.restart_signal_path.rmdir()
+            else:
+                watch_service.restart_signal_path.unlink()
