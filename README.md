@@ -6,7 +6,6 @@
 ![](https://badge.mcpx.dev?type=server 'MCP Server')
 ![](https://badge.mcpx.dev?type=dev 'MCP Dev')
 [![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
-[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=basic-memory&config=eyJjb21tYW5kIjoiL1VzZXJzL2RyZXcvLmxvY2FsL2Jpbi91dnggYmFzaWMtbWVtb3J5IG1jcCJ9)
 
 # Basic Memory
 
@@ -70,6 +69,13 @@ npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
 ```
 
 This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. Note: The Smithery installation uses their hosted MCP server, while your data remains stored locally as Markdown files.
+
+### Add to Cursor
+
+Once you have installed Basic Memory revisit this page for the 1-click installer for Cursor:
+
+[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=basic-memory&config=eyJjb21tYW5kIjoiL1VzZXJzL2RyZXcvLmxvY2FsL2Jpbi91dnggYmFzaWMtbWVtb3J5IG1jcCJ9)
+
 
 ### Glama.ai
 
