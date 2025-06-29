@@ -218,6 +218,7 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         new_fm = {**current_fm, **updates}
 
         # Write new file with updated frontmatter
+        # Use default YAML formatting for Obsidian compatibility (block style for lists)
         yaml_fm = yaml.dump(new_fm, sort_keys=False, allow_unicode=True)
         final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
 

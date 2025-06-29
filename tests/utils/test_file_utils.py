@@ -241,3 +241,50 @@ async def test_update_frontmatter_errors(tmp_path: Path):
     nonexistent = tmp_path / "nonexistent" / "test.md"
     with pytest.raises(FileError):
         await update_frontmatter(nonexistent, {"title": "Test"})
+
+
+@pytest.mark.asyncio
+async def test_yaml_tags_obsidian_compatible_format(tmp_path: Path):
+    """Test that tags are serialized in Obsidian-compatible YAML list format.
+    
+    Addresses Issue #132: Tags should use YAML list format (with dashes)
+    instead of JSON array format for better Obsidian compatibility.
+    """
+    test_file = tmp_path / "test.md"
+
+    # Test 1: Create new file with tags
+    content = "# Test Note\n\nThis is a test note for tag formatting."
+    test_file.write_text(content)
+
+    tags = ["check-in", "qr-code", "architecture", "system-design"]
+    await update_frontmatter(test_file, {"title": "Test Note", "tags": tags})
+
+    # Read back the file
+    updated_content = test_file.read_text(encoding="utf-8")
+
+    # Parse frontmatter to verify tags are preserved correctly
+    fm = parse_frontmatter(updated_content)
+    assert fm["tags"] == tags
+
+    # Verify the YAML format uses list style (with dashes) for Obsidian
+    assert "tags:\n  - check-in" in updated_content or "tags:\n- check-in" in updated_content
+    
+    # Ensure it's NOT in JSON array format
+    assert 'tags: ["' not in updated_content
+    
+    # Ensure it's NOT in the malformed format
+    assert '- \'["' not in updated_content
+    assert '- \'"' not in updated_content
+
+    # Test 2: Update existing file with empty tags list
+    await update_frontmatter(test_file, {"tags": []})
+    content2 = test_file.read_text(encoding="utf-8")
+    fm2 = parse_frontmatter(content2)
+    assert fm2["tags"] == []
+    
+    # Test 3: Update with tags containing special characters
+    special_tags = ["feat/check-in", "bug-fix", "v2.0", "high-priority"]
+    await update_frontmatter(test_file, {"tags": special_tags})
+    content3 = test_file.read_text(encoding="utf-8")
+    fm3 = parse_frontmatter(content3)
+    assert fm3["tags"] == special_tags
