@@ -81,8 +81,7 @@ class BasicMemoryBearerAuthProvider(EnvBearerAuthProvider):
             base_url = "https://api.stytch.com/v1/public"
         return f"{base_url}/{project_id}/oauth2/register"
 
-
-async def load_access_token(self, token: str) -> AccessToken | None:
+    async def load_access_token(self, token: str) -> AccessToken | None:
         """Override to add debug logging for JWT validation."""
         logger.info(f"JWT validation attempt with token: {token[:50]}...")
         
