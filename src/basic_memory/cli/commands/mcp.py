@@ -85,4 +85,5 @@ def mcp(
             host=host,
             port=port,
             path=path,
+            log_level="INFO",
         )

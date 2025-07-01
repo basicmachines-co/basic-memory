@@ -131,7 +131,7 @@ class EntityResponse(SQLAlchemyModel):
     }
     """
 
-    permalink: Permalink
+    permalink: Optional[Permalink]
     title: str
     file_path: str
     entity_type: EntityType

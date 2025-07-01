@@ -14,6 +14,7 @@ from basic_memory.deps import (
     FileServiceDep,
     ProjectConfigDep,
     AppConfigDep,
+    SyncServiceDep,
 )
 from basic_memory.schemas import (
     EntityListResponse,
@@ -63,6 +64,7 @@ async def create_or_update_entity(
     entity_service: EntityServiceDep,
     search_service: SearchServiceDep,
     file_service: FileServiceDep,
+    sync_service: SyncServiceDep,
 ) -> EntityResponse:
     """Create or update an entity. If entity exists, it will be updated, otherwise created."""
     logger.info(
@@ -85,6 +87,17 @@ async def create_or_update_entity(
 
     # reindex
     await search_service.index_entity(entity, background_tasks=background_tasks)
+
+    # Attempt immediate relation resolution when creating new entities
+    # This helps resolve forward references when related entities are created in the same session
+    if created:
+        try:
+            await sync_service.resolve_relations()
+            logger.debug(f"Resolved relations after creating entity: {entity.permalink}")
+        except Exception as e:  # pragma: no cover
+            # Don't fail the entire request if relation resolution fails
+            logger.warning(f"Failed to resolve relations after entity creation: {e}")
+
     result = EntityResponse.model_validate(entity)
 
     logger.info(

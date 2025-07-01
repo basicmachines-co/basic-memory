@@ -13,7 +13,6 @@ from basic_memory.schemas.memory import (
     GraphContext,
     MemoryUrl,
     memory_url_path,
-    normalize_memory_url,
 )
 
 
@@ -21,12 +20,17 @@ from basic_memory.schemas.memory import (
     description="""Build context from a memory:// URI to continue conversations naturally.
     
     Use this to follow up on previous discussions or explore related topics.
+    
+    Memory URL Format:
+    - Use paths like "folder/note" or "memory://folder/note" 
+    - Pattern matching: "folder/*" matches all notes in folder
+    - Valid characters: letters, numbers, hyphens, underscores, forward slashes
+    - Avoid: double slashes (//), angle brackets (<>), quotes, pipes (|)
+    - Examples: "specs/search", "projects/basic-memory", "notes/*"
+    
     Timeframes support natural language like:
-    - "2 days ago"
-    - "last week" 
-    - "today"
-    - "3 months ago"
-    Or standard formats like "7d", "24h"
+    - "2 days ago", "last week", "today", "3 months ago"
+    - Or standard formats like "7d", "24h"
     """,
 )
 async def build_context(
@@ -76,9 +80,33 @@ async def build_context(
         build_context("memory://specs/search", project="work-project")
     """
     logger.info(f"Building context from {url}")
-    url = normalize_memory_url(url)
+    # URL is already validated and normalized by MemoryUrl type annotation
 
+    # Get the active project first to check project-specific sync status
     active_project = get_active_project(project)
+
+    # Check migration status and wait briefly if needed
+    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
+
+    migration_status = await wait_for_migration_or_return_status(
+        timeout=5.0, project_name=active_project.name
+    )
+    if migration_status:  # pragma: no cover
+        # Return a proper GraphContext with status message
+        from basic_memory.schemas.memory import MemoryMetadata
+        from datetime import datetime
+
+        return GraphContext(
+            results=[],
+            metadata=MemoryMetadata(
+                depth=depth or 1,
+                timeframe=timeframe,
+                generated_at=datetime.now(),
+                primary_count=0,
+                related_count=0,
+                uri=migration_status,  # Include status in metadata
+            ),
+        )
     project_url = active_project.project_url
 
     response = await call_get(

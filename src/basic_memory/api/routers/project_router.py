@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException, Path, Body
 from typing import Optional
 
-from basic_memory.deps import ProjectServiceDep
+from basic_memory.deps import ProjectServiceDep, ProjectPathDep
 from basic_memory.schemas import ProjectInfoResponse
 from basic_memory.schemas.project_info import (
     ProjectList,
@@ -22,9 +22,10 @@ project_resource_router = APIRouter(prefix="/projects", tags=["project_managemen
 @project_router.get("/info", response_model=ProjectInfoResponse)
 async def get_project_info(
     project_service: ProjectServiceDep,
+    project: ProjectPathDep,
 ) -> ProjectInfoResponse:
-    """Get comprehensive information about the current Basic Memory project."""
-    return await project_service.get_project_info()
+    """Get comprehensive information about the specified Basic Memory project."""
+    return await project_service.get_project_info(project)
 
 
 # Update a project
@@ -47,7 +48,7 @@ async def update_project(
     """
     try:  # pragma: no cover
         # Get original project info for the response
-        old_project = ProjectItem(
+        old_project_info = ProjectItem(
             name=project_name,
             path=project_service.projects.get(project_name, ""),
         )
@@ -61,7 +62,7 @@ async def update_project(
             message=f"Project '{project_name}' updated successfully",
             status="success",
             default=(project_name == project_service.default_project),
-            old_project=old_project,
+            old_project=old_project_info,
             new_project=ProjectItem(name=project_name, path=updated_path),
         )
     except ValueError as e:  # pragma: no cover
@@ -111,10 +112,9 @@ async def add_project(
         Response confirming the project was added
     """
     try:  # pragma: no cover
-        await project_service.add_project(project_data.name, project_data.path)
-
-        if project_data.set_default:  # pragma: no cover
-            await project_service.set_default_project(project_data.name)
+        await project_service.add_project(
+            project_data.name, project_data.path, set_default=project_data.set_default
+        )
 
         return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
             message=f"Project '{project_data.name}' added successfully",

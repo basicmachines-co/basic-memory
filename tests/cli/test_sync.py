@@ -89,10 +89,45 @@ Some content""")
     await run_sync(verbose=True)
 
 
-def test_sync_command(sync_service, project_config, test_project):
+def test_sync_command():
     """Test the sync command."""
-    config.home = project_config.home
-    config.name = test_project.name
+    from unittest.mock import patch, AsyncMock
 
-    result = runner.invoke(app, ["sync", "--verbose"])
-    assert result.exit_code == 0
+    # Mock the async run_sync function to avoid event loop issues
+    with patch("basic_memory.cli.commands.sync.run_sync", new_callable=AsyncMock) as mock_run_sync:
+        # Mock successful execution (no return value needed since it just prints)
+        mock_run_sync.return_value = None
+
+        # Mock config values that the sync command prints
+        with patch("basic_memory.cli.commands.sync.config") as mock_config:
+            mock_config.project = "test-project"
+            mock_config.home = "/test/path"
+
+            result = runner.invoke(app, ["sync", "--verbose"])
+            assert result.exit_code == 0
+
+            # Verify output contains project info
+            assert "Syncing project: test-project" in result.stdout
+            assert "Project path: /test/path" in result.stdout
+
+            # Verify the function was called with verbose=True
+            mock_run_sync.assert_called_once_with(verbose=True)
+
+
+def test_sync_command_error():
+    """Test the sync command error handling."""
+    from unittest.mock import patch, AsyncMock
+
+    # Mock the async run_sync function to raise an exception
+    with patch("basic_memory.cli.commands.sync.run_sync", new_callable=AsyncMock) as mock_run_sync:
+        # Mock an error
+        mock_run_sync.side_effect = Exception("Sync failed")
+
+        # Mock config values that the sync command prints
+        with patch("basic_memory.cli.commands.sync.config") as mock_config:
+            mock_config.project = "test-project"
+            mock_config.home = "/test/path"
+
+            result = runner.invoke(app, ["sync", "--verbose"])
+            assert result.exit_code == 1
+            assert "Error during sync: Sync failed" in result.stderr

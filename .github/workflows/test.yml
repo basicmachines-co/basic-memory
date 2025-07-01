@@ -35,6 +35,10 @@ jobs:
         run: |
           pip install uv
 
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
       - name: Create virtual env
         run: |
           uv venv
@@ -45,9 +49,9 @@ jobs:
 
       - name: Run type checks
         run: |
-          uv run make type-check
+          just type-check
 
       - name: Run tests
         run: |
           uv pip install pytest pytest-cov
-          uv run make test
+          just test

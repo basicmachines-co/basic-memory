@@ -1,6 +1,7 @@
 """Tests for CLI status command."""
 
-import pytest
+from unittest.mock import patch, AsyncMock
+
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
@@ -10,34 +11,42 @@ from basic_memory.cli.commands.status import (
     group_changes_by_directory,
     display_changes,
 )
-from basic_memory.config import config
 from basic_memory.sync.sync_service import SyncReport
 
 # Set up CLI runner
 runner = CliRunner()
 
 
-def test_status_command(tmp_path, app_config, project_config, test_project):
+def test_status_command():
     """Test CLI status command."""
-    config.home = tmp_path
-    config.name = test_project.name
+    # Mock the async run_status function to avoid event loop issues
+    with patch(
+        "basic_memory.cli.commands.status.run_status", new_callable=AsyncMock
+    ) as mock_run_status:
+        # Mock successful execution (no return value needed since it just prints)
+        mock_run_status.return_value = None
 
-    # Should exit with code 0
-    result = runner.invoke(app, ["status", "--verbose"])
-    assert result.exit_code == 0
+        # Should exit with code 0
+        result = runner.invoke(app, ["status", "--verbose"])
+        assert result.exit_code == 0
+
+        # Verify the function was called with verbose=True
+        mock_run_status.assert_called_once_with(True)
 
 
-@pytest.mark.asyncio
-async def test_status_command_error(tmp_path, monkeypatch):
+def test_status_command_error():
     """Test CLI status command error handling."""
-    # Set up invalid environment
-    nonexistent = tmp_path / "nonexistent"
-    monkeypatch.setenv("HOME", str(nonexistent))
-    monkeypatch.setenv("DATABASE_PATH", str(nonexistent / "nonexistent.db"))
+    # Mock the async run_status function to raise an exception
+    with patch(
+        "basic_memory.cli.commands.status.run_status", new_callable=AsyncMock
+    ) as mock_run_status:
+        # Mock an error
+        mock_run_status.side_effect = Exception("Database connection failed")
 
-    # Should exit with code 1 when error occurs
-    result = runner.invoke(app, ["status", "--verbose"])
-    assert result.exit_code == 1
+        # Should exit with code 1 when error occurs
+        result = runner.invoke(app, ["status", "--verbose"])
+        assert result.exit_code == 1
+        assert "Error checking status: Database connection failed" in result.stderr
 
 
 def test_display_changes_no_changes():

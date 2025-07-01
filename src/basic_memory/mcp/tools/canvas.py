@@ -35,7 +35,8 @@ async def canvas(
         nodes: List of node objects following JSON Canvas 1.0 spec
         edges: List of edge objects following JSON Canvas 1.0 spec
         title: The title of the canvas (will be saved as title.canvas)
-        folder: The folder where the file should be saved
+        folder: Folder path relative to project root where the canvas should be saved.
+                Use forward slashes (/) as separators. Examples: "diagrams", "projects/2025", "visual/maps"
         project: Optional project name to create canvas in. If not provided, uses current active project.
 
     Returns:

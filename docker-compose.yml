@@ -1,0 +1,83 @@
+# Docker Compose configuration for Basic Memory
+# See docs/Docker.md for detailed setup instructions
+
+version: '3.8'
+
+services:
+  basic-memory:
+    # Use pre-built image (recommended for most users)
+    image: ghcr.io/basicmachines-co/basic-memory:latest
+    
+    # Uncomment to build locally instead:
+    # build: .
+    
+    container_name: basic-memory-server
+    
+    # Volume mounts for knowledge directories and persistent data
+    volumes:
+
+      # Persistent storage for configuration and database
+      - basic-memory-config:/root/.basic-memory:rw
+
+      # Mount your knowledge directory (required)
+      # Change './knowledge' to your actual Obsidian vault or knowledge directory
+      - ./knowledge:/app/data:rw
+
+      # OPTIONAL: Mount additional knowledge directories for multiple projects
+      # - ./work-notes:/app/data/work:rw
+      # - ./personal-notes:/app/data/personal:rw
+
+      # You can edit the project config manually in the mounted config volume
+      # The default project will be configured to use /app/data
+    environment:
+      # Project configuration
+      - BASIC_MEMORY_DEFAULT_PROJECT=main
+      
+      # Enable real-time file synchronization (recommended for Docker)
+      - BASIC_MEMORY_SYNC_CHANGES=true
+      
+      # Logging configuration
+      - BASIC_MEMORY_LOG_LEVEL=INFO
+      
+      # Sync delay in milliseconds (adjust for performance vs responsiveness)
+      - BASIC_MEMORY_SYNC_DELAY=1000
+    
+    # Port exposure for HTTP transport (only needed if not using STDIO)
+    ports:
+      - "8000:8000"
+    
+    # Command with SSE transport (configurable via environment variables above)
+    # IMPORTANT: The SSE and streamable-http endpoints are not secured
+    command: ["basic-memory", "mcp", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
+    
+    # Container management
+    restart: unless-stopped
+    
+    # Health monitoring
+    healthcheck:
+      test: ["CMD", "basic-memory", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 512M
+    #       cpus: '0.5'
+    #     reservations:
+    #       memory: 256M
+    #       cpus: '0.25'
+
+volumes:
+  # Named volume for persistent configuration and database
+  # This ensures your configuration and knowledge graph persist across container restarts
+  basic-memory-config:
+    driver: local
+
+# Network configuration (optional)
+# networks:
+#   basic-memory-net:
+#     driver: bridge

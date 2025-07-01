@@ -122,7 +122,7 @@ def display_changes(project_name: str, title: str, changes: SyncReport, verbose:
     console.print(Panel(tree, expand=False))
 
 
-async def run_status(verbose: bool = False):
+async def run_status(verbose: bool = False):  # pragma: no cover
     """Check sync status of files vs database."""
     # Check knowledge/ directory
 

@@ -17,62 +17,61 @@ from basic_memory.services.initialization import (
 
 
 @pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.run_migrations")
-async def test_initialize_database(mock_run_migrations, project_config):
+@patch("basic_memory.services.initialization.db.get_or_create_db")
+async def test_initialize_database(mock_get_or_create_db, app_config):
     """Test initializing the database."""
-    await initialize_database(project_config)
-    mock_run_migrations.assert_called_once_with(project_config)
+    mock_get_or_create_db.return_value = (MagicMock(), MagicMock())
+    await initialize_database(app_config)
+    mock_get_or_create_db.assert_called_once_with(app_config.database_path)
 
 
 @pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.run_migrations")
-async def test_initialize_database_error(mock_run_migrations, project_config):
+@patch("basic_memory.services.initialization.db.get_or_create_db")
+async def test_initialize_database_error(mock_get_or_create_db, app_config):
     """Test handling errors during database initialization."""
-    mock_run_migrations.side_effect = Exception("Test error")
-    await initialize_database(project_config)
-    mock_run_migrations.assert_called_once_with(project_config)
+    mock_get_or_create_db.side_effect = Exception("Test error")
+    await initialize_database(app_config)
+    mock_get_or_create_db.assert_called_once_with(app_config.database_path)
 
 
 @pytest.mark.asyncio
 @patch("basic_memory.services.initialization.reconcile_projects_with_config")
-@patch("basic_memory.services.initialization.migrate_legacy_projects")
+@patch("basic_memory.services.migration_service.migration_manager")
 @patch("basic_memory.services.initialization.initialize_database")
-@patch("basic_memory.services.initialization.initialize_file_sync")
 async def test_initialize_app(
-    mock_initialize_file_sync,
     mock_initialize_database,
-    mock_migrate_legacy_projects,
+    mock_migration_manager,
     mock_reconcile_projects,
     app_config,
 ):
     """Test app initialization."""
-    mock_initialize_file_sync.return_value = None
+    mock_migration_manager.start_background_migration = AsyncMock()
 
     result = await initialize_app(app_config)
 
     mock_initialize_database.assert_called_once_with(app_config)
     mock_reconcile_projects.assert_called_once_with(app_config)
-    mock_migrate_legacy_projects.assert_called_once_with(app_config)
-    mock_initialize_file_sync.assert_not_called()
-    assert result is None
+    mock_migration_manager.start_background_migration.assert_called_once_with(app_config)
+    assert result == mock_migration_manager
 
 
 @pytest.mark.asyncio
 @patch("basic_memory.services.initialization.initialize_database")
 @patch("basic_memory.services.initialization.reconcile_projects_with_config")
-@patch("basic_memory.services.initialization.migrate_legacy_projects")
+@patch("basic_memory.services.migration_service.migration_manager")
 async def test_initialize_app_sync_disabled(
-    mock_migrate_legacy_projects, mock_reconcile_projects, mock_initialize_database, app_config
+    mock_migration_manager, mock_reconcile_projects, mock_initialize_database, app_config
 ):
     """Test app initialization with sync disabled."""
     app_config.sync_changes = False
+    mock_migration_manager.start_background_migration = AsyncMock()
 
     result = await initialize_app(app_config)
 
     mock_initialize_database.assert_called_once_with(app_config)
     mock_reconcile_projects.assert_called_once_with(app_config)
-    mock_migrate_legacy_projects.assert_called_once_with(app_config)
-    assert result is None
+    mock_migration_manager.start_background_migration.assert_called_once_with(app_config)
+    assert result == mock_migration_manager
 
 
 @patch("basic_memory.services.initialization.asyncio.run")
@@ -260,7 +259,9 @@ async def test_migrate_legacy_project_data_success(mock_rmtree, tmp_path):
         result = await migrate_legacy_project_data(mock_project, legacy_dir)
 
     # Assertions
-    mock_sync_service.sync.assert_called_once_with(Path(mock_project.path))
+    mock_sync_service.sync.assert_called_once_with(
+        Path(mock_project.path), project_name=mock_project.name
+    )
     mock_rmtree.assert_called_once_with(legacy_dir)
     assert result is True
 
@@ -291,7 +292,9 @@ async def test_migrate_legacy_project_data_rmtree_error(mock_rmtree, tmp_path):
         result = await migrate_legacy_project_data(mock_project, legacy_dir)
 
     # Assertions
-    mock_sync_service.sync.assert_called_once_with(Path(mock_project.path))
+    mock_sync_service.sync.assert_called_once_with(
+        Path(mock_project.path), project_name=mock_project.name
+    )
     mock_rmtree.assert_called_once_with(legacy_dir)
     assert result is False
 
@@ -345,8 +348,12 @@ async def test_initialize_file_sync_sequential(
 
         # Should call sync on each project
         assert mock_sync_service.sync.call_count == 2
-        mock_sync_service.sync.assert_any_call(Path(mock_project1.path))
-        mock_sync_service.sync.assert_any_call(Path(mock_project2.path))
+        mock_sync_service.sync.assert_any_call(
+            Path(mock_project1.path), project_name=mock_project1.name
+        )
+        mock_sync_service.sync.assert_any_call(
+            Path(mock_project2.path), project_name=mock_project2.name
+        )
 
         # Should start the watch service
         mock_watch_service.run.assert_called_once()

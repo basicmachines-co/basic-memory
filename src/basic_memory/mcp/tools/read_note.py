@@ -52,7 +52,17 @@ async def read_note(
         read_note("Meeting Notes", project="work-project")
     """
 
+    # Get the active project first to check project-specific sync status
     active_project = get_active_project(project)
+
+    # Check migration status and wait briefly if needed
+    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
+
+    migration_status = await wait_for_migration_or_return_status(
+        timeout=5.0, project_name=active_project.name
+    )
+    if migration_status:  # pragma: no cover
+        return f"# System Status\n\n{migration_status}\n\nPlease wait for migration to complete before reading notes."
     project_url = active_project.project_url
 
     # Get the file via REST API - first try direct permalink lookup
@@ -74,7 +84,7 @@ async def read_note(
 
     # Fallback 1: Try title search via API
     logger.info(f"Search title for: {identifier}")
-    title_results = await search_notes(query=identifier, search_type="title", project=project)
+    title_results = await search_notes.fn(query=identifier, search_type="title", project=project)
 
     if title_results and title_results.results:
         result = title_results.results[0]  # Get the first/best match
@@ -98,7 +108,7 @@ async def read_note(
 
     # Fallback 2: Text search as a last resort
     logger.info(f"Title search failed, trying text search for: {identifier}")
-    text_results = await search_notes(query=identifier, search_type="text", project=project)
+    text_results = await search_notes.fn(query=identifier, search_type="text", project=project)
 
     # We didn't find a direct match, construct a helpful error message
     if not text_results or not text_results.results:
@@ -114,7 +124,7 @@ def format_not_found_message(identifier: str) -> str:
     return dedent(f"""
         # Note Not Found: "{identifier}"
         
-        I couldn't find any notes matching "{identifier}". Here are some suggestions:
+        I searched for "{identifier}" using multiple methods (direct lookup, title search, and text search) but couldn't find any matching notes. Here are some suggestions:
         
         ## Check Identifier Type
         - If you provided a title, try using the exact permalink instead
@@ -160,7 +170,7 @@ def format_related_results(identifier: str, results) -> str:
     message = dedent(f"""
         # Note Not Found: "{identifier}"
         
-        I couldn't find an exact match for "{identifier}", but I found some related notes:
+        I searched for "{identifier}" using direct lookup and title search but couldn't find an exact match. However, I found some related notes through text search:
         
         """)
 

@@ -123,10 +123,10 @@ async def test_get_system_status(project_service: ProjectService):
 
 
 @pytest.mark.asyncio
-async def test_get_statistics(project_service: ProjectService, test_graph):
+async def test_get_statistics(project_service: ProjectService, test_graph, test_project):
     """Test getting statistics."""
     # Get statistics
-    statistics = await project_service.get_statistics()
+    statistics = await project_service.get_statistics(test_project.id)
 
     # Assert it returns a valid ProjectStatistics object
     assert isinstance(statistics, ProjectStatistics)
@@ -135,10 +135,10 @@ async def test_get_statistics(project_service: ProjectService, test_graph):
 
 
 @pytest.mark.asyncio
-async def test_get_activity_metrics(project_service: ProjectService, test_graph):
+async def test_get_activity_metrics(project_service: ProjectService, test_graph, test_project):
     """Test getting activity metrics."""
     # Get activity metrics
-    metrics = await project_service.get_activity_metrics()
+    metrics = await project_service.get_activity_metrics(test_project.id)
 
     # Assert it returns a valid ActivityMetrics object
     assert isinstance(metrics, ActivityMetrics)
@@ -147,10 +147,10 @@ async def test_get_activity_metrics(project_service: ProjectService, test_graph)
 
 
 @pytest.mark.asyncio
-async def test_get_project_info(project_service: ProjectService, test_graph):
+async def test_get_project_info(project_service: ProjectService, test_graph, test_project):
     """Test getting full project info."""
     # Get project info
-    info = await project_service.get_project_info()
+    info = await project_service.get_project_info(test_project.name)
 
     # Assert it returns a valid ProjectInfoResponse object
     assert isinstance(info, ProjectInfoResponse)
@@ -304,3 +304,300 @@ async def test_set_default_project_config_db_mismatch(
         # Clean up
         if test_project_name in project_service.projects:
             config_manager.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_add_project_with_set_default_true(project_service: ProjectService, tmp_path):
+    """Test adding a project with set_default=True enforces single default."""
+    test_project_name = f"test-default-true-{os.urandom(4).hex()}"
+    test_project_path = str(tmp_path / "test-default-true")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    original_default = project_service.default_project
+
+    try:
+        # Get original default project from database
+        original_default_project = await project_service.repository.get_by_name(original_default)
+
+        # Add project with set_default=True
+        await project_service.add_project(test_project_name, test_project_path, set_default=True)
+
+        # Verify new project is set as default in both config and database
+        assert project_service.default_project == test_project_name
+
+        new_project = await project_service.repository.get_by_name(test_project_name)
+        assert new_project is not None
+        assert new_project.is_default is True
+
+        # Verify original default is no longer default in database
+        if original_default_project:
+            refreshed_original = await project_service.repository.get_by_name(original_default)
+            assert refreshed_original.is_default is not True
+
+        # Verify only one project has is_default=True
+        all_projects = await project_service.repository.find_all()
+        default_projects = [p for p in all_projects if p.is_default is True]
+        assert len(default_projects) == 1
+        assert default_projects[0].name == test_project_name
+
+    finally:
+        # Restore original default
+        if original_default:
+            await project_service.set_default_project(original_default)
+
+        # Clean up test project
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_add_project_with_set_default_false(project_service: ProjectService, tmp_path):
+    """Test adding a project with set_default=False doesn't change defaults."""
+    test_project_name = f"test-default-false-{os.urandom(4).hex()}"
+    test_project_path = str(tmp_path / "test-default-false")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    original_default = project_service.default_project
+
+    try:
+        # Add project with set_default=False (explicit)
+        await project_service.add_project(test_project_name, test_project_path, set_default=False)
+
+        # Verify default project hasn't changed
+        assert project_service.default_project == original_default
+
+        # Verify new project is NOT set as default
+        new_project = await project_service.repository.get_by_name(test_project_name)
+        assert new_project is not None
+        assert new_project.is_default is not True
+
+        # Verify original default is still default
+        original_default_project = await project_service.repository.get_by_name(original_default)
+        if original_default_project:
+            assert original_default_project.is_default is True
+
+    finally:
+        # Clean up test project
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_add_project_default_parameter_omitted(project_service: ProjectService, tmp_path):
+    """Test adding a project without set_default parameter defaults to False behavior."""
+    test_project_name = f"test-default-omitted-{os.urandom(4).hex()}"
+    test_project_path = str(tmp_path / "test-default-omitted")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    original_default = project_service.default_project
+
+    try:
+        # Add project without set_default parameter (should default to False)
+        await project_service.add_project(test_project_name, test_project_path)
+
+        # Verify default project hasn't changed
+        assert project_service.default_project == original_default
+
+        # Verify new project is NOT set as default
+        new_project = await project_service.repository.get_by_name(test_project_name)
+        assert new_project is not None
+        assert new_project.is_default is not True
+
+    finally:
+        # Clean up test project
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_ensure_single_default_project_enforcement_logic(project_service: ProjectService):
+    """Test that _ensure_single_default_project logic works correctly."""
+    # Test that the method exists and is callable
+    assert hasattr(project_service, "_ensure_single_default_project")
+    assert callable(getattr(project_service, "_ensure_single_default_project"))
+
+    # Call the enforcement method - should work without error
+    await project_service._ensure_single_default_project()
+
+    # Verify there is exactly one default project after enforcement
+    all_projects = await project_service.repository.find_all()
+    default_projects = [p for p in all_projects if p.is_default is True]
+    assert len(default_projects) == 1  # Should have exactly one default
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_calls_ensure_single_default(
+    project_service: ProjectService, tmp_path
+):
+    """Test that synchronize_projects calls _ensure_single_default_project."""
+    test_project_name = f"test-sync-default-{os.urandom(4).hex()}"
+    test_project_path = str(tmp_path / "test-sync-default")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    try:
+        # Add project to config only (simulating unsynchronized state)
+        from basic_memory.config import config_manager
+
+        config_manager.add_project(test_project_name, test_project_path)
+
+        # Verify it's in config but not in database
+        assert test_project_name in project_service.projects
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is None
+
+        # Call synchronize_projects (this should call _ensure_single_default_project)
+        await project_service.synchronize_projects()
+
+        # Verify project is now in database
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is not None
+
+        # Verify default project enforcement was applied
+        all_projects = await project_service.repository.find_all()
+        default_projects = [p for p in all_projects if p.is_default is True]
+        assert len(default_projects) <= 1  # Should be exactly 1 or 0
+
+    finally:
+        # Clean up test project
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_normalizes_project_names(
+    project_service: ProjectService, tmp_path
+):
+    """Test that synchronize_projects normalizes project names in config to match database format."""
+    # Use a project name that needs normalization (uppercase, spaces)
+    unnormalized_name = "Test Project With Spaces"
+    expected_normalized_name = "test-project-with-spaces"
+    test_project_path = str(tmp_path / "test-project-spaces")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    # Import config manager outside try block
+    from basic_memory.config import config_manager
+
+    try:
+        # Manually add the unnormalized project name to config
+
+        # Save the original config state for potential debugging
+        # original_projects = config_manager.projects.copy()
+
+        # Add project with unnormalized name directly to config
+        config_manager.config.projects[unnormalized_name] = test_project_path
+        config_manager.save_config(config_manager.config)
+
+        # Verify the unnormalized name is in config
+        assert unnormalized_name in project_service.projects
+        assert project_service.projects[unnormalized_name] == test_project_path
+
+        # Call synchronize_projects - this should normalize the project name
+        await project_service.synchronize_projects()
+
+        # Verify the config was updated with normalized name
+        assert expected_normalized_name in project_service.projects
+        assert unnormalized_name not in project_service.projects
+        assert project_service.projects[expected_normalized_name] == test_project_path
+
+        # Verify the project was added to database with normalized name
+        db_project = await project_service.repository.get_by_name(expected_normalized_name)
+        assert db_project is not None
+        assert db_project.name == expected_normalized_name
+        assert db_project.path == test_project_path
+        assert db_project.permalink == expected_normalized_name
+
+        # Verify the unnormalized name is not in database
+        unnormalized_db_project = await project_service.repository.get_by_name(unnormalized_name)
+        assert unnormalized_db_project is None
+
+    finally:
+        # Clean up - remove any test projects from both config and database
+        current_projects = project_service.projects.copy()
+        for name in [unnormalized_name, expected_normalized_name]:
+            if name in current_projects:
+                try:
+                    await project_service.remove_project(name)
+                except Exception:
+                    # Try to clean up manually if remove_project fails
+                    try:
+                        config_manager.remove_project(name)
+                    except Exception:
+                        pass
+
+                    # Remove from database
+                    db_project = await project_service.repository.get_by_name(name)
+                    if db_project:
+                        await project_service.repository.delete(db_project.id)
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_handles_case_sensitivity_bug(
+    project_service: ProjectService, tmp_path
+):
+    """Test that synchronize_projects fixes the case sensitivity bug (Personal vs personal)."""
+    # Simulate the exact bug scenario: config has "Personal" but database expects "personal"
+    config_name = "Personal"
+    normalized_name = "personal"
+    test_project_path = str(tmp_path / "personal-project")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    # Import config manager outside try block
+    from basic_memory.config import config_manager
+
+    try:
+        # Add project with uppercase name to config (simulating the bug scenario)
+        config_manager.config.projects[config_name] = test_project_path
+        config_manager.save_config(config_manager.config)
+
+        # Verify the uppercase name is in config
+        assert config_name in project_service.projects
+        assert project_service.projects[config_name] == test_project_path
+
+        # Call synchronize_projects - this should fix the case sensitivity issue
+        await project_service.synchronize_projects()
+
+        # Verify the config was updated to use normalized case
+        assert normalized_name in project_service.projects
+        assert config_name not in project_service.projects
+        assert project_service.projects[normalized_name] == test_project_path
+
+        # Verify the project exists in database with correct normalized name
+        db_project = await project_service.repository.get_by_name(normalized_name)
+        assert db_project is not None
+        assert db_project.name == normalized_name
+        assert db_project.path == test_project_path
+
+        # Verify we can now switch to this project without case sensitivity errors
+        # (This would have failed before the fix with "Personal" != "personal")
+        project_lookup = await project_service.get_project(normalized_name)
+        assert project_lookup is not None
+        assert project_lookup.name == normalized_name
+
+    finally:
+        # Clean up
+        for name in [config_name, normalized_name]:
+            if name in project_service.projects:
+                try:
+                    await project_service.remove_project(name)
+                except Exception:
+                    # Manual cleanup if needed
+                    try:
+                        config_manager.remove_project(name)
+                    except Exception:
+                        pass
+
+                    db_project = await project_service.repository.get_by_name(name)
+                    if db_project:
+                        await project_service.repository.delete(db_project.id)

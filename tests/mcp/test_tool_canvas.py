@@ -34,7 +34,7 @@ async def test_create_canvas(app, project_config):
     folder = "visualizations"
 
     # Execute
-    result = await canvas(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify result message
     assert result
@@ -71,7 +71,7 @@ async def test_create_canvas_with_extension(app, project_config):
     folder = "visualizations"
 
     # Execute
-    result = await canvas(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify
     assert "Created: visualizations/extension-test.canvas" in result
@@ -105,7 +105,7 @@ async def test_update_existing_canvas(app, project_config):
     folder = "visualizations"
 
     # Create initial canvas
-    await canvas(nodes=nodes, edges=edges, title=title, folder=folder)
+    await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify file exists
     file_path = Path(project_config.home) / folder / f"{title}.canvas"
@@ -128,7 +128,7 @@ async def test_update_existing_canvas(app, project_config):
     ]
 
     # Execute update
-    result = await canvas(nodes=updated_nodes, edges=updated_edges, title=title, folder=folder)
+    result = await canvas.fn(nodes=updated_nodes, edges=updated_edges, title=title, folder=folder)
 
     # Verify result indicates update
     assert "Updated: visualizations/update-test.canvas" in result
@@ -159,7 +159,7 @@ async def test_create_canvas_with_nested_folders(app, project_config):
     folder = "visualizations/nested/folders"  # Deep path
 
     # Execute
-    result = await canvas(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify
     assert "Created: visualizations/nested/folders/nested-test.canvas" in result
@@ -242,7 +242,7 @@ async def test_create_canvas_complex_content(app, project_config):
     test_file_path.write_text("# Test File\nThis is referenced by the canvas")
 
     # Execute
-    result = await canvas(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify
     assert "Created: visualizations/complex-test.canvas" in result

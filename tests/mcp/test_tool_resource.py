@@ -25,7 +25,7 @@ async def test_read_file_text_file(app, synced_files):
     - Include correct metadata
     """
     # First create a text file via notes
-    result = await write_note(
+    result = await write_note.fn(
         title="Text Resource",
         folder="test",
         content="This is a test text resource",
@@ -34,7 +34,7 @@ async def test_read_file_text_file(app, synced_files):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_content("test/text-resource")
+    response = await read_content.fn("test/text-resource")
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -52,7 +52,7 @@ async def test_read_content_file_path(app, synced_files):
     - Include correct metadata
     """
     # First create a text file via notes
-    result = await write_note(
+    result = await write_note.fn(
         title="Text Resource",
         folder="test",
         content="This is a test text resource",
@@ -61,7 +61,7 @@ async def test_read_content_file_path(app, synced_files):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_content("test/Text Resource.md")
+    response = await read_content.fn("test/Text Resource.md")
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -82,7 +82,7 @@ async def test_read_file_image_file(app, synced_files):
     image_path = synced_files["image"].name
 
     # Read it as a resource
-    response = await read_content(image_path)
+    response = await read_content.fn(image_path)
 
     assert response["type"] == "image"
     assert response["source"]["type"] == "base64"
@@ -110,7 +110,7 @@ async def test_read_file_pdf_file(app, synced_files):
     pdf_path = synced_files["pdf"].name
 
     # Read it as a resource
-    response = await read_content(pdf_path)
+    response = await read_content.fn(pdf_path)
 
     assert response["type"] == "document"
     assert response["source"]["type"] == "base64"
@@ -126,14 +126,14 @@ async def test_read_file_pdf_file(app, synced_files):
 async def test_read_file_not_found(app):
     """Test trying to read a non-existent"""
     with pytest.raises(ToolError, match="Resource not found"):
-        await read_content("does-not-exist")
+        await read_content.fn("does-not-exist")
 
 
 @pytest.mark.asyncio
 async def test_read_file_memory_url(app, synced_files):
     """Test reading a resource using a memory:// URL."""
     # Create a text file via notes
-    await write_note(
+    await write_note.fn(
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling for resources",
@@ -141,7 +141,7 @@ async def test_read_file_memory_url(app, synced_files):
 
     # Read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    response = await read_content(memory_url)
+    response = await read_content.fn(memory_url)
 
     assert response["type"] == "text"
     assert "Testing memory:// URL handling for resources" in response["text"]
@@ -205,7 +205,7 @@ async def test_image_conversion(app, synced_files):
     image_path = synced_files["image"].name
 
     # Test reading the resource
-    response = await read_content(image_path)
+    response = await read_content.fn(image_path)
 
     assert response["type"] == "image"
     assert response["source"]["media_type"] == "image/jpeg"

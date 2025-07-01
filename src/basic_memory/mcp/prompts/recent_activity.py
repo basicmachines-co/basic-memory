@@ -38,7 +38,7 @@ async def recent_activity_prompt(
     """
     logger.info(f"Getting recent activity, timeframe: {timeframe}")
 
-    recent = await recent_activity(timeframe=timeframe, type=[SearchItemType.ENTITY])
+    recent = await recent_activity.fn(timeframe=timeframe, type=[SearchItemType.ENTITY])
 
     # Extract primary results from the hierarchical structure
     primary_results = []

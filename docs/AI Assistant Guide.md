@@ -77,22 +77,31 @@ read_note("specs/search-design")        # By path
 read_note("memory://specs/search")      # By memory URL
 ```
 
+**Viewing notes as formatted artifacts (Claude Desktop):**
+```
+view_note("Search Design")              # Creates readable artifact
+view_note("specs/search-design")        # By permalink
+view_note("memory://specs/search")      # By memory URL
+```
+
 **Incremental editing** (v0.13.0):
 ```
 edit_note(
-    identifier="Search Design",
+    identifier="Search Design",         # Must be EXACT title/permalink (strict matching)
     operation="append",                 # append, prepend, find_replace, replace_section
     content="\n## New Section\nContent here..."
 )
 ```
+**⚠️ Important:** `edit_note` requires exact identifiers (no fuzzy matching). Use `search_notes()` first if uncertain.
 
 **File organization** (v0.13.0):
 ```
 move_note(
-    identifier="Old Note",
+    identifier="Old Note",              # Must be EXACT title/permalink (strict matching)
     destination="archive/old-note.md"   # Folders created automatically
 )
 ```
+**⚠️ Important:** `move_note` requires exact identifiers (no fuzzy matching). Use `search_notes()` first if uncertain.
 
 ### Project Management (v0.13.0)
 
@@ -363,6 +372,20 @@ When creating relations:
 **Sync Issues:**
 - If information seems outdated, suggest `basic-memory sync`
 - Use `recent_activity()` to check if content is current
+
+**Strict Mode for Edit/Move Operations:**
+- `edit_note()` and `move_note()` require **exact identifiers** (no fuzzy matching for safety)
+- If identifier not found: use `search_notes()` first to find the exact title/permalink
+- Error messages will guide you to find correct identifiers
+- Example workflow:
+  ```
+  # ❌ This might fail if identifier isn't exact
+  edit_note("Meeting Note", "append", "content")
+  
+  # ✅ Safe approach: search first, then use exact result
+  results = search_notes("meeting")
+  edit_note("Meeting Notes 2024", "append", "content")  # Use exact title from search
+  ```
 
 ## Best Practices
 

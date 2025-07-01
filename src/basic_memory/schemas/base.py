@@ -13,7 +13,7 @@ Key Concepts:
 
 import mimetypes
 import re
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
@@ -46,15 +46,43 @@ def to_snake_case(name: str) -> str:
     return s2.lower()
 
 
+def parse_timeframe(timeframe: str) -> datetime:
+    """Parse timeframe with special handling for 'today' and other natural language expressions.
+
+    Args:
+        timeframe: Natural language timeframe like 'today', '1d', '1 week ago', etc.
+
+    Returns:
+        datetime: The parsed datetime for the start of the timeframe
+
+    Examples:
+        parse_timeframe('today') -> 2025-06-05 00:00:00 (start of today)
+        parse_timeframe('1d') -> 2025-06-04 14:50:00 (24 hours ago)
+        parse_timeframe('1 week ago') -> 2025-05-29 14:50:00 (1 week ago)
+    """
+    if timeframe.lower() == "today":
+        # Return start of today (00:00:00)
+        return datetime.combine(datetime.now().date(), time.min)
+    else:
+        # Use dateparser for other formats
+        parsed = parse(timeframe)
+        if not parsed:
+            raise ValueError(f"Could not parse timeframe: {timeframe}")
+        return parsed
+
+
 def validate_timeframe(timeframe: str) -> str:
     """Convert human readable timeframes to a duration relative to the current time."""
     if not isinstance(timeframe, str):
         raise ValueError("Timeframe must be a string")
 
-    # Parse relative time expression
-    parsed = parse(timeframe)
-    if not parsed:
-        raise ValueError(f"Could not parse timeframe: {timeframe}")
+    # Preserve special timeframe strings that need custom handling
+    special_timeframes = ["today"]
+    if timeframe.lower() in special_timeframes:
+        return timeframe.lower()
+
+    # Parse relative time expression using our enhanced parser
+    parsed = parse_timeframe(timeframe)
 
     # Convert to duration
     now = datetime.now()

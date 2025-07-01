@@ -27,6 +27,7 @@ async def write_note(
     content: str,
     folder: str,
     tags=None,  # Remove type hint completely to avoid schema issues
+    entity_type: str = "note",
     project: Optional[str] = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
@@ -54,9 +55,11 @@ async def write_note(
     Args:
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
-        folder: the folder where the file should be saved
+        folder: Folder path relative to project root where the file should be saved.
+                Use forward slashes (/) as separators. Examples: "notes", "projects/2025", "research/ml"
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
+        entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
         project: Optional project name to write to. If not provided, uses current active project.
 
     Returns:
@@ -69,6 +72,18 @@ async def write_note(
     """
     logger.info(f"MCP tool call tool=write_note folder={folder}, title={title}, tags={tags}")
 
+    # Get the active project first to check project-specific sync status
+    active_project = get_active_project(project)
+
+    # Check migration status and wait briefly if needed
+    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
+
+    migration_status = await wait_for_migration_or_return_status(
+        timeout=5.0, project_name=active_project.name
+    )
+    if migration_status:  # pragma: no cover
+        return f"# System Status\n\n{migration_status}\n\nPlease wait for migration to complete before creating notes."
+
     # Process tags using the helper function
     tag_list = parse_tags(tags)
     # Create the entity request
@@ -76,12 +91,11 @@ async def write_note(
     entity = Entity(
         title=title,
         folder=folder,
-        entity_type="note",
+        entity_type=entity_type,
         content_type="text/markdown",
         content=content,
         entity_metadata=metadata,
     )
-    active_project = get_active_project(project)
     project_url = active_project.project_url
 
     # Create or update via knowledge API
@@ -120,7 +134,10 @@ async def write_note(
         summary.append(f"- Resolved: {resolved}")
         if unresolved:
             summary.append(f"- Unresolved: {unresolved}")
-            summary.append("\nUnresolved relations will be retried on next sync.")
+            summary.append("\nNote: Unresolved relations point to entities that don't exist yet.")
+            summary.append(
+                "They will be automatically resolved when target entities are created or during sync operations."
+            )
 
     if tag_list:
         summary.append(f"\n## Tags\n- {', '.join(tag_list)}")

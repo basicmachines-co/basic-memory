@@ -26,7 +26,7 @@ async def mock_call_get():
 @pytest_asyncio.fixture
 async def mock_search():
     """Mock for search tool."""
-    with patch("basic_memory.mcp.tools.read_note.search_notes") as mock:
+    with patch("basic_memory.mcp.tools.read_note.search_notes.fn") as mock:
         # Default to empty results
         mock.return_value = SearchResponse(results=[], current_page=1, page_size=1)
         yield mock
@@ -36,10 +36,10 @@ async def mock_search():
 async def test_read_note_by_title(app):
     """Test reading a note by its title."""
     # First create a note
-    await write_note(title="Special Note", folder="test", content="Note content here")
+    await write_note.fn(title="Special Note", folder="test", content="Note content here")
 
     # Should be able to read it by title
-    content = await read_note("Special Note")
+    content = await read_note.fn("Special Note")
     assert "Note content here" in content
 
 
@@ -47,7 +47,7 @@ async def test_read_note_by_title(app):
 async def test_note_unicode_content(app):
     """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    result = await write_note(title="Unicode Test", folder="test", content=content)
+    result = await write_note.fn(title="Unicode Test", folder="test", content=content)
 
     assert (
         dedent("""
@@ -60,7 +60,7 @@ async def test_note_unicode_content(app):
     )
 
     # Read back should preserve unicode
-    result = await read_note("test/unicode-test")
+    result = await read_note.fn("test/unicode-test")
     assert content in result
 
 
@@ -75,16 +75,16 @@ async def test_multiple_notes(app):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note(title=title, folder=folder, content=content, tags=tags)
+        await write_note.fn(title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note(permalink)
+        note = await read_note.fn(permalink)
         assert content in note
 
     # read multiple notes at once
 
-    result = await read_note("test/*")
+    result = await read_note.fn("test/*")
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -108,15 +108,15 @@ async def test_multiple_notes_pagination(app):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note(title=title, folder=folder, content=content, tags=tags)
+        await write_note.fn(title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note(permalink)
+        note = await read_note.fn(permalink)
         assert content in note
 
     # read multiple notes at once with pagination
-    result = await read_note("test/*", page=1, page_size=2)
+    result = await read_note.fn("test/*", page=1, page_size=2)
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -136,7 +136,7 @@ async def test_read_note_memory_url(app):
     - Return the note content
     """
     # First create a note
-    result = await write_note(
+    result = await write_note.fn(
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling",
@@ -145,7 +145,7 @@ async def test_read_note_memory_url(app):
 
     # Should be able to read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    content = await read_note(memory_url)
+    content = await read_note.fn(memory_url)
     assert "Testing memory:// URL handling" in content
 
 
@@ -159,7 +159,7 @@ async def test_read_note_direct_success(mock_call_get):
     mock_call_get.return_value = mock_response
 
     # Call the function
-    result = await read_note("test/test-note")
+    result = await read_note.fn("test/test-note")
 
     # Verify direct lookup was used
     mock_call_get.assert_called_once()
@@ -199,7 +199,7 @@ async def test_read_note_title_search_fallback(mock_call_get, mock_search):
     )
 
     # Call the function
-    result = await read_note("Test Note")
+    result = await read_note.fn("Test Note")
 
     # Verify title search was used
     mock_search.assert_called_once()
@@ -253,7 +253,7 @@ async def test_read_note_text_search_fallback(mock_call_get, mock_search):
     ]
 
     # Call the function
-    result = await read_note("some query")
+    result = await read_note.fn("some query")
 
     # Verify both search types were used
     assert mock_search.call_count == 2
@@ -281,7 +281,7 @@ async def test_read_note_complete_fallback(mock_call_get, mock_search):
     mock_search.return_value = SearchResponse(results=[], current_page=1, page_size=1)
 
     # Call the function
-    result = await read_note("nonexistent")
+    result = await read_note.fn("nonexistent")
 
     # Verify search was used
     assert mock_search.call_count == 2

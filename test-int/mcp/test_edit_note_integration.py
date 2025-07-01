@@ -324,10 +324,9 @@ async def test_edit_note_error_handling_note_not_found(mcp_server, app):
         # Should return helpful error message
         assert len(edit_result) == 1
         error_text = edit_result[0].text
-        assert "Edit Failed - Note Not Found" in error_text
+        assert "Edit Failed" in error_text
         assert "Non-existent Note" in error_text
         assert "search_notes(" in error_text
-        assert "Suggestions to try:" in error_text
 
 
 @pytest.mark.asyncio

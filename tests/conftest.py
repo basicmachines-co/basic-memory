@@ -105,7 +105,6 @@ def config_manager(
     )
 
     # Patch the project config that CLI commands import (only modules that actually import config)
-    monkeypatch.setattr("basic_memory.cli.commands.project.config", project_config)
     monkeypatch.setattr("basic_memory.cli.commands.sync.config", project_config)
     monkeypatch.setattr("basic_memory.cli.commands.status.config", project_config)
     monkeypatch.setattr("basic_memory.cli.commands.import_memory_json.config", project_config)

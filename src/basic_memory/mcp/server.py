@@ -31,23 +31,23 @@ load_dotenv()
 @dataclass
 class AppContext:
     watch_task: Optional[asyncio.Task]
+    migration_manager: Optional[Any] = None
 
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:  # pragma: no cover
     """Manage application lifecycle with type-safe context"""
-    # Initialize on startup
-    watch_task = await initialize_app(app_config)
+    # Initialize on startup (now returns migration_manager)
+    migration_manager = await initialize_app(app_config)
 
     # Initialize project session with default project
     session.initialize(app_config.default_project)
 
     try:
-        yield AppContext(watch_task=watch_task)
+        yield AppContext(watch_task=None, migration_manager=migration_manager)
     finally:
-        # Cleanup on shutdown
-        if watch_task:
-            watch_task.cancel()
+        # Cleanup on shutdown - migration tasks will be cancelled automatically
+        pass
 
 
 # OAuth configuration function
@@ -105,6 +105,5 @@ auth_settings, auth_provider = create_auth_config()
 # Create the shared server instance
 mcp = FastMCP(
     name="Basic Memory",
-    log_level="DEBUG",
     auth=auth_provider,
 )

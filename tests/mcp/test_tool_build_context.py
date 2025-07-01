@@ -14,7 +14,7 @@ from basic_memory.schemas.memory import (
 @pytest.mark.asyncio
 async def test_get_basic_discussion_context(client, test_graph):
     """Test getting basic discussion context."""
-    context = await build_context(url="memory://test/root")
+    context = await build_context.fn(url="memory://test/root")
 
     assert isinstance(context, GraphContext)
     assert len(context.results) == 1
@@ -33,7 +33,7 @@ async def test_get_basic_discussion_context(client, test_graph):
 @pytest.mark.asyncio
 async def test_get_discussion_context_pattern(client, test_graph):
     """Test getting context with pattern matching."""
-    context = await build_context(url="memory://test/*", depth=1)
+    context = await build_context.fn(url="memory://test/*", depth=1)
 
     assert isinstance(context, GraphContext)
     assert len(context.results) > 1  # Should match multiple test/* paths
@@ -45,13 +45,13 @@ async def test_get_discussion_context_pattern(client, test_graph):
 async def test_get_discussion_context_timeframe(client, test_graph):
     """Test timeframe parameter filtering."""
     # Get recent context
-    recent_context = await build_context(
+    recent_context = await build_context.fn(
         url="memory://test/root",
         timeframe="1d",  # Last 24 hours
     )
 
     # Get older context
-    older_context = await build_context(
+    older_context = await build_context.fn(
         url="memory://test/root",
         timeframe="30d",  # Last 30 days
     )
@@ -74,7 +74,7 @@ async def test_get_discussion_context_timeframe(client, test_graph):
 @pytest.mark.asyncio
 async def test_get_discussion_context_not_found(client):
     """Test handling of non-existent URIs."""
-    context = await build_context(url="memory://test/does-not-exist")
+    context = await build_context.fn(url="memory://test/does-not-exist")
 
     assert isinstance(context, GraphContext)
     assert len(context.results) == 0
@@ -103,7 +103,7 @@ async def test_build_context_timeframe_formats(client, test_graph):
     # Test each valid timeframe
     for timeframe in valid_timeframes:
         try:
-            result = await build_context(
+            result = await build_context.fn(
                 url=test_url, timeframe=timeframe, page=1, page_size=10, max_related=10
             )
             assert result is not None
@@ -113,4 +113,4 @@ async def test_build_context_timeframe_formats(client, test_graph):
     # Test invalid timeframes should raise ValidationError
     for timeframe in invalid_timeframes:
         with pytest.raises(ToolError):
-            await build_context(url=test_url, timeframe=timeframe)
+            await build_context.fn(url=test_url, timeframe=timeframe)

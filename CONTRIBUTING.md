@@ -15,8 +15,8 @@ project and how to get started as a developer.
 
 2. **Install Dependencies**:
    ```bash
-   # Using make (recommended)
-   make install
+   # Using just (recommended)
+   just install
    
    # Or using uv
    uv install -e ".[dev]"
@@ -25,10 +25,12 @@ project and how to get started as a developer.
    pip install -e ".[dev]"
    ```
 
+   > **Note**: Basic Memory uses [just](https://just.systems) as a modern command runner. Install with `brew install just` or `cargo install just`.
+
 3. **Run the Tests**:
    ```bash
    # Run all tests
-   make test
+   just test
    # or
    uv run pytest -p pytest_mock -v
    
@@ -49,16 +51,16 @@ project and how to get started as a developer.
 4. **Check Code Quality**:
    ```bash
    # Run all checks at once
-   make check
+   just check
    
    # Or run individual checks
-   make lint      # Run linting
-   make format    # Format code
-   make type-check  # Type checking
+   just lint      # Run linting
+   just format    # Format code
+   just type-check  # Type checking
    ```
 5. **Test Your Changes**: Ensure all tests pass locally and maintain 100% test coverage.
    ```bash
-   make test
+   just test
    ```
 6. **Submit a PR**: Submit a pull request with a detailed description of your changes.
 

@@ -2,12 +2,11 @@
 
 from typing import Annotated, Optional
 
-from dateparser import parse
 from fastapi import APIRouter, Query
 from loguru import logger
 
 from basic_memory.deps import ContextServiceDep, EntityRepositoryDep
-from basic_memory.schemas.base import TimeFrame
+from basic_memory.schemas.base import TimeFrame, parse_timeframe
 from basic_memory.schemas.memory import (
     GraphContext,
     normalize_memory_url,
@@ -40,7 +39,7 @@ async def recent(
         f"Getting recent context: `{types}` depth: `{depth}` timeframe: `{timeframe}` page: `{page}` page_size: `{page_size}` max_related: `{max_related}`"
     )
     # Parse timeframe
-    since = parse(timeframe)
+    since = parse_timeframe(timeframe)
     limit = page_size
     offset = (page - 1) * page_size
 
@@ -78,7 +77,7 @@ async def get_memory_context(
     memory_url = normalize_memory_url(uri)
 
     # Parse timeframe
-    since = parse(timeframe) if timeframe else None
+    since = parse_timeframe(timeframe) if timeframe else None
     limit = page_size
     offset = (page - 1) * page_size
 

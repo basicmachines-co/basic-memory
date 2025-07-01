@@ -24,14 +24,14 @@ def _format_error_response(
     if "Entity not found" in error_message or "entity not found" in error_message.lower():
         return f"""# Edit Failed - Note Not Found
 
-The note with identifier '{identifier}' could not be found.
+The note with identifier '{identifier}' could not be found. Edit operations require an exact match (no fuzzy matching).
 
 ## Suggestions to try:
-1. **Search for the note first**: Use `search_notes("{identifier.split("/")[-1]}")` to find similar notes
-2. **Try different identifier formats**:
-   - If you used a permalink like "folder/note-title", try just the title: "{identifier.split("/")[-1].replace("-", " ").title()}"
-   - If you used a title, try the permalink format: "{identifier.lower().replace(" ", "-")}"
-   - Use `read_note()` first to verify the note exists and get the correct identifiers
+1. **Search for the note first**: Use `search_notes("{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
+2. **Try different exact identifier formats**:
+   - If you used a permalink like "folder/note-title", try the exact title: "{identifier.split("/")[-1].replace("-", " ").title()}"
+   - If you used a title, try the exact permalink format: "{identifier.lower().replace(" ", "-")}"
+   - Use `read_note()` first to verify the note exists and get the exact identifier
 
 ## Alternative approach:
 Use `write_note()` to create the note first, then edit it."""
@@ -142,7 +142,9 @@ async def edit_note(
     It supports various operations for different editing scenarios.
 
     Args:
-        identifier: The title, permalink, or memory:// URL of the note to edit
+        identifier: The exact title, permalink, or memory:// URL of the note to edit.
+                   Must be an exact match - fuzzy matching is not supported for edit operations.
+                   Use search_notes() or read_note() first to find the correct identifier if uncertain.
         operation: The editing operation to perform:
                   - "append": Add content to the end of the note
                   - "prepend": Add content to the beginning of the note
@@ -179,10 +181,14 @@ async def edit_note(
         # Replace subsection with more specific header
         edit_note("docs/setup", "replace_section", "Updated install steps\\n", section="### Installation")
 
-        # Using different identifier formats
-        edit_note("Meeting Notes", "append", "\\n- Follow up on action items")  # title
-        edit_note("docs/meeting-notes", "append", "\\n- Follow up tasks")       # permalink
-        edit_note("docs/Meeting Notes", "append", "\\n- Next steps")           # folder/title
+        # Using different identifier formats (must be exact matches)
+        edit_note("Meeting Notes", "append", "\\n- Follow up on action items")  # exact title
+        edit_note("docs/meeting-notes", "append", "\\n- Follow up tasks")       # exact permalink
+        edit_note("docs/Meeting Notes", "append", "\\n- Next steps")           # exact folder/title
+
+        # If uncertain about identifier, search first:
+        # search_notes("meeting")  # Find available notes
+        # edit_note("docs/meeting-notes-2025", "append", "content")  # Use exact result
 
         # Add new section to document
         edit_note("project-plan", "replace_section", "TBD - needs research\\n", section="## Future Work")

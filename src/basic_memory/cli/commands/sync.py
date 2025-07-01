@@ -180,7 +180,7 @@ async def run_sync(verbose: bool = False):
     sync_service = await get_sync_service(project)
 
     logger.info("Running one-time sync")
-    knowledge_changes = await sync_service.sync(config.home)
+    knowledge_changes = await sync_service.sync(config.home, project_name=project.name)
 
     # Log results
     duration_ms = int((time.time() - start_time) * 1000)

@@ -25,7 +25,7 @@ jobs:
       issues: read
       id-token: write
     steps:
-      - name: Check organization membership
+      - name: Check user permissions
         id: check_membership
         uses: actions/github-script@v7
         with:
@@ -41,29 +41,62 @@ jobs:
               actor = context.payload.issue.user.login;
             }
             
-            console.log(`Checking membership for user: ${actor}`);
+            console.log(`Checking permissions for user: ${actor}`);
             
+            // List of explicitly allowed users (organization members)
+            const allowedUsers = [
+              'phernandez',
+              'groksrc',
+              'nellins',
+              'bm-claudeai'
+            ];
+            
+            if (allowedUsers.includes(actor)) {
+              console.log(`User ${actor} is in the allowed list`);
+              core.setOutput('is_member', true);
+              return;
+            }
+            
+            // Fallback: Check if user has repository permissions
             try {
-              const membership = await github.rest.orgs.getMembershipForUser({
-                org: 'basicmachines-co',
+              const collaboration = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
                 username: actor
               });
               
-              console.log(`Membership status: ${membership.data.state}`);
+              const permission = collaboration.data.permission;
+              console.log(`User ${actor} has permission level: ${permission}`);
               
-              // Allow if user is a member (public or private) or admin
-              const allowed = membership.data.state === 'active' && 
-                            (membership.data.role === 'member' || membership.data.role === 'admin');
+              // Allow if user has push access or higher (write, maintain, admin)
+              const allowed = ['write', 'maintain', 'admin'].includes(permission);
               
               core.setOutput('is_member', allowed);
               
               if (!allowed) {
-                core.notice(`User ${actor} is not a member of basicmachines-co organization`);
+                core.notice(`User ${actor} does not have sufficient repository permissions (has: ${permission})`);
               }
             } catch (error) {
-              console.log(`Error checking membership: ${error.message}`);
-              core.setOutput('is_member', false);
-              core.notice(`User ${actor} is not a member of basicmachines-co organization`);
+              console.log(`Error checking permissions: ${error.message}`);
+              
+              // Final fallback: Check if user is a public member of the organization
+              try {
+                const membership = await github.rest.orgs.getMembershipForUser({
+                  org: 'basicmachines-co',
+                  username: actor
+                });
+                
+                const allowed = membership.data.state === 'active';
+                core.setOutput('is_member', allowed);
+                
+                if (!allowed) {
+                  core.notice(`User ${actor} is not a public member of basicmachines-co organization`);
+                }
+              } catch (membershipError) {
+                console.log(`Error checking organization membership: ${membershipError.message}`);
+                core.setOutput('is_member', false);
+                core.notice(`User ${actor} does not have access to this repository`);
+              }
             }
 
       - name: Checkout repository
@@ -78,4 +111,4 @@ jobs:
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_tools: Bash(uv run pytest),Bash(uv run ruff check . --fix),Bash(uv run ruff format .),Bash(uv run pyright),Bash(make test),Bash(make lint),Bash(make format),Bash(make type-check),Bash(make check),Read,Write,Edit,MultiEdit,Glob,Grep,LS
+          allowed_tools: Bash(uv run pytest),Bash(uv run ruff check . --fix),Bash(uv run ruff format .),Bash(uv run pyright),Bash(just test),Bash(just lint),Bash(just format),Bash(just type-check),Bash(just check),Read,Write,Edit,MultiEdit,Glob,Grep,LS, mcp__web_search

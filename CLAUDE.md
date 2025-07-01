@@ -14,15 +14,15 @@ See the [README.md](README.md) file for a project overview.
 
 ### Build and Test Commands
 
-- Install: `make install` or `pip install -e ".[dev]"`
-- Run tests: `uv run pytest -p pytest_mock -v` or `make test`
+- Install: `just install` or `pip install -e ".[dev]"`
+- Run tests: `uv run pytest -p pytest_mock -v` or `just test`
 - Single test: `pytest tests/path/to/test_file.py::test_function_name`
-- Lint: `make lint` or `ruff check . --fix`
-- Type check: `make type-check` or `uv run pyright`
-- Format: `make format` or `uv run ruff format .`
-- Run all code checks: `make check` (runs lint, format, type-check, test)
-- Create db migration: `make migration m="Your migration message"`
-- Run development MCP Inspector: `make run-inspector`
+- Lint: `just lint` or `ruff check . --fix`
+- Type check: `just type-check` or `uv run pyright`
+- Format: `just format` or `uv run ruff format .`
+- Run all code checks: `just check` (runs lint, format, type-check, test)
+- Create db migration: `just migration "Your migration message"`
+- Run development MCP Inspector: `just run-inspector`
 
 ### Code Style Guidelines
 
@@ -97,15 +97,26 @@ See the [README.md](README.md) file for a project overview.
 
   **Content Management:**
     - `write_note(title, content, folder, tags)` - Create/update markdown notes with semantic observations and relations
-    - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph
-      awareness
-    - `read_file(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
+    - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph awareness
+    - `edit_note(identifier, operation, content)` - Edit notes incrementally (append, prepend, find/replace, section replace)
+    - `move_note(identifier, destination_path)` - Move notes with database consistency and search reindexing
+    - `view_note(identifier)` - Display notes as formatted artifacts for better readability in Claude Desktop
+    - `read_content(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
+    - `delete_note(identifier)` - Delete notes from knowledge base
+
+  **Project Management:**
+    - `list_memory_projects()` - List all available projects with status indicators
+    - `switch_project(project_name)` - Switch to different project context during conversations
+    - `get_current_project()` - Show currently active project with statistics
+    - `create_memory_project(name, path, set_default)` - Create new Basic Memory projects
+    - `delete_project(name)` - Delete projects from configuration and database
+    - `set_default_project(name)` - Set default project in config
+    - `sync_status()` - Check file synchronization status and background operations
 
   **Knowledge Graph Navigation:**
-    - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation
-      continuity
-    - `recent_activity(type, depth, timeframe)` - Get recently updated information with specified timeframe (e.g., "
-      1d", "1 week")
+    - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation continuity
+    - `recent_activity(type, depth, timeframe)` - Get recently updated information with specified timeframe (e.g., "1d", "1 week")
+    - `list_directory(dir_name, depth, file_name_glob)` - List directory contents with filtering and depth control
 
   **Search & Discovery:**
     - `search_notes(query, page, page_size)` - Full-text search across all content with filtering options
@@ -212,13 +223,35 @@ Basic Memory uses `uv-dynamic-versioning` for automatic version management based
 - Users install with: `pip install basic-memory --pre`
 - Use for milestone testing before stable release
 
-#### Stable Releases (Manual)
+#### Stable Releases (Automated)
+- Use the automated release system: `just release v0.13.0`
+- Includes comprehensive quality checks (lint, format, type-check, tests)
+- Automatically updates version in `__init__.py`
+- Creates git tag and pushes to GitHub
+- Triggers GitHub Actions workflow for:
+  - PyPI publication
+  - Homebrew formula update (requires HOMEBREW_TOKEN secret)
+
+**Manual method (legacy):**
 - Create version tag: `git tag v0.13.0 && git push origin v0.13.0`
-- Automatically builds, creates GitHub release, and publishes to PyPI
-- Users install with: `pip install basic-memory`
+
+#### Homebrew Formula Updates
+- Automatically triggered after successful PyPI release for **stable releases only**
+- **Stable releases** (e.g., v0.13.7) automatically update the main `basic-memory` formula
+- **Pre-releases** (dev/beta/rc) are NOT automatically updated - users must specify version manually
+- Updates formula in `basicmachines-co/homebrew-basic-memory` repo
+- Requires `HOMEBREW_TOKEN` secret in GitHub repository settings:
+  - Create a fine-grained Personal Access Token with `Contents: Read and Write` and `Actions: Read` scopes on `basicmachines-co/homebrew-basic-memory`
+  - Add as repository secret named `HOMEBREW_TOKEN` in `basicmachines-co/basic-memory`
+- Formula updates include new version URL and SHA256 checksum
 
 ### For Development
-- No manual version bumping required
-- Versions automatically derived from git tags
-- `pyproject.toml` uses `dynamic = ["version"]`
-- `__init__.py` dynamically reads version from package metadata
+- **Automated releases**: Use `just release v0.13.x` for stable releases and `just beta v0.13.0b1` for beta releases
+- **Quality gates**: All releases require passing lint, format, type-check, and test suites
+- **Version management**: Versions automatically derived from git tags via `uv-dynamic-versioning`
+- **Configuration**: `pyproject.toml` uses `dynamic = ["version"]`
+- **Release automation**: `__init__.py` updated automatically during release process
+- **CI/CD**: GitHub Actions handles building and PyPI publication
+
+## Development Notes
+- make sure you sign off on commits

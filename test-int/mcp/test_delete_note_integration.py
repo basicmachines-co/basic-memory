@@ -60,7 +60,6 @@ async def test_delete_note_by_title(mcp_server, app):
         result_text = read_after_delete[0].text
         assert "Note Not Found" in result_text
         assert "Note to Delete" in result_text
-        assert "I couldn't find any notes matching" in result_text
 
 
 @pytest.mark.asyncio

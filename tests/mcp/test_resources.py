@@ -8,7 +8,7 @@ import pytest
 async def test_ai_assistant_guide_exists(app):
     """Test that the canvas spec resource exists and returns content."""
     # Call the resource function
-    guide = ai_assistant_guide()
+    guide = ai_assistant_guide.fn()
 
     # Verify basic characteristics of the content
     assert guide is not None

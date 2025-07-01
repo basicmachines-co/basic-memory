@@ -8,7 +8,7 @@ Analyze commits and generate formatted changelog entry for a version.
 ```
 
 **Parameters:**
-- `version` (required): Version like `v0.13.0` or `v0.13.0b4`
+- `version` (required): Version like `v0.14.0` or `v0.14.0b1`
 - `type` (optional): `beta`, `rc`, or `stable` (default: `stable`)
 
 ## Implementation
@@ -59,8 +59,9 @@ You are an expert technical writer for the Basic Memory project. When the user r
 ### Step 3: Generate Changelog Entry
 Create formatted entry following existing CHANGELOG.md style:
 
+Example:
 ```markdown
-## v0.13.0 (2025-06-03)
+## <version> (<date>)
 
 ### Features
 
@@ -128,6 +129,8 @@ Create formatted entry following existing CHANGELOG.md style:
 ## Output Format
 
 ### For Beta Releases
+
+Example: 
 ```markdown
 ## v0.13.0b4 (2025-06-03)
 

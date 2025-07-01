@@ -42,7 +42,7 @@ ENV/
 
 # macOS
 .DS_Store
-/.coverage.*
+.coverage.*
 
 # obsidian docs:
 /docs/.obsidian/

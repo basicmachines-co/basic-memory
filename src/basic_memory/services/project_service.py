@@ -64,15 +64,18 @@ class ProjectService:
         return await self.repository.find_all()
 
     async def get_project(self, name: str) -> Optional[Project]:
-        """Get the file path for a project by name."""
-        return await self.repository.get_by_name(name)
+        """Get the file path for a project by name or permalink."""
+        return await self.repository.get_by_name(name) or await self.repository.get_by_permalink(
+            name
+        )
 
-    async def add_project(self, name: str, path: str) -> None:
+    async def add_project(self, name: str, path: str, set_default: bool = False) -> None:
         """Add a new project to the configuration and database.
 
         Args:
             name: The name of the project
             path: The file path to the project directory
+            set_default: Whether to set this project as the default
 
         Raises:
             ValueError: If the project already exists
@@ -92,9 +95,16 @@ class ProjectService:
             "path": resolved_path,
             "permalink": generate_permalink(project_config.name),
             "is_active": True,
-            "is_default": False,
+            # Don't set is_default=False to avoid UNIQUE constraint issues
+            # Let it default to NULL, only set to True when explicitly making default
         }
-        await self.repository.create(project_data)
+        created_project = await self.repository.create(project_data)
+
+        # If this should be the default project, ensure only one default exists
+        if set_default:
+            await self.repository.set_as_default(created_project.id)
+            config_manager.set_default_project(name)
+            logger.info(f"Project '{name}' set as default")
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 
@@ -144,6 +154,56 @@ class ProjectService:
 
         logger.info(f"Project '{name}' set as default in configuration and database")
 
+        # Refresh MCP session to pick up the new default project
+        try:
+            from basic_memory.mcp.project_session import session
+
+            session.refresh_from_config()
+        except ImportError:  # pragma: no cover
+            # MCP components might not be available in all contexts (e.g., CLI-only usage)
+            logger.debug("MCP session not available, skipping session refresh")
+
+    async def _ensure_single_default_project(self) -> None:
+        """Ensure only one project has is_default=True.
+
+        This method validates the database state and fixes any issues where
+        multiple projects might have is_default=True or no project is marked as default.
+        """
+        if not self.repository:
+            raise ValueError(
+                "Repository is required for _ensure_single_default_project"
+            )  # pragma: no cover
+
+        # Get all projects with is_default=True
+        db_projects = await self.repository.find_all()
+        default_projects = [p for p in db_projects if p.is_default is True]
+
+        if len(default_projects) > 1:  # pragma: no cover
+            # Multiple defaults found - fix by keeping the first one and clearing others
+            # This is defensive code that should rarely execute due to business logic enforcement
+            logger.warning(  # pragma: no cover
+                f"Found {len(default_projects)} projects with is_default=True, fixing..."
+            )
+            keep_default = default_projects[0]  # pragma: no cover
+
+            # Clear all defaults first, then set only the first one as default
+            await self.repository.set_as_default(keep_default.id)  # pragma: no cover
+
+            logger.info(
+                f"Fixed default project conflicts, kept '{keep_default.name}' as default"
+            )  # pragma: no cover
+
+        elif len(default_projects) == 0:  # pragma: no cover
+            # No default project - set the config default as default
+            # This is defensive code for edge cases where no default exists
+            config_default = config_manager.default_project  # pragma: no cover
+            config_project = await self.repository.get_by_name(config_default)  # pragma: no cover
+            if config_project:  # pragma: no cover
+                await self.repository.set_as_default(config_project.id)  # pragma: no cover
+                logger.info(
+                    f"Set '{config_default}' as default project (was missing)"
+                )  # pragma: no cover
+
     async def synchronize_projects(self) -> None:  # pragma: no cover
         """Synchronize projects between database and configuration.
 
@@ -158,45 +218,79 @@ class ProjectService:
 
         # Get all projects from database
         db_projects = await self.repository.get_active_projects()
-        db_projects_by_name = {p.name: p for p in db_projects}
+        db_projects_by_permalink = {p.permalink: p for p in db_projects}
 
-        # Get all projects from configuration
-        config_projects = config_manager.projects
+        # Get all projects from configuration and normalize names if needed
+        config_projects = config_manager.projects.copy()
+        updated_config = {}
+        config_updated = False
+
+        for name, path in config_projects.items():
+            # Generate normalized name (what the database expects)
+            normalized_name = generate_permalink(name)
+
+            if normalized_name != name:
+                logger.info(f"Normalizing project name in config: '{name}' -> '{normalized_name}'")
+                config_updated = True
+
+            updated_config[normalized_name] = path
+
+        # Update the configuration if any changes were made
+        if config_updated:
+            config_manager.config.projects = updated_config
+            config_manager.save_config(config_manager.config)
+            logger.info("Config updated with normalized project names")
+
+        # Use the normalized config for further processing
+        config_projects = updated_config
 
         # Add projects that exist in config but not in DB
         for name, path in config_projects.items():
-            if name not in db_projects_by_name:
+            if name not in db_projects_by_permalink:
                 logger.info(f"Adding project '{name}' to database")
                 project_data = {
                     "name": name,
                     "path": path,
-                    "permalink": name.lower().replace(" ", "-"),
+                    "permalink": generate_permalink(name),
                     "is_active": True,
-                    "is_default": (name == config_manager.default_project),
+                    # Don't set is_default here - let the enforcement logic handle it
                 }
                 await self.repository.create(project_data)
 
         # Add projects that exist in DB but not in config to config
-        for name, project in db_projects_by_name.items():
+        for name, project in db_projects_by_permalink.items():
             if name not in config_projects:
                 logger.info(f"Adding project '{name}' to configuration")
                 config_manager.add_project(name, project.path)
 
-        # Make sure default project is synchronized
-        db_default = next((p for p in db_projects if p.is_default), None)
+        # Ensure database default project state is consistent
+        await self._ensure_single_default_project()
+
+        # Make sure default project is synchronized between config and database
+        db_default = await self.repository.get_default_project()
         config_default = config_manager.default_project
 
         if db_default and db_default.name != config_default:
             # Update config to match DB default
             logger.info(f"Updating default project in config to '{db_default.name}'")
             config_manager.set_default_project(db_default.name)
-        elif not db_default and config_default in db_projects_by_name:
-            # Update DB to match config default
-            logger.info(f"Updating default project in database to '{config_default}'")
-            project = db_projects_by_name[config_default]
-            await self.repository.set_as_default(project.id)
+        elif not db_default and config_default:
+            # Update DB to match config default (if the project exists)
+            project = await self.repository.get_by_name(config_default)
+            if project:
+                logger.info(f"Updating default project in database to '{config_default}'")
+                await self.repository.set_as_default(project.id)
 
         logger.info("Project synchronization complete")
+
+        # Refresh MCP session to ensure it's in sync with current config
+        try:
+            from basic_memory.mcp.project_session import session
+
+            session.refresh_from_config()
+        except ImportError:
+            # MCP components might not be available in all contexts
+            logger.debug("MCP session not available, skipping session refresh")
 
     async def update_project(  # pragma: no cover
         self, name: str, updated_path: Optional[str] = None, is_active: Optional[bool] = None
@@ -258,8 +352,11 @@ class ProjectService:
                     f"Changed default project to '{new_default.name}' as '{name}' was deactivated"
                 )
 
-    async def get_project_info(self) -> ProjectInfoResponse:
-        """Get comprehensive information about the current Basic Memory project.
+    async def get_project_info(self, project_name: Optional[str] = None) -> ProjectInfoResponse:
+        """Get comprehensive information about the specified Basic Memory project.
+
+        Args:
+            project_name: Name of the project to get info for. If None, uses the current config project.
 
         Returns:
             Comprehensive project information and statistics
@@ -267,22 +364,33 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for get_project_info")
 
-        # Get statistics
-        statistics = await self.get_statistics()
+        # Use specified project or fall back to config project
+        project_name = project_name or config.project
+        # Get project path from configuration
+        name, project_path = config_manager.get_project(project_name)
+        if not name:  # pragma: no cover
+            raise ValueError(f"Project '{project_name}' not found in configuration")
 
-        # Get activity metrics
-        activity = await self.get_activity_metrics()
+        assert project_path is not None
+        project_permalink = generate_permalink(project_name)
+
+        # Get project from database to get project_id
+        db_project = await self.repository.get_by_permalink(project_permalink)
+        if not db_project:  # pragma: no cover
+            raise ValueError(f"Project '{project_name}' not found in database")
+
+        # Get statistics for the specified project
+        statistics = await self.get_statistics(db_project.id)
+
+        # Get activity metrics for the specified project
+        activity = await self.get_activity_metrics(db_project.id)
 
         # Get system status
         system = self.get_system_status()
 
-        # Get current project information from config
-        project_name = config.project
-        project_path = str(config.home)
-
         # Get enhanced project information from database
         db_projects = await self.repository.get_active_projects()
-        db_projects_by_name = {p.name: p for p in db_projects}
+        db_projects_by_permalink = {p.permalink: p for p in db_projects}
 
         # Get default project info
         default_project = config_manager.default_project
@@ -290,7 +398,8 @@ class ProjectService:
         # Convert config projects to include database info
         enhanced_projects = {}
         for name, path in config_manager.projects.items():
-            db_project = db_projects_by_name.get(name)
+            config_permalink = generate_permalink(name)
+            db_project = db_projects_by_permalink.get(config_permalink)
             enhanced_projects[name] = {
                 "path": path,
                 "active": db_project.is_active if db_project else True,
@@ -310,60 +419,85 @@ class ProjectService:
             system=system,
         )
 
-    async def get_statistics(self) -> ProjectStatistics:
-        """Get statistics about the current project."""
+    async def get_statistics(self, project_id: int) -> ProjectStatistics:
+        """Get statistics about the specified project.
+
+        Args:
+            project_id: ID of the project to get statistics for (required).
+        """
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for get_statistics")
 
         # Get basic counts
         entity_count_result = await self.repository.execute_query(
-            text("SELECT COUNT(*) FROM entity")
+            text("SELECT COUNT(*) FROM entity WHERE project_id = :project_id"),
+            {"project_id": project_id},
         )
         total_entities = entity_count_result.scalar() or 0
 
         observation_count_result = await self.repository.execute_query(
-            text("SELECT COUNT(*) FROM observation")
+            text(
+                "SELECT COUNT(*) FROM observation o JOIN entity e ON o.entity_id = e.id WHERE e.project_id = :project_id"
+            ),
+            {"project_id": project_id},
         )
         total_observations = observation_count_result.scalar() or 0
 
         relation_count_result = await self.repository.execute_query(
-            text("SELECT COUNT(*) FROM relation")
+            text(
+                "SELECT COUNT(*) FROM relation r JOIN entity e ON r.from_id = e.id WHERE e.project_id = :project_id"
+            ),
+            {"project_id": project_id},
         )
         total_relations = relation_count_result.scalar() or 0
 
         unresolved_count_result = await self.repository.execute_query(
-            text("SELECT COUNT(*) FROM relation WHERE to_id IS NULL")
+            text(
+                "SELECT COUNT(*) FROM relation r JOIN entity e ON r.from_id = e.id WHERE r.to_id IS NULL AND e.project_id = :project_id"
+            ),
+            {"project_id": project_id},
         )
         total_unresolved = unresolved_count_result.scalar() or 0
 
         # Get entity counts by type
         entity_types_result = await self.repository.execute_query(
-            text("SELECT entity_type, COUNT(*) FROM entity GROUP BY entity_type")
+            text(
+                "SELECT entity_type, COUNT(*) FROM entity WHERE project_id = :project_id GROUP BY entity_type"
+            ),
+            {"project_id": project_id},
         )
         entity_types = {row[0]: row[1] for row in entity_types_result.fetchall()}
 
         # Get observation counts by category
         category_result = await self.repository.execute_query(
-            text("SELECT category, COUNT(*) FROM observation GROUP BY category")
+            text(
+                "SELECT o.category, COUNT(*) FROM observation o JOIN entity e ON o.entity_id = e.id WHERE e.project_id = :project_id GROUP BY o.category"
+            ),
+            {"project_id": project_id},
         )
         observation_categories = {row[0]: row[1] for row in category_result.fetchall()}
 
         # Get relation counts by type
         relation_types_result = await self.repository.execute_query(
-            text("SELECT relation_type, COUNT(*) FROM relation GROUP BY relation_type")
+            text(
+                "SELECT r.relation_type, COUNT(*) FROM relation r JOIN entity e ON r.from_id = e.id WHERE e.project_id = :project_id GROUP BY r.relation_type"
+            ),
+            {"project_id": project_id},
         )
         relation_types = {row[0]: row[1] for row in relation_types_result.fetchall()}
 
-        # Find most connected entities (most outgoing relations)
+        # Find most connected entities (most outgoing relations) - project filtered
         connected_result = await self.repository.execute_query(
             text("""
-            SELECT e.id, e.title, e.permalink, COUNT(r.id) AS relation_count, file_path
+            SELECT e.id, e.title, e.permalink, COUNT(r.id) AS relation_count, e.file_path
             FROM entity e
             JOIN relation r ON e.id = r.from_id
+            WHERE e.project_id = :project_id
             GROUP BY e.id
             ORDER BY relation_count DESC
             LIMIT 10
-        """)
+        """),
+            {"project_id": project_id},
         )
         most_connected = [
             {
@@ -376,15 +510,16 @@ class ProjectService:
             for row in connected_result.fetchall()
         ]
 
-        # Count isolated entities (no relations)
+        # Count isolated entities (no relations) - project filtered
         isolated_result = await self.repository.execute_query(
             text("""
             SELECT COUNT(e.id)
             FROM entity e
             LEFT JOIN relation r1 ON e.id = r1.from_id
             LEFT JOIN relation r2 ON e.id = r2.to_id
-            WHERE r1.id IS NULL AND r2.id IS NULL
-        """)
+            WHERE e.project_id = :project_id AND r1.id IS NULL AND r2.id IS NULL
+        """),
+            {"project_id": project_id},
         )
         isolated_count = isolated_result.scalar() or 0
 
@@ -400,19 +535,25 @@ class ProjectService:
             isolated_entities=isolated_count,
         )
 
-    async def get_activity_metrics(self) -> ActivityMetrics:
-        """Get activity metrics for the current project."""
+    async def get_activity_metrics(self, project_id: int) -> ActivityMetrics:
+        """Get activity metrics for the specified project.
+
+        Args:
+            project_id: ID of the project to get activity metrics for (required).
+        """
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for get_activity_metrics")
 
-        # Get recently created entities
+        # Get recently created entities (project filtered)
         created_result = await self.repository.execute_query(
             text("""
             SELECT id, title, permalink, entity_type, created_at, file_path 
             FROM entity
+            WHERE project_id = :project_id
             ORDER BY created_at DESC
             LIMIT 10
-        """)
+        """),
+            {"project_id": project_id},
         )
         recently_created = [
             {
@@ -426,14 +567,16 @@ class ProjectService:
             for row in created_result.fetchall()
         ]
 
-        # Get recently updated entities
+        # Get recently updated entities (project filtered)
         updated_result = await self.repository.execute_query(
             text("""
             SELECT id, title, permalink, entity_type, updated_at, file_path 
             FROM entity
+            WHERE project_id = :project_id
             ORDER BY updated_at DESC
             LIMIT 10
-        """)
+        """),
+            {"project_id": project_id},
         )
         recently_updated = [
             {
@@ -454,47 +597,50 @@ class ProjectService:
             now.year - (1 if now.month <= 6 else 0), ((now.month - 6) % 12) or 12, 1
         )
 
-        # Query for monthly entity creation
+        # Query for monthly entity creation (project filtered)
         entity_growth_result = await self.repository.execute_query(
-            text(f"""
+            text("""
             SELECT 
                 strftime('%Y-%m', created_at) AS month,
                 COUNT(*) AS count
             FROM entity
-            WHERE created_at >= '{six_months_ago.isoformat()}'
+            WHERE created_at >= :six_months_ago AND project_id = :project_id
             GROUP BY month
             ORDER BY month
-        """)
+        """),
+            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
         )
         entity_growth = {row[0]: row[1] for row in entity_growth_result.fetchall()}
 
-        # Query for monthly observation creation
+        # Query for monthly observation creation (project filtered)
         observation_growth_result = await self.repository.execute_query(
-            text(f"""
+            text("""
             SELECT 
-                strftime('%Y-%m', created_at) AS month,
+                strftime('%Y-%m', entity.created_at) AS month,
                 COUNT(*) AS count
             FROM observation
             INNER JOIN entity ON observation.entity_id = entity.id
-            WHERE entity.created_at >= '{six_months_ago.isoformat()}'
+            WHERE entity.created_at >= :six_months_ago AND entity.project_id = :project_id
             GROUP BY month
             ORDER BY month
-        """)
+        """),
+            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
         )
         observation_growth = {row[0]: row[1] for row in observation_growth_result.fetchall()}
 
-        # Query for monthly relation creation
+        # Query for monthly relation creation (project filtered)
         relation_growth_result = await self.repository.execute_query(
-            text(f"""
+            text("""
             SELECT 
-                strftime('%Y-%m', created_at) AS month,
+                strftime('%Y-%m', entity.created_at) AS month,
                 COUNT(*) AS count
             FROM relation
             INNER JOIN entity ON relation.from_id = entity.id
-            WHERE entity.created_at >= '{six_months_ago.isoformat()}'
+            WHERE entity.created_at >= :six_months_ago AND entity.project_id = :project_id
             GROUP BY month
             ORDER BY month
-        """)
+        """),
+            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
         )
         relation_growth = {row[0]: row[1] for row in relation_growth_result.fetchall()}
 

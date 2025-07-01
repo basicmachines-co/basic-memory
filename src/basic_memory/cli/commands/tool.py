@@ -90,7 +90,7 @@ def write_note(
             typer.echo("Empty content provided. Please provide non-empty content.", err=True)
             raise typer.Exit(1)
 
-        note = asyncio.run(mcp_write_note(title, content, folder, tags))
+        note = asyncio.run(mcp_write_note.fn(title, content, folder, tags))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -103,7 +103,7 @@ def write_note(
 def read_note(identifier: str, page: int = 1, page_size: int = 10):
     """Read a markdown note from the knowledge base."""
     try:
-        note = asyncio.run(mcp_read_note(identifier, page, page_size))
+        note = asyncio.run(mcp_read_note.fn(identifier, page, page_size))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -124,7 +124,7 @@ def build_context(
     """Get context needed to continue a discussion."""
     try:
         context = asyncio.run(
-            mcp_build_context(
+            mcp_build_context.fn(
                 url=url,
                 depth=depth,
                 timeframe=timeframe,
@@ -157,7 +157,7 @@ def recent_activity(
     """Get recent activity across the knowledge base."""
     try:
         context = asyncio.run(
-            mcp_recent_activity(
+            mcp_recent_activity.fn(
                 type=type,  # pyright: ignore [reportArgumentType]
                 depth=depth,
                 timeframe=timeframe,
@@ -210,7 +210,7 @@ def search_notes(
         search_type = "text" if search_type is None else search_type
 
         results = asyncio.run(
-            mcp_search(
+            mcp_search.fn(
                 query,
                 search_type=search_type,
                 page=page,
@@ -241,7 +241,7 @@ def continue_conversation(
     """Prompt to continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
-        session = asyncio.run(mcp_continue_conversation(topic=topic, timeframe=timeframe))
+        session = asyncio.run(mcp_continue_conversation.fn(topic=topic, timeframe=timeframe))  # type: ignore
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):

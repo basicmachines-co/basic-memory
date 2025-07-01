@@ -220,3 +220,139 @@ async def test_folder_title_pattern_with_md_extension(link_resolver, test_entiti
     entity = await link_resolver.resolve_link("components/core-service")
     assert entity is not None
     assert entity.permalink == "components/core-service"
+
+
+# Tests for strict mode parameter combinations
+@pytest.mark.asyncio
+async def test_strict_mode_parameter_combinations(link_resolver, test_entities):
+    """Test all combinations of use_search and strict parameters."""
+
+    # Test queries
+    exact_match = "Auth Service"  # Should always work (unique title)
+    fuzzy_match = "Auth Serv"  # Should only work with fuzzy search enabled
+    non_existent = "Does Not Exist"  # Should never work
+
+    # Case 1: use_search=True, strict=False (default behavior - fuzzy matching allowed)
+    result = await link_resolver.resolve_link(exact_match, use_search=True, strict=False)
+    assert result is not None
+    assert result.permalink == "components/auth-service"
+
+    result = await link_resolver.resolve_link(fuzzy_match, use_search=True, strict=False)
+    assert result is not None  # Should find "Auth Service" via fuzzy matching
+    assert result.permalink == "components/auth-service"
+
+    result = await link_resolver.resolve_link(non_existent, use_search=True, strict=False)
+    assert result is None
+
+    # Case 2: use_search=True, strict=True (exact matches only, even with search enabled)
+    result = await link_resolver.resolve_link(exact_match, use_search=True, strict=True)
+    assert result is not None
+    assert result.permalink == "components/auth-service"
+
+    result = await link_resolver.resolve_link(fuzzy_match, use_search=True, strict=True)
+    assert result is None  # Should NOT find via fuzzy matching in strict mode
+
+    result = await link_resolver.resolve_link(non_existent, use_search=True, strict=True)
+    assert result is None
+
+    # Case 3: use_search=False, strict=False (no search, exact repository matches only)
+    result = await link_resolver.resolve_link(exact_match, use_search=False, strict=False)
+    assert result is not None
+    assert result.permalink == "components/auth-service"
+
+    result = await link_resolver.resolve_link(fuzzy_match, use_search=False, strict=False)
+    assert result is None  # No search means no fuzzy matching
+
+    result = await link_resolver.resolve_link(non_existent, use_search=False, strict=False)
+    assert result is None
+
+    # Case 4: use_search=False, strict=True (redundant but should work same as case 3)
+    result = await link_resolver.resolve_link(exact_match, use_search=False, strict=True)
+    assert result is not None
+    assert result.permalink == "components/auth-service"
+
+    result = await link_resolver.resolve_link(fuzzy_match, use_search=False, strict=True)
+    assert result is None  # No search means no fuzzy matching
+
+    result = await link_resolver.resolve_link(non_existent, use_search=False, strict=True)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_exact_match_types_in_strict_mode(link_resolver, test_entities):
+    """Test that all types of exact matches work in strict mode."""
+
+    # 1. Exact permalink match
+    result = await link_resolver.resolve_link("components/core-service", strict=True)
+    assert result is not None
+    assert result.permalink == "components/core-service"
+
+    # 2. Exact title match
+    result = await link_resolver.resolve_link("Core Service", strict=True)
+    assert result is not None
+    assert result.permalink == "components/core-service"
+
+    # 3. Exact file path match
+    result = await link_resolver.resolve_link("components/Core Service.md", strict=True)
+    assert result is not None
+    assert result.permalink == "components/core-service"
+
+    # 4. Folder/title pattern with .md extension added
+    result = await link_resolver.resolve_link("components/Core Service", strict=True)
+    assert result is not None
+    assert result.permalink == "components/core-service"
+
+    # 5. Non-markdown file (Image.png)
+    result = await link_resolver.resolve_link("Image.png", strict=True)
+    assert result is not None
+    assert result.title == "Image.png"
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_matching_blocked_in_strict_mode(link_resolver, test_entities):
+    """Test that various fuzzy matching scenarios are blocked in strict mode."""
+
+    # Partial matches that would work in normal mode
+    fuzzy_queries = [
+        "Auth Serv",  # Partial title
+        "auth-service",  # Lowercase permalink variation
+        "Core",  # Single word from title
+        "Service",  # Common word
+        "Serv",  # Partial word
+    ]
+
+    for query in fuzzy_queries:
+        # Should NOT work in strict mode
+        strict_result = await link_resolver.resolve_link(query, strict=True)
+        assert strict_result is None, f"Query '{query}' should return None in strict mode"
+
+
+@pytest.mark.asyncio
+async def test_link_normalization_with_strict_mode(link_resolver, test_entities):
+    """Test that link normalization still works in strict mode."""
+
+    # Test bracket removal and alias handling in strict mode
+    queries_and_expected = [
+        ("[[Core Service]]", "components/core-service"),
+        ("[[Core Service|Main]]", "components/core-service"),  # Alias should be ignored
+        ("  [[  Core Service  ]]  ", "components/core-service"),  # Extra whitespace
+    ]
+
+    for query, expected_permalink in queries_and_expected:
+        result = await link_resolver.resolve_link(query, strict=True)
+        assert result is not None, f"Query '{query}' should find entity in strict mode"
+        assert result.permalink == expected_permalink
+
+
+@pytest.mark.asyncio
+async def test_duplicate_title_handling_in_strict_mode(link_resolver, test_entities):
+    """Test how duplicate titles are handled in strict mode."""
+
+    # "Core Service" appears twice in test data (components/core-service and components2/core-service)
+    # In strict mode, if there are multiple exact title matches, it should still return the first one
+    # (same behavior as normal mode for exact matches)
+
+    result = await link_resolver.resolve_link("Core Service", strict=True)
+    assert result is not None
+    # Should return the first match (components/core-service based on test fixture order)
+    assert result.permalink == "components/core-service"

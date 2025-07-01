@@ -117,10 +117,15 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
             )
 
-        # Parse content frontmatter to check for user-specified permalink
+        # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
+
+            # If content has entity_type/type, use it to override the schema entity_type
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
             if "permalink" in content_frontmatter:
                 # Create a minimal EntityMarkdown object for permalink resolution
                 from basic_memory.markdown.schemas import EntityFrontmatter
@@ -172,10 +177,15 @@ class EntityService(BaseService[EntityModel]):
         # Read existing frontmatter from the file if it exists
         existing_markdown = await self.entity_parser.parse_file(file_path)
 
-        # Parse content frontmatter to check for user-specified permalink
+        # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
+
+            # If content has entity_type/type, use it to override the schema entity_type
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
             if "permalink" in content_frontmatter:
                 # Create a minimal EntityMarkdown object for permalink resolution
                 from basic_memory.markdown.schemas import EntityFrontmatter
@@ -292,14 +302,21 @@ class EntityService(BaseService[EntityModel]):
 
         Creates the entity with null checksum to indicate sync not complete.
         Relations will be added in second pass.
+
+        Uses UPSERT approach to handle permalink/file_path conflicts cleanly.
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
         model = entity_model_from_markdown(file_path, markdown)
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None
-        # Repository will set project_id automatically
-        return await self.repository.add(model)
+
+        # Use UPSERT to handle conflicts cleanly
+        try:
+            return await self.repository.upsert_entity(model)
+        except Exception as e:
+            logger.error(f"Failed to upsert entity for {file_path}: {e}")
+            raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
     async def update_entity_and_observations(
         self, file_path: Path, markdown: EntityMarkdown
@@ -413,8 +430,8 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Editing entity: {identifier}, operation: {operation}")
 
-        # Find the entity using the link resolver
-        entity = await self.link_resolver.resolve_link(identifier)
+        # Find the entity using the link resolver with strict mode for destructive operations
+        entity = await self.link_resolver.resolve_link(identifier, strict=True)
         if not entity:
             raise EntityNotFoundError(f"Entity not found: {identifier}")
 
@@ -630,8 +647,8 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Moving entity: {identifier} to {destination_path}")
 
-        # 1. Resolve identifier to entity
-        entity = await self.link_resolver.resolve_link(identifier)
+        # 1. Resolve identifier to entity with strict mode for destructive operations
+        entity = await self.link_resolver.resolve_link(identifier, strict=True)
         if not entity:
             raise EntityNotFoundError(f"Entity not found: {identifier}")
 
@@ -665,8 +682,8 @@ class EntityService(BaseService[EntityModel]):
             # 6. Prepare database updates
             updates = {"file_path": destination_path}
 
-            # 7. Update permalink if configured
-            if app_config.update_permalinks_on_move:
+            # 7. Update permalink if configured or if entity has null permalink
+            if app_config.update_permalinks_on_move or old_permalink is None:
                 # Generate new permalink from destination path
                 new_permalink = await self.resolve_permalink(destination_path)
 
@@ -676,7 +693,12 @@ class EntityService(BaseService[EntityModel]):
                 )
 
                 updates["permalink"] = new_permalink
-                logger.info(f"Updated permalink: {old_permalink} -> {new_permalink}")
+                if old_permalink is None:
+                    logger.info(
+                        f"Generated permalink for entity with null permalink: {new_permalink}"
+                    )
+                else:
+                    logger.info(f"Updated permalink: {old_permalink} -> {new_permalink}")
 
             # 8. Recalculate checksum
             new_checksum = await self.file_service.compute_checksum(destination_path)

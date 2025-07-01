@@ -4,7 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, List
+from typing import Any, Dict, Literal, Optional, List, Tuple
 
 from loguru import logger
 from pydantic import Field, field_validator
@@ -45,7 +45,9 @@ class BasicMemoryConfig(BaseSettings):
     env: Environment = Field(default="dev", description="Environment name")
 
     projects: Dict[str, str] = Field(
-        default_factory=lambda: {"main": str(Path.home() / "basic-memory")},
+        default_factory=lambda: {
+            "main": str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
+        },
         description="Mapping of project names to their filesystem paths",
     )
     default_project: str = Field(
@@ -92,7 +94,9 @@ class BasicMemoryConfig(BaseSettings):
         """Ensure configuration is valid after initialization."""
         # Ensure main project exists
         if "main" not in self.projects:  # pragma: no cover
-            self.projects["main"] = str(Path.home() / "basic-memory")
+            self.projects["main"] = str(
+                Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory"))
+            )
 
         # Ensure default project is valid
         if self.default_project not in self.projects:  # pragma: no cover
@@ -196,7 +200,8 @@ class ConfigManager:
 
     def add_project(self, name: str, path: str) -> ProjectConfig:
         """Add a new project to the configuration."""
-        if name in self.config.projects:  # pragma: no cover
+        project_name, _ = self.get_project(name)
+        if project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
 
         # Ensure the path exists
@@ -209,10 +214,12 @@ class ConfigManager:
 
     def remove_project(self, name: str) -> None:
         """Remove a project from the configuration."""
-        if name not in self.config.projects:  # pragma: no cover
+
+        project_name, path = self.get_project(name)
+        if not project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' not found")
 
-        if name == self.config.default_project:  # pragma: no cover
+        if project_name == self.config.default_project:  # pragma: no cover
             raise ValueError(f"Cannot remove the default project '{name}'")
 
         del self.config.projects[name]
@@ -220,11 +227,20 @@ class ConfigManager:
 
     def set_default_project(self, name: str) -> None:
         """Set the default project."""
-        if name not in self.config.projects:  # pragma: no cover
+        project_name, path = self.get_project(name)
+        if not project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' not found")
 
         self.config.default_project = name
         self.save_config(self.config)
+
+    def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:
+        """Look up a project from the configuration by name or permalink"""
+        project_permalink = generate_permalink(name)
+        for name, path in app_config.projects.items():
+            if project_permalink == generate_permalink(name):
+                return name, path
+        return None, None
 
 
 def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
@@ -256,11 +272,14 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     # the config contains a dict[str,str] of project names and absolute paths
     assert actual_project_name is not None, "actual_project_name cannot be None"
 
-    project_path = app_config.projects.get(actual_project_name)
-    if not project_path:  # pragma: no cover
-        raise ValueError(f"Project '{actual_project_name}' not found")
+    project_permalink = generate_permalink(actual_project_name)
 
-    return ProjectConfig(name=actual_project_name, home=Path(project_path))
+    for name, path in app_config.projects.items():
+        if project_permalink == generate_permalink(name):
+            return ProjectConfig(name=name, home=Path(path))
+
+    # otherwise raise error
+    raise ValueError(f"Project '{actual_project_name}' not found")  # pragma: no cover
 
 
 # Create config manager

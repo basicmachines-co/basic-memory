@@ -10,7 +10,7 @@ from basic_memory.deps import get_project_config, get_engine_factory, get_app_co
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def app(app_config, project_config, engine_factory, test_config) -> FastAPI:
+async def app(app_config, project_config, engine_factory, test_config, aiolib) -> FastAPI:
     """Create test FastAPI application."""
     app = fastapi_app
     app.dependency_overrides[get_app_config] = lambda: app_config
@@ -20,7 +20,7 @@ async def app(app_config, project_config, engine_factory, test_config) -> FastAP
 
 
 @pytest_asyncio.fixture
-async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def client(app: FastAPI, aiolib) -> AsyncGenerator[AsyncClient, None]:
     """Create test client that both MCP and tests will use."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client

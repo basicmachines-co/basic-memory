@@ -1,9 +1,7 @@
 """basic-memory - Local-first knowledge management combining Zettelkasten with knowledge graphs"""
 
-try:
-    from importlib.metadata import version
+# Package version - updated by release automation
+__version__ = "0.14.0"
 
-    __version__ = version("basic-memory")
-except Exception:  # pragma: no cover
-    # Fallback if package not installed (e.g., during development)
-    __version__ = "0.0.0"  # pragma: no cover
+# API version for FastAPI - independent of package version
+__api_version__ = "v0"

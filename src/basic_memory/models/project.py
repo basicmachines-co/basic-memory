@@ -49,9 +49,7 @@ class Project(Base):
 
     # Status flags
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_default: Mapped[Optional[bool]] = mapped_column(
-        Boolean, default=None, unique=True, nullable=True
-    )
+    is_default: Mapped[Optional[bool]] = mapped_column(Boolean, default=None, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

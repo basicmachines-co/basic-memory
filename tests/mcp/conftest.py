@@ -9,7 +9,7 @@ from httpx import AsyncClient, ASGITransport
 from mcp.server import FastMCP
 
 from basic_memory.api.app import app as fastapi_app
-from basic_memory.deps import get_project_config, get_engine_factory
+from basic_memory.deps import get_project_config, get_engine_factory, get_app_config
 from basic_memory.services.search_service import SearchService
 from basic_memory.mcp.server import mcp as mcp_server
 
@@ -25,6 +25,7 @@ def mcp() -> FastMCP:
 def app(app_config, project_config, engine_factory, project_session, config_manager) -> FastAPI:
     """Create test FastAPI application."""
     app = fastapi_app
+    app.dependency_overrides[get_app_config] = lambda: app_config
     app.dependency_overrides[get_project_config] = lambda: project_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     return app

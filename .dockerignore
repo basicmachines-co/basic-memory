@@ -1,0 +1,60 @@
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing files
+tests/
+test-int/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments (uv creates these during build)
+.venv/
+venv/
+.env
+
+# CI/CD files
+.github/
+
+# Documentation (keep README.md and pyproject.toml)
+docs/
+CHANGELOG.md
+CLAUDE.md
+CONTRIBUTING.md
+
+# Example files not needed for runtime
+examples/
+
+# Local development files
+.basic-memory/
+*.db
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log

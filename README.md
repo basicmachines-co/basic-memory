@@ -13,8 +13,11 @@ Basic Memory lets you build persistent knowledge through natural conversations w
 Claude, while keeping everything in simple Markdown files on your computer. It uses the Model Context Protocol (MCP) to
 enable any compatible LLM to read and write to your local knowledge base.
 
-- Website: https://basicmachines.co
+- Website: https://basicmemory.com
+- Company: https://basicmachines.co
 - Documentation: https://memory.basicmachines.co
+- Discord: https://discord.gg/tyvKNccgqN
+- YouTube: https://www.youtube.com/@basicmachines-co
 
 ## Pick up your conversation right where you left off
 
@@ -29,6 +32,10 @@ https://github.com/user-attachments/assets/a55d8238-8dd0-454a-be4c-8860dbbd0ddc
 ```bash
 # Install with uv (recommended)
 uv tool install basic-memory
+
+# or with Homebrew
+brew tap basicmachines-co/basic-memory
+brew install basic-memory
 
 # Configure Claude Desktop (edit ~/Library/Application Support/Claude/claude_desktop_config.json)
 # Add this to your config:
@@ -61,8 +68,7 @@ Memory for Claude Desktop:
 npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
 ```
 
-This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. The
-Smithery server hosts the MCP server component, while your data remains stored locally as Markdown files.
+This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. Note: The Smithery installation uses their hosted MCP server, while your data remains stored locally as Markdown files.
 
 ### Glama.ai
 
@@ -153,7 +159,8 @@ The note embeds semantic content and links to other topics via simple Markdown f
 
 3. You see this file on your computer in real time in the current project directory (default `~/$HOME/basic-memory`).
 
-- Realtime sync is enabled by default with the v0.12.0 version
+- Realtime sync is enabled by default starting with v0.12.0
+- Project switching during conversations is supported starting with v0.13.0
 
 4. In a chat with the LLM, you can reference a topic:
 
@@ -351,10 +358,20 @@ Basic Memory will sync the files in your project in real time if you make manual
 ```
 write_note(title, content, folder, tags) - Create or update notes
 read_note(identifier, page, page_size) - Read notes by title or permalink
+edit_note(identifier, operation, content) - Edit notes incrementally (append, prepend, find/replace)
+move_note(identifier, destination_path) - Move notes with database consistency
+view_note(identifier) - Display notes as formatted artifacts for better readability
 build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
 search_notes(query, page, page_size) - Search across your knowledge base
 recent_activity(type, depth, timeframe) - Find recently updated information
 canvas(nodes, edges, title, folder) - Generate knowledge visualizations
+list_memory_projects() - List all available projects with status
+switch_project(project_name) - Switch to different project context
+get_current_project() - Show current project and statistics
+create_memory_project(name, path, set_default) - Create new projects
+delete_project(name) - Delete projects from configuration
+set_default_project(name) - Set default project
+sync_status() - Check file synchronization status
 ```
 
 5. Example prompts to try:
@@ -365,6 +382,10 @@ canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 "Create a canvas visualization of my project components"
 "Read my notes on the authentication system"
 "What have I been working on in the past week?"
+"Switch to my work-notes project"
+"List all my available projects"
+"Edit my coffee brewing note to add a new technique"
+"Move my old meeting notes to the archive folder"
 ```
 
 ## Futher info
@@ -393,6 +414,31 @@ Development versions are automatically published on every commit to main with ve
 ```bash
 pip install basic-memory --pre --force-reinstall
 ```
+
+### Docker
+
+Run Basic Memory in a container with volume mounting for your Obsidian vault:
+
+```bash
+# Clone and start with Docker Compose
+git clone https://github.com/basicmachines-co/basic-memory.git
+cd basic-memory
+
+# Edit docker-compose.yml to point to your Obsidian vault
+# Then start the container
+docker-compose up -d
+```
+
+Or use Docker directly:
+```bash
+docker run -d \
+  --name basic-memory-server \
+  -v /path/to/your/obsidian-vault:/data/knowledge:rw \
+  -v basic-memory-config:/root/.basic-memory:rw \
+  ghcr.io/basicmachines-co/basic-memory:latest
+```
+
+See [Docker Setup Guide](docs/Docker.md) for detailed configuration options, multiple project setup, and integration examples.
 
 ## License
 

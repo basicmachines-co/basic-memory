@@ -5,12 +5,12 @@ It centralizes all prompt formatting logic that was previously in the MCP prompt
 """
 
 from datetime import datetime, timezone
-from dateparser import parse
 from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
 from basic_memory.api.routers.utils import to_graph_context, to_search_results
 from basic_memory.api.template_loader import template_loader
+from basic_memory.schemas.base import parse_timeframe
 from basic_memory.deps import (
     ContextServiceDep,
     EntityRepositoryDep,
@@ -51,7 +51,7 @@ async def continue_conversation(
         f"Generating continue conversation prompt, topic: {request.topic}, timeframe: {request.timeframe}"
     )
 
-    since = parse(request.timeframe) if request.timeframe else None
+    since = parse_timeframe(request.timeframe) if request.timeframe else None
 
     # Initialize search results
     search_results = []

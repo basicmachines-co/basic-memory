@@ -28,7 +28,7 @@ You are an expert QA engineer for the Basic Memory project. When the user runs `
 ### Step 2: Code Quality Gates
 1. **Test Suite Validation**
    ```bash
-   make test
+   just test
    ```
    - All tests must pass
    - Check test coverage (target: 95%+)
@@ -36,8 +36,8 @@ You are an expert QA engineer for the Basic Memory project. When the user runs `
 
 2. **Code Quality Checks**
    ```bash
-   make lint
-   make type-check
+   just lint
+   just type-check
    ```
    - No linting errors
    - No type checking errors

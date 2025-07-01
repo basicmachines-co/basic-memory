@@ -1,6 +1,7 @@
 """Tests for Pydantic schema validation and conversion."""
 
 import pytest
+from datetime import datetime, time, timedelta
 from pydantic import ValidationError, BaseModel
 
 from basic_memory.schemas import (
@@ -12,7 +13,7 @@ from basic_memory.schemas import (
     RelationResponse,
 )
 from basic_memory.schemas.request import EditEntityRequest
-from basic_memory.schemas.base import to_snake_case, TimeFrame
+from basic_memory.schemas.base import to_snake_case, TimeFrame, parse_timeframe, validate_timeframe
 
 
 def test_entity_project_name():
@@ -124,6 +125,36 @@ def test_entity_out_from_attributes():
     assert entity.permalink == "test/test"
     assert len(entity.observations) == 1
     assert len(entity.relations) == 1
+
+
+def test_entity_response_with_none_permalink():
+    """Test EntityResponse can handle None permalink (fixes issue #170).
+    
+    This test ensures that EntityResponse properly validates when the permalink
+    field is None, which can occur when markdown files don't have explicit 
+    permalinks in their frontmatter during edit operations.
+    """
+    # Simulate database model attributes with None permalink
+    db_data = {
+        "title": "Test Entity",
+        "permalink": None,  # This should not cause validation errors
+        "file_path": "test/test-entity.md",
+        "entity_type": "note",
+        "content_type": "text/markdown",
+        "observations": [],
+        "relations": [],
+        "created_at": "2023-01-01T00:00:00",
+        "updated_at": "2023-01-01T00:00:00",
+    }
+    
+    # This should not raise a ValidationError
+    entity = EntityResponse.model_validate(db_data)
+    assert entity.permalink is None
+    assert entity.title == "Test Entity"
+    assert entity.file_path == "test/test-entity.md"
+    assert entity.entity_type == "note"
+    assert len(entity.observations) == 0
+    assert len(entity.relations) == 0
 
 
 def test_search_nodes_input():
@@ -277,3 +308,150 @@ def test_edit_entity_request_replace_section_empty_section():
                 "section": "",  # Empty string triggers validation
             }
         )
+
+
+# New tests for timeframe parsing functions
+class TestTimeframeParsing:
+    """Test cases for parse_timeframe() and validate_timeframe() functions."""
+
+    def test_parse_timeframe_today(self):
+        """Test that parse_timeframe('today') returns start of current day."""
+        result = parse_timeframe("today")
+        expected = datetime.combine(datetime.now().date(), time.min)
+
+        assert result == expected
+        assert result.hour == 0
+        assert result.minute == 0
+        assert result.second == 0
+        assert result.microsecond == 0
+
+    def test_parse_timeframe_today_case_insensitive(self):
+        """Test that parse_timeframe handles 'today' case-insensitively."""
+        test_cases = ["today", "TODAY", "Today", "ToDay"]
+        expected = datetime.combine(datetime.now().date(), time.min)
+
+        for case in test_cases:
+            result = parse_timeframe(case)
+            assert result == expected
+
+    def test_parse_timeframe_other_formats(self):
+        """Test that parse_timeframe works with other dateparser formats."""
+        now = datetime.now()
+
+        # Test 1d ago - should be approximately 24 hours ago
+        result_1d = parse_timeframe("1d")
+        expected_1d = now - timedelta(days=1)
+        diff = abs((result_1d - expected_1d).total_seconds())
+        assert diff < 60  # Within 1 minute tolerance
+
+        # Test yesterday - should be yesterday at same time
+        result_yesterday = parse_timeframe("yesterday")
+        # dateparser returns yesterday at current time, not start of yesterday
+        assert result_yesterday.date() == (now.date() - timedelta(days=1))
+
+        # Test 1 week ago
+        result_week = parse_timeframe("1 week ago")
+        expected_week = now - timedelta(weeks=1)
+        diff = abs((result_week - expected_week).total_seconds())
+        assert diff < 3600  # Within 1 hour tolerance
+
+    def test_parse_timeframe_invalid(self):
+        """Test that parse_timeframe raises ValueError for invalid input."""
+        with pytest.raises(ValueError, match="Could not parse timeframe: invalid-timeframe"):
+            parse_timeframe("invalid-timeframe")
+
+        with pytest.raises(ValueError, match="Could not parse timeframe: not-a-date"):
+            parse_timeframe("not-a-date")
+
+    def test_validate_timeframe_preserves_special_cases(self):
+        """Test that validate_timeframe preserves special timeframe strings."""
+        # Should preserve 'today' as-is
+        result = validate_timeframe("today")
+        assert result == "today"
+
+        # Should preserve case-normalized version
+        result = validate_timeframe("TODAY")
+        assert result == "today"
+
+        result = validate_timeframe("Today")
+        assert result == "today"
+
+    def test_validate_timeframe_converts_regular_formats(self):
+        """Test that validate_timeframe converts regular formats to duration."""
+        # Test 1d format (should return as-is since it's already in standard format)
+        result = validate_timeframe("1d")
+        assert result == "1d"
+
+        # Test other formats get converted to days
+        result = validate_timeframe("yesterday")
+        assert result == "1d"  # Yesterday is 1 day ago
+
+        # Test week format
+        result = validate_timeframe("1 week ago")
+        assert result == "7d"  # 1 week = 7 days
+
+    def test_validate_timeframe_error_cases(self):
+        """Test that validate_timeframe raises appropriate errors."""
+        # Invalid type
+        with pytest.raises(ValueError, match="Timeframe must be a string"):
+            validate_timeframe(123)  # type: ignore
+
+        # Future timeframe
+        with pytest.raises(ValueError, match="Timeframe cannot be in the future"):
+            validate_timeframe("tomorrow")
+
+        # Too far in past (>365 days)
+        with pytest.raises(ValueError, match="Timeframe should be <= 1 year"):
+            validate_timeframe("2 years ago")
+
+        # Invalid format that can't be parsed
+        with pytest.raises(ValueError, match="Could not parse timeframe"):
+            validate_timeframe("not-a-real-timeframe")
+
+    def test_timeframe_annotation_with_today(self):
+        """Test that TimeFrame annotation works correctly with 'today'."""
+
+        class TestModel(BaseModel):
+            timeframe: TimeFrame
+
+        # Should preserve 'today'
+        model = TestModel(timeframe="today")
+        assert model.timeframe == "today"
+
+        # Should work with other formats
+        model = TestModel(timeframe="1d")
+        assert model.timeframe == "1d"
+
+        model = TestModel(timeframe="yesterday")
+        assert model.timeframe == "1d"
+
+    def test_timeframe_integration_today_vs_1d(self):
+        """Test the specific bug fix: 'today' vs '1d' behavior."""
+
+        class TestModel(BaseModel):
+            timeframe: TimeFrame
+
+        # 'today' should be preserved
+        today_model = TestModel(timeframe="today")
+        assert today_model.timeframe == "today"
+
+        # '1d' should also be preserved (it's already in standard format)
+        oneday_model = TestModel(timeframe="1d")
+        assert oneday_model.timeframe == "1d"
+
+        # When parsed by parse_timeframe, they should be different
+        today_parsed = parse_timeframe("today")
+        oneday_parsed = parse_timeframe("1d")
+
+        # 'today' should be start of today (00:00:00)
+        assert today_parsed.hour == 0
+        assert today_parsed.minute == 0
+
+        # '1d' should be 24 hours ago (same time yesterday)
+        now = datetime.now()
+        expected_1d = now - timedelta(days=1)
+        diff = abs((oneday_parsed - expected_1d).total_seconds())
+        assert diff < 60  # Within 1 minute
+
+        # They should be different times
+        assert today_parsed != oneday_parsed
