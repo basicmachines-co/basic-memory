@@ -453,6 +453,36 @@ class SyncService:
 
         entity = await self.entity_repository.get_by_file_path(old_path)
         if entity:
+            # Check if destination path is already occupied by another entity
+            existing_at_destination = await self.entity_repository.get_by_file_path(new_path)
+            if existing_at_destination and existing_at_destination.id != entity.id:
+                # Handle the conflict - this could be a file swap or replacement scenario
+                logger.warning(
+                    f"File path conflict detected during move: "
+                    f"entity_id={entity.id} trying to move from '{old_path}' to '{new_path}', "
+                    f"but entity_id={existing_at_destination.id} already occupies '{new_path}'"
+                )
+                
+                # Check if this is a file swap (the destination entity is being moved to our old path)
+                # This would indicate a simultaneous move operation
+                old_path_after_swap = await self.entity_repository.get_by_file_path(old_path)
+                if old_path_after_swap and old_path_after_swap.id == existing_at_destination.id:
+                    logger.info(f"Detected file swap between '{old_path}' and '{new_path}'")
+                    # This is a swap scenario - both moves should succeed
+                    # We'll allow this to proceed since the other file has moved out
+                else:
+                    # This is a conflict where the destination is occupied
+                    raise ValueError(
+                        f"Cannot move entity from '{old_path}' to '{new_path}': "
+                        f"destination path is already occupied by another file. "
+                        f"This may be caused by: "
+                        f"1. Conflicting file names with different character encodings, "
+                        f"2. Case sensitivity differences (e.g., 'Finance/' vs 'finance/'), "
+                        f"3. Character conflicts between hyphens in filenames and generated permalinks, "
+                        f"4. Files with similar names containing special characters. "
+                        f"Try renaming one of the conflicting files to resolve this issue."
+                    )
+
             # Update file_path in all cases
             updates = {"file_path": new_path}
 
@@ -477,7 +507,26 @@ class SyncService:
                     f"new_checksum={new_checksum}"
                 )
 
-            updated = await self.entity_repository.update(entity.id, updates)
+            try:
+                updated = await self.entity_repository.update(entity.id, updates)
+            except Exception as e:
+                # Catch any database integrity errors and provide helpful context
+                if "UNIQUE constraint failed" in str(e):
+                    logger.error(
+                        f"Database constraint violation during move: "
+                        f"entity_id={entity.id}, old_path='{old_path}', new_path='{new_path}'"
+                    )
+                    raise ValueError(
+                        f"Cannot complete move from '{old_path}' to '{new_path}': "
+                        f"a database constraint was violated. This usually indicates "
+                        f"a file path or permalink conflict. Please check for: "
+                        f"1. Duplicate file names, "
+                        f"2. Case sensitivity issues (e.g., 'File.md' vs 'file.md'), "
+                        f"3. Character encoding conflicts in file names."
+                    ) from e
+                else:
+                    # Re-raise other exceptions as-is
+                    raise
 
             if updated is None:  # pragma: no cover
                 logger.error(
