@@ -27,6 +27,96 @@ FilePath = Union[Path, str]
 logging.getLogger("opentelemetry.sdk.metrics._internal.instrument").setLevel(logging.ERROR)
 
 
+def sanitize_filename(title: str) -> str:
+    """
+    Sanitize a title to create a safe filename.
+    
+    Converts forward slashes and other problematic characters to hyphens
+    to prevent unintended directory creation and ensure consistency
+    with permalink generation.
+    
+    Args:
+        title: The original title
+        
+    Returns:
+        Sanitized filename safe for use as a file name
+        
+    Examples:
+        >>> sanitize_filename("Coupon Enable/Disable Feature")
+        'coupon-enable-disable-feature'
+        >>> sanitize_filename("My Awesome Feature")
+        'my-awesome-feature'
+        >>> sanitize_filename("Test_File Name.txt")
+        'test-file-name-txt'
+    """
+    # Create a transliteration mapping for specific characters
+    transliteration_map = {
+        "ø": "o",  # Handle Søren -> soren
+        "å": "a",  # Handle Kierkegård -> kierkegard
+        "ü": "u",  # Handle Müller -> muller
+        "é": "e",  # Handle Café -> cafe
+        "è": "e",  # Handle Mère -> mere
+        "ê": "e",  # Handle Fête -> fete
+        "à": "a",  # Handle À la mode -> a la mode
+        "ç": "c",  # Handle Façade -> facade
+        "ñ": "n",  # Handle Niño -> nino
+        "ö": "o",  # Handle Björk -> bjork
+        "ä": "a",  # Handle Häagen -> haagen
+    }
+
+    # Process character by character, transliterating Latin characters with diacritics
+    result = ""
+    for char in title:
+        # Direct mapping for known characters
+        if char.lower() in transliteration_map:
+            result += transliteration_map[char.lower()]
+        # General case using Unicode normalization
+        elif unicodedata.category(char).startswith("L") and ord(char) > 127:
+            # Decompose the character (e.g., ü -> u + combining diaeresis)
+            decomposed = unicodedata.normalize("NFD", char)
+            # If decomposition produced multiple characters and first one is ASCII
+            if len(decomposed) > 1 and ord(decomposed[0]) < 128:
+                # Keep only the base character
+                result += decomposed[0].lower()
+            else:
+                # For non-Latin scripts like Chinese, preserve the character
+                result += char
+        else:
+            # Add the character as is
+            result += char
+
+    # Handle special punctuation cases for apostrophes
+    result = result.replace("'", "")
+
+    # Insert dash between camelCase
+    result = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", result)
+
+    # Insert dash between Chinese and Latin character boundaries
+    result = re.sub(r"([\u4e00-\u9fff])([a-zA-Z])", r"\1-\2", result)
+    result = re.sub(r"([a-zA-Z])([\u4e00-\u9fff])", r"\1-\2", result)
+
+    # Convert ASCII letters to lowercase, preserve non-ASCII characters
+    lower_text = "".join(c.lower() if c.isascii() and c.isalpha() else c for c in result)
+
+    # Replace underscores with hyphens
+    text_with_hyphens = lower_text.replace("_", "-")
+
+    # Replace spaces, forward slashes, and unsafe ASCII characters with hyphens
+    # Include common Chinese character ranges and other non-ASCII characters
+    clean_text = re.sub(
+        r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf\-]", "-", text_with_hyphens
+    )
+
+    # Collapse multiple hyphens
+    clean_text = re.sub(r"-+", "-", clean_text)
+
+    # Remove hyphens between adjacent Chinese characters only
+    clean_text = re.sub(r"([\u4e00-\u9fff])-([\u4e00-\u9fff])", r"\1\2", clean_text)
+
+    # Remove leading and trailing hyphens
+    return clean_text.strip("-")
+
+
 def generate_permalink(file_path: Union[Path, str, Any]) -> str:
     """
     Generate a permalink from a file path.
