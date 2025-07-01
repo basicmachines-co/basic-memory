@@ -85,6 +85,9 @@ class WatchService:
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
 
+        # Restart signal file path
+        self.restart_signal_path = Path.home() / ".basic-memory" / "restart-watch-service"
+
     async def run(self):  # pragma: no cover
         """Watch for file changes and sync them"""
 
@@ -109,6 +112,11 @@ class WatchService:
                 watch_filter=self.filter_changes,
                 recursive=True,
             ):
+                # Check for restart signal
+                if await self.check_restart_signal():
+                    logger.info("Restart signal detected, exiting watch service...")
+                    return
+
                 # group changes by project
                 project_changes = defaultdict(list)
                 for change, path in changes:
@@ -160,6 +168,18 @@ class WatchService:
             return False
 
         return True
+
+    async def check_restart_signal(self) -> bool:
+        """Check if a restart signal file exists and remove it if found."""
+        try:
+            if self.restart_signal_path.exists():
+                # Remove the signal file
+                self.restart_signal_path.unlink()
+                logger.info("Found and removed restart signal file")
+                return True
+        except Exception as e:
+            logger.warning(f"Error checking restart signal: {e}")
+        return False
 
     async def write_status(self):
         """Write current state to status file"""

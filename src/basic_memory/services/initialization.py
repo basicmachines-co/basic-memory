@@ -150,13 +150,6 @@ async def initialize_file_sync(
     )
     project_repository = ProjectRepository(session_maker)
 
-    # Initialize watch service
-    watch_service = WatchService(
-        app_config=app_config,
-        project_repository=project_repository,
-        quiet=True,
-    )
-
     # Get active projects
     active_projects = await project_repository.get_active_projects()
 
@@ -196,14 +189,26 @@ async def initialize_file_sync(
     except Exception as e:  # pragma: no cover
         logger.warning(f"Could not update migration status: {e}")
 
-    # Then start the watch service in the background
+    # Then start the watch service in the background with restart capability
     logger.info("Starting watch service for all projects")
-    # run the watch service
-    try:
-        await watch_service.run()
-        logger.info("Watch service started")
-    except Exception as e:  # pragma: no cover
-        logger.error(f"Error starting watch service: {e}")
+
+    while True:
+        try:
+            # Create a fresh watch service instance to pick up new projects
+            watch_service = WatchService(
+                app_config=app_config,
+                project_repository=project_repository,
+                quiet=True,
+            )
+
+            await watch_service.run()
+            logger.info("Watch service exited normally")
+            break  # Normal exit
+
+        except Exception as e:  # pragma: no cover
+            logger.error(f"Error in watch service: {e}")
+            # Don't restart on unexpected errors
+            break
 
     return None
 
