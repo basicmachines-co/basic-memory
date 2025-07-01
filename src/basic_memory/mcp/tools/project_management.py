@@ -16,8 +16,8 @@ from basic_memory.schemas import ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse, ProjectInfoRequest
 
 
-@mcp.tool()
-async def list_projects(ctx: Context | None = None) -> str:
+@mcp.tool("list_memory_projects")
+async def list_memory_projects(ctx: Context | None = None) -> str:
     """List all available projects with their status.
 
     Shows all Basic Memory projects that are available, indicating which one
@@ -27,7 +27,7 @@ async def list_projects(ctx: Context | None = None) -> str:
         Formatted list of projects with status indicators
 
     Example:
-        list_projects()
+        list_memory_projects()
     """
     if ctx:  # pragma: no cover
         await ctx.info("Listing all available projects")
@@ -186,8 +186,8 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
     return add_project_metadata(result, session.get_current_project())
 
 
-@mcp.tool()
-async def create_project(
+@mcp.tool("create_memory_project")
+async def create_memory_project(
     project_name: str, project_path: str, set_default: bool = False, ctx: Context | None = None
 ) -> str:
     """Create a new Basic Memory project.
@@ -204,8 +204,8 @@ async def create_project(
         Confirmation message with project details
 
     Example:
-        create_project("my-research", "~/Documents/research")
-        create_project("work-notes", "/home/user/work", set_default=True)
+        create_memory_project("my-research", "~/Documents/research")
+        create_memory_project("work-notes", "/home/user/work", set_default=True)
     """
     if ctx:  # pragma: no cover
         await ctx.info(f"Creating project: {project_name} at {project_path}")

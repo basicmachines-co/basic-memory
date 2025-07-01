@@ -15,7 +15,7 @@ async def test_list_projects_basic_operation(mcp_server, app):
     async with Client(mcp_server) as client:
         # List all available projects
         list_result = await client.call_tool(
-            "list_projects",
+            "list_memory_projects",
             {},
         )
 
@@ -248,7 +248,7 @@ async def test_project_management_workflow(mcp_server, app):
         assert "test-project" in current_result[0].text
 
         # 2. List all projects
-        list_result = await client.call_tool("list_projects", {})
+        list_result = await client.call_tool("list_memory_projects", {})
         assert "Available projects:" in list_result[0].text
         assert "test-project" in list_result[0].text
 
@@ -269,7 +269,7 @@ async def test_project_metadata_consistency(mcp_server, app):
         # Test all project management tools and verify they include project metadata
 
         # list_projects
-        list_result = await client.call_tool("list_projects", {})
+        list_result = await client.call_tool("list_memory_projects", {})
         assert "Project: test-project" in list_result[0].text
 
         # get_current_project
@@ -350,7 +350,7 @@ async def test_create_project_basic_operation(mcp_server, app):
     async with Client(mcp_server) as client:
         # Create a new project
         create_result = await client.call_tool(
-            "create_project",
+            "create_memory_project",
             {
                 "project_name": "test-new-project",
                 "project_path": "/tmp/test-new-project",
@@ -370,7 +370,7 @@ async def test_create_project_basic_operation(mcp_server, app):
         assert "Project: test-project" in create_text  # Should still show current project
 
         # Verify project appears in project list
-        list_result = await client.call_tool("list_projects", {})
+        list_result = await client.call_tool("list_memory_projects", {})
         list_text = list_result[0].text
         assert "test-new-project" in list_text
 
@@ -382,7 +382,7 @@ async def test_create_project_with_default_flag(mcp_server, app):
     async with Client(mcp_server) as client:
         # Create a new project and set as default
         create_result = await client.call_tool(
-            "create_project",
+            "create_memory_project",
             {
                 "project_name": "test-default-project",
                 "project_path": "/tmp/test-default-project",
@@ -412,7 +412,7 @@ async def test_create_project_duplicate_name(mcp_server, app):
     async with Client(mcp_server) as client:
         # First create a project
         await client.call_tool(
-            "create_project",
+            "create_memory_project",
             {
                 "project_name": "duplicate-test",
                 "project_path": "/tmp/duplicate-test-1",
@@ -422,7 +422,7 @@ async def test_create_project_duplicate_name(mcp_server, app):
         # Try to create another project with same name
         with pytest.raises(Exception) as exc_info:
             await client.call_tool(
-                "create_project",
+                "create_memory_project",
                 {
                     "project_name": "duplicate-test",
                     "project_path": "/tmp/duplicate-test-2",
@@ -431,7 +431,7 @@ async def test_create_project_duplicate_name(mcp_server, app):
 
         # Should show error about duplicate name
         error_message = str(exc_info.value)
-        assert "create_project" in error_message
+        assert "create_memory_project" in error_message
         assert (
             "duplicate-test" in error_message
             or "already exists" in error_message
@@ -446,7 +446,7 @@ async def test_delete_project_basic_operation(mcp_server, app):
     async with Client(mcp_server) as client:
         # First create a project to delete
         await client.call_tool(
-            "create_project",
+            "create_memory_project",
             {
                 "project_name": "to-be-deleted",
                 "project_path": "/tmp/to-be-deleted",
@@ -454,7 +454,7 @@ async def test_delete_project_basic_operation(mcp_server, app):
         )
 
         # Verify it exists
-        list_result = await client.call_tool("list_projects", {})
+        list_result = await client.call_tool("list_memory_projects", {})
         assert "to-be-deleted" in list_result[0].text
 
         # Delete the project
@@ -478,7 +478,7 @@ async def test_delete_project_basic_operation(mcp_server, app):
         assert "Project: test-project" in delete_text  # Should show current project
 
         # Verify project no longer appears in list
-        list_result_after = await client.call_tool("list_projects", {})
+        list_result_after = await client.call_tool("list_memory_projects", {})
         assert "to-be-deleted" not in list_result_after[0].text
 
 
@@ -540,7 +540,7 @@ async def test_project_lifecycle_workflow(mcp_server, app):
 
         # 1. Create new project
         create_result = await client.call_tool(
-            "create_project",
+            "create_memory_project",
             {
                 "project_name": project_name,
                 "project_path": project_path,
@@ -595,7 +595,7 @@ async def test_project_lifecycle_workflow(mcp_server, app):
         assert "removed successfully" in delete_result[0].text
 
         # 7. Verify project is gone from list
-        list_result = await client.call_tool("list_projects", {})
+        list_result = await client.call_tool("list_memory_projects", {})
         assert project_name not in list_result[0].text
 
 
@@ -609,7 +609,7 @@ async def test_create_delete_project_edge_cases(mcp_server, app):
 
         # Create project with special characters
         create_result = await client.call_tool(
-            "create_project",
+            "create_memory_project",
             {
                 "project_name": special_name,
                 "project_path": f"/tmp/{special_name}",
@@ -619,7 +619,7 @@ async def test_create_delete_project_edge_cases(mcp_server, app):
         assert special_name in create_result[0].text
 
         # Verify it appears in list
-        list_result = await client.call_tool("list_projects", {})
+        list_result = await client.call_tool("list_memory_projects", {})
         assert special_name in list_result[0].text
 
         # Delete it
@@ -633,5 +633,5 @@ async def test_create_delete_project_edge_cases(mcp_server, app):
         assert special_name in delete_result[0].text
 
         # Verify it's gone
-        list_result_after = await client.call_tool("list_projects", {})
+        list_result_after = await client.call_tool("list_memory_projects", {})
         assert special_name not in list_result_after[0].text
