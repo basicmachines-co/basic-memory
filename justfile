@@ -17,7 +17,7 @@ test: test-unit test-int
 
 # Lint and fix code
 lint:
-    ruff check . --fix
+    uv run ruff check . --fix
 
 # Type check code
 type-check:

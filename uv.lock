@@ -121,7 +121,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14.1" },
     { name = "dateparser", specifier = ">=1.2.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.8" },
-    { name = "fastmcp", specifier = ">=2.3.4" },
+    { name = "fastmcp", specifier = ">=2.3.4,<2.10.0" },
     { name = "greenlet", specifier = ">=3.1.1" },
     { name = "icecream", specifier = ">=2.1.3" },
     { name = "loguru", specifier = ">=0.7.3" },
