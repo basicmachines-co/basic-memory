@@ -111,4 +111,4 @@ jobs:
         uses: anthropics/claude-code-action@beta
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_tools: Bash(uv run pytest),Bash(uv run ruff check . --fix),Bash(uv run ruff format .),Bash(uv run pyright),Bash(just test),Bash(just lint),Bash(just format),Bash(just type-check),Bash(just check),Read,Write,Edit,MultiEdit,Glob,Grep,LS
+          allowed_tools: Bash(uv run pytest),Bash(uv run ruff check . --fix),Bash(uv run ruff format .),Bash(uv run pyright),Bash(just test),Bash(just lint),Bash(just format),Bash(just type-check),Bash(just check),Read,Write,Edit,MultiEdit,Glob,Grep,LS, mcp__web_search

@@ -52,14 +52,17 @@ async def read_note(
         read_note("Meeting Notes", project="work-project")
     """
 
+    # Get the active project first to check project-specific sync status
+    active_project = get_active_project(project)
+
     # Check migration status and wait briefly if needed
     from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
 
-    migration_status = await wait_for_migration_or_return_status(timeout=5.0)
+    migration_status = await wait_for_migration_or_return_status(
+        timeout=5.0, project_name=active_project.name
+    )
     if migration_status:  # pragma: no cover
         return f"# System Status\n\n{migration_status}\n\nPlease wait for migration to complete before reading notes."
-
-    active_project = get_active_project(project)
     project_url = active_project.project_url
 
     # Get the file via REST API - first try direct permalink lookup

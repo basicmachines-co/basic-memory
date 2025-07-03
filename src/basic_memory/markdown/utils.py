@@ -38,7 +38,9 @@ def entity_model_from_markdown(
     # Update basic fields
     model.title = markdown.frontmatter.title
     model.entity_type = markdown.frontmatter.type
-    model.permalink = markdown.frontmatter.permalink
+    # Only update permalink if it exists in frontmatter, otherwise preserve existing
+    if markdown.frontmatter.permalink is not None:
+        model.permalink = markdown.frontmatter.permalink
     model.file_path = str(file_path)
     model.content_type = "text/markdown"
     model.created_at = markdown.created

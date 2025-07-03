@@ -52,7 +52,7 @@ async def to_graph_context(
                     file_path=item.file_path,
                     permalink=item.permalink,  # pyright: ignore
                     relation_type=item.relation_type,  # pyright: ignore
-                    from_entity=from_entity.title,  # pyright: ignore
+                    from_entity=from_entity.title if from_entity else None,
                     to_entity=to_entity.title if to_entity else None,
                     created_at=item.created_at,
                 )

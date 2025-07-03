@@ -17,6 +17,9 @@ def test_sync_tracker_initial_state(sync_tracker):
     assert sync_tracker.global_status == SyncStatus.IDLE
     assert sync_tracker.get_summary() == "✅ System ready"
 
+    # Test project-specific ready check for unknown project
+    assert sync_tracker.is_project_ready("unknown-project")
+
 
 def test_start_project_sync(sync_tracker):
     """Test starting project sync."""
@@ -211,3 +214,49 @@ def test_summary_without_file_counts(sync_tracker):
     summary = sync_tracker.get_summary()
     assert "🔄 Syncing 2 projects" in summary
     assert "files" not in summary  # Should not show file progress
+
+
+def test_is_project_ready_functionality(sync_tracker):
+    """Test project-specific ready checks."""
+    # Unknown project should be ready
+    assert sync_tracker.is_project_ready("unknown-project")
+
+    # Project in different states
+    sync_tracker.start_project_sync("scanning-project")
+    assert not sync_tracker.is_project_ready("scanning-project")  # SCANNING = not ready
+
+    sync_tracker.update_project_progress("scanning-project", SyncStatus.SYNCING, "Processing")
+    assert not sync_tracker.is_project_ready("scanning-project")  # SYNCING = not ready
+
+    sync_tracker.fail_project_sync("scanning-project", "Test error")
+    assert not sync_tracker.is_project_ready("scanning-project")  # FAILED = not ready
+
+    sync_tracker.complete_project_sync("scanning-project")
+    assert sync_tracker.is_project_ready("scanning-project")  # COMPLETED = ready
+
+    # Test watching project
+    sync_tracker.start_project_watch("watching-project")
+    assert sync_tracker.is_project_ready("watching-project")  # WATCHING = ready
+
+
+def test_project_isolation_scenario(sync_tracker):
+    """Test the specific bug scenario: project isolation with mixed sync states."""
+    # Set up the bug scenario: one failed project, one healthy project
+    sync_tracker.start_project_sync("main")
+    sync_tracker.fail_project_sync(
+        "main", "UNIQUE constraint failed: entity.file_path, entity.project_id"
+    )
+
+    sync_tracker.start_project_sync("basic-memory-testing-20250626-1009")
+    sync_tracker.complete_project_sync("basic-memory-testing-20250626-1009")
+    sync_tracker.start_project_watch("basic-memory-testing-20250626-1009")
+
+    # Global status should be failed due to "main" project
+    assert sync_tracker.global_status == SyncStatus.FAILED
+    assert not sync_tracker.is_ready
+
+    # But the healthy project should be ready for operations
+    assert sync_tracker.is_project_ready("basic-memory-testing-20250626-1009")
+    assert not sync_tracker.is_project_ready("main")
+
+    # This demonstrates the fix: project-specific checks allow isolation

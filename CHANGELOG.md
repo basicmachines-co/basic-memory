@@ -1,56 +1,138 @@
 # CHANGELOG
 
-## v0.13.8 (2025-06-20)
+## v0.14.0 (2025-06-26)
 
 ### Features
 
-- **Docker Container Support** - Complete Docker integration with volume mounting for Obsidian directories
-  ([`3269a2f`](https://github.com/basicmachines-co/basic-memory/commit/3269a2f33a7595f6d9e5207924062e2542f46759))
-  - Docker Compose configuration for easy deployment
-  - Volume mounting for persistent data and Obsidian integration
-  - Comprehensive Docker documentation and setup guides
-  - Streamlined container-based workflow
+- **Docker Container Registry Migration** - Switch from Docker Hub to GitHub Container Registry for better security and integration  
+  ([`616c1f0`](https://github.com/basicmachines-co/basic-memory/commit/616c1f0710da59c7098a5f4843d4f017877ff7b2))
+  - Automated Docker image publishing via GitHub Actions CI/CD pipeline
+  - Enhanced container security with GitHub's integrated vulnerability scanning
+  - Streamlined container deployment workflow for production environments
+
+- **Enhanced Search Documentation** - Comprehensive search syntax examples for improved user experience
+  ([`a589f8b`](https://github.com/basicmachines-co/basic-memory/commit/a589f8b894e78cce01eb25656856cfea8785fbbf))
+  - Detailed examples for Boolean search operators (AND, OR, NOT)
+  - Advanced search patterns including phrase matching and field-specific queries
+  - User-friendly documentation for complex search scenarios
+
+- **Cross-Project File Management** - Intelligent move operations with project boundary detection
+  ([`db5ef7d`](https://github.com/basicmachines-co/basic-memory/commit/db5ef7d35cc0894309c7a57b5741c9dd978526d4))
+  - Automatic detection of cross-project move attempts with helpful guidance
+  - Clear error messages when attempting unsupported cross-project operations
 
 ### Bug Fixes
 
-- **#151**: Fix reset command project configuration persistence issue
-  ([`af44941`](https://github.com/basicmachines-co/basic-memory/commit/af44941d5aa57b5ad7fcc6af4ed700f49bdb6d4d))
-  - Reset command now properly clears project configuration from `~/.basic-memory/config.json`
-  - Eliminates issue where projects would be recreated after database reset
-  - Ensures clean slate when resetting Basic Memory installation
+- **#184**: Preserve permalinks when editing notes without frontmatter permalinks
+  ([`c2f4b63`](https://github.com/basicmachines-co/basic-memory/commit/c2f4b632cf04921b1a3c2f0d43831b80c519cb31))
+  - Fix permalink preservation during note editing operations
+  - Ensure consistent permalink handling across different note formats
+  - Maintain note identity and searchability during incremental edits
 
-- **#148**: Resolve project state inconsistency between MCP and CLI
-  ([`35e4f73`](https://github.com/basicmachines-co/basic-memory/commit/35e4f73ae8a65501da4d48258ed702f957184c92))
-  - Fix "Project not found" errors when switching default projects
-  - MCP session now automatically refreshes when project configuration changes
-  - Eliminates need to restart MCP server after project operations
-  - Ensures consistent project state across CLI and MCP interfaces
+- **#183**: Implement project-specific sync status checks for MCP tools
+  ([`12b5152`](https://github.com/basicmachines-co/basic-memory/commit/12b51522bc953fca117fc5bc01fcb29c6ca7e13c))
+  - Fix sync status reporting to correctly reflect current project state
+  - Resolve inconsistencies where sync status showed global instead of project-specific information
+  - Improve project isolation for sync operations and status reporting
 
-- **FastMCP Compatibility** - Resolve deprecation warnings for FastMCP integration
-  ([`7be001c`](https://github.com/basicmachines-co/basic-memory/commit/7be001ca6834b3344bb6160cbe537b36bcbaa579))
-  - Update FastMCP usage patterns to eliminate deprecation warnings
-  - Improve future compatibility with FastMCP library updates
-  - Clean up entity repository and service layer code
+- **#180**: Handle Boolean search syntax with hyphenated terms
+  ([`546e3cd`](https://github.com/basicmachines-co/basic-memory/commit/546e3cd8db98b74f746749d41887f8a213cd0b11))
+  - Fix search parsing issues with hyphenated terms in Boolean queries
+  - Improve search query tokenization for complex term structures
+  - Enhanced search reliability for technical documentation and multi-word concepts
+
+- **#174**: Respect BASIC_MEMORY_HOME environment variable in Docker containers
+  ([`9f1db23`](https://github.com/basicmachines-co/basic-memory/commit/9f1db23c78d4648e2c242ad1ee27eed85e3f3b5d))
+  - Fix Docker container configuration to properly honor custom home directory settings
+  - Improve containerized deployment flexibility with environment variable support
+  - Ensure consistent behavior between local and containerized installations
+
+- **#168**: Scope entity queries by project_id in upsert_entity method
+  ([`2a3adc1`](https://github.com/basicmachines-co/basic-memory/commit/2a3adc109a3e4d7ccd65cae4abf63d9bb2338326))
+  - Fix entity isolation issues in multi-project setups
+  - Prevent cross-project entity conflicts during database operations
+  - Strengthen project boundary enforcement at the database level
+
+- **#166**: Handle None from_entity in Context API RelationSummary
+  ([`8a065c3`](https://github.com/basicmachines-co/basic-memory/commit/8a065c32f4e41613207d29aafc952a56e3a52241))
+  - Fix null pointer exceptions in relation processing
+  - Improve error handling for incomplete relation data
+  - Enhanced stability for knowledge graph traversal operations
+
+- **#164**: Remove log level configuration from mcp_server.run()
+  ([`224e4bf`](https://github.com/basicmachines-co/basic-memory/commit/224e4bf9e4438c44a82ffc21bd1a282fe9087690))
+  - Simplify MCP server startup by removing redundant log level settings
+  - Fix potential logging configuration conflicts
+  - Streamline server initialization process
+
+- **#162**: Ensure permalinks are generated for entities with null permalinks during move operations
+  ([`f506507`](https://github.com/basicmachines-co/basic-memory/commit/f50650763dbd4322c132e4bdc959ce4bf074374b))
+  - Fix move operations for entities without existing permalinks
+  - Automatic permalink generation during file move operations
+  - Maintain database consistency during file reorganization
 
 ### Technical Improvements
 
-- **Comprehensive Integration Testing** - New test suites for critical user workflows
-  - Full integration tests for database reset functionality
-  - End-to-end project state synchronization testing
-  - Real MCP client-server communication validation
-  - Direct config file validation without complex mocking
+- **Comprehensive Test Coverage** - Extensive test suites for new features and edge cases
+  - Enhanced test coverage for project-specific sync status functionality
+  - Additional test scenarios for search syntax validation and edge cases
+  - Integration tests for Docker CI workflow and container publishing
+  - Comprehensive move operations testing with project boundary validation
 
-- **Code Quality** - Enhanced error handling and validation
-  - Improved project state management across system components
-  - Better session refresh patterns for configuration changes
-  - Streamlined Docker setup with reduced image size
+- **Docker CI/CD Pipeline** - Production-ready automated container publishing
+  ([`74847cc`](https://github.com/basicmachines-co/basic-memory/commit/74847cc3807b0c6ed511e0d83e0d560e9f07ec44))
+  - Automated Docker image building and publishing on release
+  - Multi-architecture container support for AMD64 and ARM64 platforms
+  - Integrated security scanning and vulnerability assessments
+  - Streamlined deployment pipeline for production environments
 
-### Documentation
+- **Release Process Improvements** - Enhanced automation and quality gates
+  ([`a52ce1c`](https://github.com/basicmachines-co/basic-memory/commit/a52ce1c8605ec2cd450d1f909154172cbc30faa2))
+  - Homebrew formula updates limited to stable releases only
+  - Improved release automation with better quality control
+  - Enhanced CI/CD pipeline reliability and error handling
 
-- **Docker Integration Guide** - Complete documentation for container deployment
-  - Step-by-step Docker Compose setup instructions
-  - Volume mounting configuration for Obsidian workflows
-  - Container-based development environment setup
+- **Code Quality Enhancements** - Improved error handling and validation
+  - Better null safety in entity and relation processing
+  - Enhanced project isolation validation throughout the codebase
+  - Improved error messages and user guidance for edge cases
+  - Strengthened database consistency guarantees across operations
+
+### Infrastructure
+
+- **GitHub Container Registry Integration** - Modern container infrastructure
+  - Migration from Docker Hub to GitHub Container Registry (ghcr.io)
+  - Improved security with integrated vulnerability scanning
+  - Better integration with GitHub-based development workflow
+  - Enhanced container versioning and artifact management
+
+- **Enhanced CI/CD Workflows** - Robust automated testing and deployment
+  - Automated Docker image publishing on releases
+  - Comprehensive test coverage validation before deployment
+  - Multi-platform container building and publishing
+  - Integration with GitHub's security and monitoring tools
+
+### Migration Guide
+
+This release includes several behind-the-scenes improvements and fixes. All changes are backward compatible:
+
+- **Docker Users**: Container images now served from `ghcr.io/basicmachines-co/basic-memory` instead of Docker Hub
+- **Search Users**: Enhanced search syntax handling - existing queries continue to work unchanged
+- **Multi-Project Users**: Improved project isolation - all existing projects remain fully functional
+- **All Users**: Enhanced stability and error handling - no breaking changes to existing workflows
+
+### Installation
+
+```bash
+# Latest stable release
+uv tool install basic-memory
+
+# Update existing installation  
+uv tool upgrade basic-memory
+
+# Docker (new registry)
+docker pull ghcr.io/basicmachines-co/basic-memory:latest
+```
 
 ## v0.13.7 (2025-06-19)
 

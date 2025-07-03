@@ -19,7 +19,7 @@ from basic_memory.utils import generate_permalink
 
 
 @mcp.tool("list_memory_projects")
-async def list_projects(ctx: Context | None = None) -> str:
+async def list_memory_projects(ctx: Context | None = None) -> str:
     """List all available projects with their status.
 
     Shows all Basic Memory projects that are available, indicating which one
@@ -29,7 +29,7 @@ async def list_projects(ctx: Context | None = None) -> str:
         Formatted list of projects with status indicators
 
     Example:
-        list_projects()
+        list_memory_projects()
     """
     if ctx:  # pragma: no cover
         await ctx.info("Listing all available projects")
@@ -144,13 +144,13 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
             Your session remains on the previous project.
 
             ## Troubleshooting:
-            1. **Check available projects**: Use `list_projects()` to see valid project names
+            1. **Check available projects**: Use `list_memory_projects()` to see valid project names
             2. **Verify spelling**: Ensure the project name is spelled correctly
             3. **Check permissions**: Verify you have access to the requested project
             4. **Try again**: The error might be temporary
 
             ## Available options:
-            - See all projects: `list_projects()`
+            - See all projects: `list_memory_projects()`
             - Stay on current project: `get_current_project()`
             - Try different project: `switch_project("correct-project-name")`
 
@@ -231,7 +231,7 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
 
 
 @mcp.tool("create_memory_project")
-async def create_project(
+async def create_memory_project(
     project_name: str, project_path: str, set_default: bool = False, ctx: Context | None = None
 ) -> str:
     """Create a new Basic Memory project.
@@ -248,8 +248,8 @@ async def create_project(
         Confirmation message with project details
 
     Example:
-        create_project("my-research", "~/Documents/research")
-        create_project("work-notes", "/home/user/work", set_default=True)
+        create_memory_project("my-research", "~/Documents/research")
+        create_memory_project("work-notes", "/home/user/work", set_default=True)
     """
     if ctx:  # pragma: no cover
         await ctx.info(f"Creating project: {project_name} at {project_path}")

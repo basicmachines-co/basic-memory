@@ -1,51 +1,8 @@
 # Basic Memory - Modern Command Runner
 
-# List all available recipes
-default:
-    @just --list
-
-## ####################
-## Manage deps
-## ####################
-
-
 # Install dependencies
 install:
     pip install -e ".[dev]"
-
-# Update all dependencies to latest versions
-update-deps:
-    uv sync --upgrade
-
-## ####################
-## Code
-## ####################
-
-# Clean build artifacts and cache files
-clean:
-    find . -type f -name '*.pyc' -delete
-    find . -type d -name '__pycache__' -exec rm -r {} +
-    rm -rf installer/build/ installer/dist/ dist/
-    rm -f rw.*.dmg .coverage.*
-
-# Format code with ruff
-format:
-    uv run ruff format .
-
-# Lint and fix code
-lint:
-    ruff check . --fix
-
-# Type check code
-type-check:
-    uv run pyright
-
-# Run all code quality checks and tests
-check: lint format type-check test
-
-## ####################
-## Test
-## ####################
 
 # Run unit tests in parallel
 test-unit:
@@ -58,35 +15,48 @@ test-int:
 # Run all tests
 test: test-unit test-int
 
+# Lint and fix code
+lint:
+    uv run ruff check . --fix
 
-## ####################
-## Run
-## ####################
+# Type check code
+type-check:
+    uv run pyright
 
-# Run MCP in stdio mode
-run-mcp:
-    uv run basic-memory mcp
+# Clean build artifacts and cache files
+clean:
+    find . -type f -name '*.pyc' -delete
+    find . -type d -name '__pycache__' -exec rm -r {} +
+    rm -rf installer/build/ installer/dist/ dist/
+    rm -f rw.*.dmg .coverage.*
 
-# Run MCP in stdio mode
-run-mcp-http:
-    uv run python src/basic_memory/mcp/http/main.py
+# Format code with ruff
+format:
+    uv run ruff format .
 
 # Run MCP inspector tool
 run-inspector:
     npx @modelcontextprotocol/inspector
 
+# Build macOS installer
+installer-mac:
+    cd installer && chmod +x make_icons.sh && ./make_icons.sh
+    cd installer && uv run python setup.py bdist_mac
 
-## ####################
-## DB Migrations
-## ####################
+# Build Windows installer
+installer-win:
+    cd installer && uv run python setup.py bdist_win32
+
+# Update all dependencies to latest versions
+update-deps:
+    uv sync --upgrade
+
+# Run all code quality checks and tests
+check: lint format type-check test
 
 # Generate Alembic migration with descriptive message
 migration message:
     cd src/basic_memory/alembic && alembic revision --autogenerate -m "{{message}}"
-
-## ####################
-## Release
-## ####################
 
 # Create a stable release (e.g., just release v0.13.2)
 release version:
@@ -206,3 +176,7 @@ beta version:
     echo "📦 GitHub Actions will build and publish to PyPI as pre-release"
     echo "🔗 Monitor at: https://github.com/basicmachines-co/basic-memory/actions"
     echo "📥 Install with: uv tool install basic-memory --pre"
+
+# List all available recipes
+default:
+    @just --list

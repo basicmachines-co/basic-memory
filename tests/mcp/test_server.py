@@ -93,7 +93,7 @@ class TestMCPServer:
             # Missing SUPABASE_ANON_KEY
         }
 
-        with patch.dict(os.environ, env_vars):
+        with patch.dict(os.environ, env_vars, clear=True):
             with pytest.raises(ValueError, match="SUPABASE_URL and SUPABASE_ANON_KEY must be set"):
                 create_auth_config()
 

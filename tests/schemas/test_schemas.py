@@ -127,6 +127,36 @@ def test_entity_out_from_attributes():
     assert len(entity.relations) == 1
 
 
+def test_entity_response_with_none_permalink():
+    """Test EntityResponse can handle None permalink (fixes issue #170).
+
+    This test ensures that EntityResponse properly validates when the permalink
+    field is None, which can occur when markdown files don't have explicit
+    permalinks in their frontmatter during edit operations.
+    """
+    # Simulate database model attributes with None permalink
+    db_data = {
+        "title": "Test Entity",
+        "permalink": None,  # This should not cause validation errors
+        "file_path": "test/test-entity.md",
+        "entity_type": "note",
+        "content_type": "text/markdown",
+        "observations": [],
+        "relations": [],
+        "created_at": "2023-01-01T00:00:00",
+        "updated_at": "2023-01-01T00:00:00",
+    }
+
+    # This should not raise a ValidationError
+    entity = EntityResponse.model_validate(db_data)
+    assert entity.permalink is None
+    assert entity.title == "Test Entity"
+    assert entity.file_path == "test/test-entity.md"
+    assert entity.entity_type == "note"
+    assert len(entity.observations) == 0
+    assert len(entity.relations) == 0
+
+
 def test_search_nodes_input():
     """Test SearchNodesInput validation."""
     search = SearchNodesRequest.model_validate({"query": "test query"})

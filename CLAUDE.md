@@ -236,7 +236,9 @@ Basic Memory uses `uv-dynamic-versioning` for automatic version management based
 - Create version tag: `git tag v0.13.0 && git push origin v0.13.0`
 
 #### Homebrew Formula Updates
-- Automatically triggered after successful PyPI release
+- Automatically triggered after successful PyPI release for **stable releases only**
+- **Stable releases** (e.g., v0.13.7) automatically update the main `basic-memory` formula
+- **Pre-releases** (dev/beta/rc) are NOT automatically updated - users must specify version manually
 - Updates formula in `basicmachines-co/homebrew-basic-memory` repo
 - Requires `HOMEBREW_TOKEN` secret in GitHub repository settings:
   - Create a fine-grained Personal Access Token with `Contents: Read and Write` and `Actions: Read` scopes on `basicmachines-co/homebrew-basic-memory`

@@ -57,6 +57,8 @@ jobs:
     name: Update Homebrew Formula
     needs: release
     runs-on: ubuntu-latest
+    # Only run for stable releases (not dev, beta, or rc versions)
+    if: ${{ !contains(github.ref_name, 'dev') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') }}
     permissions:
       contents: write
       actions: read
@@ -80,3 +82,4 @@ jobs:
         env:
           # Personal Access Token with repo scope for homebrew-basic-memory repo
           COMMITTER_TOKEN: ${{ secrets.HOMEBREW_TOKEN }}
+

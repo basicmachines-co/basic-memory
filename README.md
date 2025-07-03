@@ -33,6 +33,10 @@ https://github.com/user-attachments/assets/a55d8238-8dd0-454a-be4c-8860dbbd0ddc
 # Install with uv (recommended)
 uv tool install basic-memory
 
+# or with Homebrew
+brew tap basicmachines-co/basic-memory
+brew install basic-memory
+
 # Configure Claude Desktop (edit ~/Library/Application Support/Claude/claude_desktop_config.json)
 # Add this to your config:
 {
@@ -65,6 +69,13 @@ npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
 ```
 
 This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. Note: The Smithery installation uses their hosted MCP server, while your data remains stored locally as Markdown files.
+
+### Add to Cursor
+
+Once you have installed Basic Memory revisit this page for the 1-click installer for Cursor:
+
+[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=basic-memory&config=eyJjb21tYW5kIjoiL1VzZXJzL2RyZXcvLmxvY2FsL2Jpbi91dnggYmFzaWMtbWVtb3J5IG1jcCJ9)
+
 
 ### Glama.ai
 
@@ -214,7 +225,7 @@ title: <Entity title>
 type: <The type of Entity> (e.g. note)
 permalink: <a uri slug>
 
-- <optional metadata> (such as tags) 
+- <optional metadata> (such as tags)
 ```
 
 ### Observations

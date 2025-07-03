@@ -1,6 +1,7 @@
 # /project:test-live - Live Basic Memory Testing Suite
 
-Execute comprehensive real-world testing of Basic Memory using the installed version, following the methodology in TESTING.md. All test results are recorded as notes in a dedicated test project.
+Execute comprehensive real-world testing of Basic Memory using the installed version. 
+All test results are recorded as notes in a dedicated test project.
 
 ## Usage
 ```
@@ -8,12 +9,45 @@ Execute comprehensive real-world testing of Basic Memory using the installed ver
 ```
 
 **Parameters:**
-- `phase` (optional): Specific test phase to run (`core`, `features`, `edge`, `workflows`, `stress`, or `all`)
+- `phase` (optional): Specific test phase to run (`recent`, `core`, `features`, `edge`, `workflows`, `stress`, or `all`)
+- `recent` - Focus on recent changes and new features (recommended for regular testing)
+- `core` - Essential tools only (Tier 1: write_note, read_note, search_notes, edit_note, list_projects, switch_project)
+- `features` - Core + important workflows (Tier 1 + Tier 2)
+- `all` - Comprehensive testing of all tools and scenarios
 
 ## Implementation
 
 You are an expert QA engineer conducting live testing of Basic Memory. 
-When the user runs `/project:test-live`, execute comprehensive testing following the TESTING.md methodology:
+When the user runs `/project:test-live`, execute comprehensive test plan:
+
+## Tool Testing Priority
+
+### **Tier 1: Critical Core (Always Test)**
+1. **write_note** - Foundation of all knowledge creation
+2. **read_note** - Primary knowledge retrieval mechanism  
+3. **search_notes** - Essential for finding information
+4. **edit_note** - Core content modification capability
+5. **list_memory_projects** - Project discovery and status
+6. **switch_project** - Context switching for multi-project workflows
+
+### **Tier 2: Important Workflows (Usually Test)**
+7. **recent_activity** - Understanding what's changed
+8. **build_context** - Conversation continuity via memory:// URLs
+9. **create_memory_project** - Essential for project setup
+10. **move_note** - Knowledge organization
+11. **sync_status** - Understanding system state
+
+### **Tier 3: Enhanced Functionality (Sometimes Test)**
+12. **view_note** - Claude Desktop artifact display
+13. **read_content** - Raw content access
+14. **delete_note** - Content removal
+15. **list_directory** - File system exploration
+16. **set_default_project** - Configuration
+17. **delete_project** - Administrative cleanup
+
+### **Tier 4: Specialized (Rarely Test)**
+18. **canvas** - Obsidian visualization (specialized use case)
+19. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
 
 ### Pre-Test Setup
 
@@ -22,7 +56,13 @@ When the user runs `/project:test-live`, execute comprehensive testing following
    - Check version and confirm it's the expected release
    - Test MCP connection and tool availability
 
-2. **Test Project Creation**
+2. **Recent Changes Analysis** (if phase includes 'recent' or 'all')
+   - Run `git log --oneline -20` to examine recent commits
+   - Identify new features, bug fixes, and enhancements
+   - Generate targeted test scenarios for recent changes
+   - Prioritize regression testing for recently fixed issues
+
+3. **Test Project Creation**
 
 Run the bash `date` command to get the current date/time. 
 
@@ -34,83 +74,158 @@ Run the bash `date` command to get the current date/time.
 
 Make sure to switch to the newly created project with the `switch_project()` tool.
 
-3. **Baseline Documentation**
+4. **Baseline Documentation**
    Create initial test session note with:
    - Test environment details
    - Version being tested
+   - Recent changes identified (if applicable)
    - Test objectives and scope
    - Start timestamp
 
-### Phase 1: Core Functionality Validation
+### Phase 0: Recent Changes Validation (if 'recent' or 'all' phase)
 
-Test all fundamental MCP tools systematically:
+Based on recent commit analysis, create targeted test scenarios:
 
-**write_note Tests:**
-- Basic note creation with various content types
-- Frontmatter handling (tags, custom fields)
-- Special characters in titles and content
-- Unicode and emoji support
-- Empty notes and minimal content
+**Recent Changes Test Protocol:**
+1. **Feature Addition Tests** - For each new feature identified:
+   - Test basic functionality
+   - Test integration with existing tools
+   - Verify documentation accuracy
+   - Test edge cases and error handling
 
-**read_note Tests:**
-- Read by title, permalink, memory:// URLs
-- Non-existent notes (error handling)
-- Notes with complex formatting
-- Performance with large notes
+2. **Bug Fix Regression Tests** - For each recent fix:
+   - Recreate the original problem scenario
+   - Verify the fix works as expected
+   - Test related functionality isn't broken
+   - Document the verification in test notes
 
-**view_note Tests:**
-- View notes as formatted artifacts (Claude Desktop)
-- Title extraction from frontmatter and headings
-- Unicode and emoji content in artifacts
-- Error handling for non-existent notes
-- Artifact display quality and readability
+3. **Performance/Enhancement Validation** - For optimizations:
+   - Establish baseline timing
+   - Compare with expected improvements
+   - Test under various load conditions
+   - Document performance observations
 
-**search_notes Tests:**
-- Simple text queries
-- Tag-based searches 
-- Boolean operators and complex queries
-- Empty/no results scenarios
-- Performance with growing knowledge base
+**Example Recent Changes (Update based on actual git log):**
+- Watch Service Restart (#156): Test project creation → file modification → automatic restart
+- Cross-Project Moves (#161): Test move_note with cross-project detection
+- Docker Environment Support (#174): Test BASIC_MEMORY_HOME behavior
+- MCP Server Logging (#164): Verify log level configurations
 
-**Recent Activity Tests:**
-- Various timeframes ("today", "1 week", "1d")
-- Type filtering (if available)
-- Empty project scenarios
-- Performance with many recent changes
+### Phase 1: Core Functionality Validation (Tier 1 Tools)
 
-**Context Building Tests:**
-- Different depth levels (1, 2, 3+)
-- Various timeframes
-- Relation traversal accuracy
-- Performance with complex graphs
+Test essential MCP tools that form the foundation of Basic Memory:
 
-### Phase 2: v0.13.0 Feature Deep Dive
+**1. write_note Tests (Critical):**
+- ✅ Basic note creation with frontmatter
+- ✅ Special characters and Unicode in titles
+- ✅ Various content types (lists, headings, code blocks)
+- ✅ Empty notes and minimal content edge cases
+- ⚠️ Error handling for invalid parameters
 
-**Project Management:**
-- Create multiple projects dynamically
-- Switch between projects mid-conversation  
-- Cross-project operations
-- Project discovery and status
-- Default project behavior
-- Invalid project handling
+**2. read_note Tests (Critical):**
+- ✅ Read by title, permalink, memory:// URLs
+- ✅ Non-existent notes (error handling)
+- ✅ Notes with complex markdown formatting
+- ⚠️ Performance with large notes (>10MB)
 
-**Advanced Note Editing:**
-- `edit_note` with append operations
-- Prepend operations
-- Find/replace with validation
-- Section replacement under headers
-- Error scenarios (invalid operations)
-- Frontmatter preservation
+**3. search_notes Tests (Critical):**
+- ✅ Simple text queries across content
+- ✅ Tag-based searches with multiple tags
+- ✅ Boolean operators (AND, OR, NOT)
+- ✅ Empty/no results scenarios
+- ⚠️ Performance with 100+ notes
 
-**File Management:**
-- `move_note` within same project
-- Move between projects
-- Automatic folder creation
-- Special characters in paths
-- Database consistency validation
-- Search index updates after moves
+**4. edit_note Tests (Critical):**
+- ✅ Append operations preserving frontmatter
+- ✅ Prepend operations
+- ✅ Find/replace with validation
+- ✅ Section replacement under headers
+- ⚠️ Error scenarios (invalid operations)
 
-### Phase 3: Edge Case Exploration
+**5. list_memory_projects Tests (Critical):**
+- ✅ Display all projects with status indicators
+- ✅ Current and default project identification
+- ✅ Empty project list handling
+- ✅ Project metadata accuracy
+
+**6. switch_project Tests (Critical):**
+- ✅ Switch between existing projects
+- ✅ Context preservation during switch
+- ⚠️ Invalid project name handling
+- ✅ Confirmation of successful switch
+
+### Phase 2: Important Workflows (Tier 2 Tools)
+
+**7. recent_activity Tests (Important):**
+- ✅ Various timeframes ("today", "1 week", "1d")
+- ✅ Type filtering capabilities
+- ✅ Empty project scenarios
+- ⚠️ Performance with many recent changes
+
+**8. build_context Tests (Important):**
+- ✅ Different depth levels (1, 2, 3+)
+- ✅ Various timeframes for context
+- ✅ memory:// URL navigation
+- ⚠️ Performance with complex relation graphs
+
+**9. create_memory_project Tests (Important):**
+- ✅ Create projects dynamically
+- ✅ Set default during creation
+- ✅ Path validation and creation
+- ⚠️ Invalid paths and names
+- ✅ Integration with existing projects
+
+**10. move_note Tests (Important):**
+- ✅ Move within same project
+- ✅ Cross-project moves with detection (#161)
+- ✅ Automatic folder creation
+- ✅ Database consistency validation
+- ⚠️ Special characters in paths
+
+**11. sync_status Tests (Important):**
+- ✅ Background operation monitoring
+- ✅ File synchronization status
+- ✅ Project sync state reporting
+- ⚠️ Error state handling
+
+### Phase 3: Enhanced Functionality (Tier 3 Tools)
+
+**12. view_note Tests (Enhanced):**
+- ✅ Claude Desktop artifact display
+- ✅ Title extraction from frontmatter
+- ✅ Unicode and emoji content rendering
+- ⚠️ Error handling for non-existent notes
+
+**13. read_content Tests (Enhanced):**
+- ✅ Raw file content access
+- ✅ Binary file handling
+- ✅ Image file reading
+- ⚠️ Large file performance
+
+**14. delete_note Tests (Enhanced):**
+- ✅ Single note deletion
+- ✅ Database consistency after deletion
+- ⚠️ Non-existent note handling
+- ✅ Confirmation of successful deletion
+
+**15. list_directory Tests (Enhanced):**
+- ✅ Directory content listing
+- ✅ Depth control and filtering
+- ✅ File name globbing
+- ⚠️ Empty directory handling
+
+**16. set_default_project Tests (Enhanced):**
+- ✅ Change default project
+- ✅ Configuration persistence
+- ⚠️ Invalid project handling
+
+**17. delete_project Tests (Enhanced):**
+- ✅ Project removal from config
+- ✅ Database cleanup
+- ⚠️ Default project protection
+- ⚠️ Non-existent project handling
+
+### Phase 4: Edge Case Exploration
 
 **Boundary Testing:**
 - Very long titles and content (stress limits)
@@ -134,7 +249,7 @@ Test all fundamental MCP tools systematically:
 - Rapid successive operations
 - Memory usage monitoring
 
-### Phase 4: Real-World Workflow Scenarios
+### Phase 5: Real-World Workflow Scenarios
 
 **Meeting Notes Pipeline:**
 1. Create meeting notes with action items
@@ -164,7 +279,35 @@ Test all fundamental MCP tools systematically:
 4. Update content with edit operations
 5. Validate knowledge graph integrity
 
-### Phase 5: Creative Stress Testing
+### Phase 6: Specialized Tools Testing (Tier 4)
+
+**18. canvas Tests (Specialized):**
+- ✅ JSON Canvas generation
+- ✅ Node and edge creation
+- ✅ Obsidian compatibility
+- ⚠️ Complex graph handling
+
+**19. MCP Prompts Tests (Specialized):**
+- ✅ ai_assistant_guide output
+- ✅ continue_conversation functionality
+- ✅ Formatted search results
+- ✅ Enhanced activity reports
+
+### Phase 7: Integration & File Watching Tests
+
+**File System Integration:**
+- ✅ Watch service behavior with file changes
+- ✅ Project creation → watch restart (#156)
+- ✅ Multi-project synchronization
+- ⚠️ MCP→API→DB→File stack validation
+
+**Real Integration Testing:**
+- ✅ End-to-end file watching vs manual operations
+- ✅ Cross-session persistence
+- ✅ Database consistency across operations
+- ⚠️ Performance under real file system changes
+
+### Phase 8: Creative Stress Testing
 
 **Creative Exploration:**
 - Rapid project creation/switching patterns
@@ -179,6 +322,26 @@ Test all fundamental MCP tools systematically:
 - Deep context building
 - Complex boolean search expressions
 - Resource constraint testing
+
+## Test Execution Guidelines
+
+### Quick Testing (core/features phases)
+- Focus on Tier 1 tools (core) or Tier 1+2 (features)
+- Test essential functionality and common edge cases
+- Record critical issues immediately
+- Complete in 15-20 minutes
+
+### Comprehensive Testing (all phase)
+- Cover all tiers systematically
+- Include specialized tools and stress testing
+- Document performance baselines
+- Complete in 45-60 minutes
+
+### Recent Changes Focus (recent phase)
+- Analyze git log for recent commits
+- Generate targeted test scenarios
+- Focus on regression testing for fixes
+- Validate new features thoroughly
 
 ## Test Observation Format
 
@@ -202,14 +365,14 @@ permalink: test-session-[phase]-[timestamp]
 ## Test Results
 
 ### ✅ Successful Operations
-- [timestamp] write_note: Created note with emoji title 📝 #functionality
-- [timestamp] search_notes: Boolean query returned 23 results in 0.4s #performance  
-- [timestamp] edit_note: Append operation preserved frontmatter #reliability
+- [timestamp] ✅ write_note: Created note with emoji title 📝 #tier1 #functionality
+- [timestamp] ✅ search_notes: Boolean query returned 23 results in 0.4s #tier1 #performance  
+- [timestamp] ✅ edit_note: Append operation preserved frontmatter #tier1 #reliability
 
 ### ⚠️ Issues Discovered
-- [timestamp] move_note: Slow with deep folder paths (2.1s) #performance
-- [timestamp] search_notes: Unicode query returned unexpected results #bug
-- [timestamp] project switch: Context lost for memory:// URLs #issue
+- [timestamp] ⚠️ move_note: Slow with deep folder paths (2.1s) #tier2 #performance
+- [timestamp] 🚨 search_notes: Unicode query returned unexpected results #tier1 #bug #critical
+- [timestamp] ⚠️ build_context: Context lost for memory:// URLs #tier2 #issue
 
 ### 🚀 Enhancements Identified
 - edit_note could benefit from preview mode #ux-improvement
@@ -353,24 +516,44 @@ For each error discovered:
    - Create comprehensive summary report
    - Generate development recommendations
 
+## Testing Success Criteria
+
+### Core Testing (Tier 1) - Must Pass
+- All 6 critical tools function correctly
+- No critical bugs in essential workflows
+- Acceptable performance for basic operations
+- Error handling works as expected
+
+### Feature Testing (Tier 1+2) - Should Pass
+- All 11 core + important tools function
+- Workflow scenarios complete successfully
+- Performance meets baseline expectations
+- Integration points work correctly
+
+### Comprehensive Testing (All Tiers) - Complete Coverage
+- All tools tested across all scenarios
+- Edge cases and stress testing completed
+- Performance baselines established
+- Full documentation of issues and enhancements
+
 ## Expected Outcomes
 
 **System Validation:**
-- v0.13.0 feature verification in real usage
-- Edge case discovery beyond unit tests
+- Feature verification prioritized by tier importance
+- Recent changes validated for regression
 - Performance baseline establishment
-- Bug identification with reproduction cases
+- Bug identification with severity assessment
 
 **Knowledge Base Creation:**
-- Comprehensive testing documentation
+- Prioritized testing documentation
 - Real usage examples for user guides
-- Edge case scenarios for future testing
+- Recent changes validation records
 - Performance insights for optimization
 
 **Development Insights:**
-- Prioritized bug fix list
+- Tier-based bug priority list
+- Recent changes impact assessment
 - Enhancement ideas from real usage
-- Architecture validation results
 - User experience improvement areas
 
 ## Post-Test Deliverables
@@ -402,9 +585,11 @@ For each error discovered:
    - Add performance benchmarks and targets
 
 ## Context
-- Uses installed basic-memory version (not development)
+- Uses real installed basic-memory version 
 - Tests complete MCP→API→DB→File stack
 - Creates living documentation in Basic Memory itself
 - Follows integration over isolation philosophy
+- Prioritizes testing by tool importance and usage frequency
+- Adapts to recent development changes dynamically
 - Focuses on real usage patterns over checklist validation
-- Generates actionable insights for development team
+- Generates actionable insights prioritized by impact
