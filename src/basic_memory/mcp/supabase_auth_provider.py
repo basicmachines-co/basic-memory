@@ -3,7 +3,7 @@
 import os
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 import httpx
@@ -123,7 +123,7 @@ class SupabaseOAuthProvider(
         self.pending_auth_codes[state] = SupabaseAuthorizationCode(
             code=state,
             scopes=params.scopes or [],
-            expires_at=(datetime.utcnow() + timedelta(minutes=10)).timestamp(),
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp(),
             client_id=client.client_id,
             code_challenge=params.code_challenge,
             redirect_uri=params.redirect_uri,
@@ -218,7 +218,7 @@ class SupabaseOAuthProvider(
 
         if code and code.client_id == client.client_id:
             # Check expiration
-            if datetime.utcnow().timestamp() > code.expires_at:
+            if datetime.now(timezone.utc).timestamp() > code.expires_at:
                 del self.pending_auth_codes[authorization_code]
                 return None
             return code
@@ -453,8 +453,8 @@ class SupabaseOAuthProvider(
             "email": email,
             "scopes": scopes,
             "supabase_token": supabase_access_token[:10] + "...",  # Reference only
-            "exp": datetime.utcnow() + timedelta(hours=1),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "iat": datetime.now(timezone.utc),
         }
 
         # Use Supabase JWT secret if available

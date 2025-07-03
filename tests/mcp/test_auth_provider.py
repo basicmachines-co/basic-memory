@@ -1,7 +1,7 @@
 """Tests for OAuth authentication provider."""
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from mcp.server.auth.provider import AuthorizationParams
 from mcp.shared.auth import OAuthClientInformationFull
 from pydantic import AnyHttpUrl
@@ -185,7 +185,7 @@ class TestBasicMemoryOAuthProvider:
             token=token_str,
             client_id=client.client_id,
             scopes=["read", "write"],
-            expires_at=int((datetime.utcnow() + timedelta(hours=1)).timestamp()),
+            expires_at=int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()),
         )
         provider.access_tokens[token_str] = access_token
 
@@ -226,7 +226,7 @@ class TestBasicMemoryOAuthProvider:
         provider.authorization_codes[auth_code] = BasicMemoryAuthorizationCode(
             code=auth_code,
             scopes=["read"],
-            expires_at=(datetime.utcnow() - timedelta(minutes=1)).timestamp(),
+            expires_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).timestamp(),
             client_id=client.client_id,
             code_challenge="challenge",
             redirect_uri=AnyHttpUrl("http://localhost:3000/callback"),
@@ -288,7 +288,7 @@ class TestBasicMemoryOAuthProvider:
             token=expired_token_str,
             client_id="test-client",
             scopes=["read"],
-            expires_at=int((datetime.utcnow() - timedelta(minutes=1)).timestamp()),  # Expired
+            expires_at=int((datetime.now(timezone.utc) - timedelta(minutes=1)).timestamp()),  # Expired
         )
         provider.access_tokens[expired_token_str] = expired_access_token
 

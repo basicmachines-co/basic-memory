@@ -173,6 +173,8 @@ def setup_logging(
         "httpx": logging.WARNING,
         # File watching logs
         "watchfiles.main": logging.WARNING,
+        # SQLAlchemy deprecation warnings
+        "sqlalchemy": logging.WARNING,
     }
 
     # Set log levels for noisy loggers

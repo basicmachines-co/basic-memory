@@ -1,7 +1,7 @@
 """OAuth authentication provider for Basic Memory MCP server."""
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 import jwt
@@ -92,7 +92,7 @@ class BasicMemoryOAuthProvider(
         self.authorization_codes[auth_code] = BasicMemoryAuthorizationCode(
             code=auth_code,
             scopes=params.scopes or [],
-            expires_at=(datetime.utcnow() + timedelta(minutes=10)).timestamp(),
+            expires_at=(datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp(),
             client_id=client.client_id,
             code_challenge=params.code_challenge,
             redirect_uri=params.redirect_uri,
@@ -119,7 +119,7 @@ class BasicMemoryOAuthProvider(
 
         if code and code.client_id == client.client_id:
             # Check if expired
-            if datetime.utcnow().timestamp() > code.expires_at:
+            if datetime.now(timezone.utc).timestamp() > code.expires_at:
                 del self.authorization_codes[authorization_code]
                 return None
             return code
@@ -135,7 +135,7 @@ class BasicMemoryOAuthProvider(
         refresh_token = secrets.token_urlsafe(32)
 
         # Store tokens
-        expires_at = (datetime.utcnow() + timedelta(hours=1)).timestamp()
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()
 
         self.access_tokens[access_token] = BasicMemoryAccessToken(
             token=access_token,
@@ -187,7 +187,7 @@ class BasicMemoryOAuthProvider(
         new_refresh_token = secrets.token_urlsafe(32)
 
         # Store new tokens
-        expires_at = (datetime.utcnow() + timedelta(hours=1)).timestamp()
+        expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()
 
         self.access_tokens[new_access_token] = BasicMemoryAccessToken(
             token=new_access_token,
@@ -220,7 +220,7 @@ class BasicMemoryOAuthProvider(
 
         if access_token:
             # Check if expired
-            if access_token.expires_at and datetime.utcnow().timestamp() > access_token.expires_at:
+            if access_token.expires_at and datetime.now(timezone.utc).timestamp() > access_token.expires_at:
                 logger.debug("Token found in memory but expired, removing")
                 del self.access_tokens[token]
                 return None
@@ -262,8 +262,8 @@ class BasicMemoryOAuthProvider(
             "iss": self.issuer_url,
             "sub": client_id,
             "aud": "basic-memory",
-            "exp": datetime.utcnow() + timedelta(hours=1),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "iat": datetime.now(timezone.utc),
             "scopes": scopes,
         }
 
