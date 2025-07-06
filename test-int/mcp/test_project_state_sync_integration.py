@@ -88,7 +88,10 @@ async def test_project_state_sync_after_default_change(mcp_server, app, config_m
             },
         )
         assert len(edit_result.content) == 1
-        assert "added" in edit_result.content[0].text.lower() and "lines" in edit_result.content[0].text.lower()
+        assert (
+            "added" in edit_result.content[0].text.lower()
+            and "lines" in edit_result.content[0].text.lower()
+        )
 
         # Step 9: Verify the edit was applied
         final_read_result = await client.call_tool(

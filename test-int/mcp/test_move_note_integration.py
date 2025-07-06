@@ -555,50 +555,6 @@ async def test_move_note_cross_project_detection(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_move_note_potential_cross_project_guidance(mcp_server, app):
-    """Test guidance for potentially cross-project moves with project-like keywords."""
-
-    async with Client(mcp_server) as client:
-        # Create another test project
-        await client.call_tool(
-            "create_memory_project",
-            {
-                "project_name": "workspace-docs",
-                "project_path": "/tmp/workspace-docs",
-                "set_default": False,
-            },
-        )
-
-        # Create a note in the default project
-        await client.call_tool(
-            "write_note",
-            {
-                "title": "Potential Cross Project Note",
-                "folder": "source",
-                "content": "# Potential Cross Project Note\n\nThis might be moved cross-project.",
-                "tags": "test,potential-cross-project",
-            },
-        )
-
-        # Try to move to a path that contains project-like keywords but not exact project names
-        move_result = await client.call_tool(
-            "move_note",
-            {
-                "identifier": "Potential Cross Project Note",
-                "destination_path": "project-archive/moved-note.md",
-            },
-        )
-
-        # Should provide guidance for potential cross-project moves
-        assert len(move_result.content) == 1
-        error_message = move_result.content[0].text
-        assert "Check Project Context" in error_message
-        assert "workspace-docs" in error_message  # Should mention other available projects
-        assert "list_projects" in error_message
-        assert "switch_project" in error_message
-
-
-@pytest.mark.asyncio
 async def test_move_note_normal_moves_still_work(mcp_server, app):
     """Test that normal within-project moves still work after cross-project detection."""
 

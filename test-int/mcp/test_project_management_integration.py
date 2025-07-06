@@ -258,7 +258,7 @@ async def test_project_management_workflow(mcp_server, app):
 
         # 4. Verify we're still on the same project
         current_result2 = await client.call_tool("get_current_project", {})
-        assert "Current project: test-project" in current_result2[0].text
+        assert "Current project: test-project" in current_result2.content[0].text
 
 
 @pytest.mark.asyncio
@@ -891,7 +891,10 @@ async def test_session_state_consistency_after_case_switch(mcp_server, app):
                 assert f"Current project: {project_name}" in result.content[0].text
             elif op_name == "list_memory_projects":
                 assert project_name in result.content[0].text
-                assert "(current)" in result.content[0].text or "current" in result.content[0].text.lower()
+                assert (
+                    "(current)" in result.content[0].text
+                    or "current" in result.content[0].text.lower()
+                )
 
             # All operations should include project metadata with canonical name
             # FIXME

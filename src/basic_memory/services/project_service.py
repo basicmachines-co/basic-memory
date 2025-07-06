@@ -34,7 +34,7 @@ class ProjectService:
     @property
     def config_manager(self) -> ConfigManager:
         """Get a ConfigManager instance.
-        
+
         Returns:
             Fresh ConfigManager instance for each access
         """
@@ -43,7 +43,7 @@ class ProjectService:
     @property
     def config(self) -> ProjectConfig:
         """Get the current project configuration.
-        
+
         Returns:
             Current project configuration
         """

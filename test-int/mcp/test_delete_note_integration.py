@@ -99,7 +99,10 @@ async def test_delete_note_by_permalink(mcp_server, app):
         )
 
         # Should have no results
-        assert '"results": []' in search_result.content[0].text or '"results":[]' in search_result.content[0].text
+        assert (
+            '"results": []' in search_result.content[0].text
+            or '"results":[]' in search_result.content[0].text
+        )
 
 
 @pytest.mark.asyncio
@@ -209,7 +212,9 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
             )
 
             # Should return True for successful deletion
-            assert "true" in delete_result.content[0].text.lower(), f"Failed to delete note: {title}"
+            assert "true" in delete_result.content[0].text.lower(), (
+                f"Failed to delete note: {title}"
+            )
 
             # Verify the note is deleted
             read_after_delete = await client.call_tool(
@@ -360,7 +365,10 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
         )
 
         # Should have no results
-        assert '"results": []' in search_result.content[0].text or '"results":[]' in search_result.content[0].text
+        assert (
+            '"results": []' in search_result.content[0].text
+            or '"results":[]' in search_result.content[0].text
+        )
 
 
 @pytest.mark.asyncio

@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     app_config = ConfigManager().config
     # Initialize app and database
     logger.info("Starting Basic Memory API")
+    print(f"fastapi {app_config.projects}")
     await initialize_app(app_config)
 
     logger.info(f"Sync changes enabled: {app_config.sync_changes}")

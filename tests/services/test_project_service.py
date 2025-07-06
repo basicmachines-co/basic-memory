@@ -548,7 +548,6 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
 
-
     config_manager = ConfigManager()
     try:
         # Add project with uppercase name to config (simulating the bug scenario)

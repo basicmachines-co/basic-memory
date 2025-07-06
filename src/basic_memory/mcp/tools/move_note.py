@@ -47,18 +47,7 @@ async def _detect_cross_project_move_attempt(
                     identifier, destination_path, current_project, matching_project
                 )
 
-        # Check if the destination path looks like it might be trying to reference another project
-        # (e.g., contains common project-like patterns)
-        if any(keyword in dest_lower for keyword in ["project", "workspace", "repo"]):
-            # This might be a cross-project attempt, but we can't be sure
-            # Return a general guidance message
-            available_projects = [
-                p.name for p in project_list.projects if p.name != current_project
-            ]
-            if available_projects:
-                return _format_potential_cross_project_guidance(
-                    identifier, destination_path, current_project, available_projects
-                )
+        # No other cross-project patterns detected
 
     except Exception as e:
         # If we can't detect, don't interfere with normal error handling

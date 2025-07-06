@@ -58,16 +58,12 @@ from pathlib import Path
 
 from httpx import AsyncClient, ASGITransport
 
-import basic_memory.config
-import basic_memory.mcp.project_session
-
-from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager, save_basic_memory_config
+from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from fastapi import FastAPI
 
-from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_project_config, get_engine_factory, get_app_config
 
 
@@ -93,12 +89,12 @@ async def engine_factory(tmp_path):
 
 
 @pytest_asyncio.fixture(scope="function")
-async def test_project(tmp_path, engine_factory) -> Project:
+async def test_project(config_home, engine_factory) -> Project:
     """Create a test project."""
     project_data = {
         "name": "test-project",
         "description": "Project used for integration tests",
-        "path": str(tmp_path),
+        "path": str(config_home),
         "is_active": True,
         "is_default": True,
     }
@@ -112,26 +108,32 @@ async def test_project(tmp_path, engine_factory) -> Project:
 @pytest.fixture
 def config_home(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Set BASIC_MEMORY_HOME to the test directory
+    monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path / "basic-memory"))
     return tmp_path
 
 
-@pytest.fixture(scope="function")
-def app_config(config_home, test_project, tmp_path, monkeypatch) -> BasicMemoryConfig:
+@pytest.fixture(scope="function", autouse=True)
+def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
-    projects = {test_project.name: str(test_project.path)}
+    # Create a basic config with test-project like unit tests do
+    projects = {"test-project": str(config_home)}
     app_config = BasicMemoryConfig(
         env="test",
-        default_project=test_project.name,
+        projects=projects,
+        default_project="test-project",
         update_permalinks_on_move=True,
     )
-    app_config.projects = projects
     return app_config
 
 
-@pytest.fixture(scope="function")
-def config_manager(app_config: BasicMemoryConfig, config_home, monkeypatch) -> ConfigManager:
+@pytest.fixture(scope="function", autouse=True)
+def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     config_manager = ConfigManager()
-
+    # Update its paths to use the test directory
+    config_manager.config_dir = config_home / ".basic-memory"
+    config_manager.config_file = config_manager.config_dir / "config.json"
+    config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
     # Ensure the config file is written to disk
     config_manager.save_config(app_config)
@@ -139,15 +141,17 @@ def config_manager(app_config: BasicMemoryConfig, config_home, monkeypatch) -> C
 
 
 @pytest.fixture(scope="function")
-def project_session(test_project: Project, monkeypatch):
-    # initialize the project session with the test project
-    project_session = basic_memory.mcp.project_session.session.initialize(test_project.name)
-    monkeypatch.setattr("basic_memory.mcp.project_session.session", project_session)
-    return project_session
+def project_session(test_project: Project, config_manager):
+    # Initialize the global session directly with the test project
+    # This ensures all MCP tools use the test project context
+    import basic_memory.mcp.project_session
+
+    basic_memory.mcp.project_session.session.initialize(test_project.name)
+    return basic_memory.mcp.project_session.session
 
 
-@pytest.fixture(scope="function")
-def project_config(test_project, monkeypatch):
+@pytest.fixture(scope="function", autouse=True)
+def project_config(test_project):
     """Create test project configuration."""
 
     project_config = ProjectConfig(
@@ -163,6 +167,10 @@ def app(
     app_config, project_config, engine_factory, test_project, project_session, config_manager
 ) -> FastAPI:
     """Create test FastAPI application with single project."""
+
+    # Import the FastAPI app AFTER the config_manager has written the test config to disk
+    # This ensures that when the app's lifespan manager runs, it reads the correct test config
+    from basic_memory.api.app import app as fastapi_app
 
     app = fastapi_app
     app.dependency_overrides[get_project_config] = lambda: project_config

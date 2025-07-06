@@ -23,7 +23,7 @@ class ProjectSession:
     current_project: Optional[str] = None
     default_project: Optional[str] = None
 
-    def initialize(self, default_project: str) -> 'ProjectSession':
+    def initialize(self, default_project: str) -> "ProjectSession":
         """Set the default project from config on startup.
 
         Args:

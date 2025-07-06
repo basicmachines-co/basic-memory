@@ -5,14 +5,12 @@ to ensure consistent application startup across all entry points.
 """
 
 import asyncio
-import shutil
 from pathlib import Path
 
 from loguru import logger
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 
 
@@ -68,63 +66,6 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
         # Log the error but continue with initialization
         logger.error(f"Error during project synchronization: {e}")
         logger.info("Continuing with initialization despite synchronization error")
-
-
-async def migrate_legacy_projects(app_config: BasicMemoryConfig):
-    # Get database session - migrations handled centrally
-    _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path,
-        db_type=db.DatabaseType.FILESYSTEM,
-        ensure_migrations=False,
-    )
-    logger.info("Migrating legacy projects...")
-    project_repository = ProjectRepository(session_maker)
-
-    # For each project in config.json, check if it has a .basic-memory dir
-    for project_name, project_path in app_config.projects.items():
-        legacy_dir = Path(project_path) / ".basic-memory"
-        if not legacy_dir.exists():
-            continue
-        logger.info(f"Detected legacy project directory: {legacy_dir}")
-        project = await project_repository.get_by_name(project_name)
-        if not project:  # pragma: no cover
-            logger.error(f"Project {project_name} not found in database, skipping migration")
-            continue
-
-        logger.info(f"Starting migration for project: {project_name} (id: {project.id})")
-        await migrate_legacy_project_data(project, legacy_dir)
-        logger.info(f"Completed migration for project: {project_name}")
-    logger.info("Legacy projects successfully migrated")
-
-
-async def migrate_legacy_project_data(project: Project, legacy_dir: Path) -> bool:
-    """Check if project has legacy .basic-memory dir and migrate if needed.
-
-    Args:
-        project: The project to check and potentially migrate
-
-    Returns:
-        True if migration occurred, False otherwise
-    """
-
-    # avoid circular imports
-    from basic_memory.cli.commands.sync import get_sync_service
-
-    sync_service = await get_sync_service(project)
-    sync_dir = Path(project.path)
-
-    logger.info(f"Sync starting project: {project.name}")
-    await sync_service.sync(sync_dir, project_name=project.name)
-    logger.info(f"Sync completed successfully for project: {project.name}")
-
-    # After successful sync, remove the legacy directory
-    try:
-        logger.info(f"Removing legacy directory: {legacy_dir}")
-        shutil.rmtree(legacy_dir)
-        return True
-    except Exception as e:
-        logger.error(f"Error removing legacy directory: {e}")
-        return False
 
 
 async def initialize_file_sync(
@@ -186,16 +127,6 @@ async def initialize_file_sync(
             sync_status_tracker.fail_project_sync(project.name, str(e))
             # Continue with other projects even if one fails
 
-    # Mark migration complete if it was in progress
-    try:
-        from basic_memory.services.migration_service import migration_manager
-
-        if not migration_manager.is_ready:  # pragma: no cover
-            migration_manager.mark_completed("Migration completed with file sync")
-            logger.info("Marked migration as completed after file sync")
-    except Exception as e:  # pragma: no cover
-        logger.warning(f"Could not update migration status: {e}")
-
     # Then start the watch service in the background
     logger.info("Starting watch service for all projects")
     # run the watch service
@@ -229,13 +160,7 @@ async def initialize_app(
     # Reconcile projects from config.json with projects table
     await reconcile_projects_with_config(app_config)
 
-    # Start background migration for legacy project data (non-blocking)
-    from basic_memory.services.migration_service import migration_manager
-
-    await migration_manager.start_background_migration(app_config)
-
     logger.info("App initialization completed (migration running in background if needed)")
-    return migration_manager
 
 
 def ensure_initialization(app_config: BasicMemoryConfig) -> None:

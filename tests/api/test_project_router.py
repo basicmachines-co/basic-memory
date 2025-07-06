@@ -1,8 +1,5 @@
 """Tests for the project router API endpoints."""
 
-import json
-from unittest.mock import patch
-
 import pytest
 
 
@@ -74,7 +71,6 @@ async def test_get_project_info_content(test_graph, client, project_config, proj
 
     # Check that entity types include 'test'
     assert "test" in stats["entity_types"] or "entity" in stats["entity_types"]
-
 
 
 @pytest.mark.asyncio

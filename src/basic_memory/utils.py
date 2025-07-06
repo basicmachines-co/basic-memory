@@ -4,7 +4,6 @@ import os
 
 import logging
 import re
-import sys
 import unicodedata
 from pathlib import Path
 from typing import Optional, Protocol, Union, runtime_checkable, List, Any
@@ -144,7 +143,7 @@ def setup_logging(
         console: Whether to log to the console
     """
     # Remove default handler and any existing handlers
-    #logger.remove()
+    # logger.remove()
 
     # Add file handler if we are not running tests and a log file is specified
     # if log_file and env != "test":

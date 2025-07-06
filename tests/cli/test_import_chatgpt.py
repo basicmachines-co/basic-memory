@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app, import_app
 from basic_memory.cli.commands import import_chatgpt  # noqa
-from basic_memory.config import ConfigManager, get_project_config
+from basic_memory.config import get_project_config
 
 # Set up CLI runner
 runner = CliRunner()

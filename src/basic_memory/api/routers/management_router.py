@@ -40,9 +40,9 @@ async def start_watch_service(
     if request.app.state.watch_task is not None and not request.app.state.watch_task.done():
         # Watch service is already running
         return WatchStatusResponse(running=True)
-    
+
     app_config = ConfigManager().config
-    
+
     # Create and start a new watch service
     logger.info("Starting watch service via management API")
 

@@ -9,12 +9,12 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.services.sync_status_service import sync_status_tracker
 
+
 def _get_all_projects_status() -> list[str]:
     """Get status lines for all configured projects."""
     status_lines = []
 
     try:
-        
         app_config = ConfigManager().config
 
         if app_config.projects:
