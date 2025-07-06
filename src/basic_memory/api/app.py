@@ -20,13 +20,15 @@ from basic_memory.api.routers import (
     search,
     prompt_router,
 )
-from basic_memory.config import app_config
+from basic_memory.config import ConfigManager
 from basic_memory.services.initialization import initialize_app, initialize_file_sync
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # pragma: no cover
     """Lifecycle manager for the FastAPI app."""
+
+    app_config = ConfigManager().config
     # Initialize app and database
     logger.info("Starting Basic Memory API")
     await initialize_app(app_config)

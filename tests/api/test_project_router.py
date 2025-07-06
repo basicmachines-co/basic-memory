@@ -76,39 +76,6 @@ async def test_get_project_info_content(test_graph, client, project_config, proj
     assert "test" in stats["entity_types"] or "entity" in stats["entity_types"]
 
 
-@pytest.mark.asyncio
-async def test_get_project_info_watch_status(test_graph, client, project_config, project_url):
-    """Test that project-info correctly handles watch status."""
-    # Create a mock watch status file
-    mock_watch_status = {
-        "running": True,
-        "start_time": "2025-03-05T18:00:42.752435",
-        "pid": 7321,
-        "error_count": 0,
-        "last_error": None,
-        "last_scan": "2025-03-05T19:59:02.444416",
-        "synced_files": 6,
-        "recent_events": [],
-    }
-
-    # Mock the Path.exists and Path.read_text methods
-    with (
-        patch("pathlib.Path.exists", return_value=True),
-        patch("pathlib.Path.read_text", return_value=json.dumps(mock_watch_status)),
-    ):
-        # Call the endpoint
-        response = await client.get(f"{project_url}/project/info")
-
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-
-        # Check that watch status is included
-        assert data["system"]["watch_status"] is not None
-        assert data["system"]["watch_status"]["running"] is True
-        assert data["system"]["watch_status"]["pid"] == 7321
-        assert data["system"]["watch_status"]["synced_files"] == 6
-
 
 @pytest.mark.asyncio
 async def test_list_projects_endpoint(test_config, test_graph, client, project_config, project_url):

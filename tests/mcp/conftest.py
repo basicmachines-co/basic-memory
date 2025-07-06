@@ -13,8 +13,6 @@ from basic_memory.deps import get_project_config, get_engine_factory, get_app_co
 from basic_memory.services.search_service import SearchService
 from basic_memory.mcp.server import mcp as mcp_server
 
-from basic_memory.config import app_config as basic_memory_app_config  # noqa: F401
-
 
 @pytest.fixture(scope="function")
 def mcp() -> FastMCP:

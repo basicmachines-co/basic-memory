@@ -2,7 +2,7 @@ import asyncio
 
 from loguru import logger
 
-from basic_memory.config import config as project_config
+from basic_memory.config import get_project_config
 from basic_memory.sync import SyncService, WatchService
 
 
@@ -11,9 +11,10 @@ async def sync_and_watch(
 ):  # pragma: no cover
     """Run sync and watch service."""
 
-    logger.info(f"Starting watch service to sync file changes in dir: {project_config.home}")
+    config = get_project_config()
+    logger.info(f"Starting watch service to sync file changes in dir: {config.home}")
     # full sync
-    await sync_service.sync(project_config.home)
+    await sync_service.sync(config.home)
 
     # watch changes
     await watch_service.run()

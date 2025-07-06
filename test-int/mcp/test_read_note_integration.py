@@ -24,9 +24,9 @@ async def test_read_note_after_write(mcp_server, app):
             },
         )
 
-        assert len(write_result) == 1
-        assert write_result[0].type == "text"
-        assert "Test Note.md" in write_result[0].text
+        assert len(write_result.content) == 1
+        assert write_result.content[0].type == "text"
+        assert "Test Note.md" in write_result.content[0].text
 
         # Then read it back
         read_result = await client.call_tool(
@@ -36,9 +36,9 @@ async def test_read_note_after_write(mcp_server, app):
             },
         )
 
-        assert len(read_result) == 1
-        assert read_result[0].type == "text"
-        result_text = read_result[0].text
+        assert len(read_result.content) == 1
+        assert read_result.content[0].type == "text"
+        result_text = read_result.content[0].text
 
         # Should contain the note content and metadata
         assert "# Test Note" in result_text

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from loguru import logger
 from pydantic import BaseModel
 
-from basic_memory.config import app_config
+from basic_memory.config import ConfigManager
 from basic_memory.deps import SyncServiceDep, ProjectRepositoryDep
 
 router = APIRouter(prefix="/management", tags=["management"])
@@ -40,7 +40,9 @@ async def start_watch_service(
     if request.app.state.watch_task is not None and not request.app.state.watch_task.done():
         # Watch service is already running
         return WatchStatusResponse(running=True)
-
+    
+    app_config = ConfigManager().config
+    
     # Create and start a new watch service
     logger.info("Starting watch service via management API")
 

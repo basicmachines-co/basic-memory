@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, List
 
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown, Observation, Relation
 from basic_memory.importers.base import Importer
 from basic_memory.schemas.importer import EntityImportResult
@@ -27,6 +27,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
         Returns:
             EntityImportResult containing statistics and status of the import.
         """
+        config = get_project_config()
         try:
             # First pass - collect all relations by source entity
             entity_relations: Dict[str, List[Relation]] = {}

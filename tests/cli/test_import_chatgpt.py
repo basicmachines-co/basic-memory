@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app, import_app
 from basic_memory.cli.commands import import_chatgpt  # noqa
-from basic_memory.config import config
+from basic_memory.config import ConfigManager, get_project_config
 
 # Set up CLI runner
 runner = CliRunner()
@@ -176,6 +176,8 @@ def test_import_chatgpt_command_invalid_json(tmp_path):
 def test_import_chatgpt_with_custom_folder(tmp_path, sample_chatgpt_json, monkeypatch):
     """Test import with custom conversations folder."""
     # Set up test environment
+
+    config = get_project_config()
     config.home = tmp_path
     conversations_folder = "chats"
 

@@ -2,7 +2,7 @@ from typing import Optional
 
 import typer
 
-from basic_memory.config import get_project_config
+from basic_memory.config import get_project_config, ConfigManager
 from basic_memory.mcp.project_session import session
 
 
@@ -10,8 +10,8 @@ def version_callback(value: bool) -> None:
     """Show version and exit."""
     if value:  # pragma: no cover
         import basic_memory
-        from basic_memory.config import config
 
+        config = get_project_config()
         typer.echo(f"Basic Memory version: {basic_memory.__version__}")
         typer.echo(f"Current project: {config.project}")
         typer.echo(f"Project path: {config.home}")
@@ -44,9 +44,9 @@ def app_callback(
 
     # Run initialization for every command unless --version was specified
     if not version and ctx.invoked_subcommand is not None:
-        from basic_memory.config import app_config
         from basic_memory.services.initialization import ensure_initialization
 
+        app_config = ConfigManager().config
         ensure_initialization(app_config)
 
         # Initialize MCP session with the specified project or default

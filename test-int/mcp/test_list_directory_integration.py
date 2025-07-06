@@ -54,8 +54,8 @@ async def test_list_directory_basic_operation(mcp_server, app):
         )
 
         # Should return formatted directory listing
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show the structure
         assert "Contents of '/' (depth 1):" in list_text
@@ -113,8 +113,8 @@ async def test_list_directory_specific_folder(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show work folder contents
         assert "Contents of '/work' (depth 1):" in list_text
@@ -169,8 +169,8 @@ async def test_list_directory_with_depth(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show nested structure within depth=3
         assert "Contents of '/research' (depth 3):" in list_text
@@ -226,8 +226,8 @@ async def test_list_directory_with_glob_pattern(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show only matching files
         assert "Files in '/meetings' matching 'Meeting*' (depth 1):" in list_text
@@ -250,8 +250,8 @@ async def test_list_directory_empty_directory(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should indicate no files found
         assert "No files found in directory '/empty'" in list_text
@@ -283,8 +283,8 @@ async def test_list_directory_glob_no_matches(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should indicate no matches for the pattern
         assert "No files found in directory '/docs' matching '*.py'" in list_text
@@ -325,8 +325,8 @@ async def test_list_directory_various_file_types(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show file names, paths, and titles
         assert "📄 Simple Note.md" in list_text
@@ -358,8 +358,8 @@ async def test_list_directory_default_parameters(mcp_server, app):
             {},  # Use all defaults
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show root directory with depth 1
         assert "Contents of '/' (depth 1):" in list_text
@@ -402,8 +402,8 @@ async def test_list_directory_deep_recursion(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show deep structure
         assert "Contents of '/level1' (depth 10):" in list_text
@@ -457,8 +457,8 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app):
             },
         )
 
-        assert len(list_result) == 1
-        list_text = list_result[0].text
+        assert len(list_result.content) == 1
+        list_text = list_result.content[0].text
 
         # Should show only Project files
         assert "Project Alpha Plan.md" in list_text

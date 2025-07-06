@@ -1,11 +1,10 @@
 """MCP server command with streamable HTTP transport."""
 
 import asyncio
-from loguru import logger
-
+import typer
 
 from basic_memory.cli.app import app
-from basic_memory.config import app_config
+from basic_memory.config import ConfigManager
 
 # Import mcp instance
 from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
@@ -15,20 +14,33 @@ import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
 
 # Import prompts to register them
 import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
+from loguru import logger
 
 
 @app.command()
-def mcp():  # pragma: no cover
-    """
-    Run the MCP server with stdio transport.
+def mcp(
+    transport: str = typer.Option("stdio", help="Transport type: stdio, streamable-http, or sse"),
+    host: str = typer.Option(
+        "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
+    ),
+    port: int = typer.Option(8000, help="Port for HTTP transports"),
+    path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
+):  # pragma: no cover
+    """Run the MCP server with configurable transport options.
+
+    This command starts an MCP server using one of three transport options:
+
+    - stdio: Standard I/O (good for local usage)
+    - streamable-http: Recommended for web deployments (default)
+    - sse: Server-Sent Events (for compatibility with existing clients)
     """
 
     from basic_memory.services.initialization import initialize_file_sync
 
-    # Start the MCP server with the specified transport
-
     # Use unified thread-based sync approach for both transports
     import threading
+
+    app_config = ConfigManager().config
 
     def run_file_sync():
         """Run file sync in a separate thread with its own event loop."""
@@ -49,8 +61,17 @@ def mcp():  # pragma: no cover
         logger.info("Started file sync in background")
 
     # Now run the MCP server (blocks)
-    logger.info("Starting MCP server with stdio transport")
+    logger.info(f"Starting MCP server with {transport.upper()} transport")
 
-    mcp_server.run(
-        transport="stdio",
-    )
+    if transport == "stdio":
+        mcp_server.run(
+            transport=transport,
+        )
+    elif transport == "streamable-http" or transport == "sse":
+        mcp_server.run(
+            transport=transport,
+            host=host,
+            port=port,
+            path=path,
+            log_level="INFO",
+        )

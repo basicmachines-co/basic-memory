@@ -34,8 +34,8 @@ async def test_move_note_basic_operation(mcp_server, app):
         )
 
         # Should return successful move message
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
         assert "Move Test Note" in move_text
         assert "destination/moved-note.md" in move_text
@@ -49,7 +49,7 @@ async def test_move_note_basic_operation(mcp_server, app):
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "This note will be moved to a new location" in content
 
         # Verify the original location no longer works
@@ -61,7 +61,7 @@ async def test_move_note_basic_operation(mcp_server, app):
         )
 
         # Should return "Note Not Found" message
-        assert "Note Not Found" in read_original[0].text
+        assert "Note Not Found" in read_original.content[0].text
 
 
 @pytest.mark.asyncio
@@ -90,8 +90,8 @@ async def test_move_note_using_permalink(mcp_server, app):
         )
 
         # Should successfully move
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
         assert "test/permalink-move-test" in move_text
         assert "archive/permalink-moved.md" in move_text
@@ -104,7 +104,7 @@ async def test_move_note_using_permalink(mcp_server, app):
             },
         )
 
-        assert "Moving by permalink" in read_result[0].text
+        assert "Moving by permalink" in read_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -150,8 +150,8 @@ This note demonstrates moving complex content."""
         )
 
         # Should successfully move
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
         assert "Complex Note" in move_text
         assert "moved/complex-note.md" in move_text
@@ -164,7 +164,7 @@ This note demonstrates moving complex content."""
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "Has structured observations" in content
         assert "implements [[Auth System]]" in content
         assert "## Observations" in content
@@ -198,8 +198,8 @@ async def test_move_note_to_nested_directory(mcp_server, app):
         )
 
         # Should successfully create directory structure and move
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
         assert "Nested Move Test" in move_text
         assert "projects/2025/q2/work/nested-note.md" in move_text
@@ -212,7 +212,7 @@ async def test_move_note_to_nested_directory(mcp_server, app):
             },
         )
 
-        assert "This will be moved deep" in read_result[0].text
+        assert "This will be moved deep" in read_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -241,8 +241,8 @@ async def test_move_note_with_special_characters(mcp_server, app):
         )
 
         # Should handle special characters properly
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
         assert "archive/special-chars-note.md" in move_text
 
@@ -254,7 +254,7 @@ async def test_move_note_with_special_characters(mcp_server, app):
             },
         )
 
-        assert "Testing special characters in move" in read_result[0].text
+        assert "Testing special characters in move" in read_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -272,8 +272,8 @@ async def test_move_note_error_handling_note_not_found(mcp_server, app):
         )
 
         # Should contain error message about the failed operation
-        assert len(move_result) == 1
-        error_message = move_result[0].text
+        assert len(move_result.content) == 1
+        error_message = move_result.content[0].text
         assert "# Move Failed" in error_message
         assert "Non-existent Note" in error_message
 
@@ -304,8 +304,8 @@ async def test_move_note_error_handling_invalid_destination(mcp_server, app):
         )
 
         # Should contain error message about the failed operation
-        assert len(move_result) == 1
-        error_message = move_result[0].text
+        assert len(move_result.content) == 1
+        error_message = move_result.content[0].text
         assert "# Move Failed" in error_message
         assert "/absolute/path/note.md" in error_message
 
@@ -347,8 +347,8 @@ async def test_move_note_error_handling_destination_exists(mcp_server, app):
         )
 
         # Should contain error message about the failed operation
-        assert len(move_result) == 1
-        error_message = move_result[0].text
+        assert len(move_result.content) == 1
+        error_message = move_result.content[0].text
         assert "# Move Failed" in error_message
         assert "already exists" in error_message
 
@@ -389,8 +389,8 @@ This note contains unique search terms:
             },
         )
 
-        assert len(search_before) > 0
-        assert "Searchable Note" in search_before[0].text
+        assert len(search_before.content) > 0
+        assert "Searchable Note" in search_before.content[0].text
 
         # Move the note
         move_result = await client.call_tool(
@@ -401,8 +401,8 @@ This note contains unique search terms:
             },
         )
 
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
 
         # Verify note is still searchable after move
@@ -413,8 +413,8 @@ This note contains unique search terms:
             },
         )
 
-        assert len(search_after) > 0
-        search_text = search_after[0].text
+        assert len(search_after.content) > 0
+        search_text = search_after.content[0].text
         assert "quantum mechanics" in search_text
         assert "research/quantum-ai-note.md" in search_text or "quantum-ai-note" in search_text
 
@@ -426,7 +426,7 @@ This note contains unique search terms:
             },
         )
 
-        assert len(search_by_path) > 0
+        assert len(search_by_path.content) > 0
 
 
 @pytest.mark.asyncio
@@ -473,8 +473,8 @@ async def test_move_note_using_different_identifier_formats(mcp_server, app):
                 "destination_path": "moved/title-moved.md",
             },
         )
-        assert len(move1) == 1
-        assert "✅ Note moved successfully" in move1[0].text
+        assert len(move1.content) == 1
+        assert "✅ Note moved successfully" in move1.content[0].text
 
         # Test moving by permalink
         move2 = await client.call_tool(
@@ -484,8 +484,8 @@ async def test_move_note_using_different_identifier_formats(mcp_server, app):
                 "destination_path": "moved/permalink-moved.md",
             },
         )
-        assert len(move2) == 1
-        assert "✅ Note moved successfully" in move2[0].text
+        assert len(move2.content) == 1
+        assert "✅ Note moved successfully" in move2.content[0].text
 
         # Test moving by folder/title format
         move3 = await client.call_tool(
@@ -495,18 +495,18 @@ async def test_move_note_using_different_identifier_formats(mcp_server, app):
                 "destination_path": "moved/folder-title-moved.md",
             },
         )
-        assert len(move3) == 1
-        assert "✅ Note moved successfully" in move3[0].text
+        assert len(move3.content) == 1
+        assert "✅ Note moved successfully" in move3.content[0].text
 
         # Verify all notes can be accessed at their new locations
         read1 = await client.call_tool("read_note", {"identifier": "moved/title-moved.md"})
-        assert "Move by title" in read1[0].text
+        assert "Move by title" in read1.content[0].text
 
         read2 = await client.call_tool("read_note", {"identifier": "moved/permalink-moved.md"})
-        assert "Move by permalink" in read2[0].text
+        assert "Move by permalink" in read2.content[0].text
 
         read3 = await client.call_tool("read_note", {"identifier": "moved/folder-title-moved.md"})
-        assert "Move by folder/title" in read3[0].text
+        assert "Move by folder/title" in read3.content[0].text
 
 
 @pytest.mark.asyncio
@@ -545,8 +545,8 @@ async def test_move_note_cross_project_detection(mcp_server, app):
         )
 
         # Should detect cross-project attempt and provide helpful guidance
-        assert len(move_result) == 1
-        error_message = move_result[0].text
+        assert len(move_result.content) == 1
+        error_message = move_result.content[0].text
         assert "Cross-Project Move Not Supported" in error_message
         assert "test-project-b" in error_message
         assert "switch_project" in error_message
@@ -590,8 +590,8 @@ async def test_move_note_potential_cross_project_guidance(mcp_server, app):
         )
 
         # Should provide guidance for potential cross-project moves
-        assert len(move_result) == 1
-        error_message = move_result[0].text
+        assert len(move_result.content) == 1
+        error_message = move_result.content[0].text
         assert "Check Project Context" in error_message
         assert "workspace-docs" in error_message  # Should mention other available projects
         assert "list_projects" in error_message
@@ -624,8 +624,8 @@ async def test_move_note_normal_moves_still_work(mcp_server, app):
         )
 
         # Should work normally
-        assert len(move_result) == 1
-        move_text = move_result[0].text
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
         assert "✅ Note moved successfully" in move_text
         assert "Normal Move Note" in move_text
         assert "destination/normal-moved.md" in move_text
@@ -638,5 +638,5 @@ async def test_move_note_normal_moves_still_work(mcp_server, app):
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "This should move normally" in content

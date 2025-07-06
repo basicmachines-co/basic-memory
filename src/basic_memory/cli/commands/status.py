@@ -12,7 +12,7 @@ from rich.tree import Tree
 from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.sync import get_sync_service
-from basic_memory.config import config, app_config
+from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.repository import ProjectRepository
 from basic_memory.sync.sync_service import SyncReport
 
@@ -125,6 +125,9 @@ def display_changes(project_name: str, title: str, changes: SyncReport, verbose:
 async def run_status(verbose: bool = False):  # pragma: no cover
     """Check sync status of files vs database."""
     # Check knowledge/ directory
+
+    app_config = ConfigManager().config
+    config = get_project_config()
 
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM

@@ -13,9 +13,9 @@ from fastmcp.exceptions import ToolError
 
 def parse_read_content_response(mcp_result):
     """Helper function to parse read_content MCP response."""
-    assert len(mcp_result) == 1
-    assert mcp_result[0].type == "text"
-    return json.loads(mcp_result[0].text)
+    assert len(mcp_result.content) == 1
+    assert mcp_result.content[0].type == "text"
+    return json.loads(mcp_result.content[0].text)
 
 
 @pytest.mark.asyncio
@@ -359,9 +359,9 @@ async def test_read_content_special_characters_in_filename(mcp_server, app):
                 },
             )
 
-            assert len(read_result) == 1
-            assert read_result[0].type == "text"
-            content = read_result[0].text
+            assert len(read_result.content) == 1
+            assert read_result.content[0].type == "text"
+            content = read_result.content[0].text
 
             assert f"# {title}" in content
             assert f"Content for {title}" in content

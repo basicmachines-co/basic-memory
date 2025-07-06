@@ -124,6 +124,7 @@ class BasicMemoryConfig(BaseSettings):
         """
 
         # Load the app-level database path from the global config
+        config_manager = ConfigManager()
         config = config_manager.load_config()  # pragma: no cover
         return config.app_database_path  # pragma: no cover
 
@@ -162,8 +163,11 @@ class ConfigManager:
         # Ensure config directory exists
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        # Load or create configuration
-        self.config = self.load_config()
+
+    @property
+    def config(self) -> BasicMemoryConfig:
+        """Get configuration, loading it lazily if needed."""
+        return self.load_config()
 
     def load_config(self) -> BasicMemoryConfig:
         """Load configuration from file or create default."""
@@ -183,10 +187,7 @@ class ConfigManager:
 
     def save_config(self, config: BasicMemoryConfig) -> None:
         """Save configuration to file."""
-        try:
-            self.config_file.write_text(json.dumps(config.model_dump(), indent=2))
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to save config: {e}")
+        save_basic_memory_config(self.config_file, config)
 
     @property
     def projects(self) -> Dict[str, str]:
@@ -208,8 +209,10 @@ class ConfigManager:
         project_path = Path(path)
         project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
 
-        self.config.projects[name] = str(project_path)
-        self.save_config(self.config)
+        # Load config, modify it, and save it
+        config = self.load_config()
+        config.projects[name] = str(project_path)
+        self.save_config(config)
         return ProjectConfig(name=name, home=project_path)
 
     def remove_project(self, name: str) -> None:
@@ -219,11 +222,13 @@ class ConfigManager:
         if not project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' not found")
 
-        if project_name == self.config.default_project:  # pragma: no cover
+        # Load config, check, modify, and save
+        config = self.load_config()
+        if project_name == config.default_project:  # pragma: no cover
             raise ValueError(f"Cannot remove the default project '{name}'")
 
-        del self.config.projects[name]
-        self.save_config(self.config)
+        del config.projects[name]
+        self.save_config(config)
 
     def set_default_project(self, name: str) -> None:
         """Set the default project."""
@@ -231,12 +236,16 @@ class ConfigManager:
         if not project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' not found")
 
-        self.config.default_project = name
-        self.save_config(self.config)
+        # Load config, modify, and save
+        config = self.load_config()
+        config.default_project = name
+        self.save_config(config)
 
     def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:
         """Look up a project from the configuration by name or permalink"""
         project_permalink = generate_permalink(name)
+        config_manager = ConfigManager()
+        app_config = config_manager.config
         for name, path in app_config.projects.items():
             if project_permalink == generate_permalink(name):
                 return name, path
@@ -252,8 +261,7 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     actual_project_name = None
 
     # load the config from file
-    global app_config
-    app_config = config_manager.load_config()
+    app_config = ConfigManager().load_config()
 
     # Get project name from environment variable
     os_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
@@ -281,15 +289,13 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     # otherwise raise error
     raise ValueError(f"Project '{actual_project_name}' not found")  # pragma: no cover
 
+def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None:
+    """Save configuration to file."""
+    try:
+        file_path.write_text(json.dumps(config.model_dump(), indent=2))
+    except Exception as e:  # pragma: no cover
+        logger.error(f"Failed to save config: {e}")
 
-# Create config manager
-config_manager = ConfigManager()
-
-# Export the app-level config
-app_config: BasicMemoryConfig = config_manager.config
-
-# Load project config for the default project (backward compatibility)
-config: ProjectConfig = get_project_config()
 
 
 def update_current_project(project_name: str) -> None:
@@ -332,7 +338,6 @@ _LOGGING_SETUP = False
 
 # Logging
 
-
 def setup_basic_memory_logging():  # pragma: no cover
     """Set up logging for basic-memory, ensuring it only happens once."""
     global _LOGGING_SETUP
@@ -344,6 +349,8 @@ def setup_basic_memory_logging():  # pragma: no cover
     # Check for console logging environment variable
     console_logging = os.getenv("BASIC_MEMORY_CONSOLE_LOGGING", "false").lower() == "true"
 
+    config_manager = ConfigManager()
+    config = get_project_config()
     setup_logging(
         env=config_manager.config.env,
         home_dir=user_home,  # Use user home for logs

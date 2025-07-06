@@ -13,7 +13,7 @@ from rich.tree import Tree
 
 from basic_memory import db
 from basic_memory.cli.app import app
-from basic_memory.config import config
+from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
@@ -29,7 +29,6 @@ from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
 from basic_memory.sync.sync_service import SyncReport
-from basic_memory.config import app_config
 
 console = Console()
 
@@ -42,6 +41,8 @@ class ValidationIssue:
 
 async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
     """Get sync service instance with all dependencies."""
+
+    app_config = ConfigManager().config
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
     )
@@ -96,6 +97,7 @@ def group_issues_by_directory(issues: List[ValidationIssue]) -> Dict[str, List[V
 
 def display_sync_summary(knowledge: SyncReport):
     """Display a one-line summary of sync changes."""
+    config = get_project_config()
     total_changes = knowledge.total
     project_name = config.project
 
@@ -124,6 +126,7 @@ def display_sync_summary(knowledge: SyncReport):
 
 def display_detailed_sync_results(knowledge: SyncReport):
     """Display detailed sync results with trees."""
+    config = get_project_config()
     project_name = config.project
 
     if knowledge.total == 0:
@@ -158,6 +161,9 @@ def display_detailed_sync_results(knowledge: SyncReport):
 
 async def run_sync(verbose: bool = False):
     """Run sync operation."""
+    app_config = ConfigManager().config
+    config = get_project_config()
+
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
     )
@@ -212,6 +218,8 @@ def sync(
     ),
 ) -> None:
     """Sync knowledge files with the database."""
+    config = get_project_config()
+
     try:
         # Show which project we're syncing
         typer.echo(f"Syncing project: {config.project}")

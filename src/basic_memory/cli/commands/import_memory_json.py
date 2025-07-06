@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 from basic_memory.cli.app import import_app
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 from basic_memory.importers.memory_json_importer import MemoryJsonImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from loguru import logger
@@ -19,6 +19,7 @@ console = Console()
 
 async def get_markdown_processor() -> MarkdownProcessor:
     """Get MarkdownProcessor instance."""
+    config = get_project_config()
     entity_parser = EntityParser(config.home)
     return MarkdownProcessor(entity_parser)
 
@@ -46,6 +47,7 @@ def memory_json(
         typer.echo(f"Error: File not found: {json_path}", err=True)
         raise typer.Exit(1)
 
+    config = get_project_config()
     try:
         # Get markdown processor
         markdown_processor = asyncio.run(get_markdown_processor())

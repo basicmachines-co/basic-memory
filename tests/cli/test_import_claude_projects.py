@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.import_claude_projects import import_projects  # noqa
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 
 # Set up CLI runner
 runner = CliRunner()
@@ -59,6 +59,7 @@ def test_import_projects_command_file_not_found(tmp_path):
 def test_import_projects_command_success(tmp_path, sample_projects_json, monkeypatch):
     """Test successful project import via command."""
     # Set up test environment
+    config = get_project_config()
     config.home = tmp_path
 
     # Run import
@@ -83,6 +84,7 @@ def test_import_projects_command_invalid_json(tmp_path):
 def test_import_projects_with_base_folder(tmp_path, sample_projects_json, monkeypatch):
     """Test import with custom base folder."""
     # Set up test environment
+    config = get_project_config()
     config.home = tmp_path
     base_folder = "claude-exports"
 
@@ -130,6 +132,7 @@ def test_import_project_without_prompt(tmp_path):
         json.dump([project], f)
 
     # Set up environment
+    config = get_project_config()
     config.home = tmp_path
 
     # Run import

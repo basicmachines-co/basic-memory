@@ -11,7 +11,7 @@ from basic_memory.cli.commands.sync import (
     group_issues_by_directory,
     ValidationIssue,
 )
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 from basic_memory.sync.sync_service import SyncReport
 
 # Set up CLI runner
@@ -74,6 +74,7 @@ def test_display_detailed_sync_results_with_changes():
 async def test_run_sync_basic(sync_service, project_config, test_project):
     """Test basic sync operation."""
     # Set up test environment
+    config = get_project_config()
     config.home = project_config.home
     config.name = test_project.name
 
@@ -99,19 +100,15 @@ def test_sync_command():
         mock_run_sync.return_value = None
 
         # Mock config values that the sync command prints
-        with patch("basic_memory.cli.commands.sync.config") as mock_config:
-            mock_config.project = "test-project"
-            mock_config.home = "/test/path"
+        result = runner.invoke(app, ["sync", "--verbose"])
+        assert result.exit_code == 0
 
-            result = runner.invoke(app, ["sync", "--verbose"])
-            assert result.exit_code == 0
+        # Verify output contains project info
+        assert "Syncing project: test-project" in result.stdout
+        assert "Project path: /private/var" in result.stdout
 
-            # Verify output contains project info
-            assert "Syncing project: test-project" in result.stdout
-            assert "Project path: /test/path" in result.stdout
-
-            # Verify the function was called with verbose=True
-            mock_run_sync.assert_called_once_with(verbose=True)
+        # Verify the function was called with verbose=True
+        mock_run_sync.assert_called_once_with(verbose=True)
 
 
 def test_sync_command_error():
@@ -123,11 +120,6 @@ def test_sync_command_error():
         # Mock an error
         mock_run_sync.side_effect = Exception("Sync failed")
 
-        # Mock config values that the sync command prints
-        with patch("basic_memory.cli.commands.sync.config") as mock_config:
-            mock_config.project = "test-project"
-            mock_config.home = "/test/path"
-
-            result = runner.invoke(app, ["sync", "--verbose"])
-            assert result.exit_code == 1
-            assert "Error during sync: Sync failed" in result.stderr
+        result = runner.invoke(app, ["sync", "--verbose"])
+        assert result.exit_code == 1
+        assert "Error during sync: Sync failed" in result.stderr

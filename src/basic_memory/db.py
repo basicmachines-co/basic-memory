@@ -4,7 +4,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
-from basic_memory.config import BasicMemoryConfig
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from alembic import command
 from alembic.config import Config
 
@@ -88,7 +88,6 @@ async def get_or_create_db(
     db_path: Path,
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     ensure_migrations: bool = True,
-    app_config: Optional["BasicMemoryConfig"] = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
     """Get or create database engine and session maker."""
     global _engine, _session_maker
@@ -98,10 +97,7 @@ async def get_or_create_db(
 
         # Run migrations automatically unless explicitly disabled
         if ensure_migrations:
-            if app_config is None:
-                from basic_memory.config import app_config as global_app_config
-
-                app_config = global_app_config
+            app_config = ConfigManager().config
             await run_migrations(app_config, db_type)
 
     # These checks should never fail since we just created the engine and session maker

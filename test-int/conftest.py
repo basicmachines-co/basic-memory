@@ -61,7 +61,7 @@ from httpx import AsyncClient, ASGITransport
 import basic_memory.config
 import basic_memory.mcp.project_session
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager, save_basic_memory_config
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -121,42 +121,29 @@ def app_config(config_home, test_project, tmp_path, monkeypatch) -> BasicMemoryC
     projects = {test_project.name: str(test_project.path)}
     app_config = BasicMemoryConfig(
         env="test",
-        projects=projects,
         default_project=test_project.name,
         update_permalinks_on_move=True,
     )
-
-    # Set the module app_config instance project list (like regular tests)
-    monkeypatch.setattr("basic_memory.config.app_config", app_config)
+    app_config.projects = projects
     return app_config
 
 
-@pytest.fixture
+@pytest.fixture(scope="function")
 def config_manager(app_config: BasicMemoryConfig, config_home, monkeypatch) -> ConfigManager:
     config_manager = ConfigManager()
-    # Update its paths to use the test directory
-    config_manager.config_dir = config_home / ".basic-memory"
-    config_manager.config_file = config_manager.config_dir / "config.json"
-    config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
-    # Override the config directly instead of relying on disk load
-    config_manager.config = app_config
 
     # Ensure the config file is written to disk
     config_manager.save_config(app_config)
-
-    # Patch the config_manager in all locations where it's imported
-    monkeypatch.setattr("basic_memory.config.config_manager", config_manager)
-    monkeypatch.setattr("basic_memory.services.project_service.config_manager", config_manager)
-    monkeypatch.setattr("basic_memory.mcp.project_session.config_manager", config_manager)
-
     return config_manager
 
 
-@pytest.fixture
-def project_session(test_project: Project):
+@pytest.fixture(scope="function")
+def project_session(test_project: Project, monkeypatch):
     # initialize the project session with the test project
-    basic_memory.mcp.project_session.session.initialize(test_project.name)
+    project_session = basic_memory.mcp.project_session.session.initialize(test_project.name)
+    monkeypatch.setattr("basic_memory.mcp.project_session.session", project_session)
+    return project_session
 
 
 @pytest.fixture(scope="function")
@@ -167,9 +154,6 @@ def project_config(test_project, monkeypatch):
         name=test_project.name,
         home=Path(test_project.path),
     )
-
-    # override config module project config
-    monkeypatch.setattr("basic_memory.config.config", project_config)
 
     return project_config
 
@@ -215,7 +199,7 @@ async def search_service(engine_factory, test_project):
 
 
 @pytest.fixture(scope="function")
-def mcp_server(app_config, search_service):
+def mcp_server(config_manager, search_service, project_session):
     # Import mcp instance
     from basic_memory.mcp.server import mcp as server
 
@@ -224,11 +208,6 @@ def mcp_server(app_config, search_service):
 
     # Import prompts to register them
     import basic_memory.mcp.prompts  # noqa: F401
-
-    # Initialize project session with test project
-    from basic_memory.mcp.project_session import session
-
-    session.initialize(app_config.default_project)
 
     return server
 

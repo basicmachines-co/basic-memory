@@ -26,9 +26,9 @@ async def test_write_note_basic_creation(mcp_server, app):
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: basic/Simple Note.md" in response_text
@@ -51,9 +51,9 @@ async def test_write_note_no_tags(mcp_server, app):
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: test/No Tags Note.md" in response_text
@@ -77,7 +77,7 @@ async def test_write_note_update_existing(mcp_server, app):
             },
         )
 
-        assert "# Created note" in result1[0].text
+        assert "# Created note" in result1.content[0].text
 
         # Update the same note
         result2 = await client.call_tool(
@@ -90,9 +90,9 @@ async def test_write_note_update_existing(mcp_server, app):
             },
         )
 
-        assert len(result2) == 1
-        assert result2[0].type == "text"
-        response_text = result2[0].text
+        assert len(result2.content) == 1
+        assert result2.content[0].type == "text"
+        response_text = result2.content[0].text
 
         assert "# Updated note" in response_text
         assert "file_path: test/Update Test.md" in response_text
@@ -116,9 +116,9 @@ async def test_write_note_tag_array(mcp_server, app):
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: test/Array Tags Test.md" in response_text
@@ -153,9 +153,9 @@ async def test_write_note_custom_permalink(mcp_server, app):
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: notes/Custom Permalink Note.md" in response_text
@@ -179,9 +179,9 @@ async def test_write_note_unicode_content(mcp_server, app):
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: test/Unicode Test 🌟.md" in response_text
@@ -225,9 +225,9 @@ async def test_write_note_complex_content_with_observations_relations(mcp_server
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: knowledge/Complex Knowledge Note.md" in response_text
@@ -275,9 +275,9 @@ async def test_write_note_preserve_frontmatter(mcp_server, app):
             },
         )
 
-        assert len(result) == 1
-        assert result[0].type == "text"
-        response_text = result[0].text
+        assert len(result.content) == 1
+        assert result.content[0].type == "text"
+        response_text = result.content[0].text
 
         assert "# Created note" in response_text
         assert "file_path: test/Frontmatter Note.md" in response_text

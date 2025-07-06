@@ -35,8 +35,8 @@ async def test_edit_note_append_operation(mcp_server, app):
         )
 
         # Should return successful edit summary
-        assert len(edit_result) == 1
-        edit_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
         assert "Edited note (append)" in edit_text
         assert "Added 5 lines to end of note" in edit_text
         assert "test/append-test-note" in edit_text
@@ -49,7 +49,7 @@ async def test_edit_note_append_operation(mcp_server, app):
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "Original content here." in content
         assert "## New Section" in content
         assert "This content was appended." in content
@@ -82,8 +82,8 @@ async def test_edit_note_prepend_operation(mcp_server, app):
         )
 
         # Should return successful edit summary
-        assert len(edit_result) == 1
-        edit_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
         assert "Edited note (prepend)" in edit_text
         assert "Added 5 lines to beginning of note" in edit_text
 
@@ -95,7 +95,7 @@ async def test_edit_note_prepend_operation(mcp_server, app):
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "## Important Update" in content
         assert "This was added at the top." in content
         assert "Existing content." in content
@@ -143,8 +143,8 @@ v1.0.0 introduces new features.""",
         )
 
         # Should return successful edit summary
-        assert len(edit_result) == 1
-        edit_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
         assert "Edited note (find_replace)" in edit_text
         assert "Find and replace operation completed" in edit_text
 
@@ -156,7 +156,7 @@ v1.0.0 introduces new features.""",
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "v1.2.0" in content
         assert "v1.0.0" not in content  # Should be completely replaced
         assert content.count("v1.2.0") == 3  # Should have exactly 3 occurrences
@@ -206,8 +206,8 @@ All services communicate via message queues.""",
         )
 
         # Should return successful edit summary
-        assert len(edit_result) == 1
-        edit_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
         assert "Edited note (replace_section)" in edit_text
         assert "Replaced content under section '## Implementation'" in edit_text
 
@@ -219,7 +219,7 @@ All services communicate via message queues.""",
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "New implementation approach using microservices" in content
         assert "Old implementation details here" not in content
         assert "Service A handles authentication" in content
@@ -282,8 +282,8 @@ Current endpoints include user management."""
         )
 
         # Should return edit summary with observation and relation counts
-        assert len(edit_result) == 1
-        edit_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
         assert "Edited note (append)" in edit_text
         assert "## Observations" in edit_text
         assert "## Relations" in edit_text
@@ -301,7 +301,7 @@ Current endpoints include user management."""
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "Added payment processing endpoints" in content
         assert "integrates_with [[Payment Gateway]]" in content
 
@@ -322,8 +322,8 @@ async def test_edit_note_error_handling_note_not_found(mcp_server, app):
         )
 
         # Should return helpful error message
-        assert len(edit_result) == 1
-        error_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        error_text = edit_result.content[0].text
         assert "Edit Failed" in error_text
         assert "Non-existent Note" in error_text
         assert "search_notes(" in error_text
@@ -357,8 +357,8 @@ async def test_edit_note_error_handling_text_not_found(mcp_server, app):
         )
 
         # Should return helpful error message
-        assert len(edit_result) == 1
-        error_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        error_text = edit_result.content[0].text
         assert "Edit Failed - Text Not Found" in error_text
         assert "non-existent text" in error_text
         assert "Error Test Note" in error_text
@@ -398,8 +398,8 @@ Final test of the content.""",
         )
 
         # Should return helpful error message about count mismatch
-        assert len(edit_result) == 1
-        error_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        error_text = edit_result.content[0].text
         assert "Edit Failed - Wrong Replacement Count" in error_text
         assert "Expected 5 occurrences" in error_text
         assert "test" in error_text
@@ -521,8 +521,8 @@ def test_function():
         )
 
         # Should successfully handle special characters
-        assert len(edit_result) == 1
-        edit_text = edit_result[0].text
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
         assert "Edited note (append)" in edit_text
         assert "## Observations" in edit_text
         assert "unicode:" in edit_text
@@ -536,7 +536,7 @@ def test_function():
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "🚀" in content
         assert "测试中文" in content
         assert "∑∏∂∇∆Ω" in content
@@ -569,7 +569,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
                 "content": "\n\nEdited by title.",
             },
         )
-        assert "Edited note (append)" in edit_result1[0].text
+        assert "Edited note (append)" in edit_result1.content[0].text
 
         # Test editing by permalink
         edit_result2 = await client.call_tool(
@@ -580,7 +580,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
                 "content": "\n\nEdited by permalink.",
             },
         )
-        assert "Edited note (append)" in edit_result2[0].text
+        assert "Edited note (append)" in edit_result2.content[0].text
 
         # Test editing by folder/title format
         edit_result3 = await client.call_tool(
@@ -591,7 +591,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
                 "content": "\n\nEdited by folder/title.",
             },
         )
-        assert "Edited note (append)" in edit_result3[0].text
+        assert "Edited note (append)" in edit_result3.content[0].text
 
         # Verify all edits were applied
         read_result = await client.call_tool(
@@ -601,7 +601,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
             },
         )
 
-        content = read_result[0].text
+        content = read_result.content[0].text
         assert "Edited by title." in content
         assert "Edited by permalink." in content
         assert "Edited by folder/title." in content

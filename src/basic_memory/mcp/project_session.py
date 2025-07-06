@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 from loguru import logger
 
-from basic_memory.config import ProjectConfig, get_project_config, config_manager
+from basic_memory.config import ProjectConfig, get_project_config, ConfigManager
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ProjectSession:
     current_project: Optional[str] = None
     default_project: Optional[str] = None
 
-    def initialize(self, default_project: str) -> None:
+    def initialize(self, default_project: str) -> 'ProjectSession':
         """Set the default project from config on startup.
 
         Args:
@@ -32,6 +32,7 @@ class ProjectSession:
         self.default_project = default_project
         self.current_project = default_project
         logger.info(f"Initialized project session with default project: {default_project}")
+        return self
 
     def get_current_project(self) -> str:
         """Get the currently active project name.
@@ -72,7 +73,7 @@ class ProjectSession:
         via CLI or API to ensure MCP session stays in sync.
         """
         # Reload config to get latest default project
-        current_config = config_manager.load_config()
+        current_config = ConfigManager().config
         new_default = current_config.default_project
 
         # Reinitialize with new default
@@ -102,7 +103,8 @@ def get_active_project(project_override: Optional[str] = None) -> ProjectConfig:
         return project
 
     current_project = session.get_current_project()
-    return get_project_config(current_project)
+    active_project = get_project_config(current_project)
+    return active_project
 
 
 def add_project_metadata(result: str, project_name: str) -> str:

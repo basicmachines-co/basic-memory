@@ -31,8 +31,8 @@ async def test_delete_note_by_title(mcp_server, app):
                 "identifier": "Note to Delete",
             },
         )
-        assert len(read_result) == 1
-        assert "Note to Delete" in read_result[0].text
+        assert len(read_result.content) == 1
+        assert "Note to Delete" in read_result.content[0].text
 
         # Delete the note by title
         delete_result = await client.call_tool(
@@ -43,9 +43,9 @@ async def test_delete_note_by_title(mcp_server, app):
         )
 
         # Should return True for successful deletion
-        assert len(delete_result) == 1
-        assert delete_result[0].type == "text"
-        assert "true" in delete_result[0].text.lower()
+        assert len(delete_result.content) == 1
+        assert delete_result.content[0].type == "text"
+        assert "true" in delete_result.content[0].text.lower()
 
         # Verify the note no longer exists
         read_after_delete = await client.call_tool(
@@ -56,8 +56,8 @@ async def test_delete_note_by_title(mcp_server, app):
         )
 
         # Should return helpful "Note Not Found" message instead of the actual note
-        assert len(read_after_delete) == 1
-        result_text = read_after_delete[0].text
+        assert len(read_after_delete.content) == 1
+        result_text = read_after_delete.content[0].text
         assert "Note Not Found" in result_text
         assert "Note to Delete" in result_text
 
@@ -87,8 +87,8 @@ async def test_delete_note_by_permalink(mcp_server, app):
         )
 
         # Should return True for successful deletion
-        assert len(delete_result) == 1
-        assert "true" in delete_result[0].text.lower()
+        assert len(delete_result.content) == 1
+        assert "true" in delete_result.content[0].text.lower()
 
         # Verify the note no longer exists by searching
         search_result = await client.call_tool(
@@ -99,7 +99,7 @@ async def test_delete_note_by_permalink(mcp_server, app):
         )
 
         # Should have no results
-        assert '"results": []' in search_result[0].text or '"results":[]' in search_result[0].text
+        assert '"results": []' in search_result.content[0].text or '"results":[]' in search_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -142,8 +142,8 @@ The system handles multiple projects and users."""
                 "identifier": "Project Management System",
             },
         )
-        assert len(read_result) == 1
-        result_text = read_result[0].text
+        assert len(read_result.content) == 1
+        result_text = read_result.content[0].text
         assert "Task tracking functionality" in result_text
         assert "depends_on" in result_text
 
@@ -156,7 +156,7 @@ The system handles multiple projects and users."""
         )
 
         # Should return True for successful deletion
-        assert "true" in delete_result[0].text.lower()
+        assert "true" in delete_result.content[0].text.lower()
 
         # Verify the note and all its components are deleted
         read_after_delete_2 = await client.call_tool(
@@ -167,8 +167,8 @@ The system handles multiple projects and users."""
         )
 
         # Should return "Note Not Found" message
-        assert len(read_after_delete_2) == 1
-        result_text = read_after_delete_2[0].text
+        assert len(read_after_delete_2.content) == 1
+        result_text = read_after_delete_2.content[0].text
         assert "Note Not Found" in result_text
         assert "Project Management System" in result_text
 
@@ -209,7 +209,7 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
             )
 
             # Should return True for successful deletion
-            assert "true" in delete_result[0].text.lower(), f"Failed to delete note: {title}"
+            assert "true" in delete_result.content[0].text.lower(), f"Failed to delete note: {title}"
 
             # Verify the note is deleted
             read_after_delete = await client.call_tool(
@@ -220,8 +220,8 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
             )
 
             # Should return "Note Not Found" message
-            assert len(read_after_delete) == 1
-            result_text = read_after_delete[0].text
+            assert len(read_after_delete.content) == 1
+            result_text = read_after_delete.content[0].text
             assert "Note Not Found" in result_text
             assert title in result_text
 
@@ -240,8 +240,8 @@ async def test_delete_nonexistent_note(mcp_server, app):
         )
 
         # Should return False for unsuccessful deletion
-        assert len(delete_result) == 1
-        assert "false" in delete_result[0].text.lower()
+        assert len(delete_result.content) == 1
+        assert "false" in delete_result.content[0].text.lower()
 
 
 @pytest.mark.asyncio
@@ -269,7 +269,7 @@ async def test_delete_note_by_file_path(mcp_server, app):
         )
 
         # Should return True for successful deletion
-        assert "true" in delete_result[0].text.lower()
+        assert "true" in delete_result.content[0].text.lower()
 
         # Verify deletion
         read_after_delete = await client.call_tool(
@@ -280,8 +280,8 @@ async def test_delete_note_by_file_path(mcp_server, app):
         )
 
         # Should return "Note Not Found" message
-        assert len(read_after_delete) == 1
-        result_text = read_after_delete[0].text
+        assert len(read_after_delete.content) == 1
+        result_text = read_after_delete.content[0].text
         assert "Note Not Found" in result_text
         assert "File Path Delete" in result_text
 
@@ -311,7 +311,7 @@ async def test_delete_note_case_insensitive(mcp_server, app):
         )
 
         # Should return True for successful deletion
-        assert "true" in delete_result[0].text.lower()
+        assert "true" in delete_result.content[0].text.lower()
 
 
 @pytest.mark.asyncio
@@ -349,7 +349,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
             )
 
             # Each deletion should be successful
-            assert "true" in delete_result[0].text.lower(), f"Failed to delete {title}"
+            assert "true" in delete_result.content[0].text.lower(), f"Failed to delete {title}"
 
         # Verify all notes are deleted by searching
         search_result = await client.call_tool(
@@ -360,7 +360,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
         )
 
         # Should have no results
-        assert '"results": []' in search_result[0].text or '"results":[]' in search_result[0].text
+        assert '"results": []' in search_result.content[0].text or '"results":[]' in search_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -404,7 +404,7 @@ This note contains various Unicode characters:
         )
 
         # Should return True for successful deletion
-        assert "true" in delete_result[0].text.lower()
+        assert "true" in delete_result.content[0].text.lower()
 
         # Verify deletion
         read_after_delete = await client.call_tool(
@@ -415,7 +415,7 @@ This note contains various Unicode characters:
         )
 
         # Should return "Note Not Found" message
-        assert len(read_after_delete) == 1
-        result_text = read_after_delete[0].text
+        assert len(read_after_delete.content) == 1
+        result_text = read_after_delete.content[0].text
         assert "Note Not Found" in result_text
         assert "Unicode Test Note" in result_text

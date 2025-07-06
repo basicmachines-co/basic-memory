@@ -31,8 +31,8 @@ async def test_build_context_valid_urls(mcp_server, app):
             result = await client.call_tool("build_context", {"url": url})
 
             # Should return a valid GraphContext response
-            assert len(result) == 1
-            response = result[0].text
+            assert len(result.content) == 1
+            response = result.content[0].text
             assert '"results"' in response  # Should contain results structure
             assert '"metadata"' in response  # Should contain metadata
 
@@ -82,6 +82,7 @@ async def test_build_context_empty_urls_fail_validation(mcp_server, app):
                 or "too_short" in error_message
                 or "empty or whitespace" in error_message
                 or "value_error" in error_message
+                or "should be non-empty" in error_message
             )
 
 
@@ -101,8 +102,8 @@ async def test_build_context_nonexistent_urls_return_empty_results(mcp_server, a
             result = await client.call_tool("build_context", {"url": url})
 
             # Should return valid response with empty results
-            assert len(result) == 1
-            response = result[0].text
+            assert len(result.content) == 1
+            response = result.content[0].text
             assert '"results": []' in response  # Empty results
             assert '"total_results": 0' in response  # Zero count
             assert '"metadata"' in response  # But should have metadata
@@ -163,8 +164,8 @@ async def test_build_context_pattern_matching_works(mcp_server, app):
         # Test pattern matching
         result = await client.call_tool("build_context", {"url": "patterns/*"})
 
-        assert len(result) == 1
-        response = result[0].text
+        assert len(result.content) == 1
+        response = result.content[0].text
 
         # Should find the pattern matches but not the other note
         assert '"total_results": 2' in response or '"primary_count": 2' in response

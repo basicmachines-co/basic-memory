@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 from basic_memory.cli.app import import_app
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 from basic_memory.importers import ChatGPTImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from loguru import logger
@@ -19,6 +19,7 @@ console = Console()
 
 async def get_markdown_processor() -> MarkdownProcessor:
     """Get MarkdownProcessor instance."""
+    config = get_project_config()
     entity_parser = EntityParser(config.home)
     return MarkdownProcessor(entity_parser)
 
@@ -49,7 +50,7 @@ def import_chatgpt(
 
         # Get markdown processor
         markdown_processor = asyncio.run(get_markdown_processor())
-
+        config = get_project_config()
         # Process the file
         base_path = config.home / folder
         console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")

@@ -52,7 +52,7 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
-addopts = "--cov=basic_memory --cov-report term-missing -ra -q"
+addopts = "--cov=basic_memory --cov-report term-missing"
 testpaths = ["tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"

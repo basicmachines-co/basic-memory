@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import (
 import pathlib
 
 from basic_memory import db
-from basic_memory.config import ProjectConfig, BasicMemoryConfig
+from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager
 from basic_memory.importers import (
     ChatGPTImporter,
     ClaudeConversationsImporter,
@@ -33,10 +33,10 @@ from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
-from basic_memory.config import app_config
 
 
 def get_app_config() -> BasicMemoryConfig:  # pragma: no cover
+    app_config = ConfigManager().config
     return app_config
 
 
@@ -297,6 +297,7 @@ ContextServiceDep = Annotated[ContextService, Depends(get_context_service)]
 
 
 async def get_sync_service(
+    app_config: AppConfigDep,
     entity_service: EntityServiceDep,
     entity_parser: EntityParserDep,
     entity_repository: EntityRepositoryDep,

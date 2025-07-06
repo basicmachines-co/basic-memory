@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands import import_claude_conversations  # noqa
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 
 # Set up CLI runner
 runner = CliRunner()
@@ -86,6 +86,7 @@ def test_import_conversations_command_invalid_json(tmp_path):
 def test_import_conversations_with_custom_folder(tmp_path, sample_conversations_json, monkeypatch):
     """Test import with custom conversations folder."""
     # Set up test environment
+    config = get_project_config()
     config.home = tmp_path
     conversations_folder = "chats"
 
@@ -134,6 +135,7 @@ def test_import_conversation_with_attachments(tmp_path):
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump([conversation], f)
 
+    config = get_project_config()
     # Set up environment
     config.home = tmp_path
 

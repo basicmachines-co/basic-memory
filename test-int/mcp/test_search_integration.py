@@ -53,11 +53,11 @@ async def test_search_basic_text_search(mcp_server, app):
             },
         )
 
-        assert len(search_result) == 1
-        assert search_result[0].type == "text"
+        assert len(search_result.content) == 1
+        assert search_result.content[0].type == "text"
 
         # Parse the response (it should be a SearchResponse)
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Python Programming Guide" in result_text
         assert "Flask Web Development" in result_text
         assert "JavaScript Basics" not in result_text
@@ -107,7 +107,7 @@ async def test_search_boolean_operators(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Python Flask Tutorial" in result_text
         assert "Python Django Guide" not in result_text
         assert "React JavaScript" not in result_text
@@ -120,7 +120,7 @@ async def test_search_boolean_operators(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Python Flask Tutorial" in result_text
         assert "Python Django Guide" in result_text
         assert "React JavaScript" not in result_text
@@ -133,7 +133,7 @@ async def test_search_boolean_operators(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Python Flask Tutorial" in result_text
         assert "Python Django Guide" not in result_text
 
@@ -173,7 +173,7 @@ async def test_search_title_only(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Database Design" in result_text
         assert "Web Development" not in result_text  # Has "database" in content but not title
 
@@ -213,7 +213,7 @@ async def test_search_permalink_exact(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "API Documentation" in result_text
         assert "API Testing" not in result_text
 
@@ -263,7 +263,7 @@ async def test_search_permalink_pattern(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Meeting Notes January" in result_text
         assert "Meeting Notes February" in result_text
         assert "Project Notes" not in result_text
@@ -308,7 +308,7 @@ Regular content about development practices."""
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         # Should find the main entity but filter out observations/relations
         assert "Development Process" in result_text
 
@@ -340,7 +340,7 @@ async def test_search_pagination(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         # Should contain 5 results and pagination info
         assert '"current_page": 1' in result_text
         assert '"page_size": 5' in result_text
@@ -355,7 +355,7 @@ async def test_search_pagination(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert '"current_page": 2' in result_text
 
 
@@ -383,7 +383,7 @@ async def test_search_no_results(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert '"results": []' in result_text or '"results":[]' in result_text
 
 
@@ -431,7 +431,7 @@ async def test_search_complex_boolean_query(mcp_server, app):
             },
         )
 
-        result_text = search_result[0].text
+        result_text = search_result.content[0].text
         assert "Python Web Development" in result_text
         assert "JavaScript Web Development" in result_text
         assert "Python Data Science" not in result_text  # Has Python but not web
@@ -464,5 +464,5 @@ async def test_search_case_insensitive(mcp_server, app):
                 },
             )
 
-            result_text = search_result[0].text
+            result_text = search_result.content[0].text
             assert "Machine Learning Guide" in result_text, f"Failed for search term: {search_term}"

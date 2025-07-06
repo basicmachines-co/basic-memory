@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 from basic_memory.cli.app import claude_app
-from basic_memory.config import config
+from basic_memory.config import get_project_config
 from basic_memory.importers.claude_conversations_importer import ClaudeConversationsImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from loguru import logger
@@ -19,6 +19,7 @@ console = Console()
 
 async def get_markdown_processor() -> MarkdownProcessor:
     """Get MarkdownProcessor instance."""
+    config = get_project_config()
     entity_parser = EntityParser(config.home)
     return MarkdownProcessor(entity_parser)
 
@@ -42,6 +43,7 @@ def import_claude(
     After importing, run 'basic-memory sync' to index the new files.
     """
 
+    config = get_project_config()
     try:
         if not conversations_json.exists():
             typer.echo(f"Error: File not found: {conversations_json}", err=True)

@@ -120,9 +120,7 @@ async def test_get_or_create_db_runs_migrations_automatically(
     db._session_maker = None
 
     # First call should create engine and run migrations
-    engine, session_maker = await db.get_or_create_db(
-        app_config.database_path, app_config=app_config
-    )
+    engine, session_maker = await db.get_or_create_db(app_config.database_path)
 
     # Verify we got valid objects
     assert engine is not None
@@ -168,7 +166,7 @@ async def test_multiple_get_or_create_db_calls_deduplicated(
     db._session_maker = None
 
     # First call should create engine and run migrations
-    await db.get_or_create_db(app_config.database_path, app_config=app_config)
+    await db.get_or_create_db(app_config.database_path)
 
     # Verify migrations were called
     mock_alembic_command.upgrade.assert_called_once_with(mock_alembic_config, "head")
@@ -179,8 +177,8 @@ async def test_multiple_get_or_create_db_calls_deduplicated(
     mock_search_repository.reset_mock()
 
     # Subsequent calls should not run migrations again
-    await db.get_or_create_db(app_config.database_path, app_config=app_config)
-    await db.get_or_create_db(app_config.database_path, app_config=app_config)
+    await db.get_or_create_db(app_config.database_path)
+    await db.get_or_create_db(app_config.database_path)
 
     # Verify migrations were NOT called again
     mock_alembic_command.upgrade.assert_not_called()

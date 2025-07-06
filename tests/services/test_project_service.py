@@ -442,10 +442,9 @@ async def test_synchronize_projects_calls_ensure_single_default(
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
 
+    config_manager = ConfigManager()
     try:
         # Add project to config only (simulating unsynchronized state)
-        from basic_memory.config import config_manager
-
         config_manager.add_project(test_project_name, test_project_path)
 
         # Verify it's in config but not in database
@@ -484,18 +483,14 @@ async def test_synchronize_projects_normalizes_project_names(
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
 
-    # Import config manager outside try block
-    from basic_memory.config import config_manager
-
+    config_manager = ConfigManager()
     try:
         # Manually add the unnormalized project name to config
 
-        # Save the original config state for potential debugging
-        # original_projects = config_manager.projects.copy()
-
         # Add project with unnormalized name directly to config
-        config_manager.config.projects[unnormalized_name] = test_project_path
-        config_manager.save_config(config_manager.config)
+        config = config_manager.load_config()
+        config.projects[unnormalized_name] = test_project_path
+        config_manager.save_config(config)
 
         # Verify the unnormalized name is in config
         assert unnormalized_name in project_service.projects
@@ -553,13 +548,13 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
 
-    # Import config manager outside try block
-    from basic_memory.config import config_manager
 
+    config_manager = ConfigManager()
     try:
         # Add project with uppercase name to config (simulating the bug scenario)
-        config_manager.config.projects[config_name] = test_project_path
-        config_manager.save_config(config_manager.config)
+        config = config_manager.load_config()
+        config.projects[config_name] = test_project_path
+        config_manager.save_config(config)
 
         # Verify the uppercase name is in config
         assert config_name in project_service.projects
