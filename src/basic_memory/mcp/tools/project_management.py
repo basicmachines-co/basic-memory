@@ -5,6 +5,7 @@ and manage project context during conversations.
 """
 
 from textwrap import dedent
+from typing import Optional
 
 from fastmcp import Context
 from loguru import logger
@@ -19,7 +20,9 @@ from basic_memory.utils import generate_permalink
 
 
 @mcp.tool("list_memory_projects")
-async def list_memory_projects(ctx: Context | None = None) -> str:
+async def list_memory_projects(
+    ctx: Context | None = None, _compatibility: Optional[str] = None
+) -> str:
     """List all available projects with their status.
 
     Shows all Basic Memory projects that are available, indicating which one
@@ -159,7 +162,9 @@ async def switch_project(project_name: str, ctx: Context | None = None) -> str:
 
 
 @mcp.tool()
-async def get_current_project(ctx: Context | None = None) -> str:
+async def get_current_project(
+    ctx: Context | None = None, _compatibility: Optional[str] = None
+) -> str:
     """Show the currently active project and basic stats.
 
     Displays which project is currently active and provides basic information

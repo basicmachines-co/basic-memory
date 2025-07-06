@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## v0.14.2 (2025-07-03)
+
+### Bug Fixes
+
+- **#204**: Fix MCP Error with MCP-Hub integration
+  ([`3621bb7`](https://github.com/basicmachines-co/basic-memory/commit/3621bb7b4d6ac12d892b18e36bb8f7c9101c7b10))
+  - Resolve compatibility issues with MCP-Hub
+  - Improve error handling in project management tools
+  - Ensure stable MCP tool integration across different environments
+
+- **Modernize datetime handling and suppress SQLAlchemy warnings**
+  ([`f80ac0e`](https://github.com/basicmachines-co/basic-memory/commit/f80ac0e3e74b7a737a7fc7b956b5c1d61b0c67b8))
+  - Replace deprecated `datetime.utcnow()` with timezone-aware alternatives
+  - Suppress SQLAlchemy deprecation warnings for cleaner output
+  - Improve future compatibility with Python datetime best practices
+
+## v0.14.1 (2025-07-03)
+
+### Bug Fixes
+
+- **#203**: Constrain fastmcp version to prevent breaking changes
+  ([`827f7cf`](https://github.com/basicmachines-co/basic-memory/commit/827f7cf86e7b84c56e7a43bb83f2e5d84a1ad8b8))
+  - Pin fastmcp to compatible version range to avoid API breaking changes
+  - Ensure stable MCP server functionality across updates
+  - Improve dependency management for production deployments
+
+- **#190**: Fix Problems with MCP integration  
+  ([`bd4f551`](https://github.com/basicmachines-co/basic-memory/commit/bd4f551a5bb0b7b4d3a5b04de70e08987c6ab2f9))
+  - Resolve MCP server initialization and communication issues
+  - Improve error handling and recovery in MCP operations
+  - Enhance stability for AI assistant integrations
+
+### Features
+
+- **Add Cursor IDE integration button** - One-click setup for Cursor IDE users
+  ([`5360005`](https://github.com/basicmachines-co/basic-memory/commit/536000512294d66090bf87abc8014f4dfc284310))
+  - Direct installation button for Cursor IDE in README
+  - Streamlined setup process for Cursor users
+  - Enhanced developer experience for AI-powered coding
+
+- **Add Homebrew installation instructions** - Official Homebrew tap support
+  ([`39f811f`](https://github.com/basicmachines-co/basic-memory/commit/39f811f8b57dd998445ae43537cd492c680b2e11))
+  - Official Homebrew formula in basicmachines-co/basic-memory tap
+  - Simplified installation process for macOS users
+  - Package manager integration for easier dependency management
+
 ## v0.14.0 (2025-06-26)
 
 ### Features
