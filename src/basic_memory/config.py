@@ -74,6 +74,12 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to sync changes in real time. default (True)",
     )
 
+    # API connection configuration
+    api_url: Optional[str] = Field(
+        default=None,
+        description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
