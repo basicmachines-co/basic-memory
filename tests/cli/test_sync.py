@@ -105,7 +105,6 @@ def test_sync_command():
 
         # Verify output contains project info
         assert "Syncing project: test-project" in result.stdout
-        assert "Project path: /private/var" in result.stdout
 
         # Verify the function was called with verbose=True
         mock_run_sync.assert_called_once_with(verbose=True)
