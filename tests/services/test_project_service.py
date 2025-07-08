@@ -601,3 +601,96 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
                     db_project = await project_service.repository.get_by_name(name)
                     if db_project:
                         await project_service.repository.delete(db_project.id)
+
+
+@pytest.mark.asyncio
+async def test_signal_watch_service_restart(project_service: ProjectService, tmp_path):
+    """Test that _signal_watch_service_restart creates the correct signal file."""
+    # Call the signal method
+    project_service._signal_watch_service_restart()
+
+    # Check that the signal file was created
+    restart_signal_path = tmp_path.parent / ".basic-memory" / "restart-watch-service"
+    # Since it uses Path.home(), we need to check the actual location
+    from pathlib import Path
+
+    actual_signal_path = Path.home() / ".basic-memory" / "restart-watch-service"
+
+    assert actual_signal_path.exists()
+
+    # Verify it contains a timestamp
+    content = actual_signal_path.read_text()
+    assert content  # Should have some content (timestamp)
+
+    # Clean up
+    actual_signal_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_add_project_signals_restart(project_service: ProjectService, tmp_path):
+    """Test that adding a project signals watch service restart."""
+    test_project_name = f"test-signal-restart-{os.urandom(4).hex()}"
+    test_project_path = str(tmp_path / "test-signal-restart")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    # Remove any existing signal file
+    from pathlib import Path
+
+    signal_path = Path.home() / ".basic-memory" / "restart-watch-service"
+    if signal_path.exists():
+        signal_path.unlink()
+
+    try:
+        # Add the project - this should create the signal file
+        await project_service.add_project(test_project_name, test_project_path)
+
+        # Verify signal file was created
+        assert signal_path.exists()
+
+    finally:
+        # Clean up
+        if signal_path.exists():
+            signal_path.unlink()
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_remove_project_signals_restart(project_service: ProjectService, tmp_path):
+    """Test that removing a project signals watch service restart."""
+    test_project_name = f"test-remove-signal-{os.urandom(4).hex()}"
+    test_project_path = str(tmp_path / "test-remove-signal")
+
+    # Make sure the test directory exists
+    os.makedirs(test_project_path, exist_ok=True)
+
+    from pathlib import Path
+
+    signal_path = Path.home() / ".basic-memory" / "restart-watch-service"
+
+    try:
+        # Add the project first
+        await project_service.add_project(test_project_name, test_project_path)
+
+        # Remove any existing signal file (from the add)
+        if signal_path.exists():
+            signal_path.unlink()
+
+        # Remove the project - this should create the signal file
+        await project_service.remove_project(test_project_name)
+
+        # Verify signal file was created
+        assert signal_path.exists()
+
+    finally:
+        # Clean up
+        if signal_path.exists():
+            signal_path.unlink()
+        # Project should already be removed, but double-check
+        if test_project_name in project_service.projects:
+            try:
+                await project_service.remove_project(test_project_name)
+            except:
+                pass
