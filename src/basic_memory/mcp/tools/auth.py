@@ -2,7 +2,7 @@ from httpx._types import (
     HeaderTypes,
 )
 from loguru import logger
-from fastmcp.server.dependencies import get_context
+from fastmcp.server.dependencies import get_context, get_http_headers, get_http_request
 
 
 def inject_jwt_header(headers: HeaderTypes | None = None) -> HeaderTypes:
@@ -24,6 +24,12 @@ def inject_jwt_header(headers: HeaderTypes | None = None) -> HeaderTypes:
     else:
         # Make a copy to avoid modifying the original
         headers = headers.copy()
+
+
+    http_headers = get_http_headers()
+    logger.debug(f"HTTP headers: {http_headers}")
+    http_request = get_http_request()
+    logger.debug(f"HTTP request: {http_request}")
 
     try:
         # Get JWT from FastMCP context
