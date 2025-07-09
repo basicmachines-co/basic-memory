@@ -23,7 +23,7 @@ from httpx._types import (
 from loguru import logger
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools.auth import inject_jwt_header
+from basic_memory.mcp.tools.auth import inject_auth_header
 
 
 def get_error_message(
@@ -111,7 +111,7 @@ async def call_get(
     error_message = None
 
     # Inject JWT from FastMCP context if available
-    headers = inject_jwt_header(headers)
+    headers = inject_auth_header(headers)
 
     try:
         response = await client.get(
@@ -199,7 +199,7 @@ async def call_put(
     error_message = None
 
     # Inject JWT from FastMCP context if available
-    headers = inject_jwt_header(headers)
+    headers = inject_auth_header(headers)
 
     try:
         response = await client.put(
@@ -291,7 +291,7 @@ async def call_patch(
     logger.debug(f"Calling PATCH '{url}'")
 
     # Inject JWT from FastMCP context if available
-    headers = inject_jwt_header(headers)
+    headers = inject_auth_header(headers)
 
     try:
         response = await client.patch(
@@ -399,7 +399,7 @@ async def call_post(
     error_message = None
 
     # Inject JWT from FastMCP context if available
-    headers = inject_jwt_header(headers)
+    headers = inject_auth_header(headers)
 
     try:
         response = await client.post(
@@ -484,7 +484,7 @@ async def call_delete(
     error_message = None
 
     # Inject JWT from FastMCP context if available
-    headers = inject_jwt_header(headers)
+    headers = inject_auth_header(headers)
 
     try:
         response = await client.delete(
