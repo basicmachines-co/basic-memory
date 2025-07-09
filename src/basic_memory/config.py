@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, List, Tuple
 
+from dotenv import load_dotenv
 from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +23,7 @@ WATCH_STATUS_JSON = "watch-status.json"
 
 Environment = Literal["test", "dev", "user"]
 
+load_dotenv()
 
 @dataclass
 class ProjectConfig:
