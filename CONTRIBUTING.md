@@ -27,7 +27,12 @@ project and how to get started as a developer.
 
    > **Note**: Basic Memory uses [just](https://just.systems) as a modern command runner. Install with `brew install just` or `cargo install just`.
 
-3. **Run the Tests**:
+3. **Activate the Virtual Environment**
+   ```bash
+   source .venv/bin/activate
+   ```
+
+4. **Run the Tests**:
    ```bash
    # Run all tests
    just test
