@@ -11,6 +11,7 @@ from basic_memory.mcp.tools.utils import call_post, call_get
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.project_info import ProjectList
+from basic_memory.utils import validate_project_path
 
 
 async def _detect_cross_project_move_attempt(
@@ -392,6 +393,28 @@ async def move_note(
 
     active_project = get_active_project(project)
     project_url = active_project.project_url
+
+    # Validate destination path to prevent path traversal attacks
+    project_path = active_project.home
+    if not validate_project_path(destination_path, project_path):
+        logger.warning(
+            "Attempted path traversal attack blocked",
+            destination_path=destination_path,
+            project=active_project.name,
+        )
+        return f"""# Move Failed - Security Validation Error
+
+The destination path '{destination_path}' is not allowed - paths must stay within project boundaries.
+
+## Valid path examples:
+- `notes/my-file.md`
+- `projects/2025/meeting-notes.md`
+- `archive/old-notes.md`
+
+## Try again with a safe path:
+```
+move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+```"""
 
     # Check for potential cross-project move attempts
     cross_project_error = await _detect_cross_project_move_attempt(
