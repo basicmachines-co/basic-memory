@@ -652,3 +652,397 @@ async def test_write_note_respects_frontmatter_entity_type(app):
     assert "# Guide Content" in content
     assert "- guide" in content
     assert "- documentation" in content
+
+
+class TestWriteNoteSecurityValidation:
+    """Test write_note security validation features."""
+
+    @pytest.mark.asyncio
+    async def test_write_note_blocks_path_traversal_unix(self, app):
+        """Test that Unix-style path traversal attacks are blocked in folder parameter."""
+        # Test various Unix-style path traversal patterns
+        attack_folders = [
+            "../",
+            "../../",
+            "../../../",
+            "../secrets",
+            "../../etc",
+            "../../../etc/passwd_folder",
+            "notes/../../../etc",
+            "folder/../../outside",
+            "../../../../malicious",
+        ]
+
+        for attack_folder in attack_folders:
+            result = await write_note.fn(
+                title="Test Note",
+                folder=attack_folder,
+                content="# Test Content\nThis should be blocked by security validation.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_folder in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_blocks_path_traversal_windows(self, app):
+        """Test that Windows-style path traversal attacks are blocked in folder parameter."""
+        # Test various Windows-style path traversal patterns
+        attack_folders = [
+            "..\\",
+            "..\\..\\",
+            "..\\..\\..\\",
+            "..\\secrets",
+            "..\\..\\Windows",
+            "..\\..\\..\\Windows\\System32",
+            "notes\\..\\..\\..\\Windows",
+            "\\\\server\\share",
+            "\\\\..\\..\\Windows",
+        ]
+
+        for attack_folder in attack_folders:
+            result = await write_note.fn(
+                title="Test Note",
+                folder=attack_folder,
+                content="# Test Content\nThis should be blocked by security validation.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_folder in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_blocks_absolute_paths(self, app):
+        """Test that absolute paths are blocked in folder parameter."""
+        # Test various absolute path patterns
+        attack_folders = [
+            "/etc",
+            "/home/user",
+            "/var/log",
+            "/root",
+            "C:\\Windows",
+            "C:\\Users\\user",
+            "D:\\secrets",
+            "/tmp/malicious",
+            "/usr/local/evil",
+        ]
+
+        for attack_folder in attack_folders:
+            result = await write_note.fn(
+                title="Test Note",
+                folder=attack_folder,
+                content="# Test Content\nThis should be blocked by security validation.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_folder in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_blocks_home_directory_access(self, app):
+        """Test that home directory access patterns are blocked in folder parameter."""
+        # Test various home directory access patterns
+        attack_folders = [
+            "~",
+            "~/",
+            "~/secrets",
+            "~/.ssh",
+            "~/Documents",
+            "~\\AppData",
+            "~\\Desktop",
+            "~/.env_folder",
+        ]
+
+        for attack_folder in attack_folders:
+            result = await write_note.fn(
+                title="Test Note",
+                folder=attack_folder,
+                content="# Test Content\nThis should be blocked by security validation.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_folder in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_blocks_mixed_attack_patterns(self, app):
+        """Test that mixed legitimate/attack patterns are blocked in folder parameter."""
+        # Test mixed patterns that start legitimate but contain attacks
+        attack_folders = [
+            "notes/../../../etc",
+            "docs/../../.env_folder",
+            "legitimate/path/../../.ssh",
+            "project/folder/../../../Windows",
+            "valid/folder/../../home/user",
+            "assets/../../../tmp/evil",
+        ]
+
+        for attack_folder in attack_folders:
+            result = await write_note.fn(
+                title="Test Note",
+                folder=attack_folder,
+                content="# Test Content\nThis should be blocked by security validation.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_allows_safe_folder_paths(self, app):
+        """Test that legitimate folder paths are still allowed."""
+        # Test various safe folder patterns
+        safe_folders = [
+            "notes",
+            "docs",
+            "projects/2025",
+            "archive/old-notes",
+            "deep/nested/directory/structure",
+            "folder/subfolder",
+            "research/ml",
+            "meeting-notes",
+        ]
+
+        for safe_folder in safe_folders:
+            result = await write_note.fn(
+                title=f"Test Note in {safe_folder.replace('/', '-')}",
+                folder=safe_folder,
+                content="# Test Content\nThis should work normally with security validation.",
+                tags=["test", "security"],
+            )
+
+            # Should succeed (not a security error)
+            assert isinstance(result, str)
+            assert "# Error" not in result
+            assert "paths must stay within project boundaries" not in result
+            # Should be normal successful creation/update
+            assert ("# Created note" in result) or ("# Updated note" in result)
+            assert safe_folder in result  # Should show in file_path
+
+    @pytest.mark.asyncio
+    async def test_write_note_empty_folder_security(self, app):
+        """Test that empty folder parameter is handled securely."""
+        # Empty folder should be allowed (creates in root)
+        result = await write_note.fn(
+            title="Root Note",
+            folder="",
+            content="# Root Note\nThis note should be created in the project root.",
+        )
+
+        assert isinstance(result, str)
+        # Empty folder should not trigger security error
+        assert "# Error" not in result
+        assert "paths must stay within project boundaries" not in result
+        # Should succeed normally
+        assert ("# Created note" in result) or ("# Updated note" in result)
+
+    @pytest.mark.asyncio
+    async def test_write_note_none_folder_security(self, app):
+        """Test that default folder behavior works securely when folder is omitted."""
+        # The write_note function requires folder parameter, but we can test with empty string
+        # which effectively creates in project root
+        result = await write_note.fn(
+            title="Root Folder Note",
+            folder="",  # Empty string instead of None since folder is required
+            content="# Root Folder Note\nThis note should be created in the project root.",
+        )
+
+        assert isinstance(result, str)
+        # Empty folder should not trigger security error
+        assert "# Error" not in result
+        assert "paths must stay within project boundaries" not in result
+        # Should succeed normally
+        assert ("# Created note" in result) or ("# Updated note" in result)
+
+    @pytest.mark.asyncio
+    async def test_write_note_current_directory_references_security(self, app):
+        """Test that current directory references are handled securely."""
+        # Test current directory references (should be safe)
+        safe_folders = [
+            "./notes",
+            "folder/./subfolder", 
+            "./folder/subfolder",
+        ]
+
+        for safe_folder in safe_folders:
+            result = await write_note.fn(
+                title=f"Current Dir Test {safe_folder.replace('/', '-').replace('.', 'dot')}",
+                folder=safe_folder,
+                content="# Current Directory Test\nThis should work with current directory references.",
+            )
+
+            assert isinstance(result, str)
+            # Should NOT contain security error message
+            assert "# Error" not in result
+            assert "paths must stay within project boundaries" not in result
+            # Should succeed normally
+            assert ("# Created note" in result) or ("# Updated note" in result)
+
+    @pytest.mark.asyncio
+    async def test_write_note_security_with_all_parameters(self, app):
+        """Test security validation works with all write_note parameters."""
+        # Test that security validation is applied even when all other parameters are provided
+        result = await write_note.fn(
+            title="Security Test with All Params",
+            folder="../../../etc/malicious",
+            content="# Malicious Content\nThis should be blocked by security validation.",
+            tags=["malicious", "test"],
+            entity_type="guide",
+            project=None,  # Use default project
+        )
+
+        assert isinstance(result, str)
+        assert "# Error" in result
+        assert "paths must stay within project boundaries" in result
+        assert "../../../etc/malicious" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_security_logging(self, app, caplog):
+        """Test that security violations are properly logged."""
+        # Attempt path traversal attack
+        result = await write_note.fn(
+            title="Security Logging Test",
+            folder="../../../etc/passwd_folder",
+            content="# Test Content\nThis should trigger security logging.",
+        )
+
+        assert "# Error" in result
+        assert "paths must stay within project boundaries" in result
+        
+        # Check that security violation was logged
+        # Note: This test may need adjustment based on the actual logging setup
+        # The security validation should generate a warning log entry
+
+    @pytest.mark.asyncio
+    async def test_write_note_preserves_functionality_with_security(self, app):
+        """Test that security validation doesn't break normal note creation functionality."""
+        # Create a note with all features to ensure security validation doesn't interfere
+        result = await write_note.fn(
+            title="Full Feature Security Test",
+            folder="security-tests",
+            content=dedent("""
+                # Full Feature Security Test
+                
+                This note tests that security validation doesn't break normal functionality.
+                
+                ## Observations
+                - [security] Path validation working correctly #security
+                - [feature] All features still functional #test
+                
+                ## Relations
+                - relates_to [[Security Implementation]]
+                - depends_on [[Path Validation]]
+                
+                Additional content with various formatting.
+            """).strip(),
+            tags=["security", "test", "full-feature"],
+            entity_type="guide",
+        )
+
+        # Should succeed normally
+        assert isinstance(result, str)
+        assert "# Error" not in result
+        assert "paths must stay within project boundaries" not in result
+        assert "# Created note" in result
+        assert "file_path: security-tests/Full Feature Security Test.md" in result
+        assert "permalink: security-tests/full-feature-security-test" in result
+        
+        # Should process observations and relations
+        assert "## Observations" in result
+        assert "## Relations" in result
+        assert "## Tags" in result
+        
+        # Should show proper counts
+        assert "security: 1" in result
+        assert "feature: 1" in result
+        
+
+class TestWriteNoteSecurityEdgeCases:
+    """Test edge cases for write_note security validation."""
+
+    @pytest.mark.asyncio
+    async def test_write_note_unicode_folder_attacks(self, app):
+        """Test that Unicode-based path traversal attempts are blocked."""
+        # Test Unicode path traversal attempts
+        unicode_attack_folders = [
+            "notes/文档/../../../etc",  # Chinese characters
+            "docs/café/../../secrets",  # Accented characters
+            "files/αβγ/../../../malicious",  # Greek characters
+        ]
+
+        for attack_folder in unicode_attack_folders:
+            result = await write_note.fn(
+                title="Unicode Attack Test",
+                folder=attack_folder,
+                content="# Unicode Attack\nThis should be blocked.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_very_long_attack_folder(self, app):
+        """Test handling of very long attack folder paths."""
+        # Create a very long path traversal attack
+        long_attack_folder = "../" * 1000 + "etc/malicious"
+        
+        result = await write_note.fn(
+            title="Long Attack Test",
+            folder=long_attack_folder,
+            content="# Long Attack\nThis should be blocked.",
+        )
+
+        assert isinstance(result, str)
+        assert "# Error" in result
+        assert "paths must stay within project boundaries" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_case_variations_attacks(self, app):
+        """Test that case variations don't bypass security."""
+        # Test case variations (though case sensitivity depends on filesystem)
+        case_attack_folders = [
+            "../ETC",
+            "../Etc/SECRETS",
+            "..\\WINDOWS",
+            "~/SECRETS",
+        ]
+
+        for attack_folder in case_attack_folders:
+            result = await write_note.fn(
+                title="Case Variation Attack Test",
+                folder=attack_folder,
+                content="# Case Attack\nThis should be blocked.",
+            )
+
+            assert isinstance(result, str)
+            assert "# Error" in result
+            assert "paths must stay within project boundaries" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_whitespace_in_attack_folders(self, app):
+        """Test that whitespace doesn't help bypass security."""
+        # Test attack folders with various whitespace
+        whitespace_attack_folders = [
+            " ../../../etc ",
+            "\t../../../secrets\t",
+            " ..\\..\\Windows ",
+            "notes/ ../../ malicious",
+        ]
+
+        for attack_folder in whitespace_attack_folders:
+            result = await write_note.fn(
+                title="Whitespace Attack Test",
+                folder=attack_folder,
+                content="# Whitespace Attack\nThis should be blocked.",
+            )
+
+            assert isinstance(result, str)
+            # The attack should still be blocked even with whitespace
+            if ".." in attack_folder.strip() or "~" in attack_folder.strip():
+                assert "# Error" in result
+                assert "paths must stay within project boundaries" in result

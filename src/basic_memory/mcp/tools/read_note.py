@@ -11,6 +11,7 @@ from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
+from basic_memory.utils import validate_project_path
 
 
 @mcp.tool(
@@ -67,6 +68,17 @@ async def read_note(
 
     # Get the file via REST API - first try direct permalink lookup
     entity_path = memory_url_path(identifier)
+    
+    # Validate path to prevent path traversal attacks
+    project_path = active_project.home
+    if not validate_project_path(entity_path, project_path):
+        logger.warning(
+            "Attempted path traversal attack blocked",
+            identifier=identifier,
+            entity_path=entity_path,
+            project=active_project.name,
+        )
+        return f"# Error\n\nPath '{identifier}' is not allowed - paths must stay within project boundaries"
     path = f"{project_url}/resource/{entity_path}"
     logger.info(f"Attempting to read note from URL: {path}")
 

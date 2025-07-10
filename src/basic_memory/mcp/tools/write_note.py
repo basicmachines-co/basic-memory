@@ -10,7 +10,7 @@ from basic_memory.mcp.tools.utils import call_put
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.base import Entity
-from basic_memory.utils import parse_tags
+from basic_memory.utils import parse_tags, validate_project_path
 
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]
@@ -74,6 +74,14 @@ async def write_note(
 
     # Get the active project first to check project-specific sync status
     active_project = get_active_project(project)
+
+    # Validate folder path to prevent path traversal attacks
+    project_path = active_project.home
+    if folder and not validate_project_path(folder, project_path):
+        logger.warning(
+            "Attempted path traversal attack blocked", folder=folder, project=active_project.name
+        )
+        return f"# Error\n\nFolder path '{folder}' is not allowed - paths must stay within project boundaries"
 
     # Check migration status and wait briefly if needed
     from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status

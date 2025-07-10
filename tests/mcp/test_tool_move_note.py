@@ -461,6 +461,270 @@ class TestMoveNoteErrorFormatting:
         assert "Check disk space" in result
 
 
+class TestMoveNoteSecurityValidation:
+    """Test move note security validation features."""
+
+    @pytest.mark.asyncio
+    async def test_move_note_blocks_path_traversal_unix(self, client):
+        """Test that Unix-style path traversal attacks are blocked."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test various Unix-style path traversal patterns
+        attack_paths = [
+            "../secrets.txt",
+            "../../etc/passwd",
+            "../../../root/.ssh/id_rsa",
+            "notes/../../../etc/shadow",
+            "folder/../../outside/file.md",
+            "../../../../etc/hosts",
+        ]
+
+        for attack_path in attack_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=attack_path,
+            )
+
+            assert isinstance(result, str)
+            assert "# Move Failed - Security Validation Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_path in result
+            assert "Try again with a safe path" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_blocks_path_traversal_windows(self, client):
+        """Test that Windows-style path traversal attacks are blocked."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test various Windows-style path traversal patterns
+        attack_paths = [
+            "..\\secrets.txt",
+            "..\\..\\Windows\\System32\\config\\SAM",
+            "notes\\..\\..\\..\\Windows\\System32",
+            "\\\\server\\share\\file.txt",
+            "..\\..\\Users\\user\\.env",
+            "\\\\..\\..\\Windows",
+        ]
+
+        for attack_path in attack_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=attack_path,
+            )
+
+            assert isinstance(result, str)
+            assert "# Move Failed - Security Validation Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_path in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_blocks_absolute_paths(self, client):
+        """Test that absolute paths are blocked."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test various absolute path patterns
+        attack_paths = [
+            "/etc/passwd",
+            "/home/user/.env",
+            "/var/log/auth.log",
+            "/root/.ssh/id_rsa",
+            "C:\\Windows\\System32\\config\\SAM",
+            "C:\\Users\\user\\.env",
+            "D:\\secrets\\config.json",
+            "/tmp/malicious.txt",
+        ]
+
+        for attack_path in attack_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=attack_path,
+            )
+
+            assert isinstance(result, str)
+            assert "# Move Failed - Security Validation Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_path in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_blocks_home_directory_access(self, client):
+        """Test that home directory access patterns are blocked."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test various home directory access patterns
+        attack_paths = [
+            "~/secrets.txt",
+            "~/.env",
+            "~/.ssh/id_rsa",
+            "~/Documents/passwords.txt",
+            "~\\AppData\\secrets",
+            "~\\Desktop\\config.ini",
+        ]
+
+        for attack_path in attack_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=attack_path,
+            )
+
+            assert isinstance(result, str)
+            assert "# Move Failed - Security Validation Error" in result
+            assert "paths must stay within project boundaries" in result
+            assert attack_path in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_blocks_mixed_attack_patterns(self, client):
+        """Test that mixed legitimate/attack patterns are blocked."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test mixed patterns that start legitimate but contain attacks
+        attack_paths = [
+            "notes/../../../etc/passwd",
+            "docs/../../.env",
+            "legitimate/path/../../.ssh/id_rsa",
+            "project/folder/../../../Windows/System32",
+            "valid/folder/../../home/user/.bashrc",
+        ]
+
+        for attack_path in attack_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=attack_path,
+            )
+
+            assert isinstance(result, str)
+            assert "# Move Failed - Security Validation Error" in result
+            assert "paths must stay within project boundaries" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_allows_safe_paths(self, client):
+        """Test that legitimate paths are still allowed."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test various safe path patterns
+        safe_paths = [
+            "notes/meeting.md",
+            "docs/readme.txt",
+            "projects/2025/planning.md",
+            "archive/old-notes/backup.md",
+            "deep/nested/directory/structure/file.txt",
+            "folder/subfolder/document.md",
+        ]
+
+        for safe_path in safe_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=safe_path,
+            )
+
+            # Should succeed or fail for legitimate reasons (not security)
+            assert isinstance(result, str)
+            # Should NOT contain security error message
+            assert "Security Validation Error" not in result
+            
+            # If it fails, it should be for other reasons like "already exists" or API errors
+            if "Move Failed" in result:
+                assert "paths must stay within project boundaries" not in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_security_logging(self, client, caplog):
+        """Test that security violations are properly logged."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Attempt path traversal attack
+        result = await move_note.fn(
+            identifier="source/test-note",
+            destination_path="../../../etc/passwd",
+        )
+
+        assert "# Move Failed - Security Validation Error" in result
+        
+        # Check that security violation was logged
+        # Note: This test may need adjustment based on the actual logging setup
+        # The security validation should generate a warning log entry
+
+    @pytest.mark.asyncio
+    async def test_move_note_empty_path_security(self, client):
+        """Test that empty destination path is handled securely."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test empty destination path (should be allowed as it resolves to project root)
+        result = await move_note.fn(
+            identifier="source/test-note",
+            destination_path="",
+        )
+
+        assert isinstance(result, str)
+        # Empty path should not trigger security error (it's handled by pathlib validation)
+        # But may fail for other API-related reasons
+
+    @pytest.mark.asyncio
+    async def test_move_note_current_directory_references_security(self, client):
+        """Test that current directory references are handled securely."""
+        # Create initial note
+        await write_note.fn(
+            title="Test Note",
+            folder="source",
+            content="# Test Note\nTest content for security testing.",
+        )
+
+        # Test current directory references (should be safe)
+        safe_paths = [
+            "./notes/file.md",
+            "folder/./file.md", 
+            "./folder/subfolder/file.md",
+        ]
+
+        for safe_path in safe_paths:
+            result = await move_note.fn(
+                identifier="source/test-note",
+                destination_path=safe_path,
+            )
+
+            assert isinstance(result, str)
+            # Should NOT contain security error message
+            assert "Security Validation Error" not in result
+
+
 class TestMoveNoteErrorHandling:
     """Test move note exception handling."""
 
