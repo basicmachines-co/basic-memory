@@ -181,6 +181,79 @@ def setup_logging(
         logging.getLogger(logger_name).setLevel(level)
 
 
+def normalize_file_path_for_comparison(file_path: str) -> str:
+    """Normalize a file path for conflict detection.
+    
+    This function normalizes file paths to help detect potential conflicts:
+    - Converts to lowercase for case-insensitive comparison
+    - Normalizes Unicode characters
+    - Handles path separators consistently
+    
+    Args:
+        file_path: The file path to normalize
+        
+    Returns:
+        Normalized file path for comparison purposes
+    """
+    import unicodedata
+    
+    # Convert to lowercase for case-insensitive comparison
+    normalized = file_path.lower()
+    
+    # Normalize Unicode characters (NFD normalization)
+    normalized = unicodedata.normalize('NFD', normalized)
+    
+    # Replace path separators with forward slashes
+    normalized = normalized.replace('\\', '/')
+    
+    # Remove multiple slashes
+    normalized = re.sub(r'/+', '/', normalized)
+    
+    return normalized
+
+
+def detect_potential_file_conflicts(file_path: str, existing_paths: List[str]) -> List[str]:
+    """Detect potential conflicts between a file path and existing paths.
+    
+    This function checks for various types of conflicts:
+    - Case sensitivity differences
+    - Unicode normalization differences
+    - Path separator differences
+    - Permalink generation conflicts
+    
+    Args:
+        file_path: The file path to check
+        existing_paths: List of existing file paths to check against
+        
+    Returns:
+        List of existing paths that might conflict with the given file path
+    """
+    conflicts = []
+    
+    # Normalize the input file path
+    normalized_input = normalize_file_path_for_comparison(file_path)
+    input_permalink = generate_permalink(file_path)
+    
+    for existing_path in existing_paths:
+        # Skip identical paths
+        if existing_path == file_path:
+            continue
+            
+        # Check for case-insensitive path conflicts
+        normalized_existing = normalize_file_path_for_comparison(existing_path)
+        if normalized_input == normalized_existing:
+            conflicts.append(existing_path)
+            continue
+            
+        # Check for permalink conflicts
+        existing_permalink = generate_permalink(existing_path)
+        if input_permalink == existing_permalink:
+            conflicts.append(existing_path)
+            continue
+    
+    return conflicts
+
+
 def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     """Parse tags from various input formats into a consistent list.
 
