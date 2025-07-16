@@ -361,7 +361,7 @@ def setup_basic_memory_logging():  # pragma: no cover
     setup_logging(
         env=config_manager.config.env,
         home_dir=user_home,  # Use user home for logs
-        log_level=config_manager.load_config().log_level,
+        log_level=config_manager.config.log_level,
         log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",
         console=console_logging,
     )
