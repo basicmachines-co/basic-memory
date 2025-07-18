@@ -193,7 +193,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
     def _traverse_messages(
         self, mapping: Dict[str, Any], root_id: Optional[str], seen: Set[str]
     ) -> List[Dict[str, Any]]:  # pragma: no cover
-        """Traverse message tree and return messages in order.
+        """Traverse message tree iteratively to handle deep conversations.
 
         Args:
             mapping: Message mapping.
@@ -204,19 +204,29 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             List of message data.
         """
         messages = []
-        node = mapping.get(root_id) if root_id else None
+        if not root_id:
+            return messages
 
-        while node:
+        # Use iterative approach with stack to avoid recursion depth issues
+        stack = [root_id]
+        
+        while stack:
+            node_id = stack.pop()
+            if not node_id:
+                continue
+                
+            node = mapping.get(node_id)
+            if not node:
+                continue
+            
+            # Process current node if it has a message and hasn't been seen
             if node["id"] not in seen and node.get("message"):
                 seen.add(node["id"])
                 messages.append(node["message"])
-
-            # Follow children
+            
+            # Add children to stack in reverse order to maintain conversation flow
             children = node.get("children", [])
-            for child_id in children:
-                child_msgs = self._traverse_messages(mapping, child_id, seen)
-                messages.extend(child_msgs)
-
-            break  # Don't follow siblings
-
+            for child_id in reversed(children):
+                stack.append(child_id)
+        
         return messages
