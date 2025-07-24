@@ -536,6 +536,124 @@ async def test_synchronize_projects_normalizes_project_names(
 
 
 @pytest.mark.asyncio
+async def test_move_project(project_service: ProjectService, tmp_path):
+    """Test moving a project to a new location."""
+    test_project_name = f"test-move-project-{os.urandom(4).hex()}"
+    old_path = str(tmp_path / "old-location")
+    new_path = str(tmp_path / "new-location")
+    
+    # Create old directory
+    os.makedirs(old_path, exist_ok=True)
+    
+    try:
+        # Add project with initial path
+        await project_service.add_project(test_project_name, old_path)
+        
+        # Verify initial state
+        assert test_project_name in project_service.projects
+        assert project_service.projects[test_project_name] == old_path
+        
+        project = await project_service.repository.get_by_name(test_project_name)
+        assert project is not None
+        assert project.path == old_path
+        
+        # Move project to new location
+        await project_service.move_project(test_project_name, new_path)
+        
+        # Verify config was updated
+        assert project_service.projects[test_project_name] == new_path
+        
+        # Verify database was updated
+        updated_project = await project_service.repository.get_by_name(test_project_name)
+        assert updated_project is not None
+        assert updated_project.path == new_path
+        
+        # Verify new directory was created
+        assert os.path.exists(new_path)
+        
+    finally:
+        # Clean up
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_move_project_nonexistent(project_service: ProjectService, tmp_path):
+    """Test moving a project that doesn't exist."""
+    new_path = str(tmp_path / "new-location")
+    
+    with pytest.raises(ValueError, match="not found in configuration"):
+        await project_service.move_project("nonexistent-project", new_path)
+
+
+@pytest.mark.asyncio
+async def test_move_project_db_mismatch(project_service: ProjectService, tmp_path):
+    """Test moving a project that exists in config but not in database."""
+    test_project_name = f"test-move-mismatch-{os.urandom(4).hex()}"
+    old_path = str(tmp_path / "old-location")
+    new_path = str(tmp_path / "new-location")
+    
+    # Create directories
+    os.makedirs(old_path, exist_ok=True)
+    
+    config_manager = project_service.config_manager
+    
+    try:
+        # Add project to config only (not to database)
+        config_manager.add_project(test_project_name, old_path)
+        
+        # Verify it's in config but not in database
+        assert test_project_name in project_service.projects
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is None
+        
+        # Try to move project - should fail and restore config
+        with pytest.raises(ValueError, match="not found in database"):
+            await project_service.move_project(test_project_name, new_path)
+        
+        # Verify config was restored to original path
+        assert project_service.projects[test_project_name] == old_path
+        
+    finally:
+        # Clean up
+        if test_project_name in project_service.projects:
+            config_manager.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
+async def test_move_project_expands_path(project_service: ProjectService, tmp_path):
+    """Test that move_project expands ~ and relative paths."""
+    test_project_name = f"test-move-expand-{os.urandom(4).hex()}"
+    old_path = str(tmp_path / "old-location")
+    
+    # Create old directory
+    os.makedirs(old_path, exist_ok=True)
+    
+    try:
+        # Add project with initial path
+        await project_service.add_project(test_project_name, old_path)
+        
+        # Use a relative path for the move
+        relative_new_path = "./new-location"
+        expected_absolute_path = os.path.abspath(relative_new_path)
+        
+        # Move project using relative path
+        await project_service.move_project(test_project_name, relative_new_path)
+        
+        # Verify the path was expanded to absolute
+        assert project_service.projects[test_project_name] == expected_absolute_path
+        
+        updated_project = await project_service.repository.get_by_name(test_project_name)
+        assert updated_project is not None
+        assert updated_project.path == expected_absolute_path
+        
+    finally:
+        # Clean up
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.asyncio
 async def test_synchronize_projects_handles_case_sensitivity_bug(
     project_service: ProjectService, tmp_path
 ):
@@ -595,3 +713,5 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
                     db_project = await project_service.repository.get_by_name(name)
                     if db_project:
                         await project_service.repository.delete(db_project.id)
+
+

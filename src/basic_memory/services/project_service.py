@@ -309,6 +309,47 @@ class ProjectService:
             # MCP components might not be available in all contexts
             logger.debug("MCP session not available, skipping session refresh")
 
+    async def move_project(self, name: str, new_path: str) -> None:
+        """Move a project to a new location.
+        
+        Args:
+            name: The name of the project to move
+            new_path: The new absolute path for the project
+            
+        Raises:
+            ValueError: If the project doesn't exist or repository isn't initialized
+        """
+        if not self.repository:
+            raise ValueError("Repository is required for move_project")
+        
+        # Resolve to absolute path
+        resolved_path = os.path.abspath(os.path.expanduser(new_path))
+        
+        # Validate project exists in config
+        if name not in self.config_manager.projects:
+            raise ValueError(f"Project '{name}' not found in configuration")
+        
+        # Create the new directory if it doesn't exist
+        Path(resolved_path).mkdir(parents=True, exist_ok=True)
+        
+        # Update in configuration
+        config = self.config_manager.load_config()
+        old_path = config.projects[name]
+        config.projects[name] = resolved_path
+        self.config_manager.save_config(config)
+        
+        # Update in database
+        project = await self.repository.get_by_name(name)
+        if project:
+            await self.repository.update_path(project.id, resolved_path)
+            logger.info(f"Moved project '{name}' from {old_path} to {resolved_path}")
+        else:
+            logger.error(f"Project '{name}' exists in config but not in database")
+            # Restore the old path in config since DB update failed
+            config.projects[name] = old_path
+            self.config_manager.save_config(config)
+            raise ValueError(f"Project '{name}' not found in database")
+
     async def update_project(  # pragma: no cover
         self, name: str, updated_path: Optional[str] = None, is_active: Optional[bool] = None
     ) -> None:

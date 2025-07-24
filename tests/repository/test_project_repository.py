@@ -267,3 +267,31 @@ async def test_delete_nonexistent_project(project_repository: ProjectRepository)
     """Test deleting a project that doesn't exist."""
     result = await project_repository.delete(999)  # Non-existent ID
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_update_path(project_repository: ProjectRepository, sample_project: Project):
+    """Test updating a project's path."""
+    new_path = "/new/project/path"
+    
+    # Update the project path
+    updated_project = await project_repository.update_path(sample_project.id, new_path)
+    
+    # Verify returned object
+    assert updated_project is not None
+    assert updated_project.id == sample_project.id
+    assert updated_project.path == new_path
+    assert updated_project.name == sample_project.name  # Other fields unchanged
+    
+    # Verify in database
+    found = await project_repository.find_by_id(sample_project.id)
+    assert found is not None
+    assert found.path == new_path
+    assert found.name == sample_project.name
+
+
+@pytest.mark.asyncio
+async def test_update_path_nonexistent_project(project_repository: ProjectRepository):
+    """Test updating path for a project that doesn't exist."""
+    result = await project_repository.update_path(999, "/some/path")  # Non-existent ID
+    assert result is None

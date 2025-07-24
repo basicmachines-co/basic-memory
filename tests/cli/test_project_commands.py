@@ -141,3 +141,41 @@ def test_project_failure_exits_with_error(mock_run, cli_env):
 
     assert default_result.exit_code == 1
     assert "Error setting default project" in default_result.output
+
+
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_move_command(mock_run, cli_env):
+    """Test the 'project move' command with mocked API."""
+    # Mock the API response
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "message": "Project 'test-project' updated successfully",
+        "status": "success",
+        "default": False,
+    }
+    mock_run.return_value = mock_response
+
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "move", "test-project", "/new/path/to/project"])
+
+    # Verify it runs without exception
+    assert result.exit_code == 0
+    # Verify the important warning message is displayed
+    assert "Manual File Movement Required" in result.output
+    assert "You must manually move your project files" in result.output
+    assert "/new/path/to/project" in result.output
+
+
+@patch("basic_memory.cli.commands.project.asyncio.run")
+def test_project_move_command_failure(mock_run, cli_env):
+    """Test the 'project move' command with API failure."""
+    # Mock an exception being raised
+    mock_run.side_effect = Exception("Project not found")
+
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["project", "move", "nonexistent-project", "/new/path"])
+
+    # Should exit with code 1 and show error message
+    assert result.exit_code == 1
+    assert "Error moving project" in result.output

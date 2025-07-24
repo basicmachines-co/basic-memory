@@ -23,6 +23,7 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.project_info import ProjectStatusResponse
 from basic_memory.mcp.tools.utils import call_delete
 from basic_memory.mcp.tools.utils import call_put
+from basic_memory.mcp.tools.utils import call_patch
 from basic_memory.utils import generate_permalink
 
 console = Console()
@@ -145,6 +146,42 @@ def synchronize_projects() -> None:
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:  # pragma: no cover
         console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("move")
+def move_project(
+    name: str = typer.Argument(..., help="Name of the project to move"),
+    new_path: str = typer.Argument(..., help="New absolute path for the project"),
+) -> None:
+    """Move a project to a new location."""
+    # Resolve to absolute path
+    resolved_path = os.path.abspath(os.path.expanduser(new_path))
+    
+    try:
+        data = {"path": resolved_path}
+        project_name = generate_permalink(name)
+        
+        current_project = session.get_current_project()
+        response = asyncio.run(call_patch(client, f"/{current_project}/project/{project_name}", json=data))
+        result = ProjectStatusResponse.model_validate(response.json())
+        
+        console.print(f"[green]{result.message}[/green]")
+        
+        # Show important file movement reminder
+        console.print()  # Empty line for spacing
+        console.print(Panel(
+            "[bold red]IMPORTANT:[/bold red] Project configuration updated successfully.\n\n"
+            "[yellow]You must manually move your project files from the old location to:[/yellow]\n"
+            f"[cyan]{resolved_path}[/cyan]\n\n"
+            "[dim]Basic Memory has only updated the configuration - your files remain in their original location.[/dim]",
+            title="⚠️  Manual File Movement Required",
+            border_style="yellow",
+            expand=False
+        ))
+        
+    except Exception as e:
+        console.print(f"[red]Error moving project: {str(e)}[/red]")
         raise typer.Exit(1)
 
 
