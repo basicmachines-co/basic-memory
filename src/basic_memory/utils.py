@@ -146,19 +146,19 @@ def setup_logging(
     # logger.remove()
 
     # Add file handler if we are not running tests and a log file is specified
-    # if log_file and env != "test":
-    #     # Setup file logger
-    #     log_path = home_dir / log_file
-    #     logger.add(
-    #         str(log_path),
-    #         level=log_level,
-    #         rotation="10 MB",
-    #         retention="10 days",
-    #         backtrace=True,
-    #         diagnose=True,
-    #         enqueue=True,
-    #         colorize=False,
-    #     )
+    if log_file and env != "test":
+        # Setup file logger
+        log_path = home_dir / log_file
+        logger.add(
+            str(log_path),
+            level=log_level,
+            rotation="10 MB",
+            retention="10 days",
+            backtrace=True,
+            diagnose=True,
+            enqueue=True,
+            colorize=False,
+        )
 
     # Add console logger if requested or in test mode
     # if env == "test" or console:
