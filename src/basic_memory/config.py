@@ -182,10 +182,8 @@ class ConfigManager:
                 data = json.loads(self.config_file.read_text(encoding="utf-8"))
                 return BasicMemoryConfig(**data)
             except Exception as e:  # pragma: no cover
-                logger.error(f"Failed to load config: {e}")
-                config = BasicMemoryConfig()
-                self.save_config(config)
-                return config
+                logger.exception(f"Failed to load config: {e}")
+                raise e
         else:
             config = BasicMemoryConfig()
             self.save_config(config)
