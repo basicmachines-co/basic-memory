@@ -32,6 +32,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
             # First pass - collect all relations by source entity
             entity_relations: Dict[str, List[Relation]] = {}
             entities: Dict[str, Dict[str, Any]] = {}
+            skipped_entities: int = 0
 
             # Ensure the base path exists
             base_path = config.home  # pragma: no cover
@@ -42,7 +43,13 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
             for line in source_data:
                 data = line
                 if data["type"] == "entity":
-                    entities[data["name"]] = data
+                    # Handle different possible name keys
+                    entity_name = data.get("name") or data.get("entityName") or data.get("id")
+                    if not entity_name:
+                        logger.warning(f"Entity missing name field: {data}")
+                        skipped_entities += 1
+                        continue
+                    entities[entity_name] = data
                 elif data["type"] == "relation":
                     # Store relation with its source entity
                     source = data.get("from") or data.get("from_id")
@@ -58,25 +65,31 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
             # Second pass - create and write entities
             entities_created = 0
             for name, entity_data in entities.items():
+                # Get entity type with fallback
+                entity_type = entity_data.get("entityType") or entity_data.get("type") or "entity"
+
                 # Ensure entity type directory exists
-                entity_type_dir = base_path / entity_data["entityType"]
+                entity_type_dir = base_path / entity_type
                 entity_type_dir.mkdir(parents=True, exist_ok=True)
+
+                # Get observations with fallback to empty list
+                observations = entity_data.get("observations", [])
 
                 entity = EntityMarkdown(
                     frontmatter=EntityFrontmatter(
                         metadata={
-                            "type": entity_data["entityType"],
+                            "type": entity_type,
                             "title": name,
-                            "permalink": f"{entity_data['entityType']}/{name}",
+                            "permalink": f"{entity_type}/{name}",
                         }
                     ),
                     content=f"# {name}\n",
-                    observations=[Observation(content=obs) for obs in entity_data["observations"]],
+                    observations=[Observation(content=obs) for obs in observations],
                     relations=entity_relations.get(name, []),
                 )
 
                 # Write entity file
-                file_path = base_path / f"{entity_data['entityType']}/{name}.md"
+                file_path = base_path / f"{entity_type}/{name}.md"
                 await self.write_entity(entity, file_path)
                 entities_created += 1
 
@@ -87,6 +100,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 success=True,
                 entities=entities_created,
                 relations=relations_count,
+                skipped_entities=skipped_entities,
             )
 
         except Exception as e:  # pragma: no cover
