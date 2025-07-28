@@ -139,18 +139,19 @@ class TestReadContentSecurityValidation:
             # Mock the API call to simulate a successful response
             with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
                 mock_response = MagicMock()
-                mock_response.headers = {
-                    "content-type": "text/markdown",
-                    "content-length": "100"
-                }
+                mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
                 mock_response.text = f"# Content for {safe_path}\nThis is test content."
                 mock_call_get.return_value = mock_response
-                
+
                 result = await read_content.fn(path=safe_path)
 
                 # Should succeed (not a security error)
                 assert isinstance(result, dict)
-                assert result["type"] != "error" or "paths must stay within project boundaries" not in result.get("error", "")
+                assert result[
+                    "type"
+                ] != "error" or "paths must stay within project boundaries" not in result.get(
+                    "error", ""
+                )
 
     @pytest.mark.asyncio
     async def test_read_content_memory_url_processing(self, client):
@@ -178,7 +179,7 @@ class TestReadContentSecurityValidation:
 
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
-        
+
         # Check that security violation was logged
         # Note: This test may need adjustment based on the actual logging setup
         # The security validation should generate a warning log entry
@@ -189,18 +190,19 @@ class TestReadContentSecurityValidation:
         # Mock the API call since empty path should be allowed (resolves to project root)
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
             mock_response = MagicMock()
-            mock_response.headers = {
-                "content-type": "text/markdown",
-                "content-length": "50"
-            }
+            mock_response.headers = {"content-type": "text/markdown", "content-length": "50"}
             mock_response.text = "# Root content"
             mock_call_get.return_value = mock_response
-            
+
             result = await read_content.fn(path="")
 
             assert isinstance(result, dict)
             # Empty path should not trigger security error (it's handled as project root)
-            assert result["type"] != "error" or "paths must stay within project boundaries" not in result.get("error", "")
+            assert result[
+                "type"
+            ] != "error" or "paths must stay within project boundaries" not in result.get(
+                "error", ""
+            )
 
     @pytest.mark.asyncio
     async def test_read_content_current_directory_references_security(self, client):
@@ -208,7 +210,7 @@ class TestReadContentSecurityValidation:
         # Test current directory references (should be safe)
         safe_paths = [
             "./notes/file.md",
-            "folder/./file.md", 
+            "folder/./file.md",
             "./folder/subfolder/file.md",
         ]
 
@@ -216,18 +218,19 @@ class TestReadContentSecurityValidation:
             # Mock the API call for these safe paths
             with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
                 mock_response = MagicMock()
-                mock_response.headers = {
-                    "content-type": "text/markdown",
-                    "content-length": "100"
-                }
+                mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
                 mock_response.text = f"# Content for {safe_path}"
                 mock_call_get.return_value = mock_response
-                
+
                 result = await read_content.fn(path=safe_path)
 
                 assert isinstance(result, dict)
                 # Should NOT contain security error message
-                assert result["type"] != "error" or "paths must stay within project boundaries" not in result.get("error", "")
+                assert result[
+                    "type"
+                ] != "error" or "paths must stay within project boundaries" not in result.get(
+                    "error", ""
+                )
 
 
 class TestReadContentFunctionality:
@@ -246,13 +249,10 @@ class TestReadContentFunctionality:
         # Mock the API call to simulate reading the file
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
             mock_response = MagicMock()
-            mock_response.headers = {
-                "content-type": "text/markdown",
-                "content-length": "100"
-            }
+            mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
             mock_response.text = "# Test Document\nThis is test content for reading."
             mock_call_get.return_value = mock_response
-            
+
             result = await read_content.fn(path="docs/test-document.md")
 
             assert isinstance(result, dict)
@@ -267,16 +267,16 @@ class TestReadContentFunctionality:
         # Mock the API call to simulate reading an image
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
             # Create a simple fake image data
-            fake_image_data = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb\x00\x00\x00\x00IEND\xaeB`\x82'
-            
+            fake_image_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb\x00\x00\x00\x00IEND\xaeB`\x82"
+
             mock_response = MagicMock()
             mock_response.headers = {
                 "content-type": "image/png",
-                "content-length": str(len(fake_image_data))
+                "content-length": str(len(fake_image_data)),
             }
             mock_response.content = fake_image_data
             mock_call_get.return_value = mock_response
-            
+
             # Mock PIL Image processing
             with patch("basic_memory.mcp.tools.read_content.PILImage") as mock_pil:
                 mock_img = MagicMock()
@@ -285,10 +285,10 @@ class TestReadContentFunctionality:
                 mock_img.mode = "RGB"
                 mock_img.getbands.return_value = ["R", "G", "B"]
                 mock_pil.open.return_value = mock_img
-                
+
                 with patch("basic_memory.mcp.tools.read_content.optimize_image") as mock_optimize:
                     mock_optimize.return_value = b"optimized_image_data"
-                    
+
                     result = await read_content.fn(path="assets/safe-image.png")
 
                     assert isinstance(result, dict)
@@ -302,24 +302,22 @@ class TestReadContentFunctionality:
         """Test reading content with explicit project parameter."""
         # Mock the API call and project configuration
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            with patch("basic_memory.mcp.tools.read_content.get_active_project") as mock_get_project:
+            with patch(
+                "basic_memory.mcp.tools.read_content.get_active_project"
+            ) as mock_get_project:
                 # Mock project configuration
                 mock_project = MagicMock()
                 mock_project.project_url = "http://test"
                 mock_project.home = Path("/test/project")
                 mock_get_project.return_value = mock_project
-                
+
                 mock_response = MagicMock()
-                mock_response.headers = {
-                    "content-type": "text/plain",
-                    "content-length": "50"
-                }
+                mock_response.headers = {"content-type": "text/plain", "content-length": "50"}
                 mock_response.text = "Project-specific content"
                 mock_call_get.return_value = mock_response
-                
+
                 result = await read_content.fn(
-                    path="notes/project-file.txt",
-                    project="specific-project"
+                    path="notes/project-file.txt", project="specific-project"
                 )
 
                 assert isinstance(result, dict)
@@ -332,7 +330,7 @@ class TestReadContentFunctionality:
         # Mock API call to return 404
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
             mock_call_get.side_effect = Exception("File not found")
-            
+
             # This should pass security validation but fail on API call
             try:
                 result = await read_content.fn(path="docs/nonexistent-file.md")
@@ -348,15 +346,15 @@ class TestReadContentFunctionality:
         # Mock the API call to simulate reading a binary file
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
             binary_data = b"Binary file content with special bytes: \x00\x01\x02\x03"
-            
+
             mock_response = MagicMock()
             mock_response.headers = {
                 "content-type": "application/octet-stream",
-                "content-length": str(len(binary_data))
+                "content-length": str(len(binary_data)),
             }
             mock_response.content = binary_data
             mock_call_get.return_value = mock_response
-            
+
             result = await read_content.fn(path="files/safe-binary.bin")
 
             assert isinstance(result, dict)
@@ -399,14 +397,14 @@ class TestReadContentEdgeCases:
         for attack_path in encoded_attacks:
             try:
                 result = await read_content.fn(path=attack_path)
-                
+
                 # These may or may not be blocked depending on URL decoding,
                 # but should not cause security issues
                 assert isinstance(result, dict)
-                
+
                 # If not blocked by security validation, may fail at API level
                 # which is also acceptable
-                
+
             except Exception:
                 # Exception due to API failure or other issues is acceptable
                 # as long as no actual traversal occurs
@@ -435,7 +433,7 @@ class TestReadContentEdgeCases:
         """Test handling of very long attack paths."""
         # Create a very long path traversal attack
         long_attack = "../" * 1000 + "etc/passwd"
-        
+
         result = await read_content.fn(path=long_attack)
 
         assert isinstance(result, dict)

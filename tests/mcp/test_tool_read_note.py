@@ -450,7 +450,9 @@ class TestReadNoteSecurityValidation:
 
             assert isinstance(result, str)
             # Should not contain security error message
-            assert "# Error" not in result or "paths must stay within project boundaries" not in result
+            assert (
+                "# Error" not in result or "paths must stay within project boundaries" not in result
+            )
             # Should either succeed or fail for legitimate reasons (not found, etc.)
             # but not due to security validation
 
@@ -466,7 +468,7 @@ class TestReadNoteSecurityValidation:
 
         # Test reading by title (should work)
         result = await read_note.fn("Security Test Note")
-        
+
         assert isinstance(result, str)
         # Should not be a security error
         assert "# Error" not in result or "paths must stay within project boundaries" not in result
@@ -506,7 +508,7 @@ class TestReadNoteSecurityValidation:
 
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
-        
+
         # Check that security violation was logged
         # Note: This test may need adjustment based on the actual logging setup
         # The security validation should generate a warning log entry
@@ -539,7 +541,7 @@ class TestReadNoteSecurityValidation:
 
         # Test reading by permalink
         result = await read_note.fn("security-tests/full-feature-security-test-note")
-        
+
         # Should succeed normally (not a security error)
         assert isinstance(result, str)
         assert "# Error" not in result or "paths must stay within project boundaries" not in result
@@ -571,7 +573,7 @@ class TestReadNoteSecurityEdgeCases:
         """Test handling of very long attack identifiers."""
         # Create a very long path traversal attack
         long_attack_identifier = "../" * 1000 + "etc/malicious"
-        
+
         result = await read_note.fn(identifier=long_attack_identifier)
 
         assert isinstance(result, str)

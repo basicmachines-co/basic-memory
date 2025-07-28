@@ -864,7 +864,7 @@ class TestWriteNoteSecurityValidation:
         # Test current directory references (should be safe)
         safe_folders = [
             "./notes",
-            "folder/./subfolder", 
+            "folder/./subfolder",
             "./folder/subfolder",
         ]
 
@@ -912,7 +912,7 @@ class TestWriteNoteSecurityValidation:
 
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
-        
+
         # Check that security violation was logged
         # Note: This test may need adjustment based on the actual logging setup
         # The security validation should generate a warning log entry
@@ -950,16 +950,16 @@ class TestWriteNoteSecurityValidation:
         assert "# Created note" in result
         assert "file_path: security-tests/Full Feature Security Test.md" in result
         assert "permalink: security-tests/full-feature-security-test" in result
-        
+
         # Should process observations and relations
         assert "## Observations" in result
         assert "## Relations" in result
         assert "## Tags" in result
-        
+
         # Should show proper counts
         assert "security: 1" in result
         assert "feature: 1" in result
-        
+
 
 class TestWriteNoteSecurityEdgeCases:
     """Test edge cases for write_note security validation."""
@@ -990,7 +990,7 @@ class TestWriteNoteSecurityEdgeCases:
         """Test handling of very long attack folder paths."""
         # Create a very long path traversal attack
         long_attack_folder = "../" * 1000 + "etc/malicious"
-        
+
         result = await write_note.fn(
             title="Long Attack Test",
             folder=long_attack_folder,

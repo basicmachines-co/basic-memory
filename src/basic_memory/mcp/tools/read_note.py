@@ -68,7 +68,7 @@ async def read_note(
 
     # Get the file via REST API - first try direct permalink lookup
     entity_path = memory_url_path(identifier)
-    
+
     # Validate path to prevent path traversal attacks
     project_path = active_project.home
     if not validate_project_path(entity_path, project_path):

@@ -30,7 +30,9 @@ class TestValidateProjectPathSafety:
         ]
 
         for path in safe_paths:
-            assert validate_project_path(path, project_path), f"Safe path '{path}' should be allowed"
+            assert validate_project_path(path, project_path), (
+                f"Safe path '{path}' should be allowed"
+            )
 
     def test_empty_and_current_directory(self, tmp_path):
         """Test handling of empty paths and current directory references."""
@@ -39,7 +41,7 @@ class TestValidateProjectPathSafety:
 
         # Current directory should be safe
         assert validate_project_path(".", project_path)
-        
+
         # Files in current directory should be safe
         assert validate_project_path("./file.txt", project_path)
 
@@ -55,7 +57,9 @@ class TestValidateProjectPathSafety:
         ]
 
         for path in nested_paths:
-            assert validate_project_path(path, project_path), f"Nested path '{path}' should be allowed"
+            assert validate_project_path(path, project_path), (
+                f"Nested path '{path}' should be allowed"
+            )
 
 
 class TestValidateProjectPathAttacks:
@@ -71,7 +75,7 @@ class TestValidateProjectPathAttacks:
             "../../",
             "../../../",
             "../etc/passwd",
-            "../../etc/passwd", 
+            "../../etc/passwd",
             "../../../etc/passwd",
             "../../../../etc/passwd",
             "../../.env",
@@ -82,7 +86,9 @@ class TestValidateProjectPathAttacks:
         ]
 
         for path in attack_paths:
-            assert not validate_project_path(path, project_path), f"Attack path '{path}' should be blocked"
+            assert not validate_project_path(path, project_path), (
+                f"Attack path '{path}' should be blocked"
+            )
 
     def test_windows_path_traversal(self, tmp_path):
         """Test that Windows-style path traversal is blocked."""
@@ -102,7 +108,9 @@ class TestValidateProjectPathAttacks:
         ]
 
         for path in attack_paths:
-            assert not validate_project_path(path, project_path), f"Windows attack path '{path}' should be blocked"
+            assert not validate_project_path(path, project_path), (
+                f"Windows attack path '{path}' should be blocked"
+            )
 
     def test_mixed_traversal_patterns(self, tmp_path):
         """Test paths that mix legitimate content with traversal."""
@@ -119,7 +127,9 @@ class TestValidateProjectPathAttacks:
         ]
 
         for path in mixed_attacks:
-            assert not validate_project_path(path, project_path), f"Mixed attack path '{path}' should be blocked"
+            assert not validate_project_path(path, project_path), (
+                f"Mixed attack path '{path}' should be blocked"
+            )
 
     def test_home_directory_access(self, tmp_path):
         """Test that home directory access patterns are blocked."""
@@ -137,11 +147,13 @@ class TestValidateProjectPathAttacks:
         ]
 
         for path in home_attacks:
-            assert not validate_project_path(path, project_path), f"Home directory attack '{path}' should be blocked"
+            assert not validate_project_path(path, project_path), (
+                f"Home directory attack '{path}' should be blocked"
+            )
 
     def test_unc_and_network_paths(self, tmp_path):
         """Test that UNC and network paths are blocked."""
-        project_path = tmp_path / "project" 
+        project_path = tmp_path / "project"
         project_path.mkdir()
 
         network_attacks = [
@@ -152,7 +164,9 @@ class TestValidateProjectPathAttacks:
         ]
 
         for path in network_attacks:
-            assert not validate_project_path(path, project_path), f"Network path attack '{path}' should be blocked"
+            assert not validate_project_path(path, project_path), (
+                f"Network path attack '{path}' should be blocked"
+            )
 
     def test_absolute_paths(self, tmp_path):
         """Test that absolute paths are blocked (if they contain traversal)."""
@@ -163,7 +177,7 @@ class TestValidateProjectPathAttacks:
         # but our function should catch traversal patterns first
         absolute_attacks = [
             "/etc/passwd",
-            "/home/user/.env", 
+            "/home/user/.env",
             "/var/log/auth.log",
             "/root/.ssh/id_rsa",
             "C:\\Windows\\System32\\config\\SAM",
@@ -212,7 +226,7 @@ class TestValidateProjectPathEdgeCases:
 
         # Create a very long but legitimate path
         long_path = "/".join(["verylongdirectoryname" * 10 for _ in range(10)])
-        
+
         # Should handle long paths gracefully (either allow or reject based on filesystem limits)
         try:
             result = validate_project_path(long_path, project_path)
@@ -225,7 +239,7 @@ class TestValidateProjectPathEdgeCases:
     def test_nonexistent_project_path(self):
         """Test behavior when project path doesn't exist."""
         nonexistent_project = Path("/this/path/does/not/exist")
-        
+
         # Should still be able to validate relative paths
         assert validate_project_path("notes/file.txt", nonexistent_project)
         assert not validate_project_path("../../../etc/passwd", nonexistent_project)
@@ -263,34 +277,36 @@ class TestValidateProjectPathEdgeCases:
         # These should all be blocked regardless of case
         case_variations = [
             "../file.txt",
-            "../FILE.TXT", 
+            "../FILE.TXT",
             "~/file.txt",
             "~/FILE.TXT",
         ]
 
         for path in case_variations:
-            assert not validate_project_path(path, project_path), f"Case variation '{path}' should be blocked"
+            assert not validate_project_path(path, project_path), (
+                f"Case variation '{path}' should be blocked"
+            )
 
     def test_symbolic_link_behavior(self, tmp_path):
         """Test behavior with symbolic links (if supported by filesystem)."""
         project_path = tmp_path / "project"
         project_path.mkdir()
-        
+
         # Create a directory outside the project
         outside_dir = tmp_path / "outside"
         outside_dir.mkdir()
-        
+
         try:
             # Try to create a symlink inside the project pointing outside
             symlink_path = project_path / "symlink"
             symlink_path.symlink_to(outside_dir)
-            
+
             # Paths through symlinks should be handled safely
             result = validate_project_path("symlink/file.txt", project_path)
             # The result can vary based on how pathlib handles symlinks,
             # but it shouldn't crash and should be a boolean
             assert isinstance(result, bool)
-            
+
         except (OSError, NotImplementedError):
             # Symlinks might not be supported on this filesystem
             pytest.skip("Symbolic links not supported on this filesystem")
@@ -325,24 +341,25 @@ class TestValidateProjectPathPerformance:
 
         # Test a mix of safe and dangerous paths
         test_paths = []
-        
+
         # Add safe paths
         for i in range(100):
             test_paths.append(f"folder{i}/file{i}.txt")
-            
+
         # Add dangerous paths
         for i in range(100):
             test_paths.append(f"../../../etc/passwd{i}")
 
         import time
+
         start_time = time.time()
-        
+
         for path in test_paths:
             result = validate_project_path(path, project_path)
             assert isinstance(result, bool)
-            
+
         end_time = time.time()
-        
+
         # Should complete reasonably quickly (adjust threshold as needed)
         assert end_time - start_time < 1.0, "Path validation should be fast"
 
@@ -354,21 +371,21 @@ class TestValidateProjectPathIntegration:
         """Test validation with actual files and directories."""
         project_path = tmp_path / "project"
         project_path.mkdir()
-        
+
         # Create some actual files and directories
         (project_path / "notes").mkdir()
         (project_path / "docs").mkdir()
         (project_path / "notes" / "meeting.md").write_text("# Meeting Notes")
         (project_path / "docs" / "readme.txt").write_text("README")
-        
+
         # Test accessing existing files
         assert validate_project_path("notes/meeting.md", project_path)
         assert validate_project_path("docs/readme.txt", project_path)
-        
+
         # Test accessing non-existent but safe paths
         assert validate_project_path("notes/new-file.md", project_path)
         assert validate_project_path("new-folder/file.txt", project_path)
-        
+
         # Test that attacks are still blocked even with real filesystem
         assert not validate_project_path("../../../etc/passwd", project_path)
         assert not validate_project_path("notes/../../../etc/passwd", project_path)
@@ -379,18 +396,18 @@ class TestValidateProjectPathIntegration:
         base_path = tmp_path / "workspace"
         project_path = base_path / "my-project"
         sibling_path = base_path / "other-project"
-        
+
         base_path.mkdir()
         project_path.mkdir()
         sibling_path.mkdir()
-        
+
         # Create a sensitive file in the sibling directory
         (sibling_path / "secrets.txt").write_text("secret data")
-        
+
         # Try to access the sibling directory through traversal
         attack_path = "../other-project/secrets.txt"
         assert not validate_project_path(attack_path, project_path)
-        
+
         # Verify that legitimate access within project works
         assert validate_project_path("my-file.txt", project_path)
         assert validate_project_path("subdir/my-file.txt", project_path)

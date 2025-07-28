@@ -220,23 +220,23 @@ def validate_project_path(path: str, project_path: Path) -> bool:
     # Allow empty strings as they resolve to the project root
     if not path:
         return True
-    
+
     # Check for obvious path traversal patterns first
     if ".." in path or "~" in path:
         return False
-    
+
     # Check for Windows-style path traversal (even on Unix systems)
     if "\\.." in path or path.startswith("\\"):
         return False
-    
+
     # Block absolute paths (Unix-style starting with / or Windows-style with drive letters)
     if path.startswith("/") or (len(path) >= 2 and path[1] == ":"):
         return False
-    
+
     # Block paths with control characters (but allow whitespace that will be stripped)
-    if path.strip() and any(ord(c) < 32 and c not in [' ', '\t'] for c in path):
+    if path.strip() and any(ord(c) < 32 and c not in [" ", "\t"] for c in path):
         return False
-    
+
     try:
         resolved = (project_path / path).resolve()
         return resolved.is_relative_to(project_path.resolve())

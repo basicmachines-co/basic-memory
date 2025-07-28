@@ -650,7 +650,7 @@ class TestMoveNoteSecurityValidation:
             assert isinstance(result, str)
             # Should NOT contain security error message
             assert "Security Validation Error" not in result
-            
+
             # If it fails, it should be for other reasons like "already exists" or API errors
             if "Move Failed" in result:
                 assert "paths must stay within project boundaries" not in result
@@ -672,7 +672,7 @@ class TestMoveNoteSecurityValidation:
         )
 
         assert "# Move Failed - Security Validation Error" in result
-        
+
         # Check that security violation was logged
         # Note: This test may need adjustment based on the actual logging setup
         # The security validation should generate a warning log entry
@@ -710,7 +710,7 @@ class TestMoveNoteSecurityValidation:
         # Test current directory references (should be safe)
         safe_paths = [
             "./notes/file.md",
-            "folder/./file.md", 
+            "folder/./file.md",
             "./folder/subfolder/file.md",
         ]
 
