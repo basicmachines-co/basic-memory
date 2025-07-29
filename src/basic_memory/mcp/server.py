@@ -29,8 +29,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:  # pragma:
     # Initialize on startup (now returns migration_manager)
     migration_manager = await initialize_app(app_config)
 
-    # Initialize project session with default project
-    session.initialize(app_config.default_project)
+    # Initialize project session - preserve existing session if already set
+    if not session.current_project:
+        # Session not initialized by CLI, use default
+        session.initialize(app_config.default_project)
 
     try:
         yield AppContext(watch_task=None, migration_manager=migration_manager)
