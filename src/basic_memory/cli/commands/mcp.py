@@ -35,12 +35,24 @@ def mcp(
     - sse: Server-Sent Events (for compatibility with existing clients)
     """
 
+    from basic_memory.config import get_project_config
+    from basic_memory.mcp.project_session import session
     from basic_memory.services.initialization import initialize_file_sync
 
     # Use unified thread-based sync approach for both transports
     import threading
 
+    if session.current_project:
+        project_config = get_project_config(session.current_project)
+    else:
+        project_config = get_project_config()
+
     app_config = ConfigManager().config
+
+    # Ensure the session is properly initialized with the project before starting MCP
+    # This will be picked up by the MCP server lifespan
+    session.initialize(app_config.default_project)
+    session.set_current_project(project_config.name)
 
     def run_file_sync():
         """Run file sync in a separate thread with its own event loop."""
