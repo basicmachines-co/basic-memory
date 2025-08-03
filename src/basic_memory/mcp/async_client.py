@@ -14,10 +14,10 @@ def create_client() -> AsyncClient:
     config_manager = ConfigManager()
     config = config_manager.load_config()
 
-    if config.api_url:
-        # Use HTTP transport for remote API
-        logger.info(f"Creating HTTP client for remote Basic Memory API: {config.api_url}")
-        return AsyncClient(base_url=config.api_url)
+    if config.use_remote_api:
+        # Use HTTP transport for remote API with dynamic base URL
+        logger.debug("Creating HTTP client for remote Basic Memory API (dynamic base URL)")
+        return AsyncClient()  # No base_url - will be determined from headers at runtime
     else:
         # Use ASGI transport for local API
         logger.debug("Creating ASGI client for local Basic Memory API")

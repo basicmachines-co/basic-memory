@@ -23,7 +23,39 @@ from httpx._types import (
 from loguru import logger
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.tools.auth import inject_auth_header
+from basic_memory.mcp.tools.headers import inject_auth_header, get_base_url_from_headers
+
+
+def resolve_url(client: AsyncClient, url: URL | str) -> str:
+    """Resolve URL by combining base URL from headers with the provided URL.
+    
+    Args:
+        client: The AsyncClient to check for base URL
+        url: The URL to resolve
+        
+    Returns:
+        Fully resolved URL string
+    """
+    url_str = str(url)
+    
+    # If the URL is already absolute, return as-is
+    if url_str.startswith(('http://', 'https://')):
+        return url_str
+    
+    # If client has a base URL, use it
+    if client.base_url and str(client.base_url) != "":
+        return str(client.build_request("GET", url).url)
+    
+    # Otherwise, get base URL from headers and construct full URL
+    base_url = get_base_url_from_headers()
+    if base_url:
+        # Ensure URL starts with / for proper joining
+        if not url_str.startswith('/'):
+            url_str = '/' + url_str
+        return base_url + url_str
+    
+    # Fallback - return the URL as-is (this may fail, but let httpx handle it)
+    return url_str
 
 
 def get_error_message(
@@ -107,7 +139,9 @@ async def call_get(
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
-    logger.debug(f"Calling GET '{url}' params: '{params}'")
+    # Resolve URL with dynamic base URL if needed
+    resolved_url = resolve_url(client, url)
+    logger.debug(f"Calling GET '{resolved_url}' params: '{params}'")
     error_message = None
 
     # Inject JWT from FastMCP context if available
@@ -115,7 +149,7 @@ async def call_get(
 
     try:
         response = await client.get(
-            url,
+            resolved_url,
             params=params,
             headers=headers,
             cookies=cookies,
@@ -195,7 +229,9 @@ async def call_put(
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
-    logger.debug(f"Calling PUT '{url}'")
+    # Resolve URL with dynamic base URL if needed
+    resolved_url = resolve_url(client, url)
+    logger.debug(f"Calling PUT '{resolved_url}'")
     error_message = None
 
     # Inject JWT from FastMCP context if available
@@ -203,7 +239,7 @@ async def call_put(
 
     try:
         response = await client.put(
-            url,
+            resolved_url,
             content=content,
             data=data,
             files=files,
@@ -288,14 +324,16 @@ async def call_patch(
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
-    logger.debug(f"Calling PATCH '{url}'")
+    # Resolve URL with dynamic base URL if needed
+    resolved_url = resolve_url(client, url)
+    logger.debug(f"Calling PATCH '{resolved_url}'")
 
     # Inject JWT from FastMCP context if available
     headers = inject_auth_header(headers)
 
     try:
         response = await client.patch(
-            url,
+            resolved_url,
             content=content,
             data=data,
             files=files,
@@ -395,7 +433,9 @@ async def call_post(
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
-    logger.debug(f"Calling POST '{url}'")
+    # Resolve URL with dynamic base URL if needed
+    resolved_url = resolve_url(client, url)
+    logger.debug(f"Calling POST '{resolved_url}'")
     error_message = None
 
     # Inject JWT from FastMCP context if available
@@ -403,7 +443,7 @@ async def call_post(
 
     try:
         response = await client.post(
-            url=url,
+            url=resolved_url,
             content=content,
             data=data,
             files=files,
@@ -480,7 +520,9 @@ async def call_delete(
     Raises:
         ToolError: If the request fails with an appropriate error message
     """
-    logger.debug(f"Calling DELETE '{url}'")
+    # Resolve URL with dynamic base URL if needed
+    resolved_url = resolve_url(client, url)
+    logger.debug(f"Calling DELETE '{resolved_url}'")
     error_message = None
 
     # Inject JWT from FastMCP context if available
@@ -488,7 +530,7 @@ async def call_delete(
 
     try:
         response = await client.delete(
-            url=url,
+            url=resolved_url,
             params=params,
             headers=headers,
             cookies=cookies,

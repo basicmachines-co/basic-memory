@@ -77,9 +77,9 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     # API connection configuration
-    api_url: Optional[str] = Field(
-        default=None,
-        description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
+    use_remote_api: bool = Field(
+        default=False,
+        description="Whether to use remote HTTP client instead of local ASGI transport. When true, base URL will be determined from x-bm-tenant-app-name header.",
     )
 
     model_config = SettingsConfigDict(
