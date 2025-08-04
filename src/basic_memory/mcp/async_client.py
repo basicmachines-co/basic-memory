@@ -1,8 +1,8 @@
+import os
 from httpx import ASGITransport, AsyncClient
 from loguru import logger
 
 from basic_memory.api.app import app as fastapi_app
-from basic_memory.config import ConfigManager
 
 
 def create_client() -> AsyncClient:
@@ -11,10 +11,10 @@ def create_client() -> AsyncClient:
     Returns:
         AsyncClient configured for either local ASGI or remote HTTP transport
     """
-    config_manager = ConfigManager()
-    config = config_manager.load_config()
+    BASIC_MEMORY_USE_REMOTE_API = os.getenv("BASIC_MEMORY_USE_REMOTE_API", None)
+    logger.info(f"BASIC_MEMORY_USE_REMOTE_API: {BASIC_MEMORY_USE_REMOTE_API}")
 
-    if config.use_remote_api:
+    if BASIC_MEMORY_USE_REMOTE_API:
         # Use HTTP transport for remote API with dynamic base URL
         logger.debug("Creating HTTP client for remote Basic Memory API (dynamic base URL)")
         return AsyncClient()  # No base_url - will be determined from headers at runtime

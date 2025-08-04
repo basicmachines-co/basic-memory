@@ -76,12 +76,6 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to sync changes in real time. default (True)",
     )
 
-    # API connection configuration
-    use_remote_api: bool = Field(
-        default=False,
-        description="Whether to use remote HTTP client instead of local ASGI transport. When true, base URL will be determined from x-bm-tenant-app-name header.",
-    )
-
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
