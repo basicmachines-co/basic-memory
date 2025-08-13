@@ -72,8 +72,8 @@ async def test_update_project_path(project_service: ProjectService, tmp_path, co
     """Test updating a project's path."""
     # Create a test project
     test_project = f"path-update-test-project-{os.urandom(4).hex()}"
-    original_path = str(tmp_path / "original-path")
-    new_path = str(tmp_path / "new-path")
+    original_path = (tmp_path / "original-path").as_posix()
+    new_path = (tmp_path / "new-path").as_posix()
 
     # Make sure directories exist
     os.makedirs(original_path, exist_ok=True)

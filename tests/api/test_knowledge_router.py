@@ -10,6 +10,7 @@ from basic_memory.schemas import (
     EntityResponse,
 )
 from basic_memory.schemas.search import SearchItemType, SearchResponse
+from basic_memory.utils import normalize_newlines
 
 
 @pytest.mark.asyncio
@@ -684,14 +685,14 @@ async def test_edit_entity_prepend(client: AsyncClient, project_url):
     file_content = response.text
 
     # Expected content with frontmatter preserved and content prepended to body
-    expected_content = """---
+    expected_content = normalize_newlines("""---
 title: Test Note
 type: note
 permalink: test/test-note
 ---
 
 Prepended content
-Original content"""
+Original content""")
 
     assert file_content.strip() == expected_content.strip()
 
