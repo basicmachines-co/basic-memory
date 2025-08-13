@@ -1,7 +1,6 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Optional
 
 from loguru import logger
 
@@ -9,17 +8,13 @@ from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
-from basic_memory.utils import validate_project_path
 
 
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
 )
-async def read_note(
-    identifier: str, page: int = 1, page_size: int = 10, project: Optional[str] = None
-) -> str:
+async def read_note(identifier: str, page: int = 1, page_size: int = 10) -> str:
     """Read a markdown note from the knowledge base.
 
     This tool finds and retrieves a note by its title, permalink, or content search,
@@ -31,7 +26,6 @@ async def read_note(
                    Can be a full memory:// URL, a permalink, a title, or search text
         page: Page number for paginated results (default: 1)
         page_size: Number of items per page (default: 10)
-        project: Optional project name to read from. If not provided, uses current active project.
 
     Returns:
         The full markdown content of the note if found, or helpful guidance if not found.
@@ -48,38 +42,10 @@ async def read_note(
 
         # Read with pagination
         read_note("Project Updates", page=2, page_size=5)
-
-        # Read from specific project
-        read_note("Meeting Notes", project="work-project")
     """
-
-    # Get the active project first to check project-specific sync status
-    active_project = get_active_project(project)
-
-    # Check migration status and wait briefly if needed
-    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
-
-    migration_status = await wait_for_migration_or_return_status(
-        timeout=5.0, project_name=active_project.name
-    )
-    if migration_status:  # pragma: no cover
-        return f"# System Status\n\n{migration_status}\n\nPlease wait for migration to complete before reading notes."
-    project_url = active_project.project_url
-
     # Get the file via REST API - first try direct permalink lookup
     entity_path = memory_url_path(identifier)
-
-    # Validate path to prevent path traversal attacks
-    project_path = active_project.home
-    if not validate_project_path(entity_path, project_path):
-        logger.warning(
-            "Attempted path traversal attack blocked",
-            identifier=identifier,
-            entity_path=entity_path,
-            project=active_project.name,
-        )
-        return f"# Error\n\nPath '{identifier}' is not allowed - paths must stay within project boundaries"
-    path = f"{project_url}/resource/{entity_path}"
+    path = f"/resource/{entity_path}"
     logger.info(f"Attempting to read note from URL: {path}")
 
     try:
@@ -96,14 +62,14 @@ async def read_note(
 
     # Fallback 1: Try title search via API
     logger.info(f"Search title for: {identifier}")
-    title_results = await search_notes.fn(query=identifier, search_type="title", project=project)
+    title_results = await search_notes(query=identifier, search_type="title")
 
     if title_results and title_results.results:
         result = title_results.results[0]  # Get the first/best match
         if result.permalink:
             try:
                 # Try to fetch the content using the found permalink
-                path = f"{project_url}/resource/{result.permalink}"
+                path = f"/resource/{result.permalink}"
                 response = await call_get(
                     client, path, params={"page": page, "page_size": page_size}
                 )
@@ -120,7 +86,7 @@ async def read_note(
 
     # Fallback 2: Text search as a last resort
     logger.info(f"Title search failed, trying text search for: {identifier}")
-    text_results = await search_notes.fn(query=identifier, search_type="text", project=project)
+    text_results = await search_notes(query=identifier, search_type="text")
 
     # We didn't find a direct match, construct a helpful error message
     if not text_results or not text_results.results:
@@ -136,7 +102,7 @@ def format_not_found_message(identifier: str) -> str:
     return dedent(f"""
         # Note Not Found: "{identifier}"
         
-        I searched for "{identifier}" using multiple methods (direct lookup, title search, and text search) but couldn't find any matching notes. Here are some suggestions:
+        I couldn't find any notes matching "{identifier}". Here are some suggestions:
         
         ## Check Identifier Type
         - If you provided a title, try using the exact permalink instead
@@ -182,7 +148,7 @@ def format_related_results(identifier: str, results) -> str:
     message = dedent(f"""
         # Note Not Found: "{identifier}"
         
-        I searched for "{identifier}" using direct lookup and title search but couldn't find an exact match. However, I found some related notes through text search:
+        I couldn't find an exact match for "{identifier}", but I found some related notes:
         
         """)
 

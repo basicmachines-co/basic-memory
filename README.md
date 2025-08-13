@@ -13,11 +13,8 @@ Basic Memory lets you build persistent knowledge through natural conversations w
 Claude, while keeping everything in simple Markdown files on your computer. It uses the Model Context Protocol (MCP) to
 enable any compatible LLM to read and write to your local knowledge base.
 
-- Website: https://basicmemory.com
-- Company: https://basicmachines.co
+- Website: https://basicmachines.co
 - Documentation: https://memory.basicmachines.co
-- Discord: https://discord.gg/tyvKNccgqN
-- YouTube: https://www.youtube.com/@basicmachines-co
 
 ## Pick up your conversation right where you left off
 
@@ -32,10 +29,6 @@ https://github.com/user-attachments/assets/a55d8238-8dd0-454a-be4c-8860dbbd0ddc
 ```bash
 # Install with uv (recommended)
 uv tool install basic-memory
-
-# or with Homebrew
-brew tap basicmachines-co/basic-memory
-brew install basic-memory
 
 # Configure Claude Desktop (edit ~/Library/Application Support/Claude/claude_desktop_config.json)
 # Add this to your config:
@@ -68,14 +61,8 @@ Memory for Claude Desktop:
 npx -y @smithery/cli install @basicmachines-co/basic-memory --client claude
 ```
 
-This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. Note: The Smithery installation uses their hosted MCP server, while your data remains stored locally as Markdown files.
-
-### Add to Cursor
-
-Once you have installed Basic Memory revisit this page for the 1-click installer for Cursor:
-
-[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=basic-memory&config=eyJjb21tYW5kIjoiL1VzZXJzL2RyZXcvLmxvY2FsL2Jpbi91dnggYmFzaWMtbWVtb3J5IG1jcCJ9)
-
+This installs and configures Basic Memory without requiring manual edits to the Claude Desktop configuration file. The
+Smithery server hosts the MCP server component, while your data remains stored locally as Markdown files.
 
 ### Glama.ai
 
@@ -166,8 +153,7 @@ The note embeds semantic content and links to other topics via simple Markdown f
 
 3. You see this file on your computer in real time in the current project directory (default `~/$HOME/basic-memory`).
 
-- Realtime sync is enabled by default starting with v0.12.0
-- Project switching during conversations is supported starting with v0.13.0
+- Realtime sync can be enabled via running `basic-memory sync --watch`
 
 4. In a chat with the LLM, you can reference a topic:
 
@@ -225,7 +211,7 @@ title: <Entity title>
 type: <The type of Entity> (e.g. note)
 permalink: <a uri slug>
 
-- <optional metadata> (such as tags)
+- <optional metadata> (such as tags) 
 ```
 
 ### Observations
@@ -277,13 +263,6 @@ Examples of relations:
 ```
 
 ## Using with VS Code
-For one-click installation, click one of the install buttons below...
-
-[![Install with UV in VS Code](https://img.shields.io/badge/VS_Code-UV-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=basic-memory&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22basic-memory%22%2C%22mcp%22%5D%7D) [![Install with UV in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-UV-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=basic-memory&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22basic-memory%22%2C%22mcp%22%5D%7D&quality=insiders)
-
-You can use Basic Memory with VS Code to easily retrieve and store information while coding. Click the installation buttons above for one-click setup, or follow the manual installation instructions below.
-
-### Manual Installation
 
 Add the following JSON block to your User Settings (JSON) file in VS Code. You can do this by pressing `Ctrl + Shift + P` and typing `Preferences: Open User Settings (JSON)`.
 
@@ -313,6 +292,8 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
 }
 ```
 
+You can use Basic Memory with VS Code to easily retrieve and store information while coding.
+
 ## Using with Claude Desktop
 
 Basic Memory is built using the MCP (Model Context Protocol) and works with the Claude desktop app (https://claude.ai/):
@@ -336,8 +317,7 @@ for OS X):
 }
 ```
 
-If you want to use a specific project (see [Multiple Projects](docs/User%20Guide.md#multiple-projects)), update your
-Claude Desktop
+If you want to use a specific project (see [Multiple Projects](#multiple-projects) below), update your Claude Desktop
 config:
 
 ```json
@@ -347,9 +327,9 @@ config:
       "command": "uvx",
       "args": [
         "basic-memory",
+        "mcp",
         "--project",
-        "your-project-name",
-        "mcp"
+        "your-project-name"
       ]
     }
   }
@@ -358,27 +338,23 @@ config:
 
 2. Sync your knowledge:
 
-Basic Memory will sync the files in your project in real time if you make manual edits.
+```bash
+# One-time sync of local knowledge updates
+basic-memory sync
+
+# Run realtime sync process (recommended)
+basic-memory sync --watch
+```
 
 3. In Claude Desktop, the LLM can now use these tools:
 
 ```
 write_note(title, content, folder, tags) - Create or update notes
 read_note(identifier, page, page_size) - Read notes by title or permalink
-edit_note(identifier, operation, content) - Edit notes incrementally (append, prepend, find/replace)
-move_note(identifier, destination_path) - Move notes with database consistency
-view_note(identifier) - Display notes as formatted artifacts for better readability
 build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
-search_notes(query, page, page_size) - Search across your knowledge base
+search(query, page, page_size) - Search across your knowledge base
 recent_activity(type, depth, timeframe) - Find recently updated information
 canvas(nodes, edges, title, folder) - Generate knowledge visualizations
-list_memory_projects() - List all available projects with status
-switch_project(project_name) - Switch to different project context
-get_current_project() - Show current project and statistics
-create_memory_project(name, path, set_default) - Create new projects
-delete_project(name) - Delete projects from configuration
-set_default_project(name) - Set default project
-sync_status() - Check file synchronization status
 ```
 
 5. Example prompts to try:
@@ -389,10 +365,6 @@ sync_status() - Check file synchronization status
 "Create a canvas visualization of my project components"
 "Read my notes on the authentication system"
 "What have I been working on in the past week?"
-"Switch to my work-notes project"
-"List all my available projects"
-"Edit my coffee brewing note to add a new technique"
-"Move my old meeting notes to the archive folder"
 ```
 
 ## Futher info
@@ -403,49 +375,6 @@ See the [Documentation](https://memory.basicmachines.co/) for more info, includi
 - [CLI tools](https://memory.basicmachines.co/docs/cli-reference)
 - [Managing multiple Projects](https://memory.basicmachines.co/docs/cli-reference#project)
 - [Importing data from OpenAI/Claude Projects](https://memory.basicmachines.co/docs/cli-reference#import)
-
-## Installation Options
-
-### Stable Release
-```bash
-pip install basic-memory
-```
-
-### Beta/Pre-releases
-```bash
-pip install basic-memory --pre
-```
-
-### Development Builds
-Development versions are automatically published on every commit to main with versions like `0.12.4.dev26+468a22f`:
-```bash
-pip install basic-memory --pre --force-reinstall
-```
-
-### Docker
-
-Run Basic Memory in a container with volume mounting for your Obsidian vault:
-
-```bash
-# Clone and start with Docker Compose
-git clone https://github.com/basicmachines-co/basic-memory.git
-cd basic-memory
-
-# Edit docker-compose.yml to point to your Obsidian vault
-# Then start the container
-docker-compose up -d
-```
-
-Or use Docker directly:
-```bash
-docker run -d \
-  --name basic-memory-server \
-  -v /path/to/your/obsidian-vault:/data/knowledge:rw \
-  -v basic-memory-config:/root/.basic-memory:rw \
-  ghcr.io/basicmachines-co/basic-memory:latest
-```
-
-See [Docker Setup Guide](docs/Docker.md) for detailed configuration options, multiple project setup, and integration examples.
 
 ## License
 
