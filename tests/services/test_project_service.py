@@ -167,7 +167,7 @@ async def test_get_project_info(project_service: ProjectService, test_graph, tes
 async def test_add_project_async(project_service: ProjectService, tmp_path):
     """Test adding a project with the updated async method."""
     test_project_name = f"test-async-project-{os.urandom(4).hex()}"
-    test_project_path = str(tmp_path / "test-async-project")
+    test_project_path = (tmp_path / "test-async-project").as_posix()
 
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
@@ -243,7 +243,7 @@ async def test_set_default_project_async(project_service: ProjectService, tmp_pa
 async def test_get_project_method(project_service: ProjectService, tmp_path):
     """Test the get_project method directly."""
     test_project_name = f"test-get-project-{os.urandom(4).hex()}"
-    test_project_path = str(tmp_path / "test-get-project")
+    test_project_path = (tmp_path / "test-get-project").as_posix()
 
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
@@ -539,8 +539,8 @@ async def test_synchronize_projects_normalizes_project_names(
 async def test_move_project(project_service: ProjectService, tmp_path):
     """Test moving a project to a new location."""
     test_project_name = f"test-move-project-{os.urandom(4).hex()}"
-    old_path = str(tmp_path / "old-location")
-    new_path = str(tmp_path / "new-location")
+    old_path = (tmp_path / "old-location").as_posix()
+    new_path = (tmp_path / "new-location").as_posix()
 
     # Create old directory
     os.makedirs(old_path, exist_ok=True)

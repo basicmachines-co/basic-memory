@@ -46,7 +46,7 @@ class ProjectRepository(Repository[Project]):
         Args:
             path: Path to the project directory (will be converted to string internally)
         """
-        query = self.select().where(Project.path == str(path))
+        query = self.select().where(Project.path == Path(path).as_posix())
         return await self.find_one(query)
 
     async def get_default_project(self) -> Optional[Project]:

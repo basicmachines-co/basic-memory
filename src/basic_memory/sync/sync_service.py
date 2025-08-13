@@ -619,7 +619,7 @@ class SyncService:
                     continue
 
                 path = Path(root) / filename
-                rel_path = str(path.relative_to(directory))
+                rel_path = path.relative_to(directory).as_posix()
                 checksum = await self.file_service.compute_checksum(rel_path)
                 result.files[rel_path] = checksum
                 result.checksums[checksum] = rel_path

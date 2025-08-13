@@ -197,7 +197,7 @@ class WatchService:
 
         for change, path in changes:
             # convert to relative path
-            relative_path = str(Path(path).relative_to(directory))
+            relative_path = Path(path).relative_to(directory).as_posix()
 
             # Skip .tmp files - they're temporary and shouldn't be synced
             if relative_path.endswith(".tmp"):

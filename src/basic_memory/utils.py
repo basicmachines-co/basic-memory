@@ -45,7 +45,7 @@ def generate_permalink(file_path: Union[Path, str, Any]) -> str:
         '中文/测试文档'
     """
     # Convert Path to string if needed
-    path_str = str(file_path)
+    path_str = Path(str(file_path)).as_posix()
 
     # Remove extension
     base = os.path.splitext(path_str)[0]
@@ -315,3 +315,15 @@ def validate_project_path(path: str, project_path: Path) -> bool:
         return resolved.is_relative_to(project_path.resolve())
     except (ValueError, OSError):
         return False
+
+
+def normalize_newlines(multiline: str) -> str:
+    """Replace any \r\n, \r, or \n with the native newline.
+
+    Args:
+        multiline: String containing any mixture of newlines.
+
+    Returns:
+        A string with normalized newlines native to the platform.
+    """
+    return re.sub(r'\r\n?|\n', os.linesep, multiline)
