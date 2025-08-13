@@ -74,7 +74,7 @@ def add_project(
 ) -> None:
     """Add a new project."""
     # Resolve to absolute path
-    resolved_path = os.path.abspath(os.path.expanduser(path))
+    resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
 
     try:
         data = {"name": name, "path": resolved_path, "set_default": set_default}
@@ -156,7 +156,7 @@ def move_project(
 ) -> None:
     """Move a project to a new location."""
     # Resolve to absolute path
-    resolved_path = os.path.abspath(os.path.expanduser(new_path))
+    resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
 
     try:
         data = {"path": resolved_path}

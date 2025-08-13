@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import Executable, Result, text
@@ -59,8 +60,11 @@ class SearchIndexRow:
         if not self.type == SearchItemType.ENTITY.value and not self.file_path:
             return ""
 
+        # Normalize path separators to handle both Windows (\) and Unix (/) paths
+        normalized_path = Path(self.file_path).as_posix()
+        
         # Split the path by slashes
-        parts = self.file_path.split("/")
+        parts = normalized_path.split("/")
 
         # If there's only one part (e.g., "README.md"), it's at the root
         if len(parts) <= 1:

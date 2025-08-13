@@ -100,7 +100,7 @@ class ProjectService:
             raise ValueError("Repository is required for add_project")
 
         # Resolve to absolute path
-        resolved_path = os.path.abspath(os.path.expanduser(path))
+        resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
 
         # First add to config file (this will validate the project doesn't exist)
         project_config = self.config_manager.add_project(name, resolved_path)
@@ -323,7 +323,7 @@ class ProjectService:
             raise ValueError("Repository is required for move_project")
 
         # Resolve to absolute path
-        resolved_path = os.path.abspath(os.path.expanduser(new_path))
+        resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
 
         # Validate project exists in config
         if name not in self.config_manager.projects:
@@ -378,7 +378,7 @@ class ProjectService:
 
         # Update path if provided
         if updated_path:
-            resolved_path = os.path.abspath(os.path.expanduser(updated_path))
+            resolved_path = Path(os.path.abspath(os.path.expanduser(updated_path))).as_posix()
 
             # Update in config
             config = self.config_manager.load_config()

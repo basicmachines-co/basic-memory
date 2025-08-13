@@ -592,7 +592,7 @@ async def test_create_with_no_frontmatter(
     created = await entity_service.create_entity_from_markdown(file_path, entity_markdown)
     file_content, _ = await file_service.read_file(created.file_path)
 
-    assert str(file_path) == str(created.file_path)
+    assert file_path.as_posix() == created.file_path
     assert created.title == "Git Workflow Guide"
     assert created.entity_type == "note"
     assert created.permalink is None
@@ -898,7 +898,7 @@ async def test_create_entity_from_markdown_with_upsert(
     # Verify it created the entity successfully using the UPSERT approach
     assert result is not None
     assert result.title == "UPSERT Test"
-    assert result.file_path == str(file_path)
+    assert result.file_path == file_path.as_posix()
     # create_entity_from_markdown sets checksum to None (incomplete sync)
     assert result.checksum is None
 

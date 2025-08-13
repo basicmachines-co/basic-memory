@@ -91,7 +91,7 @@ class EntityService(BaseService[EntityModel]):
 
         Enhanced to detect and handle character-related conflicts.
         """
-        file_path_str = str(file_path)
+        file_path_str = Path(file_path).as_posix()
 
         # Check for potential file path conflicts before resolving permalink
         conflicts = await self.detect_file_path_conflicts(file_path_str)
@@ -119,7 +119,7 @@ class EntityService(BaseService[EntityModel]):
         if markdown and markdown.frontmatter.permalink:
             desired_permalink = markdown.frontmatter.permalink
         else:
-            desired_permalink = generate_permalink(file_path)
+            desired_permalink = generate_permalink(file_path_str)
 
         # Make unique if needed - enhanced to handle character conflicts
         permalink = desired_permalink
@@ -283,7 +283,7 @@ class EntityService(BaseService[EntityModel]):
         entity = await self.update_entity_and_observations(file_path, entity_markdown)
 
         # add relations
-        await self.update_entity_relations(str(file_path), entity_markdown)
+        await self.update_entity_relations(file_path.as_posix(), entity_markdown)
 
         # Set final checksum to match file
         entity = await self.repository.update(entity.id, {"checksum": checksum})
@@ -374,7 +374,7 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        db_entity = await self.repository.get_by_file_path(str(file_path))
+        db_entity = await self.repository.get_by_file_path(file_path.as_posix())
 
         # Clear observations for entity
         await self.observation_repository.delete_by_fields(entity_id=db_entity.id)
@@ -498,7 +498,7 @@ class EntityService(BaseService[EntityModel]):
 
         # Update entity and its relationships
         entity = await self.update_entity_and_observations(file_path, entity_markdown)
-        await self.update_entity_relations(str(file_path), entity_markdown)
+        await self.update_entity_relations(file_path.as_posix(), entity_markdown)
 
         # Set final checksum to match file
         entity = await self.repository.update(entity.id, {"checksum": checksum})

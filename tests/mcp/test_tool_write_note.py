@@ -4,6 +4,7 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note, delete_note
+from basic_memory.utils import normalize_newlines
 
 
 @pytest.mark.asyncio
@@ -33,7 +34,7 @@ async def test_write_note(app):
     # Try reading it back via permalink
     content = await read_note.fn("test/test-note")
     assert (
-        dedent("""
+        normalize_newlines(dedent("""
         ---
         title: Test Note
         type: note
@@ -45,7 +46,7 @@ async def test_write_note(app):
         
         # Test
         This is a test note
-        """).strip()
+        """).strip())
         in content
     )
 
@@ -62,7 +63,7 @@ async def test_write_note_no_tags(app):
     # Should be able to read it back
     content = await read_note.fn("test/simple-note")
     assert (
-        dedent("""
+        normalize_newlines(dedent("""
         ---
         title: Simple Note
         type: note
@@ -70,7 +71,7 @@ async def test_write_note_no_tags(app):
         ---
         
         Just some text
-        """).strip()
+        """).strip())
         in content
     )
 
@@ -114,7 +115,7 @@ async def test_write_note_update_existing(app):
     # Try reading it back
     content = await read_note.fn("test/test-note")
     assert (
-        dedent(
+        normalize_newlines(dedent(
             """
         ---
         title: Test Note
@@ -128,7 +129,7 @@ async def test_write_note_update_existing(app):
         # Test
         This is an updated note
         """
-        ).strip()
+        ).strip())
         == content
     )
 
@@ -393,7 +394,7 @@ async def test_write_note_preserves_content_frontmatter(app):
     # Try reading it back via permalink
     content = await read_note.fn("test/test-note")
     assert (
-        dedent(
+        normalize_newlines(dedent(
             """
             ---
             title: Test Note
@@ -410,7 +411,7 @@ async def test_write_note_preserves_content_frontmatter(app):
             
             This is a test note
             """
-        ).strip()
+        ).strip())
         in content
     )
 
@@ -497,7 +498,7 @@ async def test_write_note_with_custom_entity_type(app):
     # Verify the entity type is correctly set in the frontmatter
     content = await read_note.fn("guides/test-guide")
     assert (
-        dedent("""
+        normalize_newlines(dedent("""
         ---
         title: Test Guide
         type: guide
@@ -509,7 +510,7 @@ async def test_write_note_with_custom_entity_type(app):
         
         # Guide Content
         This is a guide
-        """).strip()
+        """).strip())
         in content
     )
 
