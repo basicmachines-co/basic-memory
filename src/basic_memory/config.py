@@ -25,6 +25,7 @@ Environment = Literal["test", "dev", "user"]
 
 load_dotenv()
 
+
 @dataclass
 class ProjectConfig:
     """Configuration for a specific basic-memory project."""

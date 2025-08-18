@@ -28,32 +28,32 @@ from basic_memory.mcp.tools.headers import inject_auth_header, get_base_url_from
 
 def resolve_url(client: AsyncClient, url: URL | str) -> str:
     """Resolve URL by combining base URL from headers with the provided URL.
-    
+
     Args:
         client: The AsyncClient to check for base URL
         url: The URL to resolve
-        
+
     Returns:
         Fully resolved URL string
     """
     url_str = str(url)
-    
+
     # If the URL is already absolute, return as-is
-    if url_str.startswith(('http://', 'https://')):
+    if url_str.startswith(("http://", "https://")):
         return url_str
-    
+
     # If client has a base URL, use it
     if client.base_url and str(client.base_url) != "":
         return str(client.build_request("GET", url).url)
-    
+
     # Otherwise, get base URL from headers and construct full URL
     base_url = get_base_url_from_headers()
     if base_url:
         # Ensure URL starts with / for proper joining
-        if not url_str.startswith('/'):
-            url_str = '/' + url_str
+        if not url_str.startswith("/"):
+            url_str = "/" + url_str
         return base_url + url_str
-    
+
     # Fallback - return the URL as-is (this may fail, but let httpx handle it)
     return url_str
 
