@@ -11,6 +11,7 @@ from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
+from basic_memory.utils import validate_project_path
 
 
 @mcp.tool(
@@ -54,6 +55,20 @@ async def read_note(
 
     # Get the active project first to check project-specific sync status
     active_project = get_active_project(project)
+
+    # Validate identifier to prevent path traversal attacks
+    # We need to check both the raw identifier and the processed path
+    processed_path = memory_url_path(identifier)
+    project_path = active_project.home
+    
+    if not validate_project_path(identifier, project_path) or not validate_project_path(processed_path, project_path):
+        logger.warning(
+            "Attempted path traversal attack blocked",
+            identifier=identifier,
+            processed_path=processed_path,
+            project=active_project.name,
+        )
+        return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
 
     # Check migration status and wait briefly if needed
     from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
