@@ -53,26 +53,53 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
     # Remove extension
     base = os.path.splitext(path_str)[0]
 
-    # Check if we have non-ASCII characters that should be preserved
-    has_non_ascii = any(ord(char) > 127 for char in base)
+    # Check if we have CJK characters that should be preserved
+    # CJK ranges: \u4e00-\u9fff (CJK Unified Ideographs), \u3000-\u303f (CJK symbols), 
+    # \u3400-\u4dbf (CJK Extension A), \uff00-\uffef (Fullwidth forms)
+    has_cjk_chars = any(
+        '\u4e00' <= char <= '\u9fff' or 
+        '\u3000' <= char <= '\u303f' or 
+        '\u3400' <= char <= '\u4dbf' or
+        '\uff00' <= char <= '\uffef'
+        for char in base
+    )
     
-    if has_non_ascii:
-        # Preserve non-ASCII characters like Chinese while still processing ASCII parts
-        result = base
+    if has_cjk_chars:
+        # For text with CJK characters, selectively transliterate only Latin accented chars
+        result = ""
+        for char in base:
+            if ('\u4e00' <= char <= '\u9fff' or 
+                '\u3000' <= char <= '\u303f' or 
+                '\u3400' <= char <= '\u4dbf'):
+                # Preserve CJK ideographs and symbols
+                result += char
+            elif ('\uff00' <= char <= '\uffef'):
+                # Remove Chinese fullwidth punctuation entirely (like ，！？)
+                continue
+            else:
+                # Transliterate Latin accented characters to ASCII
+                result += unidecode(char)
+        
+        # Insert hyphens between CJK and Latin character transitions
+        # Match: CJK followed by Latin letter/digit, or Latin letter/digit followed by CJK
+        result = re.sub(r'([\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf])([a-zA-Z0-9])', r'\1-\2', result)
+        result = re.sub(r'([a-zA-Z0-9])([\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf])', r'\1-\2', result)
         
         # Insert dash between camelCase
         result = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", result)
         
-        # Convert only ASCII letters to lowercase, preserve non-ASCII
+        # Convert ASCII letters to lowercase, preserve CJK
         lower_text = "".join(c.lower() if c.isascii() and c.isalpha() else c for c in result)
         
         # Replace underscores with hyphens
         text_with_hyphens = lower_text.replace("_", "-")
         
-        # Replace spaces and unsafe ASCII chars with hyphens, preserve non-ASCII chars
-        # Includes Chinese character ranges (CJK Unified Ideographs, CJK symbols, etc.)
+        # Remove apostrophes entirely (don't replace with hyphens)
+        text_no_apostrophes = text_with_hyphens.replace("'", "")
+        
+        # Replace unsafe chars with hyphens, but preserve CJK characters
         clean_text = re.sub(
-            r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-]", "-", text_with_hyphens
+            r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-]", "-", text_no_apostrophes
         )
     else:
         # Original ASCII-only processing for backward compatibility
@@ -88,8 +115,11 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
         # replace underscores with hyphens
         text_with_hyphens = lower_text.replace("_", "-")
 
+        # Remove apostrophes entirely (don't replace with hyphens)
+        text_no_apostrophes = text_with_hyphens.replace("'", "")
+
         # Replace remaining invalid chars with hyphens
-        clean_text = re.sub(r"[^a-z0-9/\-]", "-", text_with_hyphens)
+        clean_text = re.sub(r"[^a-z0-9/\-]", "-", text_no_apostrophes)
 
     # Collapse multiple hyphens
     clean_text = re.sub(r"-+", "-", clean_text)
@@ -187,3 +217,105 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     except (ValueError, TypeError):  # pragma: no cover
         logger.warning(f"Couldn't parse tags from input of type {type(tags)}: {tags}")
         return []
+
+
+def normalize_file_path_for_comparison(file_path: str) -> str:
+    """Normalize a file path for conflict detection.
+    
+    This function normalizes file paths to help detect potential conflicts:
+    - Converts to lowercase for case-insensitive comparison
+    - Normalizes Unicode characters
+    - Handles path separators consistently
+    
+    Args:
+        file_path: The file path to normalize
+        
+    Returns:
+        Normalized file path for comparison purposes
+    """
+    import unicodedata
+    
+    # Convert to lowercase for case-insensitive comparison
+    normalized = file_path.lower()
+    
+    # Normalize Unicode characters (NFD normalization)
+    normalized = unicodedata.normalize('NFD', normalized)
+    
+    # Replace path separators with forward slashes
+    normalized = normalized.replace('\\', '/')
+    
+    # Remove multiple slashes
+    normalized = re.sub(r'/+', '/', normalized)
+    
+    return normalized
+
+
+def detect_potential_file_conflicts(file_path: str, existing_paths: List[str]) -> List[str]:
+    """Detect potential conflicts between a file path and existing paths.
+    
+    This function checks for various types of conflicts:
+    - Case sensitivity differences
+    - Unicode normalization differences
+    - Path separator differences
+    - Permalink generation conflicts
+    
+    Args:
+        file_path: The file path to check
+        existing_paths: List of existing file paths to check against
+        
+    Returns:
+        List of existing paths that might conflict with the given file path
+    """
+    conflicts = []
+    
+    # Normalize the input file path
+    normalized_input = normalize_file_path_for_comparison(file_path)
+    input_permalink = generate_permalink(file_path)
+    
+    for existing_path in existing_paths:
+        # Skip identical paths
+        if existing_path == file_path:
+            continue
+            
+        # Check for case-insensitive path conflicts
+        normalized_existing = normalize_file_path_for_comparison(existing_path)
+        if normalized_input == normalized_existing:
+            conflicts.append(existing_path)
+            continue
+            
+        # Check for permalink conflicts
+        existing_permalink = generate_permalink(existing_path)
+        if input_permalink == existing_permalink:
+            conflicts.append(existing_path)
+            continue
+    
+    return conflicts
+
+
+def validate_project_path(path: str, project_path: Path) -> bool:
+    """Ensure path stays within project boundaries."""
+    # Allow empty strings as they resolve to the project root
+    if not path:
+        return True
+
+    # Check for obvious path traversal patterns first
+    if ".." in path or "~" in path:
+        return False
+
+    # Check for Windows-style path traversal (even on Unix systems)
+    if "\\.." in path or path.startswith("\\"):
+        return False
+
+    # Block absolute paths (Unix-style starting with / or Windows-style with drive letters)
+    if path.startswith("/") or (len(path) >= 2 and path[1] == ":"):
+        return False
+
+    # Block paths with control characters (but allow whitespace that will be stripped)
+    if path.strip() and any(ord(c) < 32 and c not in [" ", "\t"] for c in path):
+        return False
+
+    try:
+        resolved = (project_path / path).resolve()
+        return resolved.is_relative_to(project_path.resolve())
+    except (ValueError, OSError):
+        return False

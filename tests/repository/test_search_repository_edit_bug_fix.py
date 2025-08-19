@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 
-from basic_memory.models import Entity
 from basic_memory.models.project import Project
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.search import SearchItemType
@@ -43,7 +42,6 @@ async def test_index_item_respects_project_isolation_during_edit():
     causing notes to disappear from the search index.
     """
     from basic_memory import db
-    from basic_memory.models.project import Project
     from basic_memory.repository.search_repository import SearchRepository
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -180,7 +178,6 @@ async def test_index_item_respects_project_isolation_during_edit():
 async def test_index_item_updates_existing_record_same_project():
     """Test that index_item() correctly updates existing records within the same project."""
     from basic_memory import db
-    from basic_memory.models.project import Project
     from basic_memory.repository.search_repository import SearchRepository
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
