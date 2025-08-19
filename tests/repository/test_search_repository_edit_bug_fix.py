@@ -42,6 +42,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     causing notes to disappear from the search index.
     """
     from basic_memory import db
+    from basic_memory.models.base import Base
     from basic_memory.repository.search_repository import SearchRepository
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -51,7 +52,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     
     # Create the database schema
     async with engine.begin() as conn:
-        await conn.run_sync(db.Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.create_all)
     
     # Create two projects
     async with db.scoped_session(session_maker) as session:
@@ -178,6 +179,7 @@ async def test_index_item_respects_project_isolation_during_edit():
 async def test_index_item_updates_existing_record_same_project():
     """Test that index_item() correctly updates existing records within the same project."""
     from basic_memory import db
+    from basic_memory.models.base import Base
     from basic_memory.repository.search_repository import SearchRepository
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
@@ -187,7 +189,7 @@ async def test_index_item_updates_existing_record_same_project():
     
     # Create the database schema
     async with engine.begin() as conn:
-        await conn.run_sync(db.Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.create_all)
     
     # Create one project
     async with db.scoped_session(session_maker) as session:
