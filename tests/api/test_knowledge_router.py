@@ -189,6 +189,7 @@ async def test_get_entity_by_permalink(client: AsyncClient, project_url):
     # Verify retrieval
     assert response.status_code == 200
     entity = response.json()
+    assert entity["title"] == "TestEntity"
     assert entity["file_path"] == "test/TestEntity.md"
     assert entity["entity_type"] == "test"
     assert entity["permalink"] == "test/test-entity"
@@ -210,6 +211,7 @@ async def test_get_entity_by_file_path(client: AsyncClient, project_url):
     # Verify retrieval
     assert response.status_code == 200
     entity = response.json()
+    assert entity["title"] == "TestEntity"
     assert entity["file_path"] == "test/TestEntity.md"
     assert entity["entity_type"] == "test"
     assert entity["permalink"] == "test/test-entity"
