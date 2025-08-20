@@ -114,3 +114,23 @@ async def test_build_context_timeframe_formats(client, test_graph):
     for timeframe in invalid_timeframes:
         with pytest.raises(ToolError):
             await build_context.fn(url=test_url, timeframe=timeframe)
+
+
+@pytest.mark.asyncio
+async def test_build_context_string_depth_parameter(client, test_graph):
+    """Test that build_context handles string depth parameter correctly."""
+    test_url = "memory://test/root"
+    
+    # Test valid string depth parameter - should either raise ToolError or convert to int
+    try:
+        result = await build_context.fn(url=test_url, depth="2")
+        # If it succeeds, verify the depth was converted to an integer
+        assert isinstance(result.metadata.depth, int)
+        assert result.metadata.depth == 2
+    except ToolError:
+        # This is also acceptable behavior - type validation should catch it
+        pass
+    
+    # Test invalid string depth parameter - should raise ToolError
+    with pytest.raises(ToolError):
+        await build_context.fn(url=test_url, depth="invalid")
