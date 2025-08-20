@@ -1,6 +1,8 @@
 """Test for project removal bug #254."""
 
 import os
+from datetime import timezone, datetime
+
 import pytest
 
 from basic_memory.services.project_service import ProjectService
@@ -41,7 +43,9 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
             "project_id": project.id,
             "permalink": "test-deletion-entity",
             "file_path": "test-deletion-entity.md",
-            "checksum": "test123"
+            "checksum": "test123",
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
         }
         entity = await entity_repo.create(entity_data)
         assert entity is not None
