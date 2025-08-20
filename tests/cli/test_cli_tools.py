@@ -321,6 +321,41 @@ def test_build_context_with_options(cli_env, setup_test_note):
     assert found, "Context did not include the test note"
 
 
+def test_build_context_string_depth_parameter(cli_env, setup_test_note):
+    """Test build_context command handles string depth parameter correctly."""
+    permalink = setup_test_note["permalink"]
+
+    # Test valid string depth parameter - Typer should convert it to int
+    result = runner.invoke(
+        tool_app,
+        [
+            "build-context",
+            f"memory://{permalink}",
+            "--depth",
+            "2",  # This is always a string from CLI
+        ],
+    )
+    assert result.exit_code == 0
+
+    # Result should be JSON containing our test note with correct depth
+    context_result = json.loads(result.stdout)
+    assert context_result["metadata"]["depth"] == 2
+
+    # Test invalid string depth parameter - should fail with Typer validation error
+    result = runner.invoke(
+        tool_app,
+        [
+            "build-context",
+            f"memory://{permalink}",
+            "--depth",
+            "invalid",
+        ],
+    )
+    assert result.exit_code == 2  # Typer exits with code 2 for parameter validation errors
+    # Typer should show a usage error for invalid integer
+    assert "invalid" in result.stderr and "is not a valid" in result.stderr and "integer" in result.stderr
+
+
 # The get-entity CLI command was removed when tools were refactored
 # into separate files with improved error handling
 

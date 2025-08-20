@@ -1,6 +1,6 @@
 """Build context tool for Basic Memory MCP server."""
 
-from typing import Optional
+from typing import Optional, Union
 
 from loguru import logger
 
@@ -35,7 +35,7 @@ from basic_memory.schemas.memory import (
 )
 async def build_context(
     url: MemoryUrl,
-    depth: Optional[int] = 1,
+    depth: Optional[Union[int, str]] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
     page_size: int = 10,
@@ -80,6 +80,15 @@ async def build_context(
         build_context("memory://specs/search", project="work-project")
     """
     logger.info(f"Building context from {url}")
+    
+    # Convert string depth to integer if needed
+    if isinstance(depth, str):
+        try:
+            depth = int(depth)
+        except ValueError:
+            from mcp.server.fastmcp.exceptions import ToolError
+            raise ToolError(f"Invalid depth parameter: '{depth}' is not a valid integer")
+    
     # URL is already validated and normalized by MemoryUrl type annotation
 
     # Get the active project first to check project-specific sync status
