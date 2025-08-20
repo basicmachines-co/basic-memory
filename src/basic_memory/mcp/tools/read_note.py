@@ -56,6 +56,20 @@ async def read_note(
     # Get the active project first to check project-specific sync status
     active_project = get_active_project(project)
 
+    # Validate identifier to prevent path traversal attacks
+    # We need to check both the raw identifier and the processed path
+    processed_path = memory_url_path(identifier)
+    project_path = active_project.home
+    
+    if not validate_project_path(identifier, project_path) or not validate_project_path(processed_path, project_path):
+        logger.warning(
+            "Attempted path traversal attack blocked",
+            identifier=identifier,
+            processed_path=processed_path,
+            project=active_project.name,
+        )
+        return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
+
     # Check migration status and wait briefly if needed
     from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
 
@@ -68,17 +82,6 @@ async def read_note(
 
     # Get the file via REST API - first try direct permalink lookup
     entity_path = memory_url_path(identifier)
-
-    # Validate path to prevent path traversal attacks
-    project_path = active_project.home
-    if not validate_project_path(entity_path, project_path):
-        logger.warning(
-            "Attempted path traversal attack blocked",
-            identifier=identifier,
-            entity_path=entity_path,
-            project=active_project.name,
-        )
-        return f"# Error\n\nPath '{identifier}' is not allowed - paths must stay within project boundaries"
     path = f"{project_url}/resource/{entity_path}"
     logger.info(f"Attempting to read note from URL: {path}")
 
@@ -136,7 +139,7 @@ def format_not_found_message(identifier: str) -> str:
     return dedent(f"""
         # Note Not Found: "{identifier}"
         
-        I searched for "{identifier}" using multiple methods (direct lookup, title search, and text search) but couldn't find any matching notes. Here are some suggestions:
+        I couldn't find any notes matching "{identifier}". Here are some suggestions:
         
         ## Check Identifier Type
         - If you provided a title, try using the exact permalink instead
@@ -182,7 +185,7 @@ def format_related_results(identifier: str, results) -> str:
     message = dedent(f"""
         # Note Not Found: "{identifier}"
         
-        I searched for "{identifier}" using direct lookup and title search but couldn't find an exact match. However, I found some related notes through text search:
+        I couldn't find an exact match for "{identifier}", but I found some related notes:
         
         """)
 
