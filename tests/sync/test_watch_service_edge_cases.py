@@ -1,6 +1,5 @@
 """Test edge cases in the WatchService."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -103,9 +102,8 @@ Modified content after atomic write
     test_file.write_text(modified_content)
 
     # Setup DELETE event even though file still exists (vim's atomic write behavior)
-    # Use relative path like the real watch service would
-    relative_path = str(test_file.relative_to(project_dir))
-    changes = {(Change.deleted, relative_path)}
+    # Use absolute path like the real watch service would
+    changes = {(Change.deleted, str(test_file))}
 
     # Handle the change
     await watch_service.handle_changes(test_project, changes)
@@ -155,12 +153,10 @@ Content for testing
     delete_file.unlink()
 
     # Setup DELETE events for both files
-    # Use relative paths like the real watch service would
-    atomic_relative = str(atomic_file.relative_to(project_dir))
-    delete_relative = str(delete_file.relative_to(project_dir))
+    # Use absolute paths like the real watch service would
     changes = {
-        (Change.deleted, atomic_relative),  # File still exists - atomic write
-        (Change.deleted, delete_relative),  # File deleted - true deletion
+        (Change.deleted, str(atomic_file)),  # File still exists - atomic write
+        (Change.deleted, str(delete_file)),  # File deleted - true deletion
     }
 
     # Handle the changes
@@ -235,9 +231,8 @@ This note links to [[Target Note]] multiple times.
     main_file.write_text(modified_content)
 
     # Setup DELETE event (vim atomic write)
-    # Use relative path like the real watch service would
-    relative_path = str(main_file.relative_to(project_dir))
-    changes = {(Change.deleted, relative_path)}
+    # Use absolute path like the real watch service would
+    changes = {(Change.deleted, str(main_file))}
 
     # Handle the change
     await watch_service.handle_changes(test_project, changes)
@@ -267,9 +262,8 @@ async def test_handle_vim_atomic_write_directory_path_ignored(watch_service, pro
     test_dir.mkdir()
 
     # Setup DELETE event for directory (should be ignored)
-    # Use relative path like the real watch service would
-    relative_path = str(test_dir.relative_to(project_dir))
-    changes = {(Change.deleted, relative_path)}
+    # Use absolute path like the real watch service would
+    changes = {(Change.deleted, str(test_dir))}
 
     # Handle the change - should not cause errors
     await watch_service.handle_changes(test_project, changes)

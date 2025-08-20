@@ -296,6 +296,16 @@ class WatchService:
                     processed.add(path)
                     modify_count += 1
                 else:
+                    # Check if this was a directory - skip if so
+                    # (we can't tell if the deleted path was a directory since it no longer exists,
+                    # so we check if there's an entity in the database for it)
+                    entity = await sync_service.entity_repository.get_by_file_path(path)
+                    if entity is None:
+                        # No entity means this was likely a directory - skip it
+                        logger.debug(f"Skipping deleted path with no entity (likely directory), path={path}")
+                        processed.add(path)
+                        continue
+                    
                     # File truly deleted
                     logger.debug("Processing deleted file", path=path)
                     await sync_service.handle_delete(path)
