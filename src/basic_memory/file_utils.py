@@ -236,7 +236,7 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         raise FileError(f"Failed to update frontmatter: {e}")
 
 
-def sanitize_for_filename(text, replacement="-"):
+def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     """
     Sanitize string to be safe for use as a note title
     Replaces path separators and other problematic characters

@@ -9,6 +9,9 @@ from textwrap import dedent
 
 import pytest
 from fastmcp import Client
+from unittest.mock import patch
+
+from basic_memory.config import ConfigManager
 
 
 @pytest.mark.asyncio
@@ -282,3 +285,64 @@ async def test_write_note_preserve_frontmatter(mcp_server, app):
         assert "# Created note" in response_text
         assert "file_path: test/Frontmatter Note.md" in response_text
         assert "permalink: test/frontmatter-note" in response_text
+
+
+@pytest.mark.asyncio
+async def test_write_note_kebab_filenames_basic(mcp_server):
+    """Test note creation with kebab_filenames=True and invalid filename characters."""
+
+    config = ConfigManager().config
+    curr_config_val = config.kebab_filenames
+    config.kebab_filenames = True
+
+    with patch.object(ConfigManager, "config", config):
+        async with Client(mcp_server) as client:
+            result = await client.call_tool(
+                "write_note",
+                {
+                    "title": "My Note: With/Invalid|Chars?",
+                    "folder": "my-folder",
+                    "content": "Testing kebab-case and invalid characters.",
+                    "tags": "kebab,invalid,filename",
+                },
+            )
+
+            assert len(result.content) == 1
+            response_text = result.content[0].text
+
+            # File path and permalink should be kebab-case and sanitized
+            assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
+            assert "permalink: my-folder/my-note-with-invalid-chars" in response_text
+
+    # Restore original config value
+    config.kebab_filenames = curr_config_val
+
+
+@pytest.mark.asyncio
+async def test_write_note_kebab_filenames_repeat_invalid(mcp_server):
+    """Test note creation with multiple invalid and repeated characters."""
+
+    config = ConfigManager().config
+    curr_config_val = config.kebab_filenames
+    config.kebab_filenames = True
+
+    with patch.object(ConfigManager, "config", config):
+        async with Client(mcp_server) as client:
+            result = await client.call_tool(
+                "write_note",
+                {
+                    "title": 'Crazy<>:"|?*Note/Name',
+                    "folder": "my-folder",
+                    "content": "Should be fully kebab-case and safe.",
+                    "tags": "crazy,filename,test",
+                },
+            )
+
+            assert len(result.content) == 1
+            response_text = result.content[0].text
+
+            assert "file_path: my-folder/crazy-note-name.md" in response_text
+            assert "permalink: my-folder/crazy-note-name" in response_text
+
+    # Restore original config value
+    config.kebab_filenames = curr_config_val
