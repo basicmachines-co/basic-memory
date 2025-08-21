@@ -245,8 +245,8 @@ class ContextService:
         # For compatibility with the old query, we still need this for filtering
         values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
 
-        # Parameters for bindings
-        params = {"max_depth": max_depth, "max_results": max_results}
+        # Parameters for bindings - include project_id for security filtering
+        params = {"max_depth": max_depth, "max_results": max_results, "project_id": self.search_repository.project_id}
 
         # Build date and timeframe filters conditionally based on since parameter
         if since:
@@ -258,6 +258,10 @@ class ContextService:
             date_filter = ""
             relation_date_filter = ""
             timeframe_condition = ""
+        
+        # Add project filtering for security - ensure all entities and relations belong to the same project
+        project_filter = "AND e.project_id = :project_id"
+        relation_project_filter = "AND e_from.project_id = :project_id"
 
         # Use a CTE that operates directly on entity and relation tables
         # This avoids the overhead of the search_index virtual table
@@ -284,6 +288,7 @@ class ContextService:
             FROM entity e
             WHERE e.id IN ({entity_id_values})
             {date_filter}
+            {project_filter}
 
             UNION ALL
 
@@ -314,8 +319,12 @@ class ContextService:
             JOIN entity e_from ON (
                 r.from_id = e_from.id
                 {relation_date_filter}
+                {relation_project_filter}
             )
+            LEFT JOIN entity e_to ON (r.to_id = e_to.id)
             WHERE eg.depth < :max_depth
+            -- Ensure to_entity (if exists) also belongs to same project
+            AND (r.to_id IS NULL OR e_to.project_id = :project_id)
 
             UNION ALL
 
@@ -348,6 +357,7 @@ class ContextService:
                     ELSE eg.from_id
                 END
                 {date_filter}
+                {project_filter}
             )
             WHERE eg.depth < :max_depth
             -- Only include entities connected by relations within timeframe if specified

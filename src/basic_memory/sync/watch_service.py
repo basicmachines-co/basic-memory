@@ -284,13 +284,36 @@ class WatchService:
         # Process deletes
         for path in deletes:
             if path not in processed:
-                logger.debug("Processing deleted file", path=path)
-                await sync_service.handle_delete(path)
-                self.state.add_event(path=path, action="deleted", status="success")
-                self.console.print(f"[red]✕[/red] {path}")
-                logger.info(f"deleted: {path}")
-                processed.add(path)
-                delete_count += 1
+                # Check if file still exists on disk (vim atomic write edge case)
+                full_path = directory / path
+                if full_path.exists() and full_path.is_file():
+                    # File still exists despite DELETE event - treat as modification
+                    logger.debug("File exists despite DELETE event, treating as modification", path=path)
+                    entity, checksum = await sync_service.sync_file(path, new=False)
+                    self.state.add_event(path=path, action="modified", status="success", checksum=checksum)
+                    self.console.print(f"[yellow]✎[/yellow] {path} (atomic write)")
+                    logger.info(f"atomic write detected: {path}")
+                    processed.add(path)
+                    modify_count += 1
+                else:
+                    # Check if this was a directory - skip if so
+                    # (we can't tell if the deleted path was a directory since it no longer exists,
+                    # so we check if there's an entity in the database for it)
+                    entity = await sync_service.entity_repository.get_by_file_path(path)
+                    if entity is None:
+                        # No entity means this was likely a directory - skip it
+                        logger.debug(f"Skipping deleted path with no entity (likely directory), path={path}")
+                        processed.add(path)
+                        continue
+                    
+                    # File truly deleted
+                    logger.debug("Processing deleted file", path=path)
+                    await sync_service.handle_delete(path)
+                    self.state.add_event(path=path, action="deleted", status="success")
+                    self.console.print(f"[red]✕[/red] {path}")
+                    logger.info(f"deleted: {path}")
+                    processed.add(path)
+                    delete_count += 1
 
         # Process adds
         for path in adds:
