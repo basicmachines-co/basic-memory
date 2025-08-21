@@ -1,7 +1,7 @@
 """Schemas for memory context."""
 
 from datetime import datetime
-from typing import List, Optional, Annotated, Sequence
+from typing import List, Optional, Annotated, Sequence, Literal, Union
 
 from annotated_types import MinLen, MaxLen
 from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter
@@ -118,7 +118,7 @@ def memory_url_path(url: memory_url) -> str:  # pyright: ignore
 class EntitySummary(BaseModel):
     """Simplified entity representation."""
 
-    type: str = "entity"
+    type: Literal["entity"] = "entity"
     permalink: Optional[str]
     title: str
     content: Optional[str] = None
@@ -129,7 +129,7 @@ class EntitySummary(BaseModel):
 class RelationSummary(BaseModel):
     """Simplified relation representation."""
 
-    type: str = "relation"
+    type: Literal["relation"] = "relation"
     title: str
     file_path: str
     permalink: str
@@ -142,7 +142,7 @@ class RelationSummary(BaseModel):
 class ObservationSummary(BaseModel):
     """Simplified observation representation."""
 
-    type: str = "observation"
+    type: Literal["observation"] = "observation"
     title: str
     file_path: str
     permalink: str
@@ -169,17 +169,21 @@ class MemoryMetadata(BaseModel):
 class ContextResult(BaseModel):
     """Context result containing a primary item with its observations and related items."""
 
-    primary_result: EntitySummary | RelationSummary | ObservationSummary = Field(
-        description="Primary item"
-    )
+    primary_result: Annotated[
+        Union[EntitySummary, RelationSummary, ObservationSummary], 
+        Field(discriminator="type", description="Primary item")
+    ]
 
     observations: Sequence[ObservationSummary] = Field(
         description="Observations belonging to this entity", default_factory=list
     )
 
-    related_results: Sequence[EntitySummary | RelationSummary | ObservationSummary] = Field(
-        description="Related items", default_factory=list
-    )
+    related_results: Sequence[
+        Annotated[
+            Union[EntitySummary, RelationSummary, ObservationSummary], 
+            Field(discriminator="type")
+        ]
+    ] = Field(description="Related items", default_factory=list)
 
 
 class GraphContext(BaseModel):
