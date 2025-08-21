@@ -256,8 +256,8 @@ async def test_update_project_both_params_endpoint(
     """Test the update project endpoint with both path and is_active parameters."""
     # Create a test project to update
     test_project_name = "test-update-both-project"
-    old_path = str(tmp_path / "old-location")
-    new_path = str(tmp_path / "new-location")
+    old_path = (tmp_path / "old-location").as_posix()
+    new_path = (tmp_path / "new-location").as_posix()
 
     await project_service.add_project(test_project_name, old_path)
 

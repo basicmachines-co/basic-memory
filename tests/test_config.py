@@ -1,6 +1,5 @@
 """Test configuration management."""
 
-from pathlib import Path
 from basic_memory.config import BasicMemoryConfig
 
 
@@ -15,7 +14,7 @@ class TestBasicMemoryConfig:
         config = BasicMemoryConfig()
 
         # Should use the default path (home/basic-memory)
-        expected_path = Path(config_home / "basic-memory").as_posix()
+        expected_path = (config_home / "basic-memory").as_posix()
         assert config.projects["main"] == expected_path
 
     def test_respects_basic_memory_home_environment_variable(self, config_home, monkeypatch):
@@ -47,7 +46,7 @@ class TestBasicMemoryConfig:
         monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
 
         # Create config without main project
-        other_path = Path(config_home / "some" / "path").as_posix()
+        other_path = (config_home / "some" / "path").as_posix()
         config = BasicMemoryConfig(projects={"other": other_path})
 
         # model_post_init should have added main project with default path
