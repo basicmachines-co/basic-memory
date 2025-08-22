@@ -5,6 +5,7 @@ import os
 import logging
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Protocol, Union, runtime_checkable, List
 
@@ -319,3 +320,23 @@ def validate_project_path(path: str, project_path: Path) -> bool:
         return resolved.is_relative_to(project_path.resolve())
     except (ValueError, OSError):
         return False
+
+
+def ensure_timezone_aware(dt: datetime) -> datetime:
+    """Ensure a datetime is timezone-aware using system timezone.
+    
+    If the datetime is naive, convert it to timezone-aware using the system's local timezone.
+    If it's already timezone-aware, return it unchanged.
+    
+    Args:
+        dt: The datetime to ensure is timezone-aware
+        
+    Returns:
+        A timezone-aware datetime
+    """
+    if dt.tzinfo is None:
+        # Naive datetime - assume it's in local time and add timezone
+        return dt.astimezone()
+    else:
+        # Already timezone-aware
+        return dt

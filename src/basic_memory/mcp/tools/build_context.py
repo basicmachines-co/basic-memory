@@ -1,6 +1,6 @@
 """Build context tool for Basic Memory MCP server."""
 
-from typing import Optional, Union
+from typing import Optional
 
 from loguru import logger
 
@@ -111,7 +111,7 @@ async def build_context(
             metadata=MemoryMetadata(
                 depth=depth or 1,
                 timeframe=timeframe,
-                generated_at=datetime.now(),
+                generated_at=datetime.now().astimezone(),
                 primary_count=0,
                 related_count=0,
                 uri=migration_status,  # Include status in metadata

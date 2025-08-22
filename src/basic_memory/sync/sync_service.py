@@ -357,8 +357,8 @@ class SyncService:
 
             # get file timestamps
             file_stats = self.file_service.file_stats(path)
-            created = datetime.fromtimestamp(file_stats.st_ctime)
-            modified = datetime.fromtimestamp(file_stats.st_mtime)
+            created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
+            modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
             # get mime type
             content_type = self.file_service.content_type(path)

@@ -93,7 +93,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 break
 
         # Generate permalink
-        date_prefix = datetime.fromtimestamp(created_at).strftime("%Y%m%d")
+        date_prefix = datetime.fromtimestamp(created_at).astimezone().strftime("%Y%m%d")
         clean_title = clean_filename(conversation["title"])
 
         # Format content
