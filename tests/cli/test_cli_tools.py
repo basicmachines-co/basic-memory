@@ -309,7 +309,7 @@ def test_build_context_with_options(cli_env, setup_test_note):
     # Check that metadata reflects our options
     assert context_result["metadata"]["depth"] == 2
     timeframe = datetime.fromisoformat(context_result["metadata"]["timeframe"])
-    assert datetime.now() - timeframe <= timedelta(days=2)  # don't bother about timezones
+    assert datetime.now().astimezone() - timeframe <= timedelta(days=2)  # Compare timezone-aware datetimes
 
     # Results should include our test note
     found = False
