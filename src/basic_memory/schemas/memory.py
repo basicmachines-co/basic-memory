@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional, Annotated, Sequence, Literal, Union
 
 from annotated_types import MinLen, MaxLen
-from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter
+from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, ConfigDict
 
 from basic_memory.schemas.search import SearchItemType
 
@@ -117,6 +117,8 @@ def memory_url_path(url: memory_url) -> str:  # pyright: ignore
 
 class EntitySummary(BaseModel):
     """Simplified entity representation."""
+    
+    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["entity"] = "entity"
     permalink: Optional[str]
@@ -128,6 +130,8 @@ class EntitySummary(BaseModel):
 
 class RelationSummary(BaseModel):
     """Simplified relation representation."""
+    
+    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["relation"] = "relation"
     title: str
@@ -141,6 +145,8 @@ class RelationSummary(BaseModel):
 
 class ObservationSummary(BaseModel):
     """Simplified observation representation."""
+    
+    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["observation"] = "observation"
     title: str
@@ -153,6 +159,8 @@ class ObservationSummary(BaseModel):
 
 class MemoryMetadata(BaseModel):
     """Simplified response metadata."""
+    
+    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     uri: Optional[str] = None
     types: Optional[List[SearchItemType]] = None
