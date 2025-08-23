@@ -225,7 +225,7 @@ class TestDateTimeSerialization:
         for model_class in models_to_test:
             # Check that ConfigDict with json_encoders is configured
             assert hasattr(model_class, 'model_config')
-            assert hasattr(model_class.model_config, 'json_encoders')
+            assert 'json_encoders' in model_class.model_config
             assert datetime in model_class.model_config['json_encoders']
             
             # Verify the encoder function produces ISO format
