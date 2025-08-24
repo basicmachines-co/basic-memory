@@ -38,24 +38,3 @@ def inject_auth_header(headers: HeaderTypes | None = None) -> HeaderTypes:
     return headers
 
 
-def get_base_url_from_headers() -> str | None:
-    """Extract base URL from x-bm-tenant-app-name header.
-
-    Returns:
-        Base URL for the tenant API, or None if header not found
-    """
-    try:
-        http_headers = get_http_headers()
-        tenant_app_name = http_headers.get("x-bm-tenant-app-name")
-
-        if tenant_app_name:
-            # Construct the fly.io app URL
-            base_url = f"https://{tenant_app_name}.fly.dev"
-            logger.debug(f"Using dynamic base URL: {base_url}")
-            return base_url
-        else:
-            logger.debug("No x-bm-tenant-app-name header found")
-            return None
-    except Exception as e:
-        logger.warning(f"Failed to extract base URL from headers: {e}")
-        return None
