@@ -5,6 +5,7 @@ from loguru import logger
 from basic_memory.api.app import app as fastapi_app
 
 
+
 def create_client() -> AsyncClient:
     """Create an HTTP client based on configuration.
 

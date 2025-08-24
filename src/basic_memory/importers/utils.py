@@ -43,13 +43,13 @@ def format_timestamp(timestamp: Any) -> str:  # pragma: no cover
         except ValueError:
             try:
                 # Try unix timestamp as string
-                timestamp = datetime.fromtimestamp(float(timestamp))
+                timestamp = datetime.fromtimestamp(float(timestamp)).astimezone()
             except ValueError:
                 # Return as is if we can't parse it
                 return timestamp
     elif isinstance(timestamp, (int, float)):
         # Unix timestamp
-        timestamp = datetime.fromtimestamp(timestamp)
+        timestamp = datetime.fromtimestamp(timestamp).astimezone()
 
     if isinstance(timestamp, datetime):
         return timestamp.strftime("%Y-%m-%d %H:%M:%S")

@@ -17,6 +17,7 @@ from basic_memory.mcp.async_client import client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
+from basic_memory.utils import validate_project_path
 
 
 def calculate_target_params(content_length):
@@ -188,6 +189,21 @@ async def read_content(path: str, project: Optional[str] = None) -> dict:
     project_url = active_project.project_url
 
     url = memory_url_path(path)
+
+    # Validate path to prevent path traversal attacks
+    project_path = active_project.home
+    if not validate_project_path(url, project_path):
+        logger.warning(
+            "Attempted path traversal attack blocked",
+            path=path,
+            url=url,
+            project=active_project.name,
+        )
+        return {
+            "type": "error",
+            "error": f"Path '{path}' is not allowed - paths must stay within project boundaries",
+        }
+
     response = await call_get(client, f"{project_url}/resource/{url}")
     content_type = response.headers.get("content-type", "application/octet-stream")
     content_length = int(response.headers.get("content-length", 0))

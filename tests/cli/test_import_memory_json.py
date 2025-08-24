@@ -113,3 +113,43 @@ def test_import_json_command_handle_old_format(tmp_path):
     result = runner.invoke(import_app, ["memory-json", str(json_file)])
     assert result.exit_code == 0
     assert "Import complete" in result.output
+
+
+def test_import_json_command_missing_name_key(tmp_path):
+    """Test handling JSON with missing 'name' key using 'id' instead."""
+    # Create JSON with id instead of name (common in Knowledge Graph Memory Server)
+    data_with_id = [
+        {
+            "type": "entity",
+            "id": "test_entity_id",
+            "entityType": "test",
+            "observations": ["Test observation with id"],
+        },
+        {
+            "type": "entity",
+            "entityName": "test_entity_2",
+            "entityType": "test",
+            "observations": ["Test observation with entityName"],
+        },
+        {
+            "type": "entity",
+            "name": "test_entity_title",
+            "entityType": "test",
+            "observations": ["Test observation with name"],
+        },
+    ]
+
+    json_file = tmp_path / "missing_name.json"
+    with open(json_file, "w", encoding="utf-8") as f:
+        for item in data_with_id:
+            f.write(json.dumps(item) + "\n")
+
+    # Set up test environment
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    # Run import - should not fail even without 'name' key
+    result = runner.invoke(import_app, ["memory-json", str(json_file)])
+    assert result.exit_code == 0
+    assert "Import complete" in result.output
+    assert "Created 3 entities" in result.output

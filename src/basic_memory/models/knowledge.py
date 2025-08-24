@@ -1,6 +1,7 @@
 """Knowledge graph models."""
 
-from datetime import datetime
+from datetime import datetime, timezone
+from basic_memory.utils import ensure_timezone_aware
 from typing import Optional
 
 from sqlalchemy import (
@@ -73,8 +74,8 @@ class Entity(Base):
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Metadata and tracking
-    created_at: Mapped[datetime] = mapped_column(DateTime)
-    updated_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
 
     # Relationships
     project = relationship("Project", back_populates="entities")
@@ -103,6 +104,16 @@ class Entity(Base):
     def is_markdown(self):
         """Check if the entity is a markdown file."""
         return self.content_type == "text/markdown"
+    
+    def __getattribute__(self, name):
+        """Override attribute access to ensure datetime fields are timezone-aware."""
+        value = super().__getattribute__(name)
+        
+        # Ensure datetime fields are timezone-aware
+        if name in ('created_at', 'updated_at') and isinstance(value, datetime):
+            return ensure_timezone_aware(value)
+        
+        return value
 
     def __repr__(self) -> str:
         return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}'"

@@ -188,7 +188,7 @@ async def write_resource(
                     "content_type": content_type,
                     "file_path": file_path,
                     "checksum": checksum,
-                    "updated_at": datetime.fromtimestamp(file_stats.st_mtime),
+                    "updated_at": datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
                 },
             )
             status_code = 200
@@ -200,8 +200,8 @@ async def write_resource(
                 content_type=content_type,
                 file_path=file_path,
                 checksum=checksum,
-                created_at=datetime.fromtimestamp(file_stats.st_ctime),
-                updated_at=datetime.fromtimestamp(file_stats.st_mtime),
+                created_at=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
+                updated_at=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
             )
             entity = await entity_repository.add(entity)
             status_code = 201

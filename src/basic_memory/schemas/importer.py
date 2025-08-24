@@ -32,3 +32,4 @@ class EntityImportResult(ImportResult):
 
     entities: int = 0
     relations: int = 0
+    skipped_entities: int = 0

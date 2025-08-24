@@ -155,7 +155,7 @@ async def test_after_date(search_service, test_graph):
     """Test search filters."""
 
     # Should find with past date
-    past_date = datetime(2020, 1, 1)
+    past_date = datetime(2020, 1, 1).astimezone()
     results = await search_service.search(
         SearchQuery(
             text="entity",
@@ -166,7 +166,7 @@ async def test_after_date(search_service, test_graph):
         assert datetime.fromisoformat(r.created_at) > past_date
 
     # Should not find with future date
-    future_date = datetime(2030, 1, 1)
+    future_date = datetime(2030, 1, 1).astimezone()
     results = await search_service.search(
         SearchQuery(
             text="entity",

@@ -130,6 +130,6 @@ class EntityParser:
             content=post.content,
             observations=entity_content.observations,
             relations=entity_content.relations,
-            created=datetime.fromtimestamp(file_stats.st_ctime),
-            modified=datetime.fromtimestamp(file_stats.st_mtime),
+            created=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
+            modified=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
         )

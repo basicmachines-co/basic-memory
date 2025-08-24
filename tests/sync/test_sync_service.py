@@ -617,7 +617,7 @@ type: knowledge
 # File Dates
 Testing file timestamps
 """
-    file_path = project_dir / "file_dates.md"
+    file_path = project_dir / "file_dates3.md"
     await create_test_file(file_path, file_dates_content)
 
     # Run sync
@@ -629,13 +629,19 @@ Testing file timestamps
     assert explicit_entity.updated_at is not None
 
     # Check file timestamps
-    file_entity = await entity_service.get_by_permalink("file-dates")
+    file_entity = await entity_service.get_by_permalink("file-dates3")
     file_stats = file_path.stat()
+    
+    # Compare using epoch timestamps to handle timezone differences correctly
+    # This ensures we're comparing the actual points in time, not display representations
+    entity_created_epoch = file_entity.created_at.timestamp()
+    entity_updated_epoch = file_entity.updated_at.timestamp()
+    
     assert (
-        abs((file_entity.created_at.timestamp() - file_stats.st_ctime)) < 1
-    )  # Allow 1s difference
+        abs(entity_created_epoch - file_stats.st_ctime) < 1
+    )
     assert (
-        abs((file_entity.updated_at.timestamp() - file_stats.st_mtime)) < 1
+        abs(entity_updated_epoch - file_stats.st_mtime) < 1
     )  # Allow 1s difference
 
 

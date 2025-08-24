@@ -13,7 +13,7 @@ Key Concepts:
 
 import mimetypes
 import re
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
@@ -53,22 +53,28 @@ def parse_timeframe(timeframe: str) -> datetime:
         timeframe: Natural language timeframe like 'today', '1d', '1 week ago', etc.
 
     Returns:
-        datetime: The parsed datetime for the start of the timeframe
+        datetime: The parsed datetime for the start of the timeframe, timezone-aware in local system timezone
 
     Examples:
-        parse_timeframe('today') -> 2025-06-05 00:00:00 (start of today)
-        parse_timeframe('1d') -> 2025-06-04 14:50:00 (24 hours ago)
-        parse_timeframe('1 week ago') -> 2025-05-29 14:50:00 (1 week ago)
+        parse_timeframe('today') -> 2025-06-05 00:00:00-07:00 (start of today with local timezone)
+        parse_timeframe('1d') -> 2025-06-04 14:50:00-07:00 (24 hours ago with local timezone)
+        parse_timeframe('1 week ago') -> 2025-05-29 14:50:00-07:00 (1 week ago with local timezone)
     """
     if timeframe.lower() == "today":
-        # Return start of today (00:00:00)
-        return datetime.combine(datetime.now().date(), time.min)
+        # Return start of today (00:00:00) in local timezone
+        naive_dt = datetime.combine(datetime.now().date(), time.min)
+        return naive_dt.astimezone()
     else:
         # Use dateparser for other formats
         parsed = parse(timeframe)
         if not parsed:
             raise ValueError(f"Could not parse timeframe: {timeframe}")
-        return parsed
+        
+        # If the parsed datetime is naive, make it timezone-aware in local system timezone
+        if parsed.tzinfo is None:
+            return parsed.astimezone()
+        else:
+            return parsed
 
 
 def validate_timeframe(timeframe: str) -> str:
@@ -85,7 +91,7 @@ def validate_timeframe(timeframe: str) -> str:
     parsed = parse_timeframe(timeframe)
 
     # Convert to duration
-    now = datetime.now()
+    now = datetime.now().astimezone()
     if parsed > now:
         raise ValueError("Timeframe cannot be in the future")
 

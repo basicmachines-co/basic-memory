@@ -76,7 +76,8 @@ def memory_json(
             Panel(
                 f"[green]Import complete![/green]\n\n"
                 f"Created {result.entities} entities\n"
-                f"Added {result.relations} relations",
+                f"Added {result.relations} relations\n"
+                f"Skipped {result.skipped_entities} entities\n",
                 expand=False,
             )
         )
