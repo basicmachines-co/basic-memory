@@ -16,7 +16,7 @@ def create_client() -> AsyncClient:
     
     if proxy_base_url:
         # Use HTTP transport to proxy endpoint
-        logger.debug(f"Creating HTTP client for proxy at: {proxy_base_url}")
+        logger.info(f"Creating HTTP client for proxy at: {proxy_base_url}")
         return AsyncClient(base_url=proxy_base_url)
     else:
         # Default: use ASGI transport for local API (development mode)
