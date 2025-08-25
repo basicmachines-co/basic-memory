@@ -49,7 +49,7 @@ def generate_permalink(file_path: Union[Path, str, PathLike]) -> str:
         '中文/测试文档'
     """
     # Convert Path to string if needed
-    path_str = str(file_path)
+    path_str = Path(str(file_path)).as_posix()
 
     # Remove extension
     base = os.path.splitext(path_str)[0]
@@ -218,6 +218,18 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     except (ValueError, TypeError):  # pragma: no cover
         logger.warning(f"Couldn't parse tags from input of type {type(tags)}: {tags}")
         return []
+
+
+def normalize_newlines(multiline: str) -> str:
+    """Replace any \r\n, \r, or \n with the native newline.
+
+    Args:
+        multiline: String containing any mixture of newlines.
+
+    Returns:
+        A string with normalized newlines native to the platform.
+    """
+    return re.sub(r'\r\n?|\n', os.linesep, multiline)
 
 
 def normalize_file_path_for_comparison(file_path: str) -> str:

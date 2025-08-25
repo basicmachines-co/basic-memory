@@ -14,11 +14,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: [ "3.12" ]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -35,9 +36,17 @@ jobs:
         run: |
           pip install uv
 
-      - name: Install just
+      - name: Install just (Linux/macOS)
+        if: runner.os != 'Windows'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      - name: Install just (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # Install just using Chocolatey (pre-installed on GitHub Actions Windows runners)
+          choco install just --yes
+        shell: pwsh
 
       - name: Create virtual env
         run: |
