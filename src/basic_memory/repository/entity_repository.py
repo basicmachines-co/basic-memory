@@ -57,7 +57,7 @@ class EntityRepository(Repository[Entity]):
         """
         query = (
             self.select()
-            .where(Entity.file_path == str(file_path))
+            .where(Entity.file_path == Path(file_path).as_posix())
             .options(*self.get_load_options())
         )
         return await self.find_one(query)
@@ -68,7 +68,7 @@ class EntityRepository(Repository[Entity]):
         Args:
             file_path: Path to the entity file (will be converted to string internally)
         """
-        return await self.delete_by_fields(file_path=str(file_path))
+        return await self.delete_by_fields(file_path=Path(file_path).as_posix())
 
     def get_load_options(self) -> List[LoaderOption]:
         """Get SQLAlchemy loader options for eager loading relationships."""
