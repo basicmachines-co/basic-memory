@@ -16,13 +16,12 @@ Usage:
 """
 
 import os
-import sys
 import json
 import csv
 import subprocess
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Dict, List
 import argparse
 import hashlib
 
@@ -419,7 +418,7 @@ def main():
     
     # Print summary
     stats = generator.get_summary_statistics()
-    print(f"\n=== Legal File Inventory Complete ===")
+    print("\n=== Legal File Inventory Complete ===")
     print(f"Repository: {stats.get('repository_path', 'Unknown')}")
     print(f"Total files inventoried: {stats.get('total_files', 0)}")
     print(f"Total contributors identified: {stats.get('total_contributors', 0)}")
@@ -427,7 +426,7 @@ def main():
     
     # Show top contributors
     if 'contributor_file_counts' in stats:
-        print(f"\nTop 5 contributors by files modified:")
+        print("\nTop 5 contributors by files modified:")
         sorted_contributors = sorted(
             stats['contributor_file_counts'].items(),
             key=lambda x: x[1],

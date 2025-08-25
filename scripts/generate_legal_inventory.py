@@ -18,13 +18,11 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 import subprocess
-import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List
 
 
 class LegalInventoryGenerator:
@@ -477,7 +475,7 @@ def main():
     if 'markdown' in formats:
         generator.export_markdown(output_dir / f'basic_memory_inventory_{timestamp}.md')
     
-    print(f"\nLegal inventory generation complete!")
+    print("\nLegal inventory generation complete!")
     print(f"Output saved to: {output_dir}")
 
 
