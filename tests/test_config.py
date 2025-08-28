@@ -1,11 +1,10 @@
 """Test configuration management."""
 
 import tempfile
-from pathlib import Path
 import pytest
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-
+from pathlib import Path
 
 class TestBasicMemoryConfig:
     """Test BasicMemoryConfig behavior with BASIC_MEMORY_HOME environment variable."""
@@ -19,7 +18,7 @@ class TestBasicMemoryConfig:
 
         # Should use the default path (home/basic-memory)
         expected_path = (config_home / "basic-memory").as_posix()
-        assert config.projects["main"] == expected_path
+        assert config.projects["main"] == Path(expected_path).as_posix()
 
     def test_respects_basic_memory_home_environment_variable(self, config_home, monkeypatch):
         """Test that config respects BASIC_MEMORY_HOME environment variable."""
@@ -42,7 +41,7 @@ class TestBasicMemoryConfig:
 
         # model_post_init should have added main project with BASIC_MEMORY_HOME
         assert "main" in config.projects
-        assert config.projects["main"] == custom_path
+        assert config.projects["main"] == Path(custom_path).as_posix()
 
     def test_model_post_init_fallback_without_basic_memory_home(self, config_home, monkeypatch):
         """Test that model_post_init falls back to default when BASIC_MEMORY_HOME is not set."""
@@ -56,7 +55,7 @@ class TestBasicMemoryConfig:
         # model_post_init should have added main project with default path
         expected_path = (config_home / "basic-memory").as_posix()
         assert "main" in config.projects
-        assert config.projects["main"] == expected_path
+        assert config.projects["main"] == Path(expected_path).as_posix()
 
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""
