@@ -23,8 +23,8 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.project_info import ProjectStatusResponse
 from basic_memory.mcp.tools.utils import call_delete
 from basic_memory.mcp.tools.utils import call_put
-from basic_memory.mcp.tools.utils import call_patch
 from basic_memory.utils import generate_permalink
+from basic_memory.mcp.tools.utils import call_patch
 
 console = Console()
 
@@ -100,8 +100,8 @@ def remove_project(
 ) -> None:
     """Remove a project from configuration."""
     try:
-        project_name = generate_permalink(name)
-        response = asyncio.run(call_delete(client, f"/projects/{project_name}"))
+        project_permalink = generate_permalink(name)
+        response = asyncio.run(call_delete(client, f"/projects/{project_permalink}"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
@@ -119,9 +119,8 @@ def set_default_project(
 ) -> None:
     """Set the default project and activate it for the current session."""
     try:
-        project_name = generate_permalink(name)
-
-        response = asyncio.run(call_put(client, f"/projects/{project_name}/default"))
+        project_permalink = generate_permalink(name)
+        response = asyncio.run(call_put(client, f"/projects/{project_permalink}/default"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
@@ -160,11 +159,10 @@ def move_project(
 
     try:
         data = {"path": resolved_path}
-        project_name = generate_permalink(name)
 
         current_project = session.get_current_project()
         response = asyncio.run(
-            call_patch(client, f"/{current_project}/project/{project_name}", json=data)
+            call_patch(client, f"/{current_project}/project/{name}", json=data)
         )
         result = ProjectStatusResponse.model_validate(response.json())
 

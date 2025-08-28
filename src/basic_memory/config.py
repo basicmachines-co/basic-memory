@@ -242,7 +242,7 @@ class ConfigManager:
 
         # Load config, modify, and save
         config = self.load_config()
-        config.default_project = name
+        config.default_project = project_name
         self.save_config(config)
 
     def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:

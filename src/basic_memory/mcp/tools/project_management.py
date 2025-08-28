@@ -221,8 +221,10 @@ async def set_default_project(project_name: str, ctx: Context | None = None) -> 
     if ctx:  # pragma: no cover
         await ctx.info(f"Setting default project to: {project_name}")
 
-    # Call API to set default project
-    response = await call_put(client, f"/projects/{project_name}/default")
+    # Call API to set default project using URL encoding for special characters
+    from urllib.parse import quote
+    encoded_name = quote(project_name, safe='')
+    response = await call_put(client, f"/projects/{encoded_name}/default")
     status_response = ProjectStatusResponse.model_validate(response.json())
 
     result = f"✓ {status_response.message}\n\n"
@@ -323,16 +325,29 @@ async def delete_project(project_name: str, ctx: Context | None = None) -> str:
     response = await call_get(client, "/projects/projects")
     project_list = ProjectList.model_validate(response.json())
 
-    # Check if project exists
-    project_exists = any(p.name == project_name for p in project_list.projects)
-    if not project_exists:
+    # Find the project by name (case-insensitive) or permalink - same logic as switch_project
+    project_permalink = generate_permalink(project_name)
+    target_project = None
+    for p in project_list.projects:
+        # Match by permalink (handles case-insensitive input)
+        if p.permalink == project_permalink:
+            target_project = p
+            break
+        # Also match by name comparison (case-insensitive)
+        if p.name.lower() == project_name.lower():
+            target_project = p
+            break
+    
+    if not target_project:
         available_projects = [p.name for p in project_list.projects]
         raise ValueError(
             f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
         )
 
-    # Call API to delete project
-    response = await call_delete(client, f"/projects/{project_name}")
+    # Call API to delete project using URL encoding for special characters
+    from urllib.parse import quote
+    encoded_name = quote(target_project.name, safe='')
+    response = await call_delete(client, f"/projects/{encoded_name}")
     status_response = ProjectStatusResponse.model_validate(response.json())
 
     result = f"✓ {status_response.message}\n\n"
