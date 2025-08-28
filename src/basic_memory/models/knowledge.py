@@ -1,6 +1,6 @@
 """Knowledge graph models."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from basic_memory.utils import ensure_timezone_aware
 from typing import Optional
 

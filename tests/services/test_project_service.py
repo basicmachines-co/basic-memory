@@ -472,13 +472,12 @@ async def test_synchronize_projects_calls_ensure_single_default(
 
 
 @pytest.mark.asyncio
-async def test_synchronize_projects_normalizes_project_names(
+async def test_synchronize_projects_preserves_original_names(
     project_service: ProjectService, tmp_path
 ):
-    """Test that synchronize_projects normalizes project names in config to match database format."""
-    # Use a project name that needs normalization (uppercase, spaces)
-    unnormalized_name = "Test Project With Spaces"
-    expected_normalized_name = "test-project-with-spaces"
+    """Test that synchronize_projects preserves original project names (no normalization)."""
+    # Use a project name with mixed case and spaces (should be preserved)
+    original_name = "Test Project With Spaces"
     test_project_path = str(tmp_path / "test-project-spaces")
 
     # Make sure the test directory exists
@@ -490,36 +489,32 @@ async def test_synchronize_projects_normalizes_project_names(
 
         # Add project with unnormalized name directly to config
         config = config_manager.load_config()
-        config.projects[unnormalized_name] = test_project_path
+        config.projects[original_name] = test_project_path
         config_manager.save_config(config)
 
-        # Verify the unnormalized name is in config
-        assert unnormalized_name in project_service.projects
-        assert project_service.projects[unnormalized_name] == test_project_path
+        # Verify the original name is in config
+        assert original_name in project_service.projects
+        assert project_service.projects[original_name] == test_project_path
 
-        # Call synchronize_projects - this should normalize the project name
+        # Call synchronize_projects - this should preserve the original name
         await project_service.synchronize_projects()
 
-        # Verify the config was updated with normalized name
-        assert expected_normalized_name in project_service.projects
-        assert unnormalized_name not in project_service.projects
-        assert project_service.projects[expected_normalized_name] == test_project_path
+        # Verify the config still has the original name (no normalization)
+        assert original_name in project_service.projects
+        assert project_service.projects[original_name] == test_project_path
 
-        # Verify the project was added to database with normalized name
-        db_project = await project_service.repository.get_by_name(expected_normalized_name)
+        # Verify the project was added to database with original name
+        db_project = await project_service.repository.get_by_name(original_name)
         assert db_project is not None
-        assert db_project.name == expected_normalized_name
+        assert db_project.name == original_name
         assert db_project.path == test_project_path
-        assert db_project.permalink == expected_normalized_name
-
-        # Verify the unnormalized name is not in database
-        unnormalized_db_project = await project_service.repository.get_by_name(unnormalized_name)
-        assert unnormalized_db_project is None
+        # Permalink should be auto-generated as normalized version
+        assert db_project.permalink == "test-project-with-spaces"
 
     finally:
         # Clean up - remove any test projects from both config and database
         current_projects = project_service.projects.copy()
-        for name in [unnormalized_name, expected_normalized_name]:
+        for name in [original_name]:
             if name in current_projects:
                 try:
                     await project_service.remove_project(name)
@@ -655,13 +650,12 @@ async def test_move_project_expands_path(project_service: ProjectService, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_synchronize_projects_handles_case_sensitivity_bug(
+async def test_synchronize_projects_with_original_case_name(
     project_service: ProjectService, tmp_path
 ):
-    """Test that synchronize_projects fixes the case sensitivity bug (Personal vs personal)."""
-    # Simulate the exact bug scenario: config has "Personal" but database expects "personal"
+    """Test that synchronize_projects works correctly with original case-sensitive names."""
+    # Use a project name with mixed case (should be preserved, not normalized)
     config_name = "Personal"
-    normalized_name = "personal"
     test_project_path = str(tmp_path / "personal-project")
 
     # Make sure the test directory exists
@@ -678,29 +672,29 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
         assert config_name in project_service.projects
         assert project_service.projects[config_name] == test_project_path
 
-        # Call synchronize_projects - this should fix the case sensitivity issue
+        # Call synchronize_projects - should preserve the original case
         await project_service.synchronize_projects()
 
-        # Verify the config was updated to use normalized case
-        assert normalized_name in project_service.projects
-        assert config_name not in project_service.projects
-        assert project_service.projects[normalized_name] == test_project_path
+        # Verify the config still has the original case name
+        assert config_name in project_service.projects
+        assert project_service.projects[config_name] == test_project_path
 
-        # Verify the project exists in database with correct normalized name
-        db_project = await project_service.repository.get_by_name(normalized_name)
+        # Verify the project exists in database with original name
+        db_project = await project_service.repository.get_by_name(config_name)
         assert db_project is not None
-        assert db_project.name == normalized_name
+        assert db_project.name == config_name
         assert db_project.path == test_project_path
+        # Permalink should be auto-generated as normalized version
+        assert db_project.permalink == "personal"
 
-        # Verify we can now switch to this project without case sensitivity errors
-        # (This would have failed before the fix with "Personal" != "personal")
-        project_lookup = await project_service.get_project(normalized_name)
+        # Verify we can lookup the project by its original name
+        project_lookup = await project_service.get_project(config_name)
         assert project_lookup is not None
-        assert project_lookup.name == normalized_name
+        assert project_lookup.name == config_name
 
     finally:
         # Clean up
-        for name in [config_name, normalized_name]:
+        for name in [config_name]:
             if name in project_service.projects:
                 try:
                     await project_service.remove_project(name)
