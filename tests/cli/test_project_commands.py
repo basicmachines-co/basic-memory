@@ -207,7 +207,7 @@ def test_project_move_command_uses_permalink(mock_session, mock_call_patch, cli_
     
     # Test with a project name that needs normalization (spaces, mixed case)
     project_name = "Test Project Name"
-    new_path = "/new/path/to/project"
+    new_path = os.path.join("new", "path", "to", "project")
     
     result = runner.invoke(cli_app, ["project", "move", project_name, new_path])
     
