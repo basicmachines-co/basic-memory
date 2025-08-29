@@ -261,35 +261,24 @@ def dumps_frontmatter_obsidian_compatible(post: frontmatter.Post) -> str:
         
     Returns:
         String containing markdown with properly formatted YAML frontmatter
-    """
-    # Create a custom YAML dumper that uses block style for lists
-    class ObsidianCompatibleYAMLDumper(yaml.SafeDumper):
-        def write_list_item(self, text):
-            # Use block style for lists to get "- item" format
-            super().write_list_item(text)
-
-        def represent_list(self, data):
-            # Force lists to use block style instead of flow style
-            return self.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=False)
-
-    # Add the list representer
-    ObsidianCompatibleYAMLDumper.add_representer(list, ObsidianCompatibleYAMLDumper.represent_list)
-    
+    """    
     if not post.metadata:
         # No frontmatter, just return content
         return post.content
         
-    # Serialize YAML with custom dumper
+    # Serialize YAML with block style for lists
     yaml_str = yaml.dump(
-        post.metadata, 
-        Dumper=ObsidianCompatibleYAMLDumper,
+        post.metadata,
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False
     )
     
     # Construct the final markdown with frontmatter
-    return f"---\n{yaml_str}---\n\n{post.content}" if post.content else f"---\n{yaml_str}---\n"
+    if post.content:
+        return f"---\n{yaml_str}---\n\n{post.content}"
+    else:
+        return f"---\n{yaml_str}---\n"
 
 
 def sanitize_for_filename(text: str, replacement: str = "-") -> str:
