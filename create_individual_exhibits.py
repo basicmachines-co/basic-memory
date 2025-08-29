@@ -150,7 +150,7 @@ def create_overall_summary_exhibit(data, output_dir):
     for category, count in sorted(summary['categories'].items()):
         summary_content += f"- **{category.replace('_', ' ').title()}:** {count} files\n"
     
-    summary_content += f"""
+    summary_content += """
 
 ## Contributor Summary
 """
@@ -158,7 +158,7 @@ def create_overall_summary_exhibit(data, output_dir):
     for contrib in summary['top_contributors']:
         summary_content += f"- **{contrib['name']}** ({contrib['email']}): {contrib['file_count']} files, {contrib['commit_count']} commits\n"
     
-    summary_content += f"""
+    summary_content += """
 
 ## Legal Significance
 This inventory represents the complete codebase of Basic Memory as licensed from Basic Machines LLC to Basic Memory LLC under the copyright license agreement dated [DATE].

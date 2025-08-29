@@ -168,8 +168,8 @@ async def test_update_project_path_endpoint(
     """Test the update project endpoint for changing project path."""
     # Create a test project to update
     test_project_name = "test-update-project"
-    old_path = str(tmp_path / "old-location")
-    new_path = str(tmp_path / "new-location")
+    old_path = (tmp_path / "old-location").as_posix()
+    new_path = (tmp_path / "new-location").as_posix()
 
     await project_service.add_project(test_project_name, old_path)
 
@@ -256,8 +256,8 @@ async def test_update_project_both_params_endpoint(
     """Test the update project endpoint with both path and is_active parameters."""
     # Create a test project to update
     test_project_name = "test-update-both-project"
-    old_path = str(tmp_path / "old-location")
-    new_path = str(tmp_path / "new-location")
+    old_path = (tmp_path / "old-location").as_posix()
+    new_path = (tmp_path / "new-location").as_posix()
 
     await project_service.add_project(test_project_name, old_path)
 
@@ -344,7 +344,8 @@ async def test_update_project_no_params_endpoint(test_config, client, project_se
     await project_service.add_project(test_project_name, test_path)
     proj_info = await project_service.get_project(test_project_name)
     assert proj_info.name == test_project_name
-    assert proj_info.path == test_path
+    # On Windows the path is prepended with a drive letter
+    assert test_path in proj_info.path
 
     try:
         # Try to update with no parameters
@@ -354,7 +355,8 @@ async def test_update_project_no_params_endpoint(test_config, client, project_se
         assert response.status_code == 200
         proj_info = await project_service.get_project(test_project_name)
         assert proj_info.name == test_project_name
-        assert proj_info.path == test_path
+        # On Windows the path is prepended with a drive letter
+        assert test_path in proj_info.path
 
     finally:
         # Clean up

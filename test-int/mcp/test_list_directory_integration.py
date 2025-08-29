@@ -465,3 +465,79 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app):
         assert "Project Beta Plan.md" in list_text
         assert "Meeting Minutes" not in list_text
         assert "matching 'Project*'" in list_text
+
+
+@pytest.mark.asyncio
+async def test_list_directory_dot_slash_prefix_paths(mcp_server, app):
+    """Test directory listing with ./ prefix paths (reproduces bug report issue)."""
+
+    async with Client(mcp_server) as client:
+        # Create test files in a subdirectory
+        await client.call_tool(
+            "write_note",
+            {
+                "title": "Artifact One",
+                "folder": "artifacts",
+                "content": "# Artifact One\n\nFirst artifact document.",
+                "tags": "artifact,test",
+            },
+        )
+
+        await client.call_tool(
+            "write_note",
+            {
+                "title": "Artifact Two",
+                "folder": "artifacts",
+                "content": "# Artifact Two\n\nSecond artifact document.",
+                "tags": "artifact,test",
+            },
+        )
+
+        # Test normal path without ./ prefix (should work)
+        normal_result = await client.call_tool(
+            "list_directory",
+            {
+                "dir_name": "artifacts",
+                "depth": 1,
+            },
+        )
+
+        assert len(normal_result.content) == 1
+        normal_text = normal_result.content[0].text
+        assert "Artifact One.md" in normal_text
+        assert "Artifact Two.md" in normal_text
+        assert "2 files" in normal_text
+
+        # Test with ./ prefix (this was the failing case in the bug report)
+        dot_slash_result = await client.call_tool(
+            "list_directory",
+            {
+                "dir_name": "./artifacts",
+                "depth": 1,
+            },
+        )
+
+        assert len(dot_slash_result.content) == 1
+        dot_slash_text = dot_slash_result.content[0].text
+
+        # Should show the same files as normal path
+        assert "Artifact One.md" in dot_slash_text
+        assert "Artifact Two.md" in dot_slash_text
+        assert "2 files" in dot_slash_text
+
+        # Test with trailing slash after ./ prefix
+        dot_slash_trailing_result = await client.call_tool(
+            "list_directory",
+            {
+                "dir_name": "./artifacts/",
+                "depth": 1,
+            },
+        )
+
+        assert len(dot_slash_trailing_result.content) == 1
+        dot_slash_trailing_text = dot_slash_trailing_result.content[0].text
+
+        # Should show the same files
+        assert "Artifact One.md" in dot_slash_trailing_text
+        assert "Artifact Two.md" in dot_slash_trailing_text
+        assert "2 files" in dot_slash_trailing_text

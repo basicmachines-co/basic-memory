@@ -680,7 +680,7 @@ Content for move test
     # Check search index has updated path
     results = await search_service.search(SearchQuery(text="Content for move test"))
     assert len(results) == 1
-    assert results[0].file_path == str(new_path.relative_to(project_dir))
+    assert results[0].file_path == new_path.relative_to(project_dir).as_posix()
 
 
 @pytest.mark.asyncio
