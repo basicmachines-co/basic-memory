@@ -48,7 +48,7 @@ async def test_add_project_to_config(project_service: ProjectService, tmp_path, 
     """Test adding a project to the config manager."""
     # Generate unique project name for testing
     test_project_name = f"config-project-{os.urandom(4).hex()}"
-    test_path = str(tmp_path / "config-project")
+    test_path = (tmp_path / "config-project").as_posix()
 
     # Make sure directory exists
     os.makedirs(test_path, exist_ok=True)
@@ -72,8 +72,8 @@ async def test_update_project_path(project_service: ProjectService, tmp_path, co
     """Test updating a project's path."""
     # Create a test project
     test_project = f"path-update-test-project-{os.urandom(4).hex()}"
-    original_path = str(tmp_path / "original-path")
-    new_path = str(tmp_path / "new-path")
+    original_path = (tmp_path / "original-path").as_posix()
+    new_path = (tmp_path / "new-path").as_posix()
 
     # Make sure directories exist
     os.makedirs(original_path, exist_ok=True)

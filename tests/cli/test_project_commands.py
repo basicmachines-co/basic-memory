@@ -85,7 +85,12 @@ def test_project_default_command(mock_reload, mock_run, cli_env):
     # Patching call_put directly since it's imported at the module level
 
     # Patch the os.environ for checking
-    with patch.dict(os.environ, {}, clear=True):
+    # On Windows, preserve USERPROFILE to allow home directory detection
+    env_vars = {}
+    if os.name == 'nt' and 'USERPROFILE' in os.environ:
+        env_vars['USERPROFILE'] = os.environ['USERPROFILE']
+
+    with patch.dict(os.environ, env_vars, clear=True):
         # Patch ConfigManager.set_default_project to prevent validation error
         with patch("basic_memory.config.ConfigManager.set_default_project"):
             runner = CliRunner()

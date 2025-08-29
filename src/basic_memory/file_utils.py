@@ -2,6 +2,7 @@
 
 import hashlib
 from pathlib import Path
+import re
 from typing import Any, Dict, Union
 
 import yaml
@@ -289,3 +290,22 @@ def dumps_frontmatter_obsidian_compatible(post: frontmatter.Post) -> str:
     
     # Construct the final markdown with frontmatter
     return f"---\n{yaml_str}---\n\n{post.content}" if post.content else f"---\n{yaml_str}---\n"
+
+
+def sanitize_for_filename(text: str, replacement: str = "-") -> str:
+    """
+    Sanitize string to be safe for use as a note title
+    Replaces path separators and other problematic characters
+    with hyphens.
+    """
+    # replace both POSIX and Windows path separators
+    text = re.sub(r"[/\\]", replacement, text)
+
+    # replace some other problematic chars
+    text = re.sub(r'[<>:"|?*]', replacement, text)
+
+    # compress multiple, repeated replacements
+    text = re.sub(f"{re.escape(replacement)}+", replacement, text)
+
+    return text.strip(replacement)
+

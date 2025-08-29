@@ -6,6 +6,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import AsyncGenerator
 
+import os
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -51,6 +52,9 @@ def project_root() -> Path:
 def config_home(tmp_path, monkeypatch) -> Path:
     # Patch HOME environment variable for the duration of the test
     monkeypatch.setenv("HOME", str(tmp_path))
+    # On Windows, also set USERPROFILE
+    if os.name == 'nt':
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
     # Set BASIC_MEMORY_HOME to the test directory
     monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path / "basic-memory"))
     return tmp_path

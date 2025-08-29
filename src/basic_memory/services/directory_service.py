@@ -106,8 +106,15 @@ class DirectoryService:
             List of DirectoryNode objects matching the criteria
         """
         # Normalize directory path
+        # Strip ./ prefix if present (handles relative path notation)
+        if dir_name.startswith("./"):
+            dir_name = dir_name[2:]  # Remove "./" prefix
+
+        # Ensure path starts with "/"
         if not dir_name.startswith("/"):
             dir_name = f"/{dir_name}"
+
+        # Remove trailing slashes except for root
         if dir_name != "/" and dir_name.endswith("/"):
             dir_name = dir_name.rstrip("/")
 

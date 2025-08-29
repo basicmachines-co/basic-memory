@@ -1,7 +1,7 @@
 """Test configuration management."""
 
 from basic_memory.config import BasicMemoryConfig
-
+from pathlib import Path
 
 class TestBasicMemoryConfig:
     """Test BasicMemoryConfig behavior with BASIC_MEMORY_HOME environment variable."""
@@ -14,12 +14,12 @@ class TestBasicMemoryConfig:
         config = BasicMemoryConfig()
 
         # Should use the default path (home/basic-memory)
-        expected_path = str(config_home / "basic-memory")
-        assert config.projects["main"] == expected_path
+        expected_path = (config_home / "basic-memory").as_posix()
+        assert config.projects["main"] == Path(expected_path).as_posix()
 
     def test_respects_basic_memory_home_environment_variable(self, config_home, monkeypatch):
         """Test that config respects BASIC_MEMORY_HOME environment variable."""
-        custom_path = str(config_home / "app" / "data")
+        custom_path = (config_home / "app" / "data").as_posix()
         monkeypatch.setenv("BASIC_MEMORY_HOME", custom_path)
 
         config = BasicMemoryConfig()
@@ -38,7 +38,7 @@ class TestBasicMemoryConfig:
 
         # model_post_init should have added main project with BASIC_MEMORY_HOME
         assert "main" in config.projects
-        assert config.projects["main"] == custom_path
+        assert config.projects["main"] == Path(custom_path).as_posix()
 
     def test_model_post_init_fallback_without_basic_memory_home(self, config_home, monkeypatch):
         """Test that model_post_init falls back to default when BASIC_MEMORY_HOME is not set."""
@@ -46,13 +46,13 @@ class TestBasicMemoryConfig:
         monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
 
         # Create config without main project
-        other_path = str(config_home / "some" / "path")
+        other_path = (config_home / "some" / "path").as_posix()
         config = BasicMemoryConfig(projects={"other": other_path})
 
         # model_post_init should have added main project with default path
-        expected_path = str(config_home / "basic-memory")
+        expected_path = (config_home / "basic-memory").as_posix()
         assert "main" in config.projects
-        assert config.projects["main"] == expected_path
+        assert config.projects["main"] == Path(expected_path).as_posix()
 
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""

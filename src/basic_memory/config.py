@@ -46,7 +46,7 @@ class BasicMemoryConfig(BaseSettings):
 
     projects: Dict[str, str] = Field(
         default_factory=lambda: {
-            "main": str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
+            "main": Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")).as_posix()
         },
         description="Mapping of project names to their filesystem paths",
     )
@@ -72,6 +72,11 @@ class BasicMemoryConfig(BaseSettings):
     sync_changes: bool = Field(
         default=True,
         description="Whether to sync changes in real time. default (True)",
+    )
+
+    kebab_filenames: bool = Field(
+        default=False,
+        description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",
     )
 
     # API connection configuration
@@ -100,9 +105,9 @@ class BasicMemoryConfig(BaseSettings):
         """Ensure configuration is valid after initialization."""
         # Ensure main project exists
         if "main" not in self.projects:  # pragma: no cover
-            self.projects["main"] = str(
+            self.projects["main"] = (
                 Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory"))
-            )
+            ).as_posix()
 
         # Ensure default project is valid
         if self.default_project not in self.projects:  # pragma: no cover
@@ -215,7 +220,7 @@ class ConfigManager:
 
         # Load config, modify it, and save it
         config = self.load_config()
-        config.projects[name] = str(project_path)
+        config.projects[name] = project_path.as_posix()
         self.save_config(config)
         return ProjectConfig(name=name, home=project_path)
 
