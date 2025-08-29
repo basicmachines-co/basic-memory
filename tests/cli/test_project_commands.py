@@ -222,6 +222,8 @@ def test_project_move_command_uses_permalink(mock_session, mock_call_patch, cli_
     expected_endpoint = "/current-project/project/test-project-name"
     assert args[1] == expected_endpoint  # Second argument is the endpoint URL
     
-    # Verify the data contains the resolved path
-    expected_data = {"path": os.path.abspath(os.path.expanduser(new_path))}
+    # Verify the data contains the resolved path (using same normalization as the function)
+    from pathlib import Path
+    expected_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
+    expected_data = {"path": expected_path}
     assert kwargs["json"] == expected_data
