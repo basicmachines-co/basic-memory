@@ -16,12 +16,12 @@ def test_create_client_uses_asgi_when_no_remote_env():
         assert str(client.base_url) == "http://test"
 
 
-def test_create_client_uses_http_when_remote_env_set():
+def test_create_client_uses_http_when_proxy_env_set():
     """Test that create_client uses HTTP transport when BASIC_MEMORY_USE_REMOTE_API is set."""
-    with patch.dict("os.environ", {"BASIC_MEMORY_USE_REMOTE_API": "true"}):
+    with patch.dict("os.environ", {"BASIC_MEMORY_PROXY_URL": "http://localhost:8000"}):
         client = create_client()
 
         assert isinstance(client, AsyncClient)
         assert not isinstance(client._transport, ASGITransport)
         # When using remote API, no base_url is set (dynamic from headers)
-        assert str(client.base_url) == ""
+        assert str(client.base_url) == "http://localhost:8000"
