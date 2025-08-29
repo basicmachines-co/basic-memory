@@ -342,8 +342,8 @@ async def test_search_pagination(mcp_server, app):
 
         result_text = search_result.content[0].text
         # Should contain 5 results and pagination info
-        assert '"current_page": 1' in result_text
-        assert '"page_size": 5' in result_text
+        assert '"current_page":1' in result_text
+        assert '"page_size":5' in result_text
 
         # Search page 2
         search_result = await client.call_tool(
@@ -356,7 +356,7 @@ async def test_search_pagination(mcp_server, app):
         )
 
         result_text = search_result.content[0].text
-        assert '"current_page": 2' in result_text
+        assert '"current_page":2' in result_text
 
 
 @pytest.mark.asyncio
