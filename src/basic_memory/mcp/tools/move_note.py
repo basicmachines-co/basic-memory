@@ -359,7 +359,8 @@ async def move_note(
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
-        destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
+        destination_path: New path relative to project root with file extension (e.g., "work/meetings/2025-05-26.md").
+                         Must include a file extension (typically .md for markdown files).
         project: Optional project name (defaults to current session project)
 
     Returns:
@@ -423,6 +424,25 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
     if cross_project_error:
         logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
         return cross_project_error
+
+    # Validate that destination path includes a file extension
+    if '.' not in destination_path or not destination_path.split('.')[-1]:
+        logger.warning(f"Move failed - no file extension provided: {destination_path}")
+        return f"""# Move Failed - File Extension Required
+
+The destination path '{destination_path}' must include a file extension (e.g., '.md').
+
+## Valid examples:
+- `notes/my-note.md`
+- `projects/meeting-2025.md`
+- `archive/old-document.md`
+
+## Try again with extension:
+```
+move_note("{identifier}", "{destination_path}.md")
+```
+
+All examples in Basic Memory expect file extensions to be explicitly provided."""
 
     try:
         # Prepare move request
