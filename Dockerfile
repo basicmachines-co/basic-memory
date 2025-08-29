@@ -12,7 +12,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 # Create a group and user with the provided UID/GID
-RUN groupadd --gid ${GID} appgroup && \
+# Check if the GID already exists, if not create appgroup
+RUN (getent group ${GID} || groupadd --gid ${GID} appgroup) && \
     useradd --uid ${UID} --gid ${GID} --create-home --shell /bin/bash appuser
 
 # Copy the project into the image
@@ -24,7 +25,7 @@ RUN uv sync --locked
 
 # Create necessary directories and set ownership
 RUN mkdir -p /app/data /app/.basic-memory && \
-    chown -R appuser:appgroup /app
+    chown -R appuser:${GID} /app
 
 # Set default data directory and add venv to PATH
 ENV BASIC_MEMORY_HOME=/app/data \
