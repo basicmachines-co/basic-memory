@@ -160,9 +160,10 @@ def move_project(
     try:
         data = {"path": resolved_path}
 
+        project_permalink = generate_permalink(name)
         current_project = session.get_current_project()
         response = asyncio.run(
-            call_patch(client, f"/{current_project}/project/{name}", json=data)
+            call_patch(client, f"/{current_project}/project/{project_permalink}", json=data)
         )
         result = ProjectStatusResponse.model_validate(response.json())
 
