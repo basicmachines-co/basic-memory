@@ -604,15 +604,15 @@ async def test_create_delete_project_edge_cases(mcp_server, app):
     """Test edge cases for create and delete project operations."""
 
     async with Client(mcp_server) as client:
-        # Test with special characters in project name (should be handled gracefully)
-        special_name = "test-project-with-dashes"
+        # Test with special characters and spaces in project name (should be handled gracefully)
+        special_name = "test project with spaces & symbols!"
 
         # Create project with special characters
         create_result = await client.call_tool(
             "create_memory_project",
             {
                 "project_name": special_name,
-                "project_path": f"/tmp/{special_name}",
+                "project_path": "/tmp/test-project-with-special-chars",
             },
         )
         assert "✓" in create_result.content[0].text

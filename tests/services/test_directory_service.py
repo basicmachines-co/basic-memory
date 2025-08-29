@@ -169,6 +169,28 @@ async def test_list_directory_path_normalization(directory_service: DirectorySer
 
 
 @pytest.mark.asyncio
+async def test_list_directory_dot_slash_prefix_normalization(
+    directory_service: DirectoryService, test_graph
+):
+    """Test that ./ prefixed directory paths are normalized correctly."""
+    # This test reproduces the bug report issue where ./dirname fails
+    base_result = await directory_service.list_directory(dir_name="/test")
+
+    # Test paths with ./ prefix that should be equivalent to /test
+    dot_paths_to_test = ["./test", "./test/"]
+
+    for path in dot_paths_to_test:
+        result = await directory_service.list_directory(dir_name=path)
+        assert len(result) == len(base_result), (
+            f"Path '{path}' returned {len(result)} results, expected {len(base_result)}"
+        )
+        # Compare by name since the objects might be different instances
+        result_names = {node.name for node in result}
+        base_names = {node.name for node in base_result}
+        assert result_names == base_names, f"Path '{path}' returned different files than expected"
+
+
+@pytest.mark.asyncio
 async def test_list_directory_glob_no_matches(directory_service: DirectoryService, test_graph):
     """Test listing directory with glob that matches nothing."""
     result = await directory_service.list_directory(

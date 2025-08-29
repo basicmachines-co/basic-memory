@@ -9,16 +9,13 @@ Usage: python test_production_cascade_delete.py
 """
 
 import asyncio
-import os
-import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 
 class ProductionCascadeTest:
@@ -234,7 +231,7 @@ class ProductionCascadeTest:
     async def restore_backup(self):
         """Restore database from backup."""
         if self.backup_path.exists():
-            print(f"🔄 Restoring database from backup...")
+            print("🔄 Restoring database from backup...")
             import shutil
             shutil.copy2(self.backup_path, self.db_path)
             print("✅ Database restored from backup")

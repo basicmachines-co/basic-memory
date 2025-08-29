@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, List, Tuple
 
-from dotenv import load_dotenv
 from loguru import logger
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,8 +21,6 @@ CONFIG_FILE_NAME = "config.json"
 WATCH_STATUS_JSON = "watch-status.json"
 
 Environment = Literal["test", "dev", "user"]
-
-load_dotenv()
 
 
 @dataclass
@@ -49,7 +46,7 @@ class BasicMemoryConfig(BaseSettings):
 
     projects: Dict[str, str] = Field(
         default_factory=lambda: {
-            "main": str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
+            "main": Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")).as_posix()
         },
         description="Mapping of project names to their filesystem paths",
     )
@@ -77,6 +74,17 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to sync changes in real time. default (True)",
     )
 
+    kebab_filenames: bool = Field(
+        default=False,
+        description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",
+    )
+
+    # API connection configuration
+    api_url: Optional[str] = Field(
+        default=None,
+        description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
@@ -97,9 +105,9 @@ class BasicMemoryConfig(BaseSettings):
         """Ensure configuration is valid after initialization."""
         # Ensure main project exists
         if "main" not in self.projects:  # pragma: no cover
-            self.projects["main"] = str(
+            self.projects["main"] = (
                 Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory"))
-            )
+            ).as_posix()
 
         # Ensure default project is valid
         if self.default_project not in self.projects:  # pragma: no cover
@@ -212,7 +220,7 @@ class ConfigManager:
 
         # Load config, modify it, and save it
         config = self.load_config()
-        config.projects[name] = str(project_path)
+        config.projects[name] = project_path.as_posix()
         self.save_config(config)
         return ProjectConfig(name=name, home=project_path)
 
@@ -239,7 +247,7 @@ class ConfigManager:
 
         # Load config, modify, and save
         config = self.load_config()
-        config.default_project = name
+        config.default_project = project_name
         self.save_config(config)
 
     def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:

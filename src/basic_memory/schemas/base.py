@@ -13,7 +13,7 @@ Key Concepts:
 
 import mimetypes
 import re
-from datetime import datetime, time, timezone
+from datetime import datetime, time
 from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
@@ -22,6 +22,8 @@ from dateparser import parse
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
+from basic_memory.config import ConfigManager
+from basic_memory.file_utils import sanitize_for_filename
 from basic_memory.utils import generate_permalink
 
 
@@ -191,12 +193,34 @@ class Entity(BaseModel):
     )
 
     @property
+    def safe_title(self) -> str:
+        """
+        A sanitized version of the title, which is safe for use on the filesystem. For example,
+        a title of "Coupon Enable/Disable Feature" should create a the file as "Coupon Enable-Disable Feature.md"
+        instead of creating a file named "Disable Feature.md" beneath the "Coupon Enable" directory.
+
+        Replaces POSIX and/or Windows style slashes as well as a few other characters that are not safe for filenames.
+        If kebab_filenames is True, then behavior is consistent with transformation used when generating permalink
+        strings (e.g. "Coupon Enable/Disable Feature" -> "coupon-enable-disable-feature").
+        """
+        fixed_title = sanitize_for_filename(self.title)
+
+        app_config = ConfigManager().config
+        use_kebab_case = app_config.kebab_filenames
+
+        if use_kebab_case:
+            fixed_title = generate_permalink(file_path=fixed_title, split_extension=False)
+
+        return fixed_title
+
+    @property
     def file_path(self):
         """Get the file path for this entity based on its permalink."""
+        safe_title = self.safe_title
         if self.content_type == "text/markdown":
-            return f"{self.folder}/{self.title}.md" if self.folder else f"{self.title}.md"
+            return f"{self.folder}/{safe_title}.md" if self.folder else f"{safe_title}.md"
         else:
-            return f"{self.folder}/{self.title}" if self.folder else self.title
+            return f"{self.folder}/{safe_title}" if self.folder else safe_title
 
     @property
     def permalink(self) -> Permalink:

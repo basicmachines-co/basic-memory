@@ -122,7 +122,7 @@ async def test_rapid_atomic_writes(watch_service, project_config, test_project, 
     await create_test_file(tmp2_path, "Second version")
 
     # Simulate the first atomic write
-    tmp1_path.rename(final_path)
+    tmp1_path.replace(final_path)
 
     # Brief pause to ensure file system registers the change
     await asyncio.sleep(0.1)
@@ -132,7 +132,7 @@ async def test_rapid_atomic_writes(watch_service, project_config, test_project, 
     assert content1 == "First version"
 
     # Simulate the second atomic write
-    tmp2_path.rename(final_path)
+    tmp2_path.replace(final_path)
 
     # Verify content was updated
     content2 = final_path.read_text(encoding="utf-8")

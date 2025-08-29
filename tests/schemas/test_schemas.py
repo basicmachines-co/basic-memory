@@ -1,7 +1,7 @@
 """Tests for Pydantic schema validation and conversion."""
 
 import pytest
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta
 from pydantic import ValidationError, BaseModel
 
 from basic_memory.schemas import (

@@ -3,7 +3,6 @@
 import json
 from datetime import datetime
 
-import pytest
 
 from basic_memory.schemas.memory import (
     EntitySummary,

@@ -1,6 +1,7 @@
 """Tests for ProjectService."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -73,7 +74,7 @@ async def test_project_operations_sync_methods(
     """
     # Generate a unique project name for testing
     test_project_name = f"test-project-{os.urandom(4).hex()}"
-    test_project_path = str(tmp_path / "test-project")
+    test_project_path = (tmp_path / "test-project").as_posix()
 
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
@@ -167,7 +168,7 @@ async def test_get_project_info(project_service: ProjectService, test_graph, tes
 async def test_add_project_async(project_service: ProjectService, tmp_path):
     """Test adding a project with the updated async method."""
     test_project_name = f"test-async-project-{os.urandom(4).hex()}"
-    test_project_path = str(tmp_path / "test-async-project")
+    test_project_path = (tmp_path / "test-async-project").as_posix()
 
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
@@ -243,7 +244,7 @@ async def test_set_default_project_async(project_service: ProjectService, tmp_pa
 async def test_get_project_method(project_service: ProjectService, tmp_path):
     """Test the get_project method directly."""
     test_project_name = f"test-get-project-{os.urandom(4).hex()}"
-    test_project_path = str(tmp_path / "test-get-project")
+    test_project_path = (tmp_path / "test-get-project").as_posix()
 
     # Make sure the test directory exists
     os.makedirs(test_project_path, exist_ok=True)
@@ -539,8 +540,8 @@ async def test_synchronize_projects_normalizes_project_names(
 async def test_move_project(project_service: ProjectService, tmp_path):
     """Test moving a project to a new location."""
     test_project_name = f"test-move-project-{os.urandom(4).hex()}"
-    old_path = str(tmp_path / "old-location")
-    new_path = str(tmp_path / "new-location")
+    old_path = (tmp_path / "old-location").as_posix()
+    new_path = (tmp_path / "new-location").as_posix()
 
     # Create old directory
     os.makedirs(old_path, exist_ok=True)
@@ -590,8 +591,8 @@ async def test_move_project_nonexistent(project_service: ProjectService, tmp_pat
 async def test_move_project_db_mismatch(project_service: ProjectService, tmp_path):
     """Test moving a project that exists in config but not in database."""
     test_project_name = f"test-move-mismatch-{os.urandom(4).hex()}"
-    old_path = str(tmp_path / "old-location")
-    new_path = str(tmp_path / "new-location")
+    old_path = (tmp_path / "old-location").as_posix()
+    new_path = (tmp_path / "new-location").as_posix()
 
     # Create directories
     os.makedirs(old_path, exist_ok=True)
@@ -624,7 +625,7 @@ async def test_move_project_db_mismatch(project_service: ProjectService, tmp_pat
 async def test_move_project_expands_path(project_service: ProjectService, tmp_path):
     """Test that move_project expands ~ and relative paths."""
     test_project_name = f"test-move-expand-{os.urandom(4).hex()}"
-    old_path = str(tmp_path / "old-location")
+    old_path = (tmp_path / "old-location").as_posix()
 
     # Create old directory
     os.makedirs(old_path, exist_ok=True)
@@ -635,7 +636,7 @@ async def test_move_project_expands_path(project_service: ProjectService, tmp_pa
 
         # Use a relative path for the move
         relative_new_path = "./new-location"
-        expected_absolute_path = os.path.abspath(relative_new_path)
+        expected_absolute_path = Path(os.path.abspath(relative_new_path)).as_posix()
 
         # Move project using relative path
         await project_service.move_project(test_project_name, relative_new_path)

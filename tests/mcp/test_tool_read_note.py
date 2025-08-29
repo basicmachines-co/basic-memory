@@ -10,6 +10,7 @@ import pytest_asyncio
 from unittest.mock import MagicMock, patch
 
 from basic_memory.schemas.search import SearchResponse, SearchItemType
+from basic_memory.utils import normalize_newlines
 
 
 @pytest_asyncio.fixture
@@ -61,7 +62,7 @@ async def test_note_unicode_content(app):
 
     # Read back should preserve unicode
     result = await read_note.fn("test/unicode-test")
-    assert content in result
+    assert normalize_newlines(content) in result
 
 
 @pytest.mark.asyncio

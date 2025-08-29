@@ -15,7 +15,7 @@ Basic Memory provides pre-built Docker images on GitHub Container Registry that 
      --name basic-memory-server \
      -p 8000:8000 \
      -v /path/to/your/obsidian-vault:/app/data:rw \
-     -v basic-memory-config:/root/.basic-memory:rw \
+     -v basic-memory-config:/app/.basic-memory:rw \
      ghcr.io/basicmachines-co/basic-memory:latest
    ```
 
@@ -30,7 +30,7 @@ Basic Memory provides pre-built Docker images on GitHub Container Registry that 
          - "8000:8000"
        volumes:
          - /path/to/your/obsidian-vault:/app/data:rw
-         - basic-memory-config:/root/.basic-memory:rw
+         - basic-memory-config:/app/.basic-memory:rw
        environment:
          - BASIC_MEMORY_DEFAULT_PROJECT=main
        restart: unless-stopped
@@ -67,7 +67,7 @@ docker build -t basic-memory .
 docker run -d \
   --name basic-memory-server \
   -v /path/to/your/obsidian-vault:/app/data:rw \
-  -v basic-memory-config:/root/.basic-memory:rw \
+  -v basic-memory-config:/app/.basic-memory:rw \
   -e BASIC_MEMORY_DEFAULT_PROJECT=main \
   basic-memory
 ```
@@ -86,11 +86,11 @@ Basic Memory requires several volume mounts for proper operation:
 
 2. **Configuration and Database** (Recommended):
    ```yaml
-   - basic-memory-config:/root/.basic-memory:rw
+   - basic-memory-config:/app/.basic-memory:rw
    ```
    Persistent storage for configuration and SQLite database.
 
-You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json after Basic Memory starts.
+You can edit the basic-memory config.json file located in the /app/.basic-memory/config.json after Basic Memory starts.
 
 3. **Multiple Projects** (Optional):
    ```yaml
@@ -98,7 +98,7 @@ You can edit the basic-memory config.json file located in the /root/.basic-memor
    - /path/to/project2:/app/data/project2:rw
    ```
 
-You can edit the basic-memory config.json file located in the /root/.basic-memory/config.json
+You can edit the basic-memory config.json file located in the /app/.basic-memory/config.json
 
 ## CLI Commands via Docker
 
@@ -123,7 +123,7 @@ When using Docker volumes, you'll need to configure projects to point to your mo
 
 1. **Check current configuration:**
    ```bash
-   docker exec basic-memory-server cat /root/.basic-memory/config.json
+   docker exec basic-memory-server cat /app/.basic-memory/config.json
    ```
 
 2. **Add a project for your mounted volume:**
@@ -184,15 +184,46 @@ environment:
 
 ### Linux/macOS
 
-Ensure your knowledge directories have proper permissions:
+The Docker container now runs as a non-root user to avoid file ownership issues. By default, the container uses UID/GID 1000, but you can customize this to match your user:
 
 ```bash
-# Make directories readable/writable
-chmod -R 755 /path/to/your/obsidian-vault
+# Build with custom UID/GID to match your user
+docker build --build-arg UID=$(id -u) --build-arg GID=$(id -g) -t basic-memory .
 
-# If using specific user/group
-chown -R $USER:$USER /path/to/your/obsidian-vault
+# Or use docker-compose with build args
 ```
+
+**Example docker-compose.yml with custom user:**
+```yaml
+version: '3.8'
+services:
+  basic-memory:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: 1000  # Replace with your UID
+        GID: 1000  # Replace with your GID
+    container_name: basic-memory-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - /path/to/your/obsidian-vault:/app/data:rw
+      - basic-memory-config:/app/.basic-memory:rw
+    environment:
+      - BASIC_MEMORY_DEFAULT_PROJECT=main
+    restart: unless-stopped
+```
+
+**Using pre-built images:**
+If using the pre-built image from GitHub Container Registry, files will be created with UID/GID 1000. You can either:
+
+1. Change your local directory ownership to match:
+   ```bash
+   sudo chown -R 1000:1000 /path/to/your/obsidian-vault
+   ```
+
+2. Or build your own image with custom UID/GID as shown above.
 
 ### Windows
 
@@ -217,7 +248,7 @@ When using Docker Desktop on Windows, ensure the directories are shared:
       ```
 
 2. **Configuration Not Persisting:**
-    - Use named volumes for `/root/.basic-memory`
+    - Use named volumes for `/app/.basic-memory`
     - Check volume mount permissions
 
 3. **Network Connectivity:**
@@ -243,10 +274,10 @@ docker-compose logs -f basic-memory
 ## Security Considerations
 
 1. **Docker Security:**
-   The container runs as root for simplicity. For production, consider additional security measures.
+   The container runs as a non-root user (UID/GID 1000 by default) for improved security. You can customize the user ID using build arguments to match your local user.
 
 2. **Volume Permissions:**
-   Ensure mounted directories have appropriate permissions and don't expose sensitive data.
+   Ensure mounted directories have appropriate permissions and don't expose sensitive data. With the non-root container, files will be created with the specified user ownership.
 
 3. **Network Security:**
    If using HTTP transport, consider using reverse proxy with SSL/TLS and authentication if the endpoint is available on
@@ -288,7 +319,7 @@ For Docker-specific issues:
 1. Check the [troubleshooting section](#troubleshooting) above
 2. Review container logs: `docker-compose logs basic-memory`
 3. Verify volume mounts: `docker inspect basic-memory-server`
-4. Test file permissions: `docker exec basic-memory-server ls -la /root`
+4. Test file permissions: `docker exec basic-memory-server ls -la /app`
 
 For general Basic Memory support, see the main [README](../README.md)
 and [documentation](https://memory.basicmachines.co/).
