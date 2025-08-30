@@ -3,7 +3,7 @@
 import pytest
 import frontmatter
 
-from basic_memory.file_utils import dumps_frontmatter_obsidian_compatible
+from basic_memory.file_utils import dump_frontmatter
 
 
 def test_tags_formatted_as_yaml_list():
