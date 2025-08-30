@@ -79,7 +79,7 @@ def test_complex_tags_with_special_characters():
     post.metadata["title"] = "Test Note"
     post.metadata["tags"] = ["python-test", "api_integration", "v2.0", "nested/tag"]
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     assert "- python-test" in result
     assert "- api_integration" in result
