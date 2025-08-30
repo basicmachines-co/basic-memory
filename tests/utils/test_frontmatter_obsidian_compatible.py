@@ -153,7 +153,7 @@ def test_empty_content():
     post.metadata["title"] = "Empty Note"
     post.metadata["tags"] = ["empty", "test"]
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     # Should have frontmatter delimiter
     assert result.startswith("---")
