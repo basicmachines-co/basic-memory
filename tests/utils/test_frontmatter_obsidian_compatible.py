@@ -57,7 +57,7 @@ def test_no_tags_metadata():
     post.metadata["title"] = "Test Note"
     post.metadata["type"] = "note"
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     assert "title: Test Note" in result
     assert "type: note" in result
