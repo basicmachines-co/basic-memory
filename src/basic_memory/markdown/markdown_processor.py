@@ -7,6 +7,7 @@ from frontmatter import Post
 from loguru import logger
 
 from basic_memory import file_utils
+from basic_memory.file_utils import dumps_frontmatter_obsidian_compatible
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
 
@@ -115,7 +116,7 @@ class MarkdownProcessor:
 
         # Create Post object for frontmatter
         post = Post(content, **frontmatter_dict)
-        final_content = frontmatter.dumps(post, sort_keys=False)
+        final_content = dumps_frontmatter_obsidian_compatible(post)
 
         logger.debug(f"writing file {path} with content:\n{final_content}")
 
