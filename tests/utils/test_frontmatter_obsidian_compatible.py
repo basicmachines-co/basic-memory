@@ -172,7 +172,7 @@ def test_roundtrip_compatibility():
     original_post.metadata["type"] = "note"
     
     # Format with our function
-    formatted = dumps_frontmatter_obsidian_compatible(original_post)
+    formatted = dump_frontmatter(original_post)
     
     # Parse it back
     parsed_post = frontmatter.loads(formatted)
