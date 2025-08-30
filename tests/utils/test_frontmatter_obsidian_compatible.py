@@ -133,7 +133,7 @@ def test_mixed_metadata_types():
     post.metadata["priority"] = 5
     post.metadata["draft"] = True
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     # Lists should use YAML format
     assert "tags:" in result
