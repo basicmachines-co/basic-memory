@@ -45,7 +45,7 @@ def test_single_tag():
     post.metadata["title"] = "Test Note"
     post.metadata["tags"] = ["single-tag"]
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     assert "tags:" in result
     assert "- single-tag" in result
