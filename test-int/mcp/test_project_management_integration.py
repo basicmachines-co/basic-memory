@@ -200,6 +200,7 @@ async def test_set_default_project_operation(mcp_server, app):
             "set_default_project",
             {
                 "project_name": "test-project",
+                "activate": False,
             },
         )
 
@@ -210,6 +211,41 @@ async def test_set_default_project_operation(mcp_server, app):
         assert "✓" in default_text  # Success indicator
         assert "test-project" in default_text
         assert "Restart Basic Memory for this change to take effect" in default_text
+        assert "basic-memory mcp" in default_text
+        assert "Project: test-project" in default_text  # Project metadata
+
+@pytest.mark.asyncio
+async def test_set_default_project_operation_activate_by_default(mcp_server, app):
+    """Test set_default_project functionality."""
+
+    async with Client(mcp_server) as client:
+        # Get current project info (default)
+        current_result = await client.call_tool(
+            "get_current_project",
+            {},
+        )
+
+        assert len(current_result.content) == 1
+        current_text = current_result.content[0].text
+
+        # Should show current project and stats
+        assert "Current project: test-project" in current_text
+
+        # Set test-project as default (it likely already is, but test the operation)
+        default_result = await client.call_tool(
+            "set_default_project",
+            {
+                "project_name": "test-project",
+            },
+        )
+
+        assert len(default_result.content) == 1
+        default_text = default_result.content[0].text
+
+        # Should show success message and restart instructions
+        assert "✓" in default_text  # Success indicator
+        assert "test-project" in default_text
+        assert f"Project test-project is now active." in default_text
         assert "basic-memory mcp" in default_text
         assert "Project: test-project" in default_text  # Project metadata
 

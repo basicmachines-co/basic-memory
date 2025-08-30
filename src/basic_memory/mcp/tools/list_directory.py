@@ -3,9 +3,10 @@
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_session import get_active_project
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 
@@ -18,6 +19,7 @@ async def list_directory(
     depth: int = 1,
     file_name_glob: Optional[str] = None,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
 
@@ -55,7 +57,7 @@ async def list_directory(
         # Find meeting notes in a specific project
         list_directory(dir_name="/projects", file_name_glob="*meeting*", project="work-project")
     """
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     # Prepare query parameters

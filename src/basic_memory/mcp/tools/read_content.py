@@ -11,11 +11,12 @@ import io
 
 from loguru import logger
 from PIL import Image as PILImage
+from fastmcp import Context
 
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -147,7 +148,7 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 
 
 @mcp.tool(description="Read a file's raw content by path or permalink")
-async def read_content(path: str, project: Optional[str] = None) -> dict:
+async def read_content(path: str, project: Optional[str] = None, context: Context | None = None) -> dict:
     """Read a file's raw content by path or permalink.
 
     This tool provides direct access to file content in the knowledge base,
@@ -185,7 +186,7 @@ async def read_content(path: str, project: Optional[str] = None) -> dict:
     """
     logger.info("Reading file", path=path)
 
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     url = memory_url_path(path)

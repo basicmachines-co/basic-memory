@@ -16,11 +16,11 @@ from basic_memory.mcp.server import mcp as mcp_server
 
 @pytest.fixture(scope="function")
 def mcp() -> FastMCP:
-    return mcp_server
+    return mcp_server  # pyright: ignore [reportReturnType]
 
 
 @pytest.fixture(scope="function")
-def app(app_config, project_config, engine_factory, project_session, config_manager) -> FastAPI:
+def app(app_config, project_config, engine_factory, config_manager) -> FastAPI:
     """Create test FastAPI application."""
     app = fastapi_app
     app.dependency_overrides[get_app_config] = lambda: app_config

@@ -3,10 +3,12 @@
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.config import ConfigManager
+from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.project_session import get_active_project
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.services.sync_status_service import sync_status_tracker
 
 
@@ -79,7 +81,7 @@ def _get_all_projects_status() -> list[str]:
     - Background processing of knowledge graphs
     """,
 )
-async def sync_status(project: Optional[str] = None) -> str:
+async def sync_status(project: Optional[str] = None, context: Context | None = None ) -> str:
     """Get current sync status and system readiness information.
 
     This tool provides detailed information about any ongoing or completed
@@ -227,7 +229,7 @@ async def sync_status(project: Optional[str] = None) -> str:
         # Add project context if provided
         if project:
             try:
-                active_project = get_active_project(project)
+                active_project = await get_active_project(client, context=context, project_override=project)
                 status_lines.extend(
                     [
                         "",

@@ -5,6 +5,7 @@ import typer
 
 from basic_memory.cli.app import app
 from basic_memory.config import ConfigManager
+from basic_memory.mcp.middleware import ProjectContextMiddleware
 
 # Import mcp instance
 from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
@@ -62,6 +63,10 @@ def mcp(
 
     # Now run the MCP server (blocks)
     logger.info(f"Starting MCP server with {transport.upper()} transport")
+
+    # middleware to store the active project
+    session_state_middleware = ProjectContextMiddleware()
+    mcp_server.add_middleware(session_state_middleware)
 
     if transport == "stdio":
         mcp_server.run(

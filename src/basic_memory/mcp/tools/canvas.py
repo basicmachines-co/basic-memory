@@ -7,11 +7,12 @@ import json
 from typing import Dict, List, Any, Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
-from basic_memory.mcp.project_session import get_active_project
 
 
 @mcp.tool(
@@ -23,6 +24,7 @@ async def canvas(
     title: str,
     folder: str,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Create an Obsidian canvas file with the provided nodes and edges.
 
@@ -38,6 +40,7 @@ async def canvas(
         folder: Folder path relative to project root where the canvas should be saved.
                 Use forward slashes (/) as separators. Examples: "diagrams", "projects/2025", "visual/maps"
         project: Optional project name to create canvas in. If not provided, uses current active project.
+        context: Optional context to use for this tool.
 
     Returns:
         A summary of the created canvas file
@@ -83,7 +86,7 @@ async def canvas(
         # Create canvas in specific project
         canvas(nodes=[...], edges=[...], title="My Canvas", folder="diagrams", project="work-project")
     """
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     # Ensure path has .canvas extension

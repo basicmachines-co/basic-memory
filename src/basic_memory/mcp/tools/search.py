@@ -4,11 +4,12 @@ from textwrap import dedent
 from typing import List, Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
 
@@ -211,6 +212,7 @@ async def search_notes(
     entity_types: Optional[List[str]] = None,
     after_date: Optional[str] = None,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> SearchResponse | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
 
@@ -343,7 +345,7 @@ async def search_notes(
     if after_date:
         search_query.after_date = after_date
 
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     logger.info(f"Searching for {search_query}")

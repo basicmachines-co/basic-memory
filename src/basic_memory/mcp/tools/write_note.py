@@ -1,14 +1,15 @@
 """Write note tool for Basic Memory MCP server."""
-
+from pathlib import Path
 from typing import List, Union, Optional
 
 from loguru import logger
 
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas import EntityResponse
+from fastmcp import Context
 from basic_memory.schemas.base import Entity
 from basic_memory.utils import parse_tags, validate_project_path
 
@@ -29,6 +30,7 @@ async def write_note(
     tags=None,  # Remove type hint completely to avoid schema issues
     entity_type: str = "note",
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
 
@@ -61,6 +63,7 @@ async def write_note(
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
         project: Optional project name to write to. If not provided, uses current active project.
+        context: Optional FastMCP context for project session management (cloud mode).
 
     Returns:
         A markdown formatted summary of the semantic content, including:
@@ -73,7 +76,7 @@ async def write_note(
     logger.info(f"MCP tool call tool=write_note folder={folder}, title={title}, tags={tags}")
 
     # Get the active project first to check project-specific sync status
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
 
     # Validate folder path to prevent path traversal attacks
     project_path = active_project.home
@@ -104,7 +107,7 @@ async def write_note(
         content=content,
         entity_metadata=metadata,
     )
-    project_url = active_project.project_url
+    project_url = active_project.permalink
 
     # Create or update via knowledge API
     logger.debug(f"Creating entity via API permalink={entity.permalink}")
