@@ -116,7 +116,7 @@ class MarkdownProcessor:
 
         # Create Post object for frontmatter
         post = Post(content, **frontmatter_dict)
-        final_content = dumps_frontmatter_obsidian_compatible(post)
+        final_content = dump_frontmatter(post)
 
         logger.debug(f"writing file {path} with content:\n{final_content}")
 
