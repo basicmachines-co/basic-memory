@@ -3,9 +3,10 @@
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_session import get_active_project
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_patch
 from basic_memory.schemas import EntityResponse
@@ -135,6 +136,7 @@ async def edit_note(
     find_text: Optional[str] = None,
     expected_replacements: int = 1,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Edit an existing markdown note in the knowledge base.
 
@@ -200,7 +202,7 @@ async def edit_note(
         edit_note("docs/guide", "find_replace", "new-api", find_text="old-api", project="my-project"))
 
     """
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)

@@ -3,18 +3,19 @@
 from typing import List, Union, Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import GraphContext
 from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.tool(
-    description="""Get recent activity from across the knowledge base.
+    description="""Get recent activity for a project.
 
     Timeframe supports natural language formats like:
     - "2 days ago"  
@@ -33,8 +34,9 @@ async def recent_activity(
     page_size: int = 10,
     max_related: int = 10,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> GraphContext:
-    """Get recent activity across the knowledge base.
+    """Get recent activity for a project.
 
     Args:
         type: Filter by content type(s). Can be a string or list of strings.
@@ -120,7 +122,7 @@ async def recent_activity(
         # Add validated types to params
         params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     response = await call_get(

@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.mcp.project_session import session
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.resources.project_info import project_info
 import json
 from datetime import datetime
@@ -52,13 +52,11 @@ def list_projects() -> None:
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
         table.add_column("Path", style="green")
-        table.add_column("Default", style="yellow")
-        table.add_column("Active", style="magenta")
+        table.add_column("Default", style="magenta")
 
         for project in result.projects:
             is_default = "✓" if project.is_default else ""
-            is_active = "✓" if session.get_current_project() == project.name else ""
-            table.add_row(project.name, format_path(project.path), is_default, is_active)
+            table.add_row(project.name, format_path(project.path), is_default)
 
         console.print(table)
     except Exception as e:
@@ -161,9 +159,10 @@ def move_project(
         data = {"path": resolved_path}
 
         project_permalink = generate_permalink(name)
-        current_project = session.get_current_project()
+
+        # TODO fix route to use ProjectPathDep
         response = asyncio.run(
-            call_patch(client, f"/{current_project}/project/{project_permalink}", json=data)
+            call_patch(client, f"/{name}/project/{project_permalink}", json=data)
         )
         result = ProjectStatusResponse.model_validate(response.json())
 

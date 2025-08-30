@@ -4,11 +4,12 @@ from textwrap import dedent
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post, call_get
-from basic_memory.mcp.project_session import get_active_project
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.project_info import ProjectList
 from basic_memory.utils import validate_project_path
@@ -352,6 +353,7 @@ async def move_note(
     identifier: str,
     destination_path: str,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Move a note to a new file location within the same project.
 
@@ -360,7 +362,7 @@ async def move_note(
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
-        project: Optional project name (defaults to current session project)
+        project: Optional project name (defaults to current active project)
 
     Returns:
         Success message with move details
@@ -391,7 +393,7 @@ async def move_note(
     """
     logger.debug(f"Moving note: {identifier} to {destination_path}")
 
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
     project_url = active_project.project_url
 
     # Validate destination path to prevent path traversal attacks

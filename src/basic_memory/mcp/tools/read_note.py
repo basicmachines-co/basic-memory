@@ -4,12 +4,13 @@ from textwrap import dedent
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -18,7 +19,7 @@ from basic_memory.utils import validate_project_path
     description="Read a markdown note by title or permalink.",
 )
 async def read_note(
-    identifier: str, page: int = 1, page_size: int = 10, project: Optional[str] = None
+    identifier: str, page: int = 1, page_size: int = 10, project: Optional[str] = None, context: Context | None = None,
 ) -> str:
     """Read a markdown note from the knowledge base.
 
@@ -53,8 +54,8 @@ async def read_note(
         read_note("Meeting Notes", project="work-project")
     """
 
-    # Get the active project first to check project-specific sync status
-    active_project = get_active_project(project)
+    # Get the active project
+    active_project = await get_active_project(client, context=context, project_override=project)
 
     # Validate identifier to prevent path traversal attacks
     # We need to check both the raw identifier and the processed path

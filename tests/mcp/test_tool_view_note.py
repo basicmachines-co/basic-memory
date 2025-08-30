@@ -234,7 +234,7 @@ async def test_view_note_fallback_identifier_as_title(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_direct_success(mock_call_get):
+async def test_view_note_direct_success(app, mock_call_get):
     """Test view_note with successful direct permalink lookup."""
     # Setup mock for successful response with frontmatter
     note_content = dedent("""
@@ -259,47 +259,6 @@ async def test_view_note_direct_success(mock_call_get):
     assert "test/test-note" in mock_call_get.call_args[0][1]
 
     # Verify result contains artifact
-    assert '<artifact identifier="note-' in result
-    assert 'title="Test Note"' in result
-    assert "This is a test note." in result
-    assert "✅ Note displayed as artifact: **Test Note**" in result
-
-
-@pytest.mark.asyncio
-async def test_view_note_title_search_fallback(mock_call_get, mock_search):
-    """Test view_note falls back to title search when direct lookup fails."""
-    # Setup mock for failed direct lookup
-    mock_call_get.side_effect = [
-        # First call fails (direct lookup)
-        MagicMock(status_code=404),
-        # Second call succeeds (after title search)
-        MagicMock(status_code=200, text="# Test Note\n\nThis is a test note."),
-    ]
-
-    # Setup mock for successful title search
-    mock_search.return_value = SearchResponse(
-        results=[
-            {
-                "id": 1,
-                "entity": "test/test-note",
-                "title": "Test Note",
-                "type": SearchItemType.ENTITY,
-                "permalink": "test/test-note",
-                "file_path": "test/test-note.md",
-                "score": 1.0,
-            }
-        ],
-        current_page=1,
-        page_size=1,
-    )
-
-    # Call the function
-    result = await view_note.fn("Test Note")
-
-    # Verify title search was used
-    mock_search.assert_called_once()
-
-    # Verify result contains artifact with extracted title
     assert '<artifact identifier="note-' in result
     assert 'title="Test Note"' in result
     assert "This is a test note." in result

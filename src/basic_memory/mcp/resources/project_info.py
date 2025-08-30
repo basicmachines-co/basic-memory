@@ -1,19 +1,20 @@
 """Project info tool for Basic Memory MCP server."""
 
 from loguru import logger
+from fastmcp import Context
 
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas import ProjectInfoResponse
 
 
 @mcp.resource(
-    uri="memory://project_info",
+    uri="memory://{project}/info",
     description="Get information and statistics about the current Basic Memory project.",
 )
-async def project_info() -> ProjectInfoResponse:
+async def project_info(project: str, context: Context | None) -> ProjectInfoResponse:
     """Get comprehensive information about the current Basic Memory project.
 
     This tool provides detailed statistics and status information about your
@@ -31,12 +32,15 @@ async def project_info() -> ProjectInfoResponse:
     - Monitor growth and activity over time
     - Identify potential issues like unresolved relations
 
+    Args:
+        project (str): The name of the project.
+
     Returns:
         Detailed project information and statistics
 
     Examples:
         # Get information about the current project
-        info = await project_info()
+        info = await project_info(name)
 
         # Check entity counts
         print(f"Total entities: {info.statistics.total_entities}")
@@ -45,8 +49,8 @@ async def project_info() -> ProjectInfoResponse:
         print(f"Basic Memory version: {info.system.version}")
     """
     logger.info("Getting project info")
-    project_config = get_active_project()
-    project_url = project_config.project_url
+    project_config = await get_active_project(client, context=context, project_override=project)
+    project_url = project_config.permalink
 
     # Call the API endpoint
     response = await call_get(client, f"{project_url}/project/info")

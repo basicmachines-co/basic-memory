@@ -3,11 +3,12 @@
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     GraphContext,
@@ -42,6 +43,7 @@ async def build_context(
     page_size: int = 10,
     max_related: int = 10,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> GraphContext:
     """Get context needed to continue a discussion.
 
@@ -57,6 +59,7 @@ async def build_context(
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
         project: Optional project name to build context from. If not provided, uses current active project.
+        context: Optional context to use for this tool.
 
     Returns:
         GraphContext containing:
@@ -93,7 +96,7 @@ async def build_context(
     # URL is already validated and normalized by MemoryUrl type annotation
 
     # Get the active project first to check project-specific sync status
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, context=context, project_override=project)
 
     # Check migration status and wait briefly if needed
     from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status

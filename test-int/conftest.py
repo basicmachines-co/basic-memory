@@ -60,6 +60,7 @@ from httpx import AsyncClient, ASGITransport
 
 from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
 from basic_memory.db import engine_session_factory, DatabaseType
+from basic_memory.mcp.middleware import ProjectContextMiddleware
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from fastapi import FastAPI
@@ -140,15 +141,6 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     return config_manager
 
 
-@pytest.fixture(scope="function")
-def project_session(test_project: Project, config_manager):
-    # Initialize the global session directly with the test project
-    # This ensures all MCP tools use the test project context
-    import basic_memory.mcp.project_session
-
-    basic_memory.mcp.project_session.session.initialize(test_project.name)
-    return basic_memory.mcp.project_session.session
-
 
 @pytest.fixture(scope="function", autouse=True)
 def project_config(test_project):
@@ -164,7 +156,7 @@ def project_config(test_project):
 
 @pytest.fixture(scope="function")
 def app(
-    app_config, project_config, engine_factory, test_project, project_session, config_manager
+    app_config, project_config, engine_factory, test_project, config_manager
 ) -> FastAPI:
     """Create test FastAPI application with single project."""
 
@@ -207,9 +199,12 @@ async def search_service(engine_factory, test_project):
 
 
 @pytest.fixture(scope="function")
-def mcp_server(config_manager, search_service, project_session):
+def mcp_server(config_manager, search_service):
     # Import mcp instance
     from basic_memory.mcp.server import mcp as server
+
+    session_state_middleware = ProjectContextMiddleware()
+    server.add_middleware(session_state_middleware)
 
     # Import mcp tools to register them
     import basic_memory.mcp.tools  # noqa: F401
