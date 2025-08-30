@@ -111,7 +111,7 @@ def test_non_tags_lists_also_formatted():
     post.metadata["authors"] = ["John Doe", "Jane Smith"]
     post.metadata["keywords"] = ["AI", "machine learning"]
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     # Authors should be formatted as YAML list
     assert "authors:" in result
