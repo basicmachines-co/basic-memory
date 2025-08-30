@@ -68,7 +68,7 @@ def test_no_frontmatter():
     """Test that posts with no frontmatter just return content."""
     post = frontmatter.Post("Test content only")
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     assert result == "Test content only"
 
