@@ -93,7 +93,7 @@ def test_tags_order_preserved():
     post.metadata["title"] = "Test Note"
     post.metadata["tags"] = ["zebra", "apple", "banana"]
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     # Find the positions of each tag in the output
     zebra_pos = result.find("- zebra")
