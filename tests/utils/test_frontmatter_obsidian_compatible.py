@@ -33,7 +33,7 @@ def test_empty_tags_list():
     post.metadata["title"] = "Test Note"
     post.metadata["tags"] = []
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     # Should have empty list representation
     assert "tags: []" in result
