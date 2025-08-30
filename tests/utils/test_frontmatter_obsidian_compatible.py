@@ -13,7 +13,7 @@ def test_tags_formatted_as_yaml_list():
     post.metadata["type"] = "note"
     post.metadata["tags"] = ["system", "overview", "reference"]
     
-    result = dumps_frontmatter_obsidian_compatible(post)
+    result = dump_frontmatter(post)
     
     # Should use YAML list format
     assert "tags:" in result
