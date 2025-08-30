@@ -7,7 +7,7 @@ from frontmatter import Post
 from loguru import logger
 
 from basic_memory import file_utils
-from basic_memory.file_utils import dumps_frontmatter_obsidian_compatible
+from basic_memory.file_utils import dump_frontmatter
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
 
