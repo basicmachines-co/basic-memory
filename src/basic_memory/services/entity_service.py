@@ -273,7 +273,7 @@ class EntityService(BaseService[EntityModel]):
         merged_post = frontmatter.Post(post.content, **existing_markdown.frontmatter.metadata)
 
         # write file
-        final_content = dumps_frontmatter_obsidian_compatible(merged_post)
+        final_content = dump_frontmatter(merged_post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
         # parse entity from file
