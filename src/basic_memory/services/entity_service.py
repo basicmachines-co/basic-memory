@@ -196,7 +196,7 @@ class EntityService(BaseService[EntityModel]):
         post = await schema_to_markdown(schema)
 
         # write file
-        final_content = dumps_frontmatter_obsidian_compatible(post)
+        final_content = dump_frontmatter(post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
         # parse entity from file
