@@ -237,7 +237,7 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         raise FileError(f"Failed to update frontmatter: {e}")
 
 
-def dumps_frontmatter_obsidian_compatible(post: frontmatter.Post) -> str:
+def dump_frontmatter(post: frontmatter.Post) -> str:
     """
     Serialize frontmatter.Post to markdown with Obsidian-compatible YAML format.
     
