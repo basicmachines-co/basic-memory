@@ -10,6 +10,7 @@ from .file_utils import (
     has_frontmatter,
     parse_frontmatter,
     remove_frontmatter,
+    sanitize_for_filename,
     update_frontmatter,
     write_file_atomic,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "has_frontmatter",
     "parse_frontmatter",
     "remove_frontmatter",
+    "sanitize_for_filename",
     "update_frontmatter",
     "write_file_atomic",
     "should_ignore_file",
