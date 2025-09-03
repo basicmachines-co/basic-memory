@@ -21,16 +21,19 @@ def get_gitignore_patterns(project_root: Path) -> List[str]:
     
     # Default ignore patterns for build artifacts
     DEFAULT_PATTERNS = [
+        # Ignore all dot directories and their contents
+        '/.*',           # Hidden files in root
+        '/.*/',          # Hidden directories in root
+        '.*/',           # Hidden directories anywhere
+        '**/.*/',        # Hidden directories in subdirectories
+        '**/.*/**',      # Contents of hidden directories
+        
         # Build directories
         'target/',        # Rust
         'node_modules/',  # Node.js
         'dist/',         # Various build systems
         'build/',        # Various build systems
         '__pycache__/',  # Python
-        '.pytest_cache/', # Python tests
-        '.ruff_cache/',  # Ruff linter
-        '.mypy_cache/',  # MyPy type checker
-        '.coverage/',    # Python coverage
         
         # Binary and object files
         '*.o',          # Object files
@@ -41,9 +44,7 @@ def get_gitignore_patterns(project_root: Path) -> List[str]:
         '*.pyo',        # Python optimized bytecode
         '*.pyd',        # Python DLLs
         
-        # IDE and editor files
-        '.idea/',       # IntelliJ
-        '.vscode/',     # VS Code
+        # Temporary and system files
         '*.swp',        # Vim swap files
         '.DS_Store',    # macOS metadata
         
