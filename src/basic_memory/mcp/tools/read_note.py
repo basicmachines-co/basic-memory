@@ -8,7 +8,7 @@ from loguru import logger
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
-from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.tools.utils import call_get, wait_for_migration_or_return_status
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
@@ -71,8 +71,6 @@ async def read_note(
         return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
 
     # Check migration status and wait briefly if needed
-    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
-
     migration_status = await wait_for_migration_or_return_status(
         timeout=5.0, project_name=active_project.name
     )

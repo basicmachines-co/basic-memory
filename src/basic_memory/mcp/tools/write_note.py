@@ -6,7 +6,7 @@ from loguru import logger
 
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_put
+from basic_memory.mcp.tools.utils import call_put, wait_for_migration_or_return_status
 from basic_memory.mcp.project_session import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.base import Entity
@@ -84,8 +84,6 @@ async def write_note(
         return f"# Error\n\nFolder path '{folder}' is not allowed - paths must stay within project boundaries"
 
     # Check migration status and wait briefly if needed
-    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
-
     migration_status = await wait_for_migration_or_return_status(
         timeout=5.0, project_name=active_project.name
     )
