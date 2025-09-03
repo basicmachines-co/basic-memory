@@ -126,7 +126,7 @@ class FileService:
 
         try:
             # Ensure parent directory exists
-            await file_utils.ensure_directory(full_path.parent)
+            file_utils.ensure_directory(full_path.parent)
 
             # Write content atomically
             logger.info(
@@ -136,10 +136,10 @@ class FileService:
                 f"is_markdown={full_path.suffix.lower() == '.md'}"
             )
 
-            await file_utils.write_file_atomic(full_path, content)
+            file_utils.write_file_atomic(full_path, content)
 
             # Compute and return checksum
-            checksum = await file_utils.compute_checksum(content)
+            checksum = await file_utils.compute_checksum_from_content(content)
             logger.debug(f"File write completed path={full_path}, {checksum=}")
             return checksum
 
@@ -170,7 +170,7 @@ class FileService:
         try:
             logger.debug("Reading file", operation="read_file", path=str(full_path))
             content = full_path.read_text(encoding="utf-8")
-            checksum = await file_utils.compute_checksum(content)
+            checksum = await file_utils.compute_checksum_from_content(content)
 
             logger.debug(
                 "File read completed",
@@ -212,7 +212,18 @@ class FileService:
         # Convert string to Path if needed
         path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
-        return await file_utils.update_frontmatter(full_path, updates)
+        
+        # Read current content
+        content = full_path.read_text(encoding="utf-8")
+        
+        # Use the synchronous update_frontmatter from file_utils to update the content
+        updated_content = file_utils.update_frontmatter(content, updates)
+        
+        # Write the updated content back
+        file_utils.write_file_atomic(full_path, updated_content)
+        
+        # Return checksum of updated content
+        return await file_utils.compute_checksum_from_content(updated_content)
 
     async def compute_checksum(self, path: FilePath) -> str:
         """Compute checksum for a file.
@@ -237,7 +248,7 @@ class FileService:
             else:
                 # read bytes
                 content = full_path.read_bytes()
-            return await file_utils.compute_checksum(content)
+            return await file_utils.compute_checksum_from_content(content)
 
         except Exception as e:  # pragma: no cover
             logger.error("Failed to compute checksum", path=str(full_path), error=str(e))

@@ -84,7 +84,7 @@ class MarkdownProcessor:
         # Dirty check if needed
         if expected_checksum is not None:
             current_content = path.read_text(encoding="utf-8")
-            current_checksum = await file_utils.compute_checksum(current_content)
+            current_checksum = await file_utils.compute_checksum_from_content(current_content)
             if current_checksum != expected_checksum:
                 raise DirtyFileError(f"File {path} has been modified")
 
@@ -121,8 +121,8 @@ class MarkdownProcessor:
 
         # Write atomically and return checksum of updated file
         path.parent.mkdir(parents=True, exist_ok=True)
-        await file_utils.write_file_atomic(path, final_content)
-        return await file_utils.compute_checksum(final_content)
+        file_utils.write_file_atomic(path, final_content)
+        return await file_utils.compute_checksum_from_content(final_content)
 
     def format_observations(self, observations: list[Observation]) -> str:
         """Format observations section in standard way.

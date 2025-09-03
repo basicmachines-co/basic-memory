@@ -4,9 +4,8 @@ import hashlib
 import os
 import re
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 from unidecode import unidecode
 
@@ -43,6 +42,21 @@ async def compute_checksum(path: str) -> str:
     with open(path, "rb") as f:
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+async def compute_checksum_from_content(content: Union[str, bytes]) -> str:
+    """Compute SHA-256 checksum from content.
+    
+    Args:
+        content: Content to hash (string or bytes)
+        
+    Returns:
+        Hex digest of SHA-256 hash
+    """
+    sha256_hash = hashlib.sha256()
+    if isinstance(content, str):
+        content = content.encode('utf-8')
+    sha256_hash.update(content)
     return sha256_hash.hexdigest()
 
 def write_file_atomic(path: Union[str, Path], content: str) -> None:
