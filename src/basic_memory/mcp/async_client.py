@@ -24,5 +24,26 @@ def create_client() -> AsyncClient:
         return AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test")
 
 
-# Create shared async client
-client = create_client()
+class LazyClient:
+    """A lazy-loading wrapper for the async client."""
+    
+    def __init__(self):
+        self._client: AsyncClient | None = None
+    
+    def _ensure_client(self) -> AsyncClient:
+        """Ensure the client is created."""
+        if self._client is None:
+            self._client = create_client()
+        return self._client
+    
+    def __getattr__(self, name):
+        """Delegate all attribute access to the underlying client."""
+        return getattr(self._ensure_client(), name)
+    
+    def __call__(self, *args, **kwargs):
+        """Make the lazy client callable if needed."""
+        return self._ensure_client()(*args, **kwargs)
+
+
+# Create shared lazy client that won't hang during imports
+client = LazyClient()
