@@ -68,16 +68,22 @@ class ProjectSession:
     def refresh_from_config(self) -> None:
         """Refresh session state from current configuration.
 
-        This method reloads the default project from config and reinitializes
-        the session. This should be called when the default project is changed
-        via CLI or API to ensure MCP session stays in sync.
+        This method reloads the default project from config and updates
+        the default_project. It preserves the current_project if it was
+        explicitly set (e.g. via CLI --project flag).
         """
         # Reload config to get latest default project
         current_config = ConfigManager().config
         new_default = current_config.default_project
 
-        # Reinitialize with new default
-        self.initialize(new_default)
+        # Update default project without touching current project
+        old_default = self.default_project
+        self.default_project = new_default
+
+        # Only update current project if it was the same as the old default
+        if self.current_project == old_default:
+            self.current_project = new_default
+
         logger.info(f"Refreshed project session from config, new default: {new_default}")
 
 
