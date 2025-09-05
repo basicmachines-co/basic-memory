@@ -16,7 +16,7 @@ from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.prompt(
-    name="Share Recent Activity",
+    name="recent-activity",
     description="Get recent activity from across the knowledge base",
 )
 async def recent_activity_prompt(
