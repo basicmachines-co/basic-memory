@@ -449,12 +449,12 @@ async def move_note(
 
             ## Valid examples:
             - `notes/my-note.md`
-            - `projects/meeting-2025.md`
-            - `archive/old-document.md`
+            - `projects/meeting-2025.txt`
+            - `archive/old-program.sh`
 
             ## Try again with extension:
             ```
-            move_note("{identifier}", "{destination_path}.md")
+            move_note("{identifier}", "{destination_path}.EXTENSION")
             ```
 
             All examples in Basic Memory expect file extensions to be explicitly provided.
