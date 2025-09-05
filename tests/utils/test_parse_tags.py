@@ -58,11 +58,11 @@ def test_parse_tags_special_case() -> None:
 def test_parse_tags_invalid_json() -> None:
     """Test that invalid JSON strings fall back to comma-separated parsing."""
     # Invalid JSON should fall back to comma-separated parsing
-    result = parse_tags('[invalid json')
+    result = parse_tags("[invalid json")
     assert result == ["[invalid json"]  # Treated as single tag
-    
-    result = parse_tags('[tag1, tag2]')  # Valid bracket format but not JSON
+
+    result = parse_tags("[tag1, tag2]")  # Valid bracket format but not JSON
     assert result == ["[tag1", "tag2]"]  # Split by comma
-    
+
     result = parse_tags('["tag1", "tag2"')  # Incomplete JSON
     assert result == ['["tag1"', '"tag2"']  # Fall back to comma separation

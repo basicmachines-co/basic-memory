@@ -62,7 +62,7 @@ class SearchIndexRow:
 
         # Normalize path separators to handle both Windows (\) and Unix (/) paths
         normalized_path = Path(self.file_path).as_posix()
-        
+
         # Split the path by slashes
         parts = normalized_path.split("/")
 
@@ -527,7 +527,9 @@ class SearchRepository:
         async with db.scoped_session(self.session_maker) as session:
             # Delete existing record if any
             await session.execute(
-                text("DELETE FROM search_index WHERE permalink = :permalink AND project_id = :project_id"),
+                text(
+                    "DELETE FROM search_index WHERE permalink = :permalink AND project_id = :project_id"
+                ),
                 {"permalink": search_index_row.permalink, "project_id": self.project_id},
             )
 

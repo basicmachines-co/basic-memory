@@ -9,7 +9,12 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
-from basic_memory.file_utils import has_frontmatter, parse_frontmatter, remove_frontmatter, dump_frontmatter
+from basic_memory.file_utils import (
+    has_frontmatter,
+    parse_frontmatter,
+    remove_frontmatter,
+    dump_frontmatter,
+)
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown

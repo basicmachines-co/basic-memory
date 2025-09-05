@@ -17,6 +17,7 @@ from basic_memory.schemas.memory import (
 
 type StringOrInt = str | int
 
+
 @mcp.tool(
     description="""Build context from a memory:// URI to continue conversations naturally.
     
@@ -81,15 +82,16 @@ async def build_context(
         build_context("memory://specs/search", project="work-project")
     """
     logger.info(f"Building context from {url}")
-    
+
     # Convert string depth to integer if needed
     if isinstance(depth, str):
         try:
             depth = int(depth)
         except ValueError:
             from mcp.server.fastmcp.exceptions import ToolError
+
             raise ToolError(f"Invalid depth parameter: '{depth}' is not a valid integer")
-    
+
     # URL is already validated and normalized by MemoryUrl type annotation
 
     # Get the active project first to check project-specific sync status

@@ -223,7 +223,8 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     if isinstance(tags, str):
         # Check if it's a JSON array string (common issue from AI assistants)
         import json
-        if tags.strip().startswith('[') and tags.strip().endswith(']'):
+
+        if tags.strip().startswith("[") and tags.strip().endswith("]"):
             try:
                 # Try to parse as JSON array
                 parsed_json = json.loads(tags)
@@ -233,7 +234,7 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
             except json.JSONDecodeError:
                 # Not valid JSON, fall through to comma-separated parsing
                 pass
-        
+
         # Split by comma, strip whitespace, then strip leading '#' characters
         return [tag.strip().lstrip("#") for tag in tags.split(",") if tag and tag.strip()]
 

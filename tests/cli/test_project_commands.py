@@ -87,8 +87,8 @@ def test_project_default_command(mock_reload, mock_run, cli_env):
     # Patch the os.environ for checking
     # On Windows, preserve USERPROFILE to allow home directory detection
     env_vars = {}
-    if os.name == 'nt' and 'USERPROFILE' in os.environ:
-        env_vars['USERPROFILE'] = os.environ['USERPROFILE']
+    if os.name == "nt" and "USERPROFILE" in os.environ:
+        env_vars["USERPROFILE"] = os.environ["USERPROFILE"]
 
     with patch.dict(os.environ, env_vars, clear=True):
         # Patch ConfigManager.set_default_project to prevent validation error
@@ -192,7 +192,7 @@ def test_project_move_command_uses_permalink(mock_session, mock_call_patch, cli_
     """Test that the 'project move' command correctly generates and uses permalink in API call."""
     # Mock the session to return a current project
     mock_session.get_current_project.return_value = "current-project"
-    
+
     # Mock successful API response
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -202,28 +202,29 @@ def test_project_move_command_uses_permalink(mock_session, mock_call_patch, cli_
         "default": False,
     }
     mock_call_patch.return_value = mock_response
-    
+
     runner = CliRunner()
-    
+
     # Test with a project name that needs normalization (spaces, mixed case)
     project_name = "Test Project Name"
     new_path = os.path.join("new", "path", "to", "project")
-    
+
     result = runner.invoke(cli_app, ["project", "move", project_name, new_path])
-    
+
     # Verify command executed successfully
     assert result.exit_code == 0
-    
+
     # Verify call_patch was called with the correct permalink-formatted project name
     mock_call_patch.assert_called_once()
     args, kwargs = mock_call_patch.call_args
-    
+
     # Check the API endpoint uses the normalized permalink
     expected_endpoint = "/current-project/project/test-project-name"
     assert args[1] == expected_endpoint  # Second argument is the endpoint URL
-    
+
     # Verify the data contains the resolved path (using same normalization as the function)
     from pathlib import Path
+
     expected_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
     expected_data = {"path": expected_path}
     assert kwargs["json"] == expected_data

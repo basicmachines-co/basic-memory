@@ -631,18 +631,14 @@ Testing file timestamps
     # Check file timestamps
     file_entity = await entity_service.get_by_permalink("file-dates3")
     file_stats = file_path.stat()
-    
+
     # Compare using epoch timestamps to handle timezone differences correctly
     # This ensures we're comparing the actual points in time, not display representations
     entity_created_epoch = file_entity.created_at.timestamp()
     entity_updated_epoch = file_entity.updated_at.timestamp()
-    
-    assert (
-        abs(entity_created_epoch - file_stats.st_ctime) < 1
-    )
-    assert (
-        abs(entity_updated_epoch - file_stats.st_mtime) < 1
-    )  # Allow 1s difference
+
+    assert abs(entity_created_epoch - file_stats.st_ctime) < 1
+    assert abs(entity_updated_epoch - file_stats.st_mtime) < 1  # Allow 1s difference
 
 
 @pytest.mark.asyncio

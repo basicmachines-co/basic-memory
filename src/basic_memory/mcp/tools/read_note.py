@@ -60,8 +60,10 @@ async def read_note(
     # We need to check both the raw identifier and the processed path
     processed_path = memory_url_path(identifier)
     project_path = active_project.home
-    
-    if not validate_project_path(identifier, project_path) or not validate_project_path(processed_path, project_path):
+
+    if not validate_project_path(identifier, project_path) or not validate_project_path(
+        processed_path, project_path
+    ):
         logger.warning(
             "Attempted path traversal attack blocked",
             identifier=identifier,

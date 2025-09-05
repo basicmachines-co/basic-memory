@@ -149,7 +149,8 @@ async def test_get_resource_observation(client, project_config, entity_repositor
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
-        normalize_newlines("""
+        normalize_newlines(
+            """
 ---
 title: Test Entity
 type: test
@@ -159,7 +160,8 @@ permalink: test/test-entity
 # Test Content
 
 - [note] an observation.
-    """.strip())
+    """.strip()
+        )
         in response.text
     )
 
@@ -197,7 +199,8 @@ async def test_get_resource_entities(client, project_config, entity_repository, 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
-        normalize_newlines(f"""
+        normalize_newlines(
+            f"""
 --- memory://test/test-entity {entity1.updated_at.isoformat()} {entity1.checksum[:8]}
 
 # Test Content
@@ -207,7 +210,8 @@ async def test_get_resource_entities(client, project_config, entity_repository, 
 # Related Content
 - links to [[Test Entity]]
 
-    """.strip())
+    """.strip()
+        )
         in response.text
     )
 
@@ -250,7 +254,8 @@ async def test_get_resource_entities_pagination(
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
-        normalize_newlines("""
+        normalize_newlines(
+            """
 ---
 title: Related Entity
 type: test
@@ -259,7 +264,8 @@ permalink: test/related-entity
 
 # Related Content
 - links to [[Test Entity]]
-""".strip())
+""".strip()
+        )
         in response.text
     )
 
@@ -298,7 +304,8 @@ async def test_get_resource_relation(client, project_config, entity_repository, 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/markdown; charset=utf-8"
     assert (
-        normalize_newlines(f"""
+        normalize_newlines(
+            f"""
 --- memory://test/test-entity {entity1.updated_at.isoformat()} {entity1.checksum[:8]}
 
 # Test Content
@@ -308,7 +315,8 @@ async def test_get_resource_relation(client, project_config, entity_repository, 
 # Related Content
 - links to [[Test Entity]]
     
-    """.strip())
+    """.strip()
+        )
         in response.text
     )
 
