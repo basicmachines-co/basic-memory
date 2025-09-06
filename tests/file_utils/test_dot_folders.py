@@ -1,7 +1,6 @@
 """Test that all dot folders are ignored."""
 
 import pytest
-from pathlib import Path
 from basic_memory.file_utils.gitignore import should_ignore_file
 
 

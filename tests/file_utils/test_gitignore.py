@@ -1,11 +1,10 @@
 """Tests for gitignore pattern handling."""
 
-import os
 from pathlib import Path
 
 import pytest
 
-from basic_memory.file_utils.gitignore import should_ignore_file, get_gitignore_patterns, build_gitignore_spec
+from basic_memory.file_utils.gitignore import should_ignore_file, get_gitignore_patterns
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:

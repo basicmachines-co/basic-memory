@@ -4,6 +4,8 @@ __pycache__/
 .coverage
 htmlcov/
 
+*.db
+
 # Distribution / packaging
 .Python
 build/

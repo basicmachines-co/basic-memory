@@ -129,8 +129,9 @@ async def run_status(verbose: bool = False):  # pragma: no cover
     app_config = ConfigManager().config
     config = get_project_config()
 
+    # Use current project's database
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=config.database_path, db_type=db.DatabaseType.FILESYSTEM
     )
     project_repository = ProjectRepository(session_maker)
     project = await project_repository.get_by_name(config.project)

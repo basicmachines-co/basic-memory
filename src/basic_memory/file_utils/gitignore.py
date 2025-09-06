@@ -1,8 +1,7 @@
 """Gitignore pattern handling."""
 
-import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import pathspec
 
