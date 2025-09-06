@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import has_frontmatter
+from basic_memory.file_utils.gitignore import should_ignore_file
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -596,7 +597,7 @@ class SyncService:
 
     async def scan_directory(self, directory: Path) -> ScanResult:
         """
-        Scan directory for markdown files and their checksums.
+        Scan directory for files and their checksums, respecting gitignore patterns.
 
         Args:
             directory: Directory to scan
@@ -619,6 +620,13 @@ class SyncService:
                     continue
 
                 path = Path(root) / filename
+                abs_path = str(path)
+                
+                # Check if the file should be ignored based on gitignore patterns
+                if should_ignore_file(abs_path, directory):
+                    logger.debug(f"Ignoring file based on gitignore patterns: {abs_path}")
+                    continue
+
                 rel_path = path.relative_to(directory).as_posix()
                 checksum = await self.file_service.compute_checksum(rel_path)
                 result.files[rel_path] = checksum

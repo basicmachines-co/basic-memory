@@ -15,7 +15,11 @@ from basic_memory.repository import ProjectRepository
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
-    """Initialize database with migrations handled automatically by get_or_create_db.
+    """Initialize the current project's database with migrations.
+
+    Each project has its own completely self-contained database,
+    eliminating any shared state that could cause locking issues
+    between multiple Claude Code instances.
 
     Args:
         app_config: The Basic Memory project configuration
@@ -24,29 +28,30 @@ async def initialize_database(app_config: BasicMemoryConfig) -> None:
         Database migrations are now handled automatically when the database
         connection is first established via get_or_create_db().
     """
-    # Trigger database initialization and migrations by getting the database connection
+    # Initialize only the current project's database
     try:
         await db.get_or_create_db(app_config.database_path)
-        logger.info("Database initialization completed")
+        logger.info("Project database initialization completed")
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
+        logger.error(f"Error initializing project database: {e}")
         # Allow application to continue - it might still work
         # depending on what the error was, and will fail with a
         # more specific error if the database is actually unusable
 
 
 async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
-    """Ensure all projects in config.json exist in the projects table and vice versa.
+    """Ensure the current project exists in its own database.
 
-    This uses the ProjectService's synchronize_projects method to ensure bidirectional
-    synchronization between the configuration file and the database.
+    Each project maintains its own project record in its own database.
+    This eliminates the need for a shared global registry that could
+    cause locking issues.
 
     Args:
         app_config: The Basic Memory application configuration
     """
-    logger.info("Reconciling projects from config with database...")
+    logger.info("Ensuring current project exists in database...")
 
-    # Get database session - migrations handled centrally
+    # Use the current project's database
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path,
         db_type=db.DatabaseType.FILESYSTEM,
@@ -83,7 +88,7 @@ async def initialize_file_sync(
     # delay import
     from basic_memory.sync import WatchService
 
-    # Load app configuration - migrations handled centrally
+    # Use the current project's database
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path,
         db_type=db.DatabaseType.FILESYSTEM,

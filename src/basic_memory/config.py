@@ -38,6 +38,25 @@ class ProjectConfig:
     def project_url(self) -> str:  # pragma: no cover
         return f"/{generate_permalink(self.name)}"
 
+    @property
+    def database_path(self) -> Path:
+        """Get the database path for this project.
+        
+        Each project has its own database file to prevent locking issues
+        when multiple instances are running.
+        
+        Returns:
+            Path to the project's database file.
+        """
+        database_path = self.home / DATABASE_NAME
+        
+        # Ensure database file exists
+        if not database_path.exists():  # pragma: no cover
+            database_path.parent.mkdir(parents=True, exist_ok=True)
+            database_path.touch()
+            
+        return database_path
+
 
 class BasicMemoryConfig(BaseSettings):
     """Pydantic model for Basic Memory global configuration."""
@@ -130,14 +149,37 @@ class BasicMemoryConfig(BaseSettings):
     def database_path(self) -> Path:
         """Get SQLite database path.
 
-        Rreturns the app-level database path
-        for backward compatibility in the codebase.
+        Returns the project-specific database path to prevent locking
+        issues when multiple Claude Code instances run on different projects.
+        
+        Each project's database is completely self-contained, including
+        its own project metadata.
         """
+        # Use project-specific database by default
+        return self.get_project_database_path()
 
-        # Load the app-level database path from the global config
-        config_manager = ConfigManager()
-        config = config_manager.load_config()  # pragma: no cover
-        return config.app_database_path  # pragma: no cover
+    def get_project_database_path(self, project_name: Optional[str] = None) -> Path:
+        """Get the database path for a specific project.
+        
+        Each project will have its own database file in the project directory.
+        This prevents database locking when multiple Claude Code instances 
+        are running on different projects.
+        
+        Args:
+            project_name: Name of the project. If None, uses default project.
+            
+        Returns:
+            Path to the project's database file.
+        """
+        project_path = self.get_project_path(project_name)
+        database_path = project_path / DATABASE_NAME
+        
+        # Ensure database file exists
+        if not database_path.exists():  # pragma: no cover
+            database_path.parent.mkdir(parents=True, exist_ok=True)
+            database_path.touch()
+            
+        return database_path
 
     @property
     def project_list(self) -> List[ProjectConfig]:  # pragma: no cover
@@ -297,6 +339,23 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
 
     # otherwise raise error
     raise ValueError(f"Project '{actual_project_name}' not found")  # pragma: no cover
+
+
+def get_project_database_path(project_name: Optional[str] = None) -> Path:
+    """Get the database path for a specific project.
+    
+    This is a convenience function that gets the project config and returns
+    its database path. Each project has its own database file to prevent
+    locking issues when multiple Claude Code instances are running.
+    
+    Args:
+        project_name: Name of the project. If None, uses default project.
+        
+    Returns:
+        Path to the project's database file.
+    """
+    project_config = get_project_config(project_name)
+    return project_config.database_path
 
 
 def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None:

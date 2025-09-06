@@ -43,8 +43,15 @@ async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
     """Get sync service instance with all dependencies."""
 
     app_config = ConfigManager().config
+    
+    # Use the specific project's database path
+    project_database_path = Path(project.path) / "memory.db"
+    if not project_database_path.exists():
+        project_database_path.parent.mkdir(parents=True, exist_ok=True)
+        project_database_path.touch()
+    
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=project_database_path, db_type=db.DatabaseType.FILESYSTEM
     )
 
     project_path = Path(project.path)
@@ -164,8 +171,9 @@ async def run_sync(verbose: bool = False):
     app_config = ConfigManager().config
     config = get_project_config()
 
+    # Use current project's database
     _, session_maker = await db.get_or_create_db(
-        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+        db_path=config.database_path, db_type=db.DatabaseType.FILESYSTEM
     )
     project_repository = ProjectRepository(session_maker)
     project = await project_repository.get_by_name(config.project)

@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from enum import Enum, auto
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from alembic import command
@@ -20,10 +20,10 @@ from sqlalchemy.ext.asyncio import (
 
 from basic_memory.repository.search_repository import SearchRepository
 
-# Module level state
-_engine: Optional[AsyncEngine] = None
-_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
-_migrations_completed: bool = False
+# Module level state - now supports multiple databases
+_engines: dict[str, AsyncEngine] = {}
+_session_makers: dict[str, async_sessionmaker[AsyncSession]] = {}
+_migrations_completed: dict[str, bool] = {}
 
 
 class DatabaseType(Enum):
@@ -89,39 +89,84 @@ async def get_or_create_db(
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     ensure_migrations: bool = True,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
-    """Get or create database engine and session maker."""
-    global _engine, _session_maker
-
-    if _engine is None:
-        _engine, _session_maker = _create_engine_and_session(db_path, db_type)
-
+    """Get or create database engine and session maker for a specific database path."""
+    global _engines, _session_makers, _migrations_completed
+    
+    # Use string path as key for the cache
+    db_key = str(db_path)
+    
+    # Check if we already have an engine for this database
+    if db_key not in _engines:
+        engine, session_maker = _create_engine_and_session(db_path, db_type)
+        _engines[db_key] = engine
+        _session_makers[db_key] = session_maker
+        
         # Run migrations automatically unless explicitly disabled
-        if ensure_migrations:
+        if ensure_migrations and not _migrations_completed.get(db_key, False):
             app_config = ConfigManager().config
-            await run_migrations(app_config, db_type)
-
-    # These checks should never fail since we just created the engine and session maker
-    # if they were None, but we'll check anyway for the type checker
-    if _engine is None:
+            await run_migrations_for_db(app_config, db_path, db_type)
+            _migrations_completed[db_key] = True
+    
+    # Get the engine and session maker for this database
+    engine = _engines.get(db_key)
+    session_maker = _session_makers.get(db_key)
+    
+    # These checks should never fail since we just created them if they were missing
+    if engine is None:
         logger.error("Failed to create database engine", db_path=str(db_path))
         raise RuntimeError("Database engine initialization failed")
-
-    if _session_maker is None:
+    
+    if session_maker is None:
         logger.error("Failed to create session maker", db_path=str(db_path))
         raise RuntimeError("Session maker initialization failed")
+    
+    return engine, session_maker
 
-    return _engine, _session_maker
+
+async def run_migrations_for_db(
+    app_config: BasicMemoryConfig, 
+    db_path: Path,
+    database_type: DatabaseType = DatabaseType.FILESYSTEM
+) -> None:  # pragma: no cover
+    """Run migrations for a specific database."""
+    from basic_memory.models import Base
+    
+    # Get the engine for this specific database
+    db_key = str(db_path)
+    engine = _engines.get(db_key)
+    
+    if not engine:
+        logger.error(f"No engine found for database: {db_path}")
+        return
+    
+    # Create all tables directly using SQLAlchemy for this database
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    
+    logger.info(f"Database tables created for: {db_path}")
+    
+    # Initialize the search index
+    session_maker = _session_makers.get(db_key)
+    if session_maker:
+        # The project_id is not used for init_search_index, so we pass a dummy value
+        await SearchRepository(session_maker, 1).init_search_index()
+        logger.info(f"Search index created for: {db_path}")
+    else:
+        logger.error(f"No session maker found for database: {db_path}")
 
 
 async def shutdown_db() -> None:  # pragma: no cover
-    """Clean up database connections."""
-    global _engine, _session_maker, _migrations_completed
-
-    if _engine:
-        await _engine.dispose()
-        _engine = None
-        _session_maker = None
-        _migrations_completed = False
+    """Clean up all database connections."""
+    global _engines, _session_makers, _migrations_completed
+    
+    for db_key, engine in _engines.items():
+        if engine:
+            await engine.dispose()
+            logger.debug(f"Disposed engine for: {db_key}")
+    
+    _engines.clear()
+    _session_makers.clear()
+    _migrations_completed.clear()
 
 
 @asynccontextmanager
@@ -159,18 +204,20 @@ async def engine_session_factory(
             await _engine.dispose()
             _engine = None
             _session_maker = None
-            _migrations_completed = False
 
 
 async def run_migrations(
     app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM, force: bool = False
 ):  # pragma: no cover
-    """Run any pending alembic migrations."""
+    """Run any pending alembic migrations for the default database."""
     global _migrations_completed
+    
+    # Get the database path to use as key
+    db_key = str(app_config.database_path)
 
     # Skip if migrations already completed unless forced
-    if _migrations_completed and not force:
-        logger.debug("Migrations already completed in this session, skipping")
+    if _migrations_completed.get(db_key, False) and not force:
+        logger.debug("Migrations already completed for this database, skipping")
         return
 
     logger.info("Running database migrations...")
@@ -204,8 +251,8 @@ async def run_migrations(
         # the project_id is not used for init_search_index, so we pass a dummy value
         await SearchRepository(session_maker, 1).init_search_index()
 
-        # Mark migrations as completed
-        _migrations_completed = True
+        # Mark migrations as completed for this database
+        _migrations_completed[db_key] = True
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise

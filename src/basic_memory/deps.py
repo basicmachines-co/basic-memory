@@ -80,7 +80,7 @@ ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]  # prag
 async def get_engine_factory(
     app_config: AppConfigDep,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
-    """Get engine and session maker."""
+    """Get engine and session maker for project-specific database."""
     engine, session_maker = await db.get_or_create_db(app_config.database_path)
     return engine, session_maker
 
@@ -90,13 +90,17 @@ EngineFactoryDep = Annotated[
 ]
 
 
+
+
 async def get_session_maker(engine_factory: EngineFactoryDep) -> async_sessionmaker[AsyncSession]:
-    """Get session maker."""
+    """Get session maker for project-specific database."""
     _, session_maker = engine_factory
     return session_maker
 
 
 SessionMakerDep = Annotated[async_sessionmaker, Depends(get_session_maker)]
+
+
 
 
 ## repositories
@@ -105,7 +109,7 @@ SessionMakerDep = Annotated[async_sessionmaker, Depends(get_session_maker)]
 async def get_project_repository(
     session_maker: SessionMakerDep,
 ) -> ProjectRepository:
-    """Get the project repository."""
+    """Get the project repository using the current project's database."""
     return ProjectRepository(session_maker)
 
 
