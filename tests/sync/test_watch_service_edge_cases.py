@@ -69,7 +69,9 @@ async def test_handle_changes_empty_set(watch_service, project_config, test_proj
 
 
 @pytest.mark.asyncio
-async def test_handle_vim_atomic_write_delete_still_exists(watch_service, project_config, test_project, sync_service):
+async def test_handle_vim_atomic_write_delete_still_exists(
+    watch_service, project_config, test_project, sync_service
+):
     """Test vim atomic write scenario: DELETE event but file still exists on disk."""
     project_dir = project_config.home
 
@@ -84,7 +86,7 @@ Initial content for atomic write test
 """
     test_file.write_text(initial_content)
     await sync_service.sync(project_dir)
-    
+
     # Get initial entity state
     initial_entity = await sync_service.entity_repository.get_by_file_path("vim_test.md")
     assert initial_entity is not None
@@ -126,21 +128,23 @@ Modified content after atomic write
 
 
 @pytest.mark.asyncio
-async def test_handle_true_deletion_vs_vim_atomic(watch_service, project_config, test_project, sync_service):
+async def test_handle_true_deletion_vs_vim_atomic(
+    watch_service, project_config, test_project, sync_service
+):
     """Test that true deletions are still handled correctly vs vim atomic writes."""
     project_dir = project_config.home
 
     # Create and sync two files
     atomic_file = project_dir / "atomic_test.md"
     delete_file = project_dir / "delete_test.md"
-    
+
     content = """---
 type: note
 ---
 # Test File
 Content for testing
 """
-    
+
     atomic_file.write_text(content)
     delete_file.write_text(content)
     await sync_service.sync(project_dir)
@@ -174,16 +178,18 @@ Content for testing
     events = watch_service.state.recent_events
     atomic_events = [e for e in events if e.path == "atomic_test.md"]
     delete_events = [e for e in events if e.path == "delete_test.md"]
-    
+
     assert len(atomic_events) == 1
     assert atomic_events[0].action == "modified"
-    
+
     assert len(delete_events) == 1
     assert delete_events[0].action == "deleted"
 
 
 @pytest.mark.asyncio
-async def test_handle_vim_atomic_write_markdown_with_relations(watch_service, project_config, test_project, sync_service):
+async def test_handle_vim_atomic_write_markdown_with_relations(
+    watch_service, project_config, test_project, sync_service
+):
     """Test vim atomic write with markdown files that contain relations."""
     project_dir = project_config.home
 
@@ -241,7 +247,7 @@ This note links to [[Target Note]] multiple times.
     updated_entity = await sync_service.entity_repository.get_by_file_path("main.md")
     assert updated_entity is not None
     assert updated_entity.id == main_entity.id
-    
+
     # Verify relations were processed correctly
     updated_relations = len(updated_entity.relations)
     assert updated_relations >= initial_relations  # Should have at least as many relations
@@ -253,7 +259,9 @@ This note links to [[Target Note]] multiple times.
 
 
 @pytest.mark.asyncio
-async def test_handle_vim_atomic_write_directory_path_ignored(watch_service, project_config, test_project):
+async def test_handle_vim_atomic_write_directory_path_ignored(
+    watch_service, project_config, test_project
+):
     """Test that directories are properly ignored even in atomic write detection."""
     project_dir = project_config.home
 

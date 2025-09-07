@@ -74,8 +74,14 @@ class Entity(Base):
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Metadata and tracking
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now().astimezone()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now().astimezone(),
+        onupdate=lambda: datetime.now().astimezone(),
+    )
 
     # Relationships
     project = relationship("Project", back_populates="entities")
@@ -104,15 +110,15 @@ class Entity(Base):
     def is_markdown(self):
         """Check if the entity is a markdown file."""
         return self.content_type == "text/markdown"
-    
+
     def __getattribute__(self, name):
         """Override attribute access to ensure datetime fields are timezone-aware."""
         value = super().__getattribute__(name)
-        
+
         # Ensure datetime fields are timezone-aware
-        if name in ('created_at', 'updated_at') and isinstance(value, datetime):
+        if name in ("created_at", "updated_at") and isinstance(value, datetime):
             return ensure_timezone_aware(value)
-        
+
         return value
 
     def __repr__(self) -> str:

@@ -117,7 +117,7 @@ def memory_url_path(url: memory_url) -> str:  # pyright: ignore
 
 class EntitySummary(BaseModel):
     """Simplified entity representation."""
-    
+
     model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["entity"] = "entity"
@@ -130,7 +130,7 @@ class EntitySummary(BaseModel):
 
 class RelationSummary(BaseModel):
     """Simplified relation representation."""
-    
+
     model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["relation"] = "relation"
@@ -145,7 +145,7 @@ class RelationSummary(BaseModel):
 
 class ObservationSummary(BaseModel):
     """Simplified observation representation."""
-    
+
     model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["observation"] = "observation"
@@ -159,7 +159,7 @@ class ObservationSummary(BaseModel):
 
 class MemoryMetadata(BaseModel):
     """Simplified response metadata."""
-    
+
     model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     uri: Optional[str] = None
@@ -178,8 +178,8 @@ class ContextResult(BaseModel):
     """Context result containing a primary item with its observations and related items."""
 
     primary_result: Annotated[
-        Union[EntitySummary, RelationSummary, ObservationSummary], 
-        Field(discriminator="type", description="Primary item")
+        Union[EntitySummary, RelationSummary, ObservationSummary],
+        Field(discriminator="type", description="Primary item"),
     ]
 
     observations: Sequence[ObservationSummary] = Field(
@@ -188,8 +188,7 @@ class ContextResult(BaseModel):
 
     related_results: Sequence[
         Annotated[
-            Union[EntitySummary, RelationSummary, ObservationSummary], 
-            Field(discriminator="type")
+            Union[EntitySummary, RelationSummary, ObservationSummary], Field(discriminator="type")
         ]
     ] = Field(description="Related items", default_factory=list)
 

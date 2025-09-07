@@ -222,14 +222,14 @@ async def test_context_metadata(context_service, test_graph):
     assert metadata.primary_count > 0
 
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
 async def test_project_isolation_in_find_related(session_maker):
     """Test that find_related respects project boundaries and doesn't leak data."""
     from basic_memory.repository.entity_repository import EntityRepository
     from basic_memory.repository.observation_repository import ObservationRepository
     from basic_memory.repository.search_repository import SearchRepository
     from basic_memory import db
-    
+
     # Create database session
     async with db.scoped_session(session_maker) as db_session:
         # Create two separate projects
@@ -238,82 +238,82 @@ async def test_project_isolation_in_find_related(session_maker):
         db_session.add(project1)
         db_session.add(project2)
         await db_session.flush()
-        
+
         # Create entities in project1
         entity1_p1 = Entity(
             title="Entity1_P1",
-            entity_type="document", 
+            entity_type="document",
             content_type="text/markdown",
             project_id=project1.id,
             permalink="project1/entity1",
             file_path="project1/entity1.md",
             created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC)
+            updated_at=datetime.now(UTC),
         )
         entity2_p1 = Entity(
-            title="Entity2_P1", 
+            title="Entity2_P1",
             entity_type="document",
-            content_type="text/markdown", 
+            content_type="text/markdown",
             project_id=project1.id,
             permalink="project1/entity2",
-            file_path="project1/entity2.md", 
+            file_path="project1/entity2.md",
             created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC)
+            updated_at=datetime.now(UTC),
         )
-        
+
         # Create entities in project2
         entity1_p2 = Entity(
             title="Entity1_P2",
             entity_type="document",
             content_type="text/markdown",
-            project_id=project2.id, 
+            project_id=project2.id,
             permalink="project2/entity1",
             file_path="project2/entity1.md",
             created_at=datetime.now(UTC),
-            updated_at=datetime.now(UTC)
+            updated_at=datetime.now(UTC),
         )
-        
+
         db_session.add_all([entity1_p1, entity2_p1, entity1_p2])
         await db_session.flush()
-        
+
         # Create relation in project1 (between entities of project1)
         relation_p1 = Relation(
             from_id=entity1_p1.id,
             to_id=entity2_p1.id,
             to_name="Entity2_P1",
-            relation_type="connects_to"
+            relation_type="connects_to",
         )
         db_session.add(relation_p1)
         await db_session.commit()
-        
-        # Create repositories for project1 
+
+        # Create repositories for project1
         search_repo_p1 = SearchRepository(session_maker, project1.id)
         entity_repo_p1 = EntityRepository(session_maker, project1.id)
         obs_repo_p1 = ObservationRepository(session_maker, project1.id)
         context_service_p1 = ContextService(search_repo_p1, entity_repo_p1, obs_repo_p1)
-        
+
         # Create repositories for project2
         search_repo_p2 = SearchRepository(session_maker, project2.id)
-        entity_repo_p2 = EntityRepository(session_maker, project2.id)  
+        entity_repo_p2 = EntityRepository(session_maker, project2.id)
         obs_repo_p2 = ObservationRepository(session_maker, project2.id)
         context_service_p2 = ContextService(search_repo_p2, entity_repo_p2, obs_repo_p2)
-        
+
         # Test: find_related for project1 should only return project1 entities
         type_id_pairs_p1 = [("entity", entity1_p1.id)]
         related_p1 = await context_service_p1.find_related(type_id_pairs_p1, max_depth=2)
-        
+
         # Verify only project1 entities are returned
         related_entity_ids = [r.id for r in related_p1 if r.type == "entity"]
         assert entity2_p1.id in related_entity_ids  # Should find connected entity2 in project1
         assert entity1_p2.id not in related_entity_ids  # Should NOT find entity from project2
-        
+
         # Test: find_related for project2 should return empty (no relations)
         type_id_pairs_p2 = [("entity", entity1_p2.id)]
         related_p2 = await context_service_p2.find_related(type_id_pairs_p2, max_depth=2)
-        
+
         # Project2 has no relations, so should return empty
         assert len(related_p2) == 0
-        
+
         # Double-check: verify entities exist in their respective projects
         assert entity1_p1.project_id == project1.id
         assert entity2_p1.project_id == project1.id

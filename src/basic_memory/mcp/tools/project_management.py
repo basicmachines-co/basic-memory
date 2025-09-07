@@ -227,7 +227,8 @@ async def set_default_project(project_name: str, activate=True, context: Context
 
     # Call API to set default project using URL encoding for special characters
     from urllib.parse import quote
-    encoded_name = quote(project_name, safe='')
+
+    encoded_name = quote(project_name, safe="")
     response = await call_put(client, f"/projects/{encoded_name}/default")
     status_response = ProjectStatusResponse.model_validate(response.json())
 
@@ -356,7 +357,7 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
         if p.name.lower() == project_name.lower():
             target_project = p
             break
-    
+
     if not target_project:
         available_projects = [p.name for p in project_list.projects]
         raise ValueError(
@@ -365,7 +366,8 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
 
     # Call API to delete project using URL encoding for special characters
     from urllib.parse import quote
-    encoded_name = quote(target_project.name, safe='')
+
+    encoded_name = quote(target_project.name, safe="")
     response = await call_delete(client, f"/projects/{encoded_name}")
     status_response = ProjectStatusResponse.model_validate(response.json())
 

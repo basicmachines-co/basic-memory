@@ -9,6 +9,7 @@ from markdown_it.token import Token
 def is_observation(token: Token) -> bool:
     """Check if token looks like our observation format."""
     import re
+
     if token.type != "inline":  # pragma: no cover
         return False
     # Use token.tag which contains the actual content for test tokens, fallback to content
@@ -18,15 +19,15 @@ def is_observation(token: Token) -> bool:
     # if it's a markdown_task, return false
     if content.startswith("[ ]") or content.startswith("[x]") or content.startswith("[-]"):
         return False
-    
+
     # Exclude markdown links: [text](url)
     if re.match(r"^\[.*?\]\(.*?\)$", content):
         return False
-    
+
     # Exclude wiki links: [[text]]
     if re.match(r"^\[\[.*?\]\]$", content):
         return False
-    
+
     # Check for proper observation format: [category] content
     match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
     has_tags = "#" in content
@@ -36,9 +37,10 @@ def is_observation(token: Token) -> bool:
 def parse_observation(token: Token) -> Dict[str, Any]:
     """Extract observation parts from token."""
     import re
+
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
-    
+
     # Parse [category] with regex
     match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
     category = None
@@ -50,7 +52,7 @@ def parse_observation(token: Token) -> Dict[str, Any]:
         empty_match = re.match(r"^\[\]\s+(.+)", content)
         if empty_match:
             content = empty_match.group(1).strip()
-    
+
     # Parse (context)
     context = None
     if content.endswith(")"):
@@ -58,7 +60,7 @@ def parse_observation(token: Token) -> Dict[str, Any]:
         if start != -1:
             context = content[start + 1 : -1].strip()
             content = content[:start].strip()
-    
+
     # Extract tags and keep original content
     tags = []
     parts = content.split()
@@ -69,7 +71,7 @@ def parse_observation(token: Token) -> Dict[str, Any]:
                 tags.extend(subtags)
             else:
                 tags.append(part[1:])
-    
+
     return {
         "category": category,
         "content": content,

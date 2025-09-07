@@ -288,9 +288,13 @@ class WatchService:
                 full_path = directory / path
                 if full_path.exists() and full_path.is_file():
                     # File still exists despite DELETE event - treat as modification
-                    logger.debug("File exists despite DELETE event, treating as modification", path=path)
+                    logger.debug(
+                        "File exists despite DELETE event, treating as modification", path=path
+                    )
                     entity, checksum = await sync_service.sync_file(path, new=False)
-                    self.state.add_event(path=path, action="modified", status="success", checksum=checksum)
+                    self.state.add_event(
+                        path=path, action="modified", status="success", checksum=checksum
+                    )
                     self.console.print(f"[yellow]✎[/yellow] {path} (atomic write)")
                     logger.info(f"atomic write detected: {path}")
                     processed.add(path)
@@ -302,10 +306,12 @@ class WatchService:
                     entity = await sync_service.entity_repository.get_by_file_path(path)
                     if entity is None:
                         # No entity means this was likely a directory - skip it
-                        logger.debug(f"Skipping deleted path with no entity (likely directory), path={path}")
+                        logger.debug(
+                            f"Skipping deleted path with no entity (likely directory), path={path}"
+                        )
                         processed.add(path)
                         continue
-                    
+
                     # File truly deleted
                     logger.debug("Processing deleted file", path=path)
                     await sync_service.handle_delete(path)
