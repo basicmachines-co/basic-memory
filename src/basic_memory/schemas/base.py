@@ -71,7 +71,7 @@ def parse_timeframe(timeframe: str) -> datetime:
         parsed = parse(timeframe)
         if not parsed:
             raise ValueError(f"Could not parse timeframe: {timeframe}")
-        
+
         # If the parsed datetime is naive, make it timezone-aware in local system timezone
         if parsed.tzinfo is None:
             return parsed.astimezone()

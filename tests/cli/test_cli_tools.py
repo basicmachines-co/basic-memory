@@ -309,7 +309,9 @@ def test_build_context_with_options(cli_env, setup_test_note):
     # Check that metadata reflects our options
     assert context_result["metadata"]["depth"] == 2
     timeframe = datetime.fromisoformat(context_result["metadata"]["timeframe"])
-    assert datetime.now().astimezone() - timeframe <= timedelta(days=2)  # Compare timezone-aware datetimes
+    assert datetime.now().astimezone() - timeframe <= timedelta(
+        days=2
+    )  # Compare timezone-aware datetimes
 
     # Results should include our test note
     found = False
@@ -353,7 +355,11 @@ def test_build_context_string_depth_parameter(cli_env, setup_test_note):
     )
     assert result.exit_code == 2  # Typer exits with code 2 for parameter validation errors
     # Typer should show a usage error for invalid integer
-    assert "invalid" in result.stderr and "is not a valid" in result.stderr and "integer" in result.stderr
+    assert (
+        "invalid" in result.stderr
+        and "is not a valid" in result.stderr
+        and "integer" in result.stderr
+    )
 
 
 # The get-entity CLI command was removed when tools were refactored

@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, Union
 
 import yaml
+import frontmatter
 from loguru import logger
 
 from basic_memory.utils import FilePath
@@ -234,6 +235,47 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
             error=str(e),
         )
         raise FileError(f"Failed to update frontmatter: {e}")
+
+
+def dump_frontmatter(post: frontmatter.Post) -> str:
+    """
+    Serialize frontmatter.Post to markdown with Obsidian-compatible YAML format.
+
+    This function ensures that tags are formatted as YAML lists instead of JSON arrays:
+
+    Good (Obsidian compatible):
+    ---
+    tags:
+    - system
+    - overview
+    - reference
+    ---
+
+    Bad (current behavior):
+    ---
+    tags: ["system", "overview", "reference"]
+    ---
+
+    Args:
+        post: frontmatter.Post object to serialize
+
+    Returns:
+        String containing markdown with properly formatted YAML frontmatter
+    """
+    if not post.metadata:
+        # No frontmatter, just return content
+        return post.content
+
+    # Serialize YAML with block style for lists
+    yaml_str = yaml.dump(
+        post.metadata, sort_keys=False, allow_unicode=True, default_flow_style=False
+    )
+
+    # Construct the final markdown with frontmatter
+    if post.content:
+        return f"---\n{yaml_str}---\n\n{post.content}"
+    else:
+        return f"---\n{yaml_str}---\n"
 
 
 def sanitize_for_filename(text: str, replacement: str = "-") -> str:

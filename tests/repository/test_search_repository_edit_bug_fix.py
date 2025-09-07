@@ -36,7 +36,7 @@ async def second_search_repo(session_maker, second_test_project):
 @pytest.mark.asyncio
 async def test_index_item_respects_project_isolation_during_edit():
     """Test that index_item() doesn't delete records from other projects during edits.
-    
+
     This test reproduces the critical bug where editing a note in one project
     would delete search index entries with the same permalink from ALL projects,
     causing notes to disappear from the search index.
@@ -49,11 +49,11 @@ async def test_index_item_respects_project_isolation_during_edit():
     # Create a separate in-memory database for this test
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    
+
     # Create the database schema
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     # Create two projects
     async with db.scoped_session(session_maker) as session:
         project1 = Project(
@@ -61,19 +61,19 @@ async def test_index_item_respects_project_isolation_during_edit():
             description="First project",
             path="/project1/path",
             is_active=True,
-            is_default=True
+            is_default=True,
         )
         project2 = Project(
-            name="Project 2", 
+            name="Project 2",
             description="Second project",
             path="/project2/path",
             is_active=True,
-            is_default=False
+            is_default=False,
         )
         session.add(project1)
         session.add(project2)
         await session.flush()
-        
+
         project1_id = project1.id
         project2_id = project2.id
         await session.commit()
@@ -88,7 +88,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     # Create two notes with the SAME permalink in different projects
     # This simulates the same note name/structure across different projects
     same_permalink = "notes/test-note"
-    
+
     search_row1 = SearchIndexRow(
         id=1,
         type=SearchItemType.ENTITY.value,
@@ -143,7 +143,7 @@ async def test_index_item_respects_project_isolation_during_edit():
         content_stems="project 1 content EDITED",  # Changed content
         content_snippet="This is the EDITED content in project 1",
         permalink=same_permalink,
-        file_path="notes/test_note.md", 
+        file_path="notes/test_note.md",
         entity_id=1,
         metadata={"entity_type": "note"},
         created_at=datetime.now(timezone.utc),
@@ -175,7 +175,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     await engine.dispose()
 
 
-@pytest.mark.asyncio 
+@pytest.mark.asyncio
 async def test_index_item_updates_existing_record_same_project():
     """Test that index_item() correctly updates existing records within the same project."""
     from basic_memory import db
@@ -186,11 +186,11 @@ async def test_index_item_updates_existing_record_same_project():
     # Create a separate in-memory database for this test
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    
+
     # Create the database schema
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     # Create one project
     async with db.scoped_session(session_maker) as session:
         project = Project(
@@ -198,7 +198,7 @@ async def test_index_item_updates_existing_record_same_project():
             description="Test project",
             path="/test/path",
             is_active=True,
-            is_default=True
+            is_default=True,
         )
         session.add(project)
         await session.flush()

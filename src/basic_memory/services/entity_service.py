@@ -9,7 +9,12 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
-from basic_memory.file_utils import has_frontmatter, parse_frontmatter, remove_frontmatter
+from basic_memory.file_utils import (
+    has_frontmatter,
+    parse_frontmatter,
+    remove_frontmatter,
+    dump_frontmatter,
+)
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
@@ -196,7 +201,7 @@ class EntityService(BaseService[EntityModel]):
         post = await schema_to_markdown(schema)
 
         # write file
-        final_content = frontmatter.dumps(post, sort_keys=False)
+        final_content = dump_frontmatter(post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
         # parse entity from file
@@ -273,7 +278,7 @@ class EntityService(BaseService[EntityModel]):
         merged_post = frontmatter.Post(post.content, **existing_markdown.frontmatter.metadata)
 
         # write file
-        final_content = frontmatter.dumps(merged_post, sort_keys=False)
+        final_content = dump_frontmatter(merged_post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
         # parse entity from file

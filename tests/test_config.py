@@ -6,6 +6,7 @@ import pytest
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from pathlib import Path
 
+
 class TestBasicMemoryConfig:
     """Test BasicMemoryConfig behavior with BASIC_MEMORY_HOME environment variable."""
 
@@ -83,84 +84,88 @@ class TestBasicMemoryConfig:
 
 class TestConfigManager:
     """Test ConfigManager functionality."""
-    
+
     @pytest.fixture
     def temp_config_manager(self):
         """Create a ConfigManager with temporary config file."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            
+
             # Create a test ConfigManager instance
             config_manager = ConfigManager()
             # Override config paths to use temp directory
             config_manager.config_dir = temp_path / "basic-memory"
             config_manager.config_file = config_manager.config_dir / "config.yaml"
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Create initial config with test projects
             test_config = BasicMemoryConfig(
                 default_project="main",
                 projects={
                     "main": str(temp_path / "main"),
                     "test-project": str(temp_path / "test"),
-                    "special-chars": str(temp_path / "special")  # This will be the config key for "Special/Chars"
-                }
+                    "special-chars": str(
+                        temp_path / "special"
+                    ),  # This will be the config key for "Special/Chars"
+                },
             )
             config_manager.save_config(test_config)
-            
+
             yield config_manager
-    
+
     def test_set_default_project_with_exact_name_match(self, temp_config_manager):
         """Test set_default_project when project name matches config key exactly."""
         config_manager = temp_config_manager
-        
+
         # Set default to a project that exists with exact name match
         config_manager.set_default_project("test-project")
-        
+
         # Verify the config was updated
         config = config_manager.load_config()
         assert config.default_project == "test-project"
-    
+
     def test_set_default_project_with_permalink_lookup(self, temp_config_manager):
         """Test set_default_project when input needs permalink normalization."""
         config_manager = temp_config_manager
-        
+
         # Simulate a project that was created with special characters
         # The config key would be the permalink, but user might type the original name
-        
+
         # First add a project with original name that gets normalized
         config = config_manager.load_config()
         config.projects["special-chars-project"] = str(Path("/tmp/special"))
         config_manager.save_config(config)
-        
+
         # Now test setting default using a name that will normalize to the config key
-        config_manager.set_default_project("Special Chars Project")  # This should normalize to "special-chars-project"
-        
+        config_manager.set_default_project(
+            "Special Chars Project"
+        )  # This should normalize to "special-chars-project"
+
         # Verify the config was updated with the correct config key
         updated_config = config_manager.load_config()
         assert updated_config.default_project == "special-chars-project"
-    
+
     def test_set_default_project_uses_canonical_name(self, temp_config_manager):
         """Test that set_default_project uses the canonical config key, not user input."""
         config_manager = temp_config_manager
-        
+
         # Add a project with a config key that differs from user input
         config = config_manager.load_config()
         config.projects["my-test-project"] = str(Path("/tmp/mytest"))
         config_manager.save_config(config)
-        
+
         # Set default using input that will match but is different from config key
         config_manager.set_default_project("My Test Project")  # Should find "my-test-project"
-        
+
         # Verify that the canonical config key is used, not the user input
         updated_config = config_manager.load_config()
         assert updated_config.default_project == "my-test-project"
         # Should NOT be the user input
         assert updated_config.default_project != "My Test Project"
-    
+
     def test_set_default_project_nonexistent_project(self, temp_config_manager):
         """Test set_default_project raises ValueError for nonexistent project."""
         config_manager = temp_config_manager
-        
+
         with pytest.raises(ValueError, match="Project 'nonexistent' not found"):
             config_manager.set_default_project("nonexistent")
