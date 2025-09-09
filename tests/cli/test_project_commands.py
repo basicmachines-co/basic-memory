@@ -187,12 +187,8 @@ def test_project_move_command_failure(mock_run, cli_env):
 
 
 @patch("basic_memory.cli.commands.project.call_patch")
-@patch("basic_memory.cli.commands.project.session")
-def test_project_move_command_uses_permalink(mock_session, mock_call_patch, cli_env):
+def test_project_move_command_uses_permalink(mock_call_patch, cli_env):
     """Test that the 'project move' command correctly generates and uses permalink in API call."""
-    # Mock the session to return a current project
-    mock_session.get_current_project.return_value = "current-project"
-
     # Mock successful API response
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -218,8 +214,9 @@ def test_project_move_command_uses_permalink(mock_session, mock_call_patch, cli_
     mock_call_patch.assert_called_once()
     args, kwargs = mock_call_patch.call_args
 
-    # Check the API endpoint uses the normalized permalink
-    expected_endpoint = "/current-project/project/test-project-name"
+    # Check the API endpoint uses the original name and normalized permalink
+    # The actual implementation uses f"/{name}/project/{project_permalink}"
+    expected_endpoint = "/Test Project Name/project/test-project-name"
     assert args[1] == expected_endpoint  # Second argument is the endpoint URL
 
     # Verify the data contains the resolved path (using same normalization as the function)

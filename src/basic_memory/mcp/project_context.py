@@ -62,7 +62,7 @@ async def get_active_project(client: AsyncClient, *, context: Context | None, pr
     else:
         response = await call_get(
             client,
-            f"/projects/default",
+            "/projects/default",
         )
         active_project = ProjectItem.model_validate(response.json())
         logger.debug(f"No context provided. Using default project: {active_project}")

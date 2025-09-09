@@ -9,7 +9,7 @@ from basic_memory.mcp.tools import write_note, read_note
 import pytest_asyncio
 from unittest.mock import MagicMock, patch
 
-from basic_memory.schemas.search import SearchResponse, SearchItemType
+from basic_memory.schemas.search import SearchResponse
 from basic_memory.utils import normalize_newlines
 
 
