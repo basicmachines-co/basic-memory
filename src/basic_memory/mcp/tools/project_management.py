@@ -5,7 +5,6 @@ and manage project context during conversations.
 """
 
 from textwrap import dedent
-from typing import Optional
 
 from fastmcp import Context
 from loguru import logger

@@ -37,7 +37,7 @@ async def test_get_default_project(test_graph, client, project_config, test_proj
     # Set up some test data in the database
 
     # Call the endpoint
-    response = await client.get(f"/projects/default")
+    response = await client.get("/projects/default")
 
     # Verify response
     assert response.status_code == 200

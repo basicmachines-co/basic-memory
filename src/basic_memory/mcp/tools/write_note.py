@@ -1,5 +1,4 @@
 """Write note tool for Basic Memory MCP server."""
-from pathlib import Path
 from typing import List, Union, Optional
 
 from loguru import logger

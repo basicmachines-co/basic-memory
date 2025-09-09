@@ -9,7 +9,6 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.resources.project_info import project_info
 import json
 from datetime import datetime

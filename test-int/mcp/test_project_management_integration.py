@@ -245,7 +245,7 @@ async def test_set_default_project_operation_activate_by_default(mcp_server, app
         # Should show success message and restart instructions
         assert "✓" in default_text  # Success indicator
         assert "test-project" in default_text
-        assert f"Project test-project is now active." in default_text
+        assert "Project test-project is now active." in default_text
         assert "basic-memory mcp" in default_text
         assert "Project: test-project" in default_text  # Project metadata
 
