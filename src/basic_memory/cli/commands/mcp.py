@@ -65,8 +65,7 @@ def mcp(
     logger.info(f"Starting MCP server with {transport.upper()} transport")
 
     # middleware to store the active project
-    session_state_middleware = ProjectContextMiddleware()
-    mcp_server.add_middleware(session_state_middleware)
+    mcp_server.add_middleware(ProjectContextMiddleware())
 
     if transport == "stdio":
         mcp_server.run(
