@@ -73,7 +73,7 @@ async def get_active_project(client: AsyncClient, *, context: Context | None, pr
         permalink = generate_permalink(project_override)
         response = await call_get(
             client,
-            f"/{permalink}/item",
+            f"/{permalink}/project/item",
         )
         active_project = ProjectItem.model_validate(response.json())
 
