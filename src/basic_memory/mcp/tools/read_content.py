@@ -148,7 +148,9 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 
 
 @mcp.tool(description="Read a file's raw content by path or permalink")
-async def read_content(path: str, project: Optional[str] = None, context: Context | None = None) -> dict:
+async def read_content(
+    path: str, project: Optional[str] = None, context: Context | None = None
+) -> dict:
     """Read a file's raw content by path or permalink.
 
     This tool provides direct access to file content in the knowledge base,

@@ -152,7 +152,9 @@ If the note should be deleted but the operation keeps failing, send a message to
 
 
 @mcp.tool(description="Delete a note by title or permalink")
-async def delete_note(identifier: str, project: Optional[str] = None, context: Context | None = None) -> bool | str:
+async def delete_note(
+    identifier: str, project: Optional[str] = None, context: Context | None = None
+) -> bool | str:
     """Delete a note from the knowledge base.
 
     Args:

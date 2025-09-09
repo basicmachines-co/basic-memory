@@ -29,6 +29,7 @@ async def get_project_info(
     """Get comprehensive information about the specified Basic Memory project."""
     return await project_service.get_project_info(project)
 
+
 @project_router.get("/item", response_model=ProjectItem)
 async def get_project(
     project_service: ProjectServiceDep,
@@ -41,7 +42,11 @@ async def get_project(
             status_code=404, detail=f"Project: '{project}' does not exist"
         )  # pragma: no cover
 
-    return ProjectItem(name=found_project.name, path=found_project.path, is_default=found_project.is_default or False)
+    return ProjectItem(
+        name=found_project.name,
+        path=found_project.path,
+        is_default=found_project.is_default or False,
+    )
 
 
 # Update a project
@@ -230,6 +235,7 @@ async def set_default_project(
         )
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # Get the default project
 @project_resource_router.get("/default", response_model=ProjectItem)

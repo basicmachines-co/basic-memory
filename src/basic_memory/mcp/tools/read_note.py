@@ -19,7 +19,11 @@ from basic_memory.utils import validate_project_path
     description="Read a markdown note by title or permalink.",
 )
 async def read_note(
-    identifier: str, page: int = 1, page_size: int = 10, project: Optional[str] = None, context: Context | None = None,
+    identifier: str,
+    page: int = 1,
+    page_size: int = 10,
+    project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Read a markdown note from the knowledge base.
 

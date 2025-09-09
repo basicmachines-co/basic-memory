@@ -21,7 +21,9 @@ from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink
 
 
-async def set_active_project(client: AsyncClient, *, context: Context | None, project: ProjectItem) -> None:
+async def set_active_project(
+    client: AsyncClient, *, context: Context | None, project: ProjectItem
+) -> None:
     """Set the active project context.
 
     Args:
@@ -29,19 +31,23 @@ async def set_active_project(client: AsyncClient, *, context: Context | None, pr
         project_name: The project to switch to
         context: Optional FastMCP context containing project session state
     """
-    active_project = await get_active_project(client, context= context)
+    active_project = await get_active_project(client, context=context)
     if active_project.name != project.name:
         previous_project = active_project
         # set project in the context
         if context:
             context.set_state("active_project", project)
-            await context.info(f"Context {context.session_id} Switched active project: {previous_project} -> {project.name}")
+            await context.info(
+                f"Context {context.session_id} Switched active project: {previous_project} -> {project.name}"
+            )
             logger.info(f"Switched active project: {previous_project} -> {project.name}")
     else:
         logger.debug(f"No change for active project: {active_project}")
 
 
-async def get_active_project(client: AsyncClient, *, context: Context | None, project_override: Optional[str] = None) -> ProjectItem:
+async def get_active_project(
+    client: AsyncClient, *, context: Context | None, project_override: Optional[str] = None
+) -> ProjectItem:
     """
     Get the active project for a tool call.
     If no context is provided, the active project is returned from the default project

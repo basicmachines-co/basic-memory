@@ -36,5 +36,3 @@ def inject_auth_header(headers: HeaderTypes | None = None) -> HeaderTypes:
         logger.debug("No authorization found in request headers")
 
     return headers
-
-

@@ -1,4 +1,5 @@
 """Write note tool for Basic Memory MCP server."""
+
 from typing import List, Union, Optional
 
 from loguru import logger

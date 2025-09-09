@@ -79,7 +79,6 @@ class SystemStatus(BaseModel):
     timestamp: datetime = Field(description="Timestamp when the information was collected")
 
 
-
 class ProjectInfoResponse(BaseModel):
     """Response for the project_info tool."""
 

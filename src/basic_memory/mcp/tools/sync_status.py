@@ -81,7 +81,7 @@ def _get_all_projects_status() -> list[str]:
     - Background processing of knowledge graphs
     """,
 )
-async def sync_status(project: Optional[str] = None, context: Context | None = None ) -> str:
+async def sync_status(project: Optional[str] = None, context: Context | None = None) -> str:
     """Get current sync status and system readiness information.
 
     This tool provides detailed information about any ongoing or completed
@@ -229,7 +229,9 @@ async def sync_status(project: Optional[str] = None, context: Context | None = N
         # Add project context if provided
         if project:
             try:
-                active_project = await get_active_project(client, context=context, project_override=project)
+                active_project = await get_active_project(
+                    client, context=context, project_override=project
+                )
                 status_lines.extend(
                     [
                         "",

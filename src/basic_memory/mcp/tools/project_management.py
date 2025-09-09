@@ -15,14 +15,17 @@ from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, call_put, call_post, call_delete
 from basic_memory.schemas import ProjectInfoResponse
-from basic_memory.schemas.project_info import ProjectItem, ProjectList, ProjectStatusResponse, ProjectInfoRequest
+from basic_memory.schemas.project_info import (
+    ProjectItem,
+    ProjectList,
+    ProjectStatusResponse,
+    ProjectInfoRequest,
+)
 from basic_memory.utils import generate_permalink
 
 
 @mcp.tool("list_memory_projects")
-async def list_memory_projects(
-    context: Context | None = None
-) -> str:
+async def list_memory_projects(context: Context | None = None) -> str:
     """List all available projects with their status.
 
     Shows all Basic Memory projects that are available, indicating which one
@@ -136,7 +139,7 @@ async def switch_project(project_name: str, context: Context | None = None) -> s
     except Exception as e:
         logger.error(f"Error switching to project {project_name}: {e}")
         # Revert to previous project on error
-        await set_active_project(client,  context=context,  project=current_project)
+        await set_active_project(client, context=context, project=current_project)
 
         # Return user-friendly error message instead of raising exception
         return dedent(f"""
@@ -205,7 +208,9 @@ async def get_current_project(
 
 
 @mcp.tool()
-async def set_default_project(project_name: str, activate=True, context: Context | None = None) -> str:
+async def set_default_project(
+    project_name: str, activate=True, context: Context | None = None
+) -> str:
     """Set default project in config.
 
     Updates the configuration to use a different default project.
@@ -237,7 +242,9 @@ async def set_default_project(project_name: str, activate=True, context: Context
         await set_active_project(
             client,
             context=context,
-            project=ProjectItem(name=new_default_project.name, path=new_default_project.path, is_default=True),
+            project=ProjectItem(
+                name=new_default_project.name, path=new_default_project.path, is_default=True
+            ),
         )
 
     result = f"✓ {status_response.message}\n\n"
@@ -301,7 +308,11 @@ async def create_memory_project(
 
     # If project was set as default, set as active
     if set_default:
-        await set_active_project(client, context=context, project=ProjectItem(name=project_name, path=project_path, is_default=True))
+        await set_active_project(
+            client,
+            context=context,
+            project=ProjectItem(name=project_name, path=project_path, is_default=True),
+        )
 
     active_project = await get_active_project(client, context=context)
     return add_project_metadata(result, active_project.name)

@@ -13,7 +13,7 @@ def create_client() -> AsyncClient:
     """
     proxy_base_url = os.getenv("BASIC_MEMORY_PROXY_URL", None)
     logger.info(f"BASIC_MEMORY_PROXY_URL: {proxy_base_url}")
-    
+
     if proxy_base_url:
         # Use HTTP transport to proxy endpoint
         logger.info(f"Creating HTTP client for proxy at: {proxy_base_url}")

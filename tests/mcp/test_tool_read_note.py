@@ -149,6 +149,7 @@ async def test_read_note_memory_url(app):
     content = await read_note.fn(memory_url)
     assert "Testing memory:// URL handling" in content
 
+
 class TestReadNoteSecurityValidation:
     """Test read_note security validation features."""
 

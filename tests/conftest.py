@@ -90,8 +90,6 @@ def config_manager(
     return config_manager
 
 
-
-
 @pytest.fixture(scope="function", autouse=True)
 def project_config(test_project):
     """Create test project configuration."""

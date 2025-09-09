@@ -214,6 +214,7 @@ async def test_set_default_project_operation(mcp_server, app):
         assert "basic-memory mcp" in default_text
         assert "Project: test-project" in default_text  # Project metadata
 
+
 @pytest.mark.asyncio
 async def test_set_default_project_operation_activate_by_default(mcp_server, app):
     """Test set_default_project functionality."""

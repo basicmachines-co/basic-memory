@@ -25,6 +25,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.headers import inject_auth_header
 
+
 def get_error_message(
     status_code: int, url: URL | str, method: str, msg: Optional[str] = None
 ) -> str:

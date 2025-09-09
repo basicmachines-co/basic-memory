@@ -291,7 +291,6 @@ class ProjectService:
 
         logger.info("Project synchronization complete")
 
-
     async def move_project(self, name: str, new_path: str) -> None:
         """Move a project to a new location.
 

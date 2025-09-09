@@ -141,7 +141,6 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     return config_manager
 
 
-
 @pytest.fixture(scope="function", autouse=True)
 def project_config(test_project):
     """Create test project configuration."""
@@ -155,9 +154,7 @@ def project_config(test_project):
 
 
 @pytest.fixture(scope="function")
-def app(
-    app_config, project_config, engine_factory, test_project, config_manager
-) -> FastAPI:
+def app(app_config, project_config, engine_factory, test_project, config_manager) -> FastAPI:
     """Create test FastAPI application with single project."""
 
     # Import the FastAPI app AFTER the config_manager has written the test config to disk
