@@ -18,7 +18,7 @@ from basic_memory.schemas.prompt import ContinueConversationRequest
 
 
 @mcp.prompt(
-    name="continue-conversation",
+    name="continue_conversation",
     description="Continue a previous conversation",
 )
 async def continue_conversation(
