@@ -294,3 +294,31 @@ def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     text = re.sub(f"{re.escape(replacement)}+", replacement, text)
 
     return text.strip(replacement)
+
+
+def sanitize_for_folder(folder: str) -> str:
+    """
+    Sanitize folder path to be safe for use in file system paths.
+    Removes leading/trailing whitespace, compresses multiple slashes,
+    and removes special characters except for /, -, and _.
+    """
+    if not folder:
+        return ""
+
+    sanitized = folder.strip()
+
+    if sanitized.startswith("./"):
+        sanitized = sanitized[2:]
+
+    # ensure no special characters (except for a few that are allowed)
+    sanitized = "".join(
+        c for c in sanitized if c.isalnum() or c in (".", " ", "-", "_", "\\", "/")
+    ).rstrip()
+
+    # compress multiple, repeated instances of path separators
+    sanitized = re.sub(r"[\\/]+", "/", sanitized)
+
+    # trim any leading/trailing path separators
+    sanitized = sanitized.strip("\\/")
+
+    return sanitized
