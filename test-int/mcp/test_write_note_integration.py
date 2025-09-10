@@ -346,3 +346,54 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server):
 
     # Restore original config value
     config.kebab_filenames = curr_config_val
+
+
+@pytest.mark.asyncio
+async def test_write_note_file_path_os_path_join(mcp_server):
+    """Test that os.path.join logic in Entity.file_path works for various folder/title combinations."""
+
+    config = ConfigManager().config
+    curr_config_val = config.kebab_filenames
+    config.kebab_filenames = True
+
+    test_cases = [
+        # (folder, title, expected file_path, expected permalink)
+        ("my-folder", "Test Note", "my-folder/test-note.md", "my-folder/test-note"),
+        (
+            "nested/folder",
+            "Another Note",
+            "nested/folder/another-note.md",
+            "nested/folder/another-note",
+        ),
+        ("", "Root Note", "root-note.md", "root-note"),
+        (
+            "folder with spaces",
+            "Note Title",
+            "folder with spaces/note-title.md",
+            "folder-with-spaces/note-title",
+        ),
+        ("folder//subfolder", "Note", "folder/subfolder/note.md", "folder/subfolder/note"),
+    ]
+
+    with patch.object(ConfigManager, "config", config):
+        async with Client(mcp_server) as client:
+            for folder, title, expected_path, expected_permalink in test_cases:
+                result = await client.call_tool(
+                    "write_note",
+                    {
+                        "title": title,
+                        "folder": folder,
+                        "content": "Testing os.path.join logic.",
+                        "tags": "integration,ospath",
+                    },
+                )
+
+                assert len(result.content) == 1
+                response_text = result.content[0].text
+                print(response_text)
+
+                assert f"file_path: {expected_path}" in response_text
+                assert f"permalink: {expected_permalink}" in response_text
+
+    # Restore original config value
+    config.kebab_filenames = curr_config_val
