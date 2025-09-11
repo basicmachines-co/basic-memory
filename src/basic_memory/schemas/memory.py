@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional, Annotated, Sequence, Literal, Union
 
 from annotated_types import MinLen, MaxLen
-from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, ConfigDict
+from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, ConfigDict, field_serializer
 
 from basic_memory.schemas.search import SearchItemType
 
@@ -118,8 +118,6 @@ def memory_url_path(url: memory_url) -> str:  # pyright: ignore
 class EntitySummary(BaseModel):
     """Simplified entity representation."""
 
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
-
     type: Literal["entity"] = "entity"
     permalink: Optional[str]
     title: str
@@ -127,11 +125,13 @@ class EntitySummary(BaseModel):
     file_path: str
     created_at: datetime
 
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
+
 
 class RelationSummary(BaseModel):
     """Simplified relation representation."""
-
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["relation"] = "relation"
     title: str
@@ -142,11 +142,13 @@ class RelationSummary(BaseModel):
     to_entity: Optional[str] = None
     created_at: datetime
 
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
+
 
 class ObservationSummary(BaseModel):
     """Simplified observation representation."""
-
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["observation"] = "observation"
     title: str
@@ -156,11 +158,13 @@ class ObservationSummary(BaseModel):
     content: str
     created_at: datetime
 
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
+
 
 class MemoryMetadata(BaseModel):
     """Simplified response metadata."""
-
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     uri: Optional[str] = None
     types: Optional[List[SearchItemType]] = None
@@ -172,6 +176,10 @@ class MemoryMetadata(BaseModel):
     total_results: Optional[int] = None  # For backward compatibility
     total_relations: Optional[int] = None
     total_observations: Optional[int] = None
+
+    @field_serializer('generated_at')
+    def serialize_generated_at(self, dt: datetime) -> str:
+        return dt.isoformat()
 
 
 class ContextResult(BaseModel):

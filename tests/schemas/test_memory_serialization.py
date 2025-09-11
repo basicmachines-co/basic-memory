@@ -197,18 +197,36 @@ class TestDateTimeSerialization:
         assert "T" in datetime_str  # Contains date-time separator
         assert len(datetime_str) >= 19  # At least YYYY-MM-DDTHH:MM:SS format
 
-    def test_all_models_have_json_encoders_configured(self):
-        """Test that all memory schema models have datetime json_encoders configured."""
-        models_to_test = [EntitySummary, RelationSummary, ObservationSummary, MemoryMetadata]
+    def test_all_models_have_datetime_serializers_configured(self):
+        """Test that all memory schema models have datetime field serializers configured."""
+        models_to_test = [
+            (EntitySummary, "created_at"),
+            (RelationSummary, "created_at"), 
+            (ObservationSummary, "created_at"),
+            (MemoryMetadata, "generated_at")
+        ]
 
-        for model_class in models_to_test:
-            # Check that ConfigDict with json_encoders is configured
-            assert hasattr(model_class, "model_config")
-            assert "json_encoders" in model_class.model_config
-            assert datetime in model_class.model_config["json_encoders"]
-
-            # Verify the encoder function produces ISO format
-            encoder = model_class.model_config["json_encoders"][datetime]
+        for model_class, datetime_field in models_to_test:
+            # Create a test instance with a datetime field
             test_datetime = datetime(2023, 12, 8, 10, 30, 0)
-            result = encoder(test_datetime)
-            assert result == "2023-12-08T10:30:00"
+            
+            if model_class == EntitySummary:
+                instance = model_class(
+                    permalink="test", title="Test", file_path="test.md", created_at=test_datetime
+                )
+            elif model_class == RelationSummary:
+                instance = model_class(
+                    title="Test", file_path="test.md", permalink="test", 
+                    relation_type="test", created_at=test_datetime
+                )
+            elif model_class == ObservationSummary:
+                instance = model_class(
+                    title="Test", file_path="test.md", permalink="test", 
+                    category="test", content="Test", created_at=test_datetime
+                )
+            elif model_class == MemoryMetadata:
+                instance = model_class(depth=1, generated_at=test_datetime)
+            
+            # Test that model_dump produces ISO format for datetime field
+            data = instance.model_dump()
+            assert data[datetime_field] == "2023-12-08T10:30:00"
