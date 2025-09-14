@@ -23,7 +23,7 @@ lint:
     uv run ruff check . --fix
 
 # Type check code
-type-check:
+typecheck:
     uv run pyright
 
 # Clean build artifacts and cache files
@@ -55,7 +55,7 @@ update-deps:
     uv sync --upgrade
 
 # Run all code quality checks and tests
-check: lint format type-check test
+check: lint format typecheck test
 
 # Generate Alembic migration with descriptive message
 migration message:
