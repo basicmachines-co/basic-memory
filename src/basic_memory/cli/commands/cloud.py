@@ -11,6 +11,7 @@ from rich.table import Table
 
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.config import ConfigManager
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.utils import generate_permalink
 
@@ -23,9 +24,11 @@ class CloudAPIError(Exception):
     pass
 
 
-# TODO this is the workos dev env
-CLI_OAUTH_CLIENT_ID = "client_01K46RED2BW9YKYE4N7Y9BDN2V"
-AUTHKIT_DOMAIN = "https://exciting-aquarium-32-staging.authkit.app"
+def get_cloud_config() -> tuple[str, str, str]:
+    """Get cloud OAuth configuration from config."""
+    config_manager = ConfigManager()
+    config = config_manager.config
+    return config.cloud_client_id, config.cloud_domain, config.cloud_host
 
 
 async def make_api_request(
@@ -39,19 +42,39 @@ async def make_api_request(
     headers = headers or {}
     auth_headers = await get_authenticated_headers()
     headers.update(auth_headers)
+    # Add debug headers to help with compression issues
+    headers.setdefault("Accept-Encoding", "identity")  # Disable compression for debugging
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
+            console.print(f"[dim]Making {method} request to {url}[/dim]")
+            console.print(f"[dim]Headers: {dict(headers)}[/dim]")
+
             response = await client.request(method=method, url=url, headers=headers, json=json_data)
-            console.print(response)
+
+            console.print(f"[dim]Response status: {response.status_code}[/dim]")
+            console.print(f"[dim]Response headers: {dict(response.headers)}[/dim]")
+
             response.raise_for_status()
             return response
         except httpx.HTTPError as e:
+            console.print(f"[red]HTTP Error details: {e}[/red]")
+            # Check if this is a response error with response details
+            if hasattr(e, "response") and e.response is not None:  # pyright: ignore [reportAttributeAccessIssue]
+                response = e.response  # type: ignore
+                console.print(f"[red]Response status: {response.status_code}[/red]")
+                console.print(f"[red]Response headers: {dict(response.headers)}[/red]")
+                try:
+                    console.print(f"[red]Response text: {response.text}[/red]")
+                except Exception:
+                    console.print("[red]Could not read response text[/red]")
             raise CloudAPIError(f"API request failed: {e}") from e
 
 
 async def get_authenticated_headers() -> dict[str, str]:
     """Get authentication headers with JWT token."""
-    auth = CLIAuth(client_id=CLI_OAUTH_CLIENT_ID, authkit_domain=AUTHKIT_DOMAIN)
+    client_id, domain, _ = get_cloud_config()
+    auth = CLIAuth(client_id=client_id, authkit_domain=domain)
     token = await auth.get_valid_token()
     if not token:
         console.print("[red]Not authenticated. Please run 'tenant login' first.[/red]")
@@ -65,7 +88,8 @@ def login():
     """Authenticate with WorkOS using OAuth Device Authorization flow."""
 
     async def _login():
-        auth = CLIAuth(client_id=CLI_OAUTH_CLIENT_ID, authkit_domain=AUTHKIT_DOMAIN)
+        client_id, domain, _ = get_cloud_config()
+        auth = CLIAuth(client_id=client_id, authkit_domain=domain)
 
         success = await auth.login()
         if not success:
@@ -75,20 +99,27 @@ def login():
     asyncio.run(_login())
 
 
-@cloud_app.command("list")
-def list_projects(
-    host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
-) -> None:
+# Project
+
+project_app = typer.Typer(help="Manage Basic Memory Cloud Projects")
+cloud_app.add_typer(project_app, name="project")
+
+
+@project_app.command("list")
+def list_projects() -> None:
     """List projects on the cloud instance."""
 
-    # Clean up the host URL
-    host_url = host_url.rstrip("/")
-
     try:
+        # Get cloud configuration
+        _, _, host_url = get_cloud_config()
+        host_url = host_url.rstrip("/")
+
         console.print(f"[blue]Fetching projects from {host_url}...[/blue]")
 
         # Make API request to list projects
-        response = asyncio.run(make_api_request(method="GET", url=f"{host_url}/projects/projects"))
+        response = asyncio.run(
+            make_api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
+        )
 
         projects_data = response.json()
 
@@ -97,9 +128,11 @@ def list_projects(
             return
 
         # Create table for display
-        table = Table(title=f"Projects on {host_url}", show_header=True, header_style="bold blue")
-        table.add_column("Name", style="green")
-        table.add_column("Path", style="dim")
+        table = Table(
+            title="Cloud Projects", show_header=True, header_style="bold blue", min_width=60
+        )
+        table.add_column("Name", style="green", min_width=20)
+        table.add_column("Path", style="dim", min_width=30)
 
         for project in projects_data["projects"]:
             # Format the path for display
@@ -123,15 +156,15 @@ def list_projects(
         raise typer.Exit(1)
 
 
-@cloud_app.command("create")
-def create_project(
-    name: str = typer.Argument(..., help="Name of the project to create"),
-    host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
+@project_app.command("add")
+def add_project(
+    name: str = typer.Argument(..., help="Name of the project to add"),
     set_default: bool = typer.Option(False, "--default", "-d", help="Set as default project"),
 ) -> None:
     """Create a new project on the cloud instance."""
 
-    # Clean up the host URL
+    # Get cloud configuration
+    _, _, host_url = get_cloud_config()
     host_url = host_url.rstrip("/")
 
     # Prepare headers
@@ -154,7 +187,7 @@ def create_project(
         response = asyncio.run(
             make_api_request(
                 method="POST",
-                url=f"{host_url}/projects/projects",
+                url=f"{host_url}/proxy/projects/projects",
                 headers=headers,
                 json_data=project_data,
             )
@@ -184,7 +217,6 @@ def create_project(
 def upload_files(
     project: str = typer.Argument(..., help="Project name to upload to"),
     path_to_files: str = typer.Argument(..., help="Local path to files or directory to upload"),
-    host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
     preserve_timestamps: bool = typer.Option(
         True,
         "--preserve-timestamps/--no-preserve-timestamps",
@@ -198,7 +230,8 @@ def upload_files(
 ) -> None:
     """Upload files to a cloud project using WebDAV."""
 
-    # Clean up the host URL
+    # Get cloud configuration
+    _, _, host_url = get_cloud_config()
     host_url = host_url.rstrip("/")
 
     # Validate local path
@@ -283,6 +316,9 @@ async def _upload_files_webdav(
 ) -> None:
     """Upload files using WebDAV protocol."""
 
+    # Get authentication headers for WebDAV uploads
+    auth_headers = await get_authenticated_headers()
+
     async with httpx.AsyncClient(timeout=300.0) as client:
         for file_path in files_to_upload:
             # Calculate relative path for WebDAV outside try block
@@ -295,24 +331,31 @@ async def _upload_files_webdav(
 
             try:
                 # WebDAV URL
-                webdav_url = f"{host_url}/{project}/webdav/{relative_path}"
+                webdav_url = f"{host_url}/proxy/{project}/webdav/{relative_path}"
 
                 # Prepare upload headers
                 upload_headers = dict(headers)
+                upload_headers.update(auth_headers)
 
                 # Add timestamp preservation header if requested
                 if preserve_timestamps:
                     mtime = file_path.stat().st_mtime
                     upload_headers["X-OC-Mtime"] = str(mtime)
 
+                # Disable compression for WebDAV as well
+                upload_headers.setdefault("Accept-Encoding", "identity")
+
                 # Read file content
                 file_content = file_path.read_bytes()
+
+                # console.print(f"[dim]Uploading {relative_path} to {webdav_url}[/dim]")
 
                 # Upload file
                 response = await client.put(
                     webdav_url, content=file_content, headers=upload_headers
                 )
 
+                # console.print(f"[dim]WebDAV response status: {response.status_code}[/dim]")
                 response.raise_for_status()
 
                 # Show file upload progress
@@ -320,16 +363,19 @@ async def _upload_files_webdav(
 
             except httpx.HTTPError as e:
                 console.print(f"  ✗ {relative_path} - {e}")
+                if hasattr(e, "response") and e.response is not None:  # pyright: ignore [reportAttributeAccessIssue]
+                    response = e.response  # type: ignore
+                    console.print(f"[red]WebDAV Response status: {response.status_code}[/red]")
+                    console.print(f"[red]WebDAV Response headers: {dict(response.headers)}[/red]")
                 raise CloudAPIError(f"Failed to upload {file_path.name}: {e}") from e
 
 
 @cloud_app.command("status")
-def status(
-    host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
-) -> None:
+def status() -> None:
     """Check the status of the cloud instance."""
 
-    # Clean up the host URL
+    # Get cloud configuration
+    _, _, host_url = get_cloud_config()
     host_url = host_url.rstrip("/")
 
     # Prepare headers
@@ -340,7 +386,7 @@ def status(
 
         # Make API request to check health
         response = asyncio.run(
-            make_api_request(method="GET", url=f"{host_url}/health", headers=headers)
+            make_api_request(method="GET", url=f"{host_url}/proxy/health", headers=headers)
         )
 
         health_data = response.json()
