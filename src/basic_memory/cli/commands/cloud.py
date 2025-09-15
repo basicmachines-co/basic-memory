@@ -8,15 +8,6 @@ import httpx
 import typer
 from rich.console import Console
 from rich.table import Table
-from rich.progress import (
-    BarColumn,
-    Progress,
-    TextColumn,
-    TimeElapsedColumn,
-    FileSizeColumn,
-    TotalFileSizeColumn,
-    TransferSpeedColumn,
-)
 
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.auth import CLIAuth
@@ -233,37 +224,17 @@ def upload_files(
             f"[blue]Uploading {len(files_to_upload)} file(s) to project '{project}' on {host_url}...[/blue]"
         )
 
-        # Calculate total size for progress tracking
-        total_size = sum(f.stat().st_size for f in files_to_upload)
-
-        # Create progress bar
-        with Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            FileSizeColumn(),
-            "/",
-            TotalFileSizeColumn(),
-            TransferSpeedColumn(),
-            TimeElapsedColumn(),
-            console=console,
-            transient=False,
-        ) as progress:
-            task = progress.add_task("Uploading files...", total=total_size)
-
-            # Upload files using WebDAV
-            asyncio.run(
-                _upload_files_webdav(
-                    files_to_upload=files_to_upload,
-                    local_base_path=local_path,
-                    project=project,
-                    host_url=host_url,
-                    headers=headers,
-                    preserve_timestamps=preserve_timestamps,
-                    progress=progress,
-                    task=task,
-                )
+        # Upload files using WebDAV
+        asyncio.run(
+            _upload_files_webdav(
+                files_to_upload=files_to_upload,
+                local_base_path=local_path,
+                project=project,
+                host_url=host_url,
+                headers=headers,
+                preserve_timestamps=preserve_timestamps,
             )
+        )
 
         console.print(f"[green]Successfully uploaded {len(files_to_upload)} file(s)![/green]")
 
@@ -282,22 +253,20 @@ async def _upload_files_webdav(
     host_url: str,
     headers: dict,
     preserve_timestamps: bool,
-    progress: Progress,
-    task,
 ) -> None:
     """Upload files using WebDAV protocol."""
 
     async with httpx.AsyncClient(timeout=300.0) as client:
         for file_path in files_to_upload:
-            try:
-                # Calculate relative path for WebDAV
-                if local_base_path.is_file():
-                    # Single file upload - use just the filename
-                    relative_path = file_path.name
-                else:
-                    # Directory upload - preserve structure
-                    relative_path = file_path.relative_to(local_base_path)
+            # Calculate relative path for WebDAV outside try block
+            if local_base_path.is_file():
+                # Single file upload - use just the filename
+                relative_path = file_path.name
+            else:
+                # Directory upload - preserve structure
+                relative_path = file_path.relative_to(local_base_path)
 
+            try:
                 # WebDAV URL
                 webdav_url = f"{host_url}/{project}/webdav/{relative_path}"
 
@@ -319,10 +288,11 @@ async def _upload_files_webdav(
 
                 response.raise_for_status()
 
-                # Update progress
-                progress.update(task, advance=len(file_content))
+                # Show file upload progress
+                console.print(f"  ✓ {relative_path}")
 
             except httpx.HTTPError as e:
+                console.print(f"  ✗ {relative_path} - {e}")
                 raise CloudAPIError(f"Failed to upload {file_path.name}: {e}") from e
 
 
