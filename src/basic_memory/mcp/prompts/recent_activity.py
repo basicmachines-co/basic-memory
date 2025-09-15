@@ -16,7 +16,7 @@ from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.prompt(
-    name="Share Recent Activity",
+    name="recent_activity",
     description="Get recent activity from across the knowledge base",
 )
 async def recent_activity_prompt(
@@ -72,32 +72,32 @@ async def recent_activity_prompt(
 
     capture_suggestions = f"""
     ## Opportunity to Capture Activity Summary
-    
+
     Consider creating a summary note of recent activity:
-    
+
     ```python
     await write_note(
         title="Activity Summary {timeframe}",
         content='''
         # Activity Summary for {timeframe}
-        
+
         ## Overview
         [Summary of key changes and developments over this period]
-        
+
         ## Key Updates
         [List main updates and their significance]
-        
+
         ## Observations
         - [trend] [Observation about patterns in recent activity]
         - [insight] [Connection between different activities]
-        
+
         ## Relations
         - summarizes [[{first_title}]]
         - relates_to [[Project Overview]]
         '''
     )
     ```
-    
+
     Summarizing periodic activity helps create high-level insights and connections between topics.
     """
 
