@@ -58,7 +58,15 @@ jobs:
 
       - name: Run type checks
         run: |
-          just type-check
+          just typecheck
+
+      - name: Run type checks
+        run: |
+          just typecheck
+
+      - name: Run linting
+        run: |
+          just lint
 
       - name: Run tests
         run: |

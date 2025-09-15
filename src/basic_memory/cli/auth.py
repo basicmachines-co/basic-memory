@@ -4,7 +4,6 @@ import json
 import os
 import time
 import webbrowser
-from pathlib import Path
 
 import httpx
 from rich.console import Console

@@ -30,9 +30,10 @@ class CloudAPIError(Exception):
 
     pass
 
+
 # TODO this is the workos dev env
-CLI_OAUTH_CLIENT_ID="client_01K46RED2BW9YKYE4N7Y9BDN2V"
-AUTHKIT_DOMAIN="https://exciting-aquarium-32-staging.authkit.app"
+CLI_OAUTH_CLIENT_ID = "client_01K46RED2BW9YKYE4N7Y9BDN2V"
+AUTHKIT_DOMAIN = "https://exciting-aquarium-32-staging.authkit.app"
 
 
 async def make_api_request(
@@ -48,14 +49,13 @@ async def make_api_request(
     headers.update(auth_headers)
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            response = await client.request(
-                method=method, url=url, headers=headers, json=json_data
-            )
+            response = await client.request(method=method, url=url, headers=headers, json=json_data)
             console.print(response)
             response.raise_for_status()
             return response
         except httpx.HTTPError as e:
             raise CloudAPIError(f"API request failed: {e}") from e
+
 
 async def get_authenticated_headers() -> dict[str, str]:
     """Get authentication headers with JWT token."""
@@ -73,9 +73,7 @@ def login():
     """Authenticate with WorkOS using OAuth Device Authorization flow."""
 
     async def _login():
-        auth = CLIAuth(
-            client_id=CLI_OAUTH_CLIENT_ID, authkit_domain=AUTHKIT_DOMAIN
-        )
+        auth = CLIAuth(client_id=CLI_OAUTH_CLIENT_ID, authkit_domain=AUTHKIT_DOMAIN)
 
         success = await auth.login()
         if not success:
@@ -83,6 +81,7 @@ def login():
             raise typer.Exit(1)
 
     asyncio.run(_login())
+
 
 @cloud_app.command("list")
 def list_projects(
@@ -97,9 +96,7 @@ def list_projects(
         console.print(f"[blue]Fetching projects from {host_url}...[/blue]")
 
         # Make API request to list projects
-        response = asyncio.run(
-            make_api_request(method="GET", url=f"{host_url}/projects/projects")
-        )
+        response = asyncio.run(make_api_request(method="GET", url=f"{host_url}/projects/projects"))
 
         projects_data = response.json()
 
