@@ -57,9 +57,16 @@ def app_callback(
             update_current_project(project)
 
 
+## import
 # Register sub-command groups
 import_app = typer.Typer(help="Import data from various sources")
 app.add_typer(import_app, name="import")
 
-claude_app = typer.Typer()
+claude_app = typer.Typer(help="Import Conversations from Claude JSON export.")
 import_app.add_typer(claude_app, name="claude")
+
+
+## cloud
+
+cloud_app = typer.Typer(help="Access Basic Memory Cloud")
+app.add_typer(cloud_app, name="cloud")
