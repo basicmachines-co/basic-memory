@@ -201,32 +201,39 @@ class TestDateTimeSerialization:
         """Test that all memory schema models have datetime field serializers configured."""
         models_to_test = [
             (EntitySummary, "created_at"),
-            (RelationSummary, "created_at"), 
+            (RelationSummary, "created_at"),
             (ObservationSummary, "created_at"),
-            (MemoryMetadata, "generated_at")
+            (MemoryMetadata, "generated_at"),
         ]
 
         for model_class, datetime_field in models_to_test:
             # Create a test instance with a datetime field
             test_datetime = datetime(2023, 12, 8, 10, 30, 0)
-            
+
             if model_class == EntitySummary:
                 instance = model_class(
                     permalink="test", title="Test", file_path="test.md", created_at=test_datetime
                 )
             elif model_class == RelationSummary:
                 instance = model_class(
-                    title="Test", file_path="test.md", permalink="test", 
-                    relation_type="test", created_at=test_datetime
+                    title="Test",
+                    file_path="test.md",
+                    permalink="test",
+                    relation_type="test",
+                    created_at=test_datetime,
                 )
             elif model_class == ObservationSummary:
                 instance = model_class(
-                    title="Test", file_path="test.md", permalink="test", 
-                    category="test", content="Test", created_at=test_datetime
+                    title="Test",
+                    file_path="test.md",
+                    permalink="test",
+                    category="test",
+                    content="Test",
+                    created_at=test_datetime,
                 )
             elif model_class == MemoryMetadata:
                 instance = model_class(depth=1, generated_at=test_datetime)
-            
+
             # Test that model_dump produces ISO format for datetime field
             data = instance.model_dump()
             assert data[datetime_field] == "2023-12-08T10:30:00"

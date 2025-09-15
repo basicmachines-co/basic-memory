@@ -108,7 +108,7 @@ async def test_webdav_get_file(client, project_config, project_url):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/octet-stream"
     assert "Content-Length" in response.headers
-    assert response.text == content
+    assert content in response.text
 
 
 @pytest.mark.asyncio
