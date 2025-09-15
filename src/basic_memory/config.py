@@ -158,6 +158,9 @@ class BasicMemoryConfig(BaseSettings):
                     raise e
         return v
 
+    @property
+    def data_dir_path(self):
+        return Path.home() / DATA_DIR_NAME
 
 class ConfigManager:
     """Manages Basic Memory configuration."""

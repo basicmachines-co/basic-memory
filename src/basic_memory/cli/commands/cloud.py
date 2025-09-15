@@ -19,6 +19,7 @@ from rich.progress import (
 )
 
 from basic_memory.cli.app import cloud_app
+from basic_memory.cli.auth import CLIAuth
 from basic_memory.utils import generate_permalink
 
 console = Console()
@@ -26,7 +27,12 @@ console = Console()
 
 class CloudAPIError(Exception):
     """Exception raised for cloud API errors."""
+
     pass
+
+# TODO this is the workos dev env
+CLI_OAUTH_CLIENT_ID="client_01K46RED2BW9YKYE4N7Y9BDN2V"
+AUTHKIT_DOMAIN="https://exciting-aquarium-32-staging.authkit.app"
 
 
 async def make_api_request(
@@ -34,48 +40,66 @@ async def make_api_request(
     url: str,
     headers: Optional[dict] = None,
     json_data: Optional[dict] = None,
-    timeout: float = 30.0
+    timeout: float = 30.0,
 ) -> httpx.Response:
     """Make an API request to the cloud service."""
+    headers = headers or {}
+    auth_headers = await get_authenticated_headers()
+    headers.update(auth_headers)
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
             response = await client.request(
-                method=method,
-                url=url,
-                headers=headers or {},
-                json=json_data
+                method=method, url=url, headers=headers, json=json_data
             )
-            console.print(response.json())
+            console.print(response)
             response.raise_for_status()
             return response
         except httpx.HTTPError as e:
             raise CloudAPIError(f"API request failed: {e}") from e
 
+async def get_authenticated_headers() -> dict[str, str]:
+    """Get authentication headers with JWT token."""
+    auth = CLIAuth(client_id=CLI_OAUTH_CLIENT_ID, authkit_domain=AUTHKIT_DOMAIN)
+    token = await auth.get_valid_token()
+    if not token:
+        console.print("[red]Not authenticated. Please run 'tenant login' first.[/red]")
+        raise typer.Exit(1)
+
+    return {"Authorization": f"Bearer {token}"}
+
+
+@cloud_app.command()
+def login():
+    """Authenticate with WorkOS using OAuth Device Authorization flow."""
+
+    async def _login():
+        auth = CLIAuth(
+            client_id=CLI_OAUTH_CLIENT_ID, authkit_domain=AUTHKIT_DOMAIN
+        )
+
+        success = await auth.login()
+        if not success:
+            console.print("[red]Login failed[/red]")
+            raise typer.Exit(1)
+
+    asyncio.run(_login())
 
 @cloud_app.command("list")
 def list_projects(
-        host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
-    auth_token: Optional[str] = typer.Option(None, "--token", "-t", help="Authentication token"),
+    host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
 ) -> None:
     """List projects on the cloud instance."""
 
     # Clean up the host URL
-    host_url = host_url.rstrip('/')
-
-    # Prepare headers
-    headers = {}
-    if auth_token:
-        headers["Authorization"] = f"Bearer {auth_token}"
+    host_url = host_url.rstrip("/")
 
     try:
         console.print(f"[blue]Fetching projects from {host_url}...[/blue]")
 
         # Make API request to list projects
-        response = asyncio.run(make_api_request(
-            method="GET",
-            url=f"{host_url}/projects/projects",
-            headers=headers
-        ))
+        response = asyncio.run(
+            make_api_request(method="GET", url=f"{host_url}/projects/projects")
+        )
 
         projects_data = response.json()
 
@@ -84,11 +108,7 @@ def list_projects(
             return
 
         # Create table for display
-        table = Table(
-            title=f"Projects on {host_url}",
-            show_header=True,
-            header_style="bold blue"
-        )
+        table = Table(title=f"Projects on {host_url}", show_header=True, header_style="bold blue")
         table.add_column("Name", style="green")
         table.add_column("Path", style="dim")
 
@@ -118,18 +138,15 @@ def list_projects(
 def create_project(
     name: str = typer.Argument(..., help="Name of the project to create"),
     host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
-    auth_token: Optional[str] = typer.Option(None, "--token", "-t", help="Authentication token"),
     set_default: bool = typer.Option(False, "--default", "-d", help="Set as default project"),
 ) -> None:
     """Create a new project on the cloud instance."""
 
     # Clean up the host URL
-    host_url = host_url.rstrip('/')
+    host_url = host_url.rstrip("/")
 
     # Prepare headers
     headers = {"Content-Type": "application/json"}
-    if auth_token:
-        headers["Authorization"] = f"Bearer {auth_token}"
 
     project_path = generate_permalink(name)
     # Prepare project data
@@ -145,12 +162,14 @@ def create_project(
         console.print(f"[blue]Creating project '{name}' on {host_url}...[/blue]")
 
         # Make API request to create project
-        response = asyncio.run(make_api_request(
-            method="POST",
-            url=f"{host_url}/projects/projects",
-            headers=headers,
-            json_data=project_data
-        ))
+        response = asyncio.run(
+            make_api_request(
+                method="POST",
+                url=f"{host_url}/projects/projects",
+                headers=headers,
+                json_data=project_data,
+            )
+        )
 
         result = response.json()
 
@@ -161,11 +180,10 @@ def create_project(
             project = result["project"]
             console.print(f"  Name: {project.get('name', name)}")
             console.print(f"  Path: {project.get('path', 'unknown')}")
-            if project.get('id'):
+            if project.get("id"):
                 console.print(f"  ID: {project['id']}")
 
     except CloudAPIError as e:
-
         console.print(f"[red]Error creating project: {e}[/red]")
         raise typer.Exit(1)
     except Exception as e:
@@ -178,13 +196,16 @@ def upload_files(
     project: str = typer.Argument(..., help="Project name to upload to"),
     path_to_files: str = typer.Argument(..., help="Local path to files or directory to upload"),
     host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
-    auth_token: Optional[str] = typer.Option(None, "--token", "-t", help="Authentication token"),
-    preserve_timestamps: bool = typer.Option(True, "--preserve-timestamps/--no-preserve-timestamps", help="Preserve file modification times"),
+    preserve_timestamps: bool = typer.Option(
+        True,
+        "--preserve-timestamps/--no-preserve-timestamps",
+        help="Preserve file modification times",
+    ),
 ) -> None:
     """Upload files to a cloud project using WebDAV."""
 
     # Clean up the host URL
-    host_url = host_url.rstrip('/')
+    host_url = host_url.rstrip("/")
 
     # Validate local path
     local_path = Path(path_to_files).expanduser().resolve()
@@ -194,8 +215,6 @@ def upload_files(
 
     # Prepare headers
     headers = {}
-    if auth_token:
-        headers["Authorization"] = f"Bearer {auth_token}"
 
     try:
         # Collect files to upload
@@ -213,7 +232,9 @@ def upload_files(
             console.print("[yellow]No files found to upload[/yellow]")
             return
 
-        console.print(f"[blue]Uploading {len(files_to_upload)} file(s) to project '{project}' on {host_url}...[/blue]")
+        console.print(
+            f"[blue]Uploading {len(files_to_upload)} file(s) to project '{project}' on {host_url}...[/blue]"
+        )
 
         # Calculate total size for progress tracking
         total_size = sum(f.stat().st_size for f in files_to_upload)
@@ -231,20 +252,21 @@ def upload_files(
             console=console,
             transient=False,
         ) as progress:
-
             task = progress.add_task("Uploading files...", total=total_size)
 
             # Upload files using WebDAV
-            asyncio.run(_upload_files_webdav(
-                files_to_upload=files_to_upload,
-                local_base_path=local_path,
-                project=project,
-                host_url=host_url,
-                headers=headers,
-                preserve_timestamps=preserve_timestamps,
-                progress=progress,
-                task=task
-            ))
+            asyncio.run(
+                _upload_files_webdav(
+                    files_to_upload=files_to_upload,
+                    local_base_path=local_path,
+                    project=project,
+                    host_url=host_url,
+                    headers=headers,
+                    preserve_timestamps=preserve_timestamps,
+                    progress=progress,
+                    task=task,
+                )
+            )
 
         console.print(f"[green]Successfully uploaded {len(files_to_upload)} file(s)![/green]")
 
@@ -264,7 +286,7 @@ async def _upload_files_webdav(
     headers: dict,
     preserve_timestamps: bool,
     progress: Progress,
-    task
+    task,
 ) -> None:
     """Upload files using WebDAV protocol."""
 
@@ -295,9 +317,7 @@ async def _upload_files_webdav(
 
                 # Upload file
                 response = await client.put(
-                    webdav_url,
-                    content=file_content,
-                    headers=upload_headers
+                    webdav_url, content=file_content, headers=upload_headers
                 )
 
                 response.raise_for_status()
@@ -312,27 +332,22 @@ async def _upload_files_webdav(
 @cloud_app.command("status")
 def status(
     host_url: str = typer.Option(..., "--host", "-h", help="Cloud host URL"),
-    auth_token: Optional[str] = typer.Option(None, "--token", "-t", help="Authentication token"),
 ) -> None:
     """Check the status of the cloud instance."""
 
     # Clean up the host URL
-    host_url = host_url.rstrip('/')
+    host_url = host_url.rstrip("/")
 
     # Prepare headers
     headers = {}
-    if auth_token:
-        headers["Authorization"] = f"Bearer {auth_token}"
 
     try:
         console.print(f"[blue]Checking status of {host_url}...[/blue]")
 
         # Make API request to check health
-        response = asyncio.run(make_api_request(
-            method="GET",
-            url=f"{host_url}/health",
-            headers=headers
-        ))
+        response = asyncio.run(
+            make_api_request(method="GET", url=f"{host_url}/health", headers=headers)
+        )
 
         health_data = response.json()
 
