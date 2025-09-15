@@ -11,6 +11,7 @@ from rich.table import Table
 
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.utils import generate_permalink
 
 console = Console()
@@ -189,6 +190,11 @@ def upload_files(
         "--preserve-timestamps/--no-preserve-timestamps",
         help="Preserve file modification times",
     ),
+    respect_gitignore: bool = typer.Option(
+        True,
+        "--respect-gitignore/--no-gitignore",
+        help="Respect .gitignore patterns and skip common development artifacts",
+    ),
 ) -> None:
     """Upload files to a cloud project using WebDAV."""
 
@@ -205,16 +211,37 @@ def upload_files(
     headers = {}
 
     try:
+        # Load gitignore patterns (only if enabled)
+        ignore_patterns = load_gitignore_patterns(local_path) if respect_gitignore else set()
+
         # Collect files to upload
         files_to_upload = []
+        ignored_count = 0
 
         if local_path.is_file():
-            files_to_upload.append(local_path)
+            # Single file upload - check if it should be ignored
+            if not respect_gitignore or not should_ignore_path(
+                local_path, local_path.parent, ignore_patterns
+            ):
+                files_to_upload.append(local_path)
+            else:
+                ignored_count += 1
         else:
             # Recursively collect all files
             for file_path in local_path.rglob("*"):
                 if file_path.is_file():
-                    files_to_upload.append(file_path)
+                    if not respect_gitignore or not should_ignore_path(
+                        file_path, local_path, ignore_patterns
+                    ):
+                        files_to_upload.append(file_path)
+                    else:
+                        ignored_count += 1
+
+        # Show summary
+        if ignored_count > 0 and respect_gitignore:
+            console.print(
+                f"[dim]Ignored {ignored_count} file(s) based on .gitignore and default patterns[/dim]"
+            )
 
         if not files_to_upload:
             console.print("[yellow]No files found to upload[/yellow]")
