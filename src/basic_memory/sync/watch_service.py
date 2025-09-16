@@ -5,7 +5,7 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Sequence
 
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.models import Project
@@ -85,50 +85,85 @@ class WatchService:
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
 
-    async def run(self):  # pragma: no cover
-        """Watch for file changes and sync them"""
+    async def _schedule_restart(self, stop_event: asyncio.Event):
+        """Schedule a restart of the watch service after the configured interval."""
+        await asyncio.sleep(self.app_config.watch_project_reload_interval)
+        stop_event.set()
 
-        projects = await self.project_repository.get_active_projects()
+    async def _watch_projects_cycle(self, projects: Sequence[Project], stop_event: asyncio.Event):
+        """Run one cycle of watching the given projects until stop_event is set."""
         project_paths = [project.path for project in projects]
 
-        logger.info(
-            "Watch service started",
-            f"directories={project_paths}",
-            f"debounce_ms={self.app_config.sync_delay}",
-            f"pid={os.getpid()}",
-        )
+        async for changes in awatch(
+            *project_paths,
+            debounce=self.app_config.sync_delay,
+            watch_filter=self.filter_changes,
+            recursive=True,
+            stop_event=stop_event,
+        ):
+            # group changes by project
+            project_changes = defaultdict(list)
+            for change, path in changes:
+                for project in projects:
+                    if self.is_project_path(project, path):
+                        project_changes[project].append((change, path))
+                        break
+
+            # create coroutines to handle changes
+            change_handlers = [
+                self.handle_changes(project, changes)  # pyright: ignore
+                for project, changes in project_changes.items()
+            ]
+
+            # process changes
+            await asyncio.gather(*change_handlers)
+
+    async def run(self):  # pragma: no cover
+        """Watch for file changes and sync them"""
 
         self.state.running = True
         self.state.start_time = datetime.now()
         await self.write_status()
 
+        logger.info(
+            "Watch service started",
+            f"debounce_ms={self.app_config.sync_delay}",
+            f"pid={os.getpid()}",
+        )
+
         try:
-            async for changes in awatch(
-                *project_paths,
-                debounce=self.app_config.sync_delay,
-                watch_filter=self.filter_changes,
-                recursive=True,
-            ):
-                # group changes by project
-                project_changes = defaultdict(list)
-                for change, path in changes:
-                    for project in projects:
-                        if self.is_project_path(project, path):
-                            project_changes[project].append((change, path))
-                            break
+            while self.state.running:
+                # Reload projects to catch any new/removed projects
+                projects = await self.project_repository.get_active_projects()
 
-                # create coroutines to handle changes
-                change_handlers = [
-                    self.handle_changes(project, changes)  # pyright: ignore
-                    for project, changes in project_changes.items()
-                ]
+                project_paths = [project.path for project in projects]
+                logger.debug(f"Starting watch cycle for directories: {project_paths}")
 
-                # process changes
-                await asyncio.gather(*change_handlers)
+                # Create stop event for this watch cycle
+                stop_event = asyncio.Event()
+
+                # Schedule restart after configured interval to reload projects
+                timer_task = asyncio.create_task(self._schedule_restart(stop_event))
+
+                try:
+                    await self._watch_projects_cycle(projects, stop_event)
+                except Exception as e:
+                    logger.exception("Watch service error during cycle", error=str(e))
+                    self.state.record_error(str(e))
+                    await self.write_status()
+                    # Continue to next cycle instead of exiting
+                    await asyncio.sleep(5)  # Brief pause before retry
+                finally:
+                    # Cancel timer task if it's still running
+                    if not timer_task.done():
+                        timer_task.cancel()
+                        try:
+                            await timer_task
+                        except asyncio.CancelledError:
+                            pass
 
         except Exception as e:
             logger.exception("Watch service error", error=str(e))
-
             self.state.record_error(str(e))
             await self.write_status()
             raise

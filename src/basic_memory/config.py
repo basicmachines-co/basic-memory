@@ -63,6 +63,10 @@ class BasicMemoryConfig(BaseSettings):
         default=1000, description="Milliseconds to wait after changes before syncing", gt=0
     )
 
+    watch_project_reload_interval: int = Field(
+        default=30, description="Seconds between reloading project list in watch service", gt=0
+    )
+
     # update permalinks on move
     update_permalinks_on_move: bool = Field(
         default=False,
