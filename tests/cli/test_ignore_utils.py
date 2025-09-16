@@ -90,9 +90,18 @@ def test_load_patterns_unreadable_gitignore():
         try:
             patterns = load_gitignore_patterns(temp_path)
 
-            # Should fallback to default patterns only
-            assert patterns == DEFAULT_IGNORE_PATTERNS
-            assert "*.log" not in patterns
+            # On Windows, chmod might not work as expected, so we need to check
+            # if the file is actually unreadable
+            try:
+                with gitignore_file.open("r"):
+                    pass
+                # If we can read it, the test environment doesn't support this scenario
+                # In this case, the patterns should include *.log
+                assert "*.log" in patterns
+            except (PermissionError, OSError):
+                # File is actually unreadable, should fallback to default patterns only
+                assert patterns == DEFAULT_IGNORE_PATTERNS
+                assert "*.log" not in patterns
         finally:
             # Restore permissions for cleanup
             gitignore_file.chmod(0o644)
