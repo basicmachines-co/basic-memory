@@ -27,35 +27,50 @@ async def read_note(
 ) -> str:
     """Read a markdown note from the knowledge base.
 
-    This tool finds and retrieves a note by its title, permalink, or content search,
+    Finds and retrieves a note by its title, permalink, or content search,
     returning the raw markdown content including observations, relations, and metadata.
-    It will try multiple lookup strategies to find the most relevant note.
+    Uses stateless architecture - each call requires explicit project parameter.
+
+    This tool will try multiple lookup strategies to find the most relevant note:
+    1. Direct permalink lookup
+    2. Title search fallback
+    3. Text search as last resort
 
     Args:
+        project: Required project name to read from. Must be an existing project.
         identifier: The title or permalink of the note to read
                    Can be a full memory:// URL, a permalink, a title, or search text
         page: Page number for paginated results (default: 1)
         page_size: Number of items per page (default: 10)
-        project: Required project name to read from.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         The full markdown content of the note if found, or helpful guidance if not found.
+        Content includes frontmatter, observations, relations, and all markdown formatting.
 
     Examples:
         # Read by permalink
-        read_note("specs/search-spec")
+        read_note("my-research", "specs/search-spec")
 
         # Read by title
-        read_note("Search Specification")
+        read_note("work-project", "Search Specification")
 
         # Read with memory URL
-        read_note("memory://specs/search-spec")
+        read_note("my-research", "memory://specs/search-spec")
 
         # Read with pagination
-        read_note("Project Updates", page=2, page_size=5)
+        read_note("work-project", "Project Updates", page=2, page_size=5)
 
-        # Read from specific project
-        read_note("Meeting Notes", project="work-project")
+        # Read recent meeting notes
+        read_note("team-docs", "Weekly Standup")
+
+    Raises:
+        HTTPError: If project doesn't exist or is inaccessible
+        SecurityError: If identifier attempts path traversal
+
+    Note:
+        If the exact note isn't found, this tool provides helpful suggestions
+        including related notes, search commands, and note creation templates.
     """
 
     # Get and validate the project

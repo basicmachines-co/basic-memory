@@ -156,20 +156,51 @@ async def delete_note(
 ) -> bool | str:
     """Delete a note from the knowledge base.
 
+    Permanently removes a note from the specified project. Uses stateless
+    architecture - each call requires explicit project parameter.
+
+    The note is identified by title or permalink. If the note doesn't exist,
+    the operation returns False without error. If deletion fails due to other
+    issues, helpful error messages are provided.
+
     Args:
-        project: Required project name to delete from.
-        identifier: Note title or permalink
-        context: Optional context to use for this tool.
+        project: Required project name to delete from. Must be an existing project.
+        identifier: Note title or permalink to delete
+                   Can be a title like "Meeting Notes" or permalink like "notes/meeting-notes"
+        context: Optional FastMCP context for performance caching.
 
     Returns:
-        True if note was deleted, False otherwise
+        True if note was successfully deleted, False if note was not found.
+        On errors, returns a formatted string with helpful troubleshooting guidance.
 
     Examples:
         # Delete by title
         delete_note("my-project", "Meeting Notes: Project Planning")
 
         # Delete by permalink
-        delete_note("my-project", "notes/project-planning")
+        delete_note("work-docs", "notes/project-planning")
+
+        # Delete with exact path
+        delete_note("research", "experiments/ml-model-results")
+
+        # Common usage pattern
+        if delete_note("my-project", "old-draft"):
+            print("Note deleted successfully")
+        else:
+            print("Note not found or already deleted")
+
+    Raises:
+        HTTPError: If project doesn't exist or is inaccessible
+        SecurityError: If identifier attempts path traversal
+
+    Warning:
+        This operation is permanent and cannot be undone. The note file
+        will be removed from the filesystem and all references will be lost.
+
+    Note:
+        If the note is not found, this function provides helpful error messages
+        with suggestions for finding the correct identifier, including search
+        commands and alternative formats to try.
     """
     active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url

@@ -34,8 +34,11 @@ async def write_note(
 ) -> str:
     """Write a markdown note to the knowledge base.
 
-    The content can include semantic observations and relations using markdown syntax.
-    Relations can be specified either explicitly or through inline wiki-style links:
+    Creates or updates a markdown note in the specified project with semantic
+    observations and relations. Uses stateless architecture - each call requires
+    explicit project parameter.
+
+    The content can include semantic observations and relations using markdown syntax:
 
     Observations format:
         `- [category] Observation text #tag1 #tag2 (optional context)`
@@ -52,10 +55,10 @@ async def write_note(
         Examples:
         `- depends_on [[Content Parser]] (Need for semantic extraction)`
         `- implements [[Search Spec]] (Initial implementation)`
-        `- This feature extends [[Base Design]] andst uses [[Core Utils]]`
+        `- This feature extends [[Base Design]] and uses [[Core Utils]]`
 
     Args:
-        project: Required project name to write to.
+        project: Required project name to write to. Must be an existing project.
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
@@ -63,15 +66,47 @@ async def write_note(
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
-        context: Optional FastMCP context for project session management (cloud mode).
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         A markdown formatted summary of the semantic content, including:
-        - Creation/update status
+        - Creation/update status with project name
         - File path and checksum
         - Observation counts by category
         - Relation counts (resolved/unresolved)
         - Tags if present
+        - Project metadata footer for LLM awareness
+
+    Examples:
+        # Create a simple note
+        write_note(
+            project="my-research",
+            title="Meeting Notes",
+            folder="meetings",
+            content="# Weekly Standup\\n\\n- [decision] Use SQLite for storage #tech"
+        )
+
+        # Create a note with tags and entity type
+        write_note(
+            project="work-project",
+            title="API Design",
+            folder="specs",
+            content="# REST API Specification\\n\\n- implements [[Authentication]]",
+            tags=["api", "design"],
+            entity_type="guide"
+        )
+
+        # Update existing note (same title/folder)
+        write_note(
+            project="my-research",
+            title="Meeting Notes",
+            folder="meetings",
+            content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech"
+        )
+
+    Raises:
+        HTTPError: If project doesn't exist or is inaccessible
+        SecurityError: If folder path attempts path traversal
     """
     logger.info(f"MCP tool call tool=write_note folder={folder}, title={title}, tags={tags}")
 
