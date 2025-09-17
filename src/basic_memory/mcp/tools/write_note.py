@@ -5,7 +5,7 @@ from typing import List, Union, Optional
 from loguru import logger
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
 from basic_memory.schemas import EntityResponse
@@ -24,12 +24,12 @@ TagType = Union[List[str], str, None]
     description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
 )
 async def write_note(
+    project: str,
     title: str,
     content: str,
     folder: str,
-    tags=None,  # Remove type hint completely to avoid schema issues
+    tags=None,
     entity_type: str = "note",
-    project: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
@@ -55,6 +55,7 @@ async def write_note(
         `- This feature extends [[Base Design]] andst uses [[Core Utils]]`
 
     Args:
+        project: Required project name to write to.
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
@@ -62,7 +63,6 @@ async def write_note(
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
-        project: Optional project name to write to. If not provided, uses current active project.
         context: Optional FastMCP context for project session management (cloud mode).
 
     Returns:
@@ -75,8 +75,8 @@ async def write_note(
     """
     logger.info(f"MCP tool call tool=write_note folder={folder}, title={title}, tags={tags}")
 
-    # Get the active project first to check project-specific sync status
-    active_project = await get_active_project(client, context=context, project_override=project)
+    # Get and validate the project
+    active_project = await get_active_project(client, project, context)
 
     # Validate folder path to prevent path traversal attacks
     project_path = active_project.home
@@ -119,6 +119,7 @@ async def write_note(
     action = "Created" if response.status_code == 201 else "Updated"
     summary = [
         f"# {action} note",
+        f"project: {active_project.name}",
         f"file_path: {result.file_path}",
         f"permalink: {result.permalink}",
         f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
@@ -155,6 +156,7 @@ async def write_note(
 
     # Log the response with structured data
     logger.info(
-        f"MCP tool response: tool=write_note action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} status_code={response.status_code}"
+        f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} status_code={response.status_code}"
     )
-    return "\n".join(summary)
+    result =  "\n".join(summary)
+    return add_project_metadata(result, active_project.name)

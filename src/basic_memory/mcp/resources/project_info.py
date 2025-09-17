@@ -39,7 +39,7 @@ async def project_info(project: str, context: Context | None) -> ProjectInfoResp
         Detailed project information and statistics
 
     Examples:
-        # Get information about the current project
+        # Get information about the project
         info = await project_info(name)
 
         # Check entity counts
@@ -49,7 +49,7 @@ async def project_info(project: str, context: Context | None) -> ProjectInfoResp
         print(f"Basic Memory version: {info.system.version}")
     """
     logger.info("Getting project info")
-    project_config = await get_active_project(client, context=context, project_override=project)
+    project_config = await get_active_project(client, project, context)
     project_url = project_config.permalink
 
     # Call the API endpoint
