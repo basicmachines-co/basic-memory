@@ -15,49 +15,52 @@ from basic_memory.mcp.tools.utils import call_get
     description="List directory contents with filtering and depth control.",
 )
 async def list_directory(
+    project: str,
     dir_name: str = "/",
     depth: int = 1,
     file_name_glob: Optional[str] = None,
-    project: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
 
     This tool provides 'ls' functionality for browsing the knowledge base directory structure.
     It can list immediate children or recursively explore subdirectories with depth control,
-    and supports glob pattern filtering for finding specific files.
+    and supports glob pattern filtering for finding specific files. Uses stateless architecture -
+    each call requires explicit project parameter.
 
     Args:
+        project: Required project name to list directory from. Must be an existing project.
         dir_name: Directory path to list (default: root "/")
                  Examples: "/", "/projects", "/research/ml"
         depth: Recursion depth (1-10, default: 1 for immediate children only)
                Higher values show subdirectory contents recursively
         file_name_glob: Optional glob pattern for filtering file names
                        Examples: "*.md", "*meeting*", "project_*"
-        project: Optional project name to delete from. If not provided, uses current active project.
+        context: Optional FastMCP context for performance caching.
+
     Returns:
         Formatted listing of directory contents with file metadata
 
     Examples:
         # List root directory contents
-        list_directory()
+        list_directory("my-project")
 
         # List specific folder
-        list_directory(dir_name="/projects")
+        list_directory("work-docs", dir_name="/projects")
 
-        # Find all Python files
-        list_directory(file_name_glob="*.py")
+        # Find all markdown files
+        list_directory("research", file_name_glob="*.md")
 
         # Deep exploration of research folder
-        list_directory(dir_name="/research", depth=3)
+        list_directory("dev-notes", dir_name="/research", depth=3)
 
         # Find meeting notes in projects folder
-        list_directory(dir_name="/projects", file_name_glob="*meeting*")
+        list_directory("team-docs", dir_name="/projects", file_name_glob="*meeting*")
 
-        # Find meeting notes in a specific project
-        list_directory(dir_name="/projects", file_name_glob="*meeting*", project="work-project")
+    Raises:
+        ToolError: If project doesn't exist or directory path is invalid
     """
-    active_project = await get_active_project(client, context=context, project_override=project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     # Prepare query parameters
@@ -68,7 +71,7 @@ async def list_directory(
     if file_name_glob:
         params["file_name_glob"] = file_name_glob
 
-    logger.debug(f"Listing directory '{dir_name}' with depth={depth}, glob='{file_name_glob}'")
+    logger.debug(f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'")
 
     # Call the API endpoint
     response = await call_get(

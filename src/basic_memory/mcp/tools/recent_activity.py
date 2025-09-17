@@ -18,27 +18,32 @@ from basic_memory.schemas.search import SearchItemType
     description="""Get recent activity for a project.
 
     Timeframe supports natural language formats like:
-    - "2 days ago"  
+    - "2 days ago"
     - "last week"
-    - "yesterday" 
+    - "yesterday"
     - "today"
     - "3 weeks ago"
     Or standard formats like "7d"
     """,
 )
 async def recent_activity(
+    project: str,
     type: Union[str, List[str]] = "",
     depth: int = 1,
     timeframe: TimeFrame = "7d",
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
-    project: Optional[str] = None,
     context: Context | None = None,
 ) -> GraphContext:
     """Get recent activity for a project.
 
+    This tool retrieves recently modified content from a specific project, with filtering
+    and graph traversal capabilities. Uses stateless architecture - each call requires
+    explicit project parameter.
+
     Args:
+        project: Required project name to get activity from. Must be an existing project.
         type: Filter by content type(s). Can be a string or list of strings.
             Valid options:
             - "entity" or ["entity"] for knowledge entities
@@ -55,7 +60,7 @@ async def recent_activity(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
-        project: Optional project name to get activity from. If not provided, uses current active project.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         GraphContext containing:
@@ -64,23 +69,23 @@ async def recent_activity(
             - metadata: Query details and statistics
 
     Examples:
-        # Get all entities for the last 10 days (default)
-        recent_activity()
+        # Get all entities for the last 7 days (default)
+        recent_activity("my-project")
 
         # Get all entities from yesterday (string format)
-        recent_activity(type="entity", timeframe="yesterday")
+        recent_activity("work-docs", type="entity", timeframe="yesterday")
 
         # Get all entities from yesterday (list format)
-        recent_activity(type=["entity"], timeframe="yesterday")
+        recent_activity("research", type=["entity"], timeframe="yesterday")
 
         # Get recent relations and observations
-        recent_activity(type=["relation", "observation"], timeframe="today")
+        recent_activity("dev-notes", type=["relation", "observation"], timeframe="today")
 
         # Look back further with more context
-        recent_activity(type="entity", depth=2, timeframe="2 weeks ago")
+        recent_activity("team-docs", type="entity", depth=2, timeframe="2 weeks ago")
 
-        # Get activity from specific project
-        recent_activity(type="entity", project="work-project")
+    Raises:
+        ToolError: If project doesn't exist or type parameter contains invalid values
 
     Notes:
         - Higher depth values (>3) may impact performance with large result sets
@@ -88,7 +93,7 @@ async def recent_activity(
         - Max timeframe is 1 year in the past
     """
     logger.info(
-        f"Getting recent activity from type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
+        f"Getting recent activity from project {project}: type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
     )
     params = {
         "page": page,
@@ -122,7 +127,7 @@ async def recent_activity(
         # Add validated types to params
         params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
-    active_project = await get_active_project(client, context=context, project_override=project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     response = await call_get(

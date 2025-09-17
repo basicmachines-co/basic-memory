@@ -31,17 +31,18 @@ async def mock_search():
 
 
 @pytest.mark.asyncio
-async def test_view_note_basic_functionality(app):
+async def test_view_note_basic_functionality(app, test_project):
     """Test viewing a note creates an artifact."""
     # First create a note
     await write_note.fn(
+        project=test_project.name,
         title="Test View Note",
         folder="test",
         content="# Test View Note\n\nThis is test content for viewing.",
     )
 
     # View the note
-    result = await view_note.fn("Test View Note")
+    result = await view_note.fn(test_project.name, "Test View Note")
 
     # Should contain artifact XML
     assert '<artifact identifier="note-' in result
@@ -58,7 +59,7 @@ async def test_view_note_basic_functionality(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_with_frontmatter_title(app):
+async def test_view_note_with_frontmatter_title(app, test_project):
     """Test viewing a note extracts title from frontmatter."""
     # Create note with frontmatter
     content = dedent("""
@@ -66,16 +67,21 @@ async def test_view_note_with_frontmatter_title(app):
         title: "Frontmatter Title"
         tags: [test]
         ---
-        
+
         # Frontmatter Title
-        
+
         Content with frontmatter title.
     """).strip()
 
-    await write_note.fn(title="Frontmatter Title", folder="test", content=content)
+    await write_note.fn(
+        project=test_project.name,
+        title="Frontmatter Title",
+        folder="test",
+        content=content
+    )
 
     # View the note
-    result = await view_note.fn("Frontmatter Title")
+    result = await view_note.fn(test_project.name, "Frontmatter Title")
 
     # Should extract title from frontmatter
     assert 'title="Frontmatter Title"' in result
@@ -83,15 +89,20 @@ async def test_view_note_with_frontmatter_title(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_with_heading_title(app):
+async def test_view_note_with_heading_title(app, test_project):
     """Test viewing a note extracts title from first heading when no frontmatter."""
     # Create note with heading but no frontmatter title
     content = "# Heading Title\n\nContent with heading title."
 
-    await write_note.fn(title="Heading Title", folder="test", content=content)
+    await write_note.fn(
+        project=test_project.name,
+        title="Heading Title",
+        folder="test",
+        content=content
+    )
 
     # View the note
-    result = await view_note.fn("Heading Title")
+    result = await view_note.fn(test_project.name, "Heading Title")
 
     # Should extract title from heading
     assert 'title="Heading Title"' in result
@@ -99,14 +110,19 @@ async def test_view_note_with_heading_title(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_unicode_content(app):
+async def test_view_note_unicode_content(app, test_project):
     """Test viewing a note with Unicode content."""
     content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦"
 
-    await write_note.fn(title="Unicode Test 🚀", folder="test", content=content)
+    await write_note.fn(
+        project=test_project.name,
+        title="Unicode Test 🚀",
+        folder="test",
+        content=content
+    )
 
     # View the note
-    result = await view_note.fn("Unicode Test 🚀")
+    result = await view_note.fn(test_project.name, "Unicode Test 🚀")
 
     # Should handle Unicode properly
     assert "🚀" in result
@@ -116,14 +132,17 @@ async def test_view_note_unicode_content(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_by_permalink(app):
+async def test_view_note_by_permalink(app, test_project):
     """Test viewing a note by its permalink."""
     await write_note.fn(
-        title="Permalink Test", folder="test", content="Content for permalink test."
+        project=test_project.name,
+        title="Permalink Test",
+        folder="test",
+        content="Content for permalink test."
     )
 
     # View by permalink
-    result = await view_note.fn("test/permalink-test")
+    result = await view_note.fn(test_project.name, "test/permalink-test")
 
     # Should work with permalink
     assert '<artifact identifier="note-' in result
@@ -132,16 +151,17 @@ async def test_view_note_by_permalink(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_with_memory_url(app):
+async def test_view_note_with_memory_url(app, test_project):
     """Test viewing a note using a memory:// URL."""
     await write_note.fn(
+        project=test_project.name,
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling in view_note",
     )
 
     # View with memory:// URL
-    result = await view_note.fn("memory://test/memory-url-test")
+    result = await view_note.fn(test_project.name, "memory://test/memory-url-test")
 
     # Should work with memory:// URL
     assert '<artifact identifier="note-' in result
@@ -150,13 +170,13 @@ async def test_view_note_with_memory_url(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_not_found(app):
+async def test_view_note_not_found(app, test_project):
     """Test viewing a non-existent note returns error without artifact."""
     # Try to view non-existent note
-    result = await view_note.fn("NonExistent Note")
+    result = await view_note.fn(test_project.name, "NonExistent Note")
 
     # Should return error message without artifact
-    assert "# Note Not Found:" in result
+    assert "# Note Not Found" in result
     assert "NonExistent Note" in result
     assert "<artifact" not in result  # No artifact for errors
     assert "Check Identifier Type" in result
@@ -164,14 +184,17 @@ async def test_view_note_not_found(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_pagination(app):
+async def test_view_note_pagination(app, test_project):
     """Test viewing a note with pagination parameters."""
     await write_note.fn(
-        title="Pagination Test", folder="test", content="Content for pagination test."
+        project=test_project.name,
+        title="Pagination Test",
+        folder="test",
+        content="Content for pagination test."
     )
 
     # View with pagination
-    result = await view_note.fn("Pagination Test", page=1, page_size=5)
+    result = await view_note.fn(test_project.name, "Pagination Test", page=1, page_size=5)
 
     # Should work with pagination
     assert '<artifact identifier="note-' in result
@@ -180,12 +203,17 @@ async def test_view_note_pagination(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_project_parameter(app):
+async def test_view_note_project_parameter(app, test_project):
     """Test viewing a note with project parameter."""
-    await write_note.fn(title="Project Test", folder="test", content="Content for project test.")
+    await write_note.fn(
+        project=test_project.name,
+        title="Project Test",
+        folder="test",
+        content="Content for project test."
+    )
 
-    # View with explicit project (None uses current)
-    result = await view_note.fn("Project Test", project=None)
+    # View with explicit project
+    result = await view_note.fn(test_project.name, "Project Test")
 
     # Should work with project parameter
     assert '<artifact identifier="note-' in result
@@ -194,15 +222,25 @@ async def test_view_note_project_parameter(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_artifact_identifier_unique(app):
+async def test_view_note_artifact_identifier_unique(app, test_project):
     """Test that different notes get different artifact identifiers."""
     # Create two notes
-    await write_note.fn(title="Note One", folder="test", content="Content one")
-    await write_note.fn(title="Note Two", folder="test", content="Content two")
+    await write_note.fn(
+        project=test_project.name,
+        title="Note One",
+        folder="test",
+        content="Content one"
+    )
+    await write_note.fn(
+        project=test_project.name,
+        title="Note Two",
+        folder="test",
+        content="Content two"
+    )
 
     # View both notes
-    result1 = await view_note.fn("Note One")
-    result2 = await view_note.fn("Note Two")
+    result1 = await view_note.fn(test_project.name, "Note One")
+    result2 = await view_note.fn(test_project.name, "Note Two")
 
     # Should have different artifact identifiers
     import re
@@ -216,17 +254,18 @@ async def test_view_note_artifact_identifier_unique(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_fallback_identifier_as_title(app):
+async def test_view_note_fallback_identifier_as_title(app, test_project):
     """Test that view_note uses identifier as title when no title is extractable."""
     # Create a note with no clear title structure
     await write_note.fn(
+        project=test_project.name,
         title="Simple Note",
         folder="test",
         content="Just plain content with no headings or frontmatter title",
     )
 
     # View the note
-    result = await view_note.fn("Simple Note")
+    result = await view_note.fn(test_project.name, "Simple Note")
 
     # Should use identifier as fallback title
     assert 'title="Simple Note"' in result
@@ -234,7 +273,7 @@ async def test_view_note_fallback_identifier_as_title(app):
 
 
 @pytest.mark.asyncio
-async def test_view_note_direct_success(app, mock_call_get):
+async def test_view_note_direct_success(app, test_project, mock_call_get):
     """Test view_note with successful direct permalink lookup."""
     # Setup mock for successful response with frontmatter
     note_content = dedent("""
@@ -242,7 +281,7 @@ async def test_view_note_direct_success(app, mock_call_get):
         title: "Test Note"
         ---
         # Test Note
-        
+
         This is a test note.
     """).strip()
 
@@ -252,7 +291,7 @@ async def test_view_note_direct_success(app, mock_call_get):
     mock_call_get.return_value = mock_response
 
     # Call the function
-    result = await view_note.fn("test/test-note")
+    result = await view_note.fn(test_project.name, "test/test-note")
 
     # Verify direct lookup was used
     mock_call_get.assert_called_once()

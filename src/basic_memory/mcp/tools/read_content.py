@@ -148,23 +148,25 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 
 
 @mcp.tool(description="Read a file's raw content by path or permalink")
-async def read_content(
-    path: str, project: Optional[str] = None, context: Context | None = None
-) -> dict:
+async def read_content(project: str, path: str, context: Context | None = None) -> dict:
     """Read a file's raw content by path or permalink.
 
     This tool provides direct access to file content in the knowledge base,
-    handling different file types appropriately:
+    handling different file types appropriately. Uses stateless architecture -
+    each call requires explicit project parameter.
+
+    Supported file types:
     - Text files (markdown, code, etc.) are returned as plain text
     - Images are automatically resized/optimized for display
     - Other binary files are returned as base64 if below size limits
 
     Args:
+        project: Required project name to read from. Must be an existing project.
         path: The path or permalink to the file. Can be:
             - A regular file path (docs/example.md)
             - A memory URL (memory://docs/example)
             - A permalink (docs/example)
-        project: Optional project name to read from. If not provided, uses current active project.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         A dictionary with the file content and metadata:
@@ -175,20 +177,24 @@ async def read_content(
 
     Examples:
         # Read a markdown file
-        result = await read_file("docs/project-specs.md")
+        result = await read_content("my-project", "docs/project-specs.md")
 
         # Read an image
-        image_data = await read_file("assets/diagram.png")
+        image_data = await read_content("work-docs", "assets/diagram.png")
 
         # Read using memory URL
-        content = await read_file("memory://docs/architecture")
+        content = await read_content("research", "memory://docs/architecture")
 
-        # Read from specific project
-        content = await read_content("docs/example.md", project="work-project")
+        # Read configuration file
+        config = await read_content("api-project", "config/settings.json")
+
+    Raises:
+        HTTPError: If project doesn't exist or is inaccessible
+        SecurityError: If path attempts path traversal
     """
-    logger.info("Reading file", path=path)
+    logger.info("Reading file", path=path, project=project)
 
-    active_project = await get_active_project(client, context=context, project_override=project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     url = memory_url_path(path)

@@ -350,39 +350,48 @@ delete_note("{identifier}")
     description="Move a note to a new location, updating database and maintaining links.",
 )
 async def move_note(
+    project: str,
     identifier: str,
     destination_path: str,
-    project: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """Move a note to a new file location within the same project.
 
+    Moves a note from one location to another within the project, updating all
+    database references and maintaining semantic content. Uses stateless architecture -
+    each call requires explicit project parameter.
+
     Args:
+        project: Required project name to move within. Must be an existing project.
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
-        project: Optional project name (defaults to current active project)
+        context: Optional FastMCP context for performance caching.
 
     Returns:
-        Success message with move details
+        Success message with move details and project information.
 
     Examples:
         # Move to new folder (exact title match)
-        move_note("My Note", "work/notes/my-note.md")
+        move_note("work-project", "My Note", "work/notes/my-note.md")
 
         # Move by exact permalink
-        move_note("my-note-permalink", "archive/old-notes/my-note.md")
+        move_note("my-project", "my-note-permalink", "archive/old-notes/my-note.md")
 
-        # Specify project with exact identifier
-        move_note("My Note", "archive/my-note.md", project="work-project")
+        # Move with complex path structure
+        move_note("research", "experiments/ml-results", "archive/2025/ml-experiments.md")
 
         # If uncertain about identifier, search first:
-        # search_notes("my note")  # Find available notes
-        # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
+        # search_notes("my-project", "my note")  # Find available notes
+        # move_note("my-project", "docs/my-note-2025", "archive/my-note.md")  # Use exact result
 
-    Note: This operation moves notes within the specified project only. Moving notes
-    between different projects is not currently supported.
+    Raises:
+        ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
+
+    Note:
+        This operation moves notes within the specified project only. Moving notes
+        between different projects is not currently supported.
 
     The move operation:
     - Updates the entity's file_path in the database
@@ -391,9 +400,9 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
-    logger.debug(f"Moving note: {identifier} to {destination_path}")
+    logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 
-    active_project = await get_active_project(client, context=context, project_override=project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     # Validate destination path to prevent path traversal attacks
