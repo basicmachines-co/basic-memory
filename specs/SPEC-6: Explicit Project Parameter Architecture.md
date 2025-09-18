@@ -82,6 +82,12 @@ The complete stateless architecture has been successfully implemented for Basic 
 - Project parameter usage clearly documented
 - Error handling and security behavior documented
 
+✅ **Enhanced Discovery Mode Complete**
+- `recent_activity` tool supports dual-mode operation (discovery vs project-specific)
+- ProjectActivitySummary schema provides cross-project insights
+- Recent activity prompt updated to support both modes
+- Comprehensive project distribution statistics and most active project tracking
+
 ## What
 
 Transform Basic Memory from stateful session-based to stateless explicit project parameter architecture:
@@ -139,28 +145,28 @@ Phase 1: Core Changes
 
 1. Update project_context.py
 
-  - [x] Make project parameter mandatory for get_active_project()
-  - [x] Remove session state handling
+- [x] Make project parameter mandatory for get_active_project()
+- [x] Remove session state handling
 
 2. Update Content Management Tools (6 tools)
 
-  - [x] write_note: Make project parameter required, not optional
-  - [x] read_note: Make project parameter required
-  - [x] edit_note: Add required project parameter
-  - [x] delete_note: Add required project parameter
-  - [x] view_note: Add required project parameter
-  - [x] read_content: Add required project parameter
+- [x] write_note: Make project parameter required, not optional
+- [x] read_note: Make project parameter required
+- [x] edit_note: Add required project parameter
+- [x] delete_note: Add required project parameter
+- [x] view_note: Add required project parameter
+- [x] read_content: Add required project parameter
 
-4. Update Knowledge Graph Navigation Tools (3 tools)
+3. Update Knowledge Graph Navigation Tools (3 tools)
 
-  - [x] build_context: Add required project parameter
-  - [x] recent_activity: Make project parameter required
-  - [x] list_directory: Add required project parameter
+- [x] build_context: Add required project parameter
+- [x] recent_activity: Make project parameter required
+- [x] list_directory: Add required project parameter
 
-5. Update Search & Visualization Tools (2 tools)
+4. Update Search & Visualization Tools (2 tools)
 
-  - [x] search_notes: Add required project parameter
-  - [x] canvas: Add required project parameter
+- [x] search_notes: Add required project parameter
+- [x] canvas: Add required project parameter
 
 5. Update Project Management Tools
 
@@ -168,38 +174,40 @@ Phase 1: Core Changes
 - [x] Remove get_current_project tool completely
 - [x] Update set_default_project to remove activate parameter
 - [x] Keep list_memory_projects, create_memory_project, delete_project unchanged
+    
+6. Enhance recent_activity Response
 
-6. Enhance recent_activity Response                                                                                          
-
-- [ ] Add project distribution info showing activity across all projects                                                       
-- [ ] Include project usage stats in response
+- [x] Add project distribution info showing activity across all projects
+- [x] Include project usage stats in response
+- [x] Implement ProjectActivitySummary for discovery mode
+- [x] Add dual-mode functionality (discovery vs project-specific)
 
 7. Update Tool Documentation
 
-  - [x] Update write_note docstring with stateless architecture examples
-  - [x] Update read_note docstring with project parameter examples
-  - [x] Update delete_note docstring with comprehensive usage guidance
-  - [x] Update all remaining tool docstrings with project parameter examples
+- [x] Update write_note docstring with stateless architecture examples
+- [x] Update read_note docstring with project parameter examples
+- [x] Update delete_note docstring with comprehensive usage guidance
+- [x] Update all remaining tool docstrings with project parameter examples
 
 8. Update Tool Responses
 
-  - [x] Add clear project indicator to all tool responses across all tools
-  - [x] Format: "project: {project_name}" in response metadata
-  - [x] Add project metadata footer for LLM awareness
-  - [x] Update all tool responses to include project indicators
+- [x] Add clear project indicator to all tool responses across all tools
+- [x] Format: "project: {project_name}" in response metadata
+- [x] Add project metadata footer for LLM awareness
+- [x] Update all tool responses to include project indicators
 
 9. Comprehensive Testing
 
-  - [x] Update all write_note tests to use stateless architecture (34 tests passing)
-  - [x] Update all edit_note tests to use stateless architecture (17 tests passing)
-  - [x] Update all view_note tests to use stateless architecture (12 tests passing)
-  - [x] Update all search_notes tests to use stateless architecture (16 tests passing)
-  - [x] Update all move_note tests to use stateless architecture (31 tests passing)
-  - [x] Update all delete_note tests to use stateless architecture
-  - [x] Verify direct function call compatibility (bypassing MCP layer)
-  - [x] Test security validation with project parameters
-  - [x] Validate error handling for non-existent projects
-  - [x] **Total: 147 tests updated and passing (100% success rate)**                                                                   
+- [x] Update all write_note tests to use stateless architecture (34 tests passing)
+- [x] Update all edit_note tests to use stateless architecture (17 tests passing)
+- [x] Update all view_note tests to use stateless architecture (12 tests passing)
+- [x] Update all search_notes tests to use stateless architecture (16 tests passing)
+- [x] Update all move_note tests to use stateless architecture (31 tests passing)
+- [x] Update all delete_note tests to use stateless architecture
+- [x] Verify direct function call compatibility (bypassing MCP layer)
+- [x] Test security validation with project parameters
+- [x] Validate error handling for non-existent projects
+- [x] **Total: 147 tests updated and passing (100% success rate)**                                                                   
                                                                                                                              
 Phase 2: Testing & Validation
 
@@ -297,7 +305,7 @@ Permalink: research-project/neural-network-results
 - [x] `switch_project` and `get_current_project` tools removed
 - [x] All responses display target project clearly
 - [ ] No Redis dependencies in deployment (Phase 2: Cloud Service)
-- [ ] `recent_activity` shows project distribution (Enhancement pending)
+- [x] `recent_activity` shows project distribution with ProjectActivitySummary
 
 #### 2. Cross-Client Compatibility Testing
 Test identical operations across all clients:
@@ -321,19 +329,19 @@ Test identical operations across all clients:
 
 #### 5. User Experience Testing
 **Project Discovery Flow**:
-- [ ] `recent_activity()` provides useful project context
-- [ ] Claude can intelligently suggest projects based on activity
-- [ ] Project switching is explicit and clear in conversation
+- [x] `recent_activity()` provides useful project context
+- [x] Claude can intelligently suggest projects based on activity
+- [x] Project switching is explicit and clear in conversation
 
 **Error Handling**:
-- [ ] Clear error messages for non-existent projects
-- [ ] Helpful suggestions when project parameter missing
-- [ ] No silent failures or wrong-project operations
+- [x] Clear error messages for non-existent projects
+- [x] Helpful suggestions when project parameter missing
+- [x] No silent failures or wrong-project operations
 
 **Response Clarity**:
-- [ ] Every operation clearly shows target project
-- [ ] Users always know which project is being operated on
-- [ ] No confusion about "current project" state
+- [x] Every operation clearly shows target project
+- [x] Users always know which project is being operated on
+- [x] No confusion about "current project" state
 
 #### 6. Migration Safety
 - [ ] Backward compatibility period with optional project parameter

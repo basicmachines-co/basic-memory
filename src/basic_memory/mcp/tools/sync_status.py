@@ -230,7 +230,7 @@ async def sync_status(project: Optional[str] = None, context: Context | None = N
         if project:
             try:
                 active_project = await get_active_project(
-                    client, context=context, project_override=project
+                    client, project, context
                 )
                 status_lines.extend(
                     [

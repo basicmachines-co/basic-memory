@@ -34,25 +34,26 @@ async def mock_search():
 
 
 @pytest.mark.asyncio
-async def test_read_note_by_title(app):
+async def test_read_note_by_title(app, test_project):
     """Test reading a note by its title."""
     # First create a note
-    await write_note.fn(title="Special Note", folder="test", content="Note content here")
+    await write_note.fn(project=test_project.name, title="Special Note", folder="test", content="Note content here")
 
     # Should be able to read it by title
-    content = await read_note.fn("Special Note")
+    content = await read_note.fn(test_project.name, "Special Note")
     assert "Note content here" in content
 
 
 @pytest.mark.asyncio
-async def test_note_unicode_content(app):
+async def test_note_unicode_content(app, test_project):
     """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    result = await write_note.fn(title="Unicode Test", folder="test", content=content)
+    result = await write_note.fn(project=test_project.name, title="Unicode Test", folder="test", content=content)
 
     assert (
-        dedent("""
+        dedent(f"""
         # Created note
+        project: {test_project.name}
         file_path: test/Unicode Test.md
         permalink: test/unicode-test
         checksum: 272389cd
@@ -61,12 +62,12 @@ async def test_note_unicode_content(app):
     )
 
     # Read back should preserve unicode
-    result = await read_note.fn("test/unicode-test")
+    result = await read_note.fn(test_project.name, "test/unicode-test")
     assert normalize_newlines(content) in result
 
 
 @pytest.mark.asyncio
-async def test_multiple_notes(app):
+async def test_multiple_notes(app, test_project):
     """Test creating and managing multiple"""
     # Create several notes
     notes_data = [
@@ -76,16 +77,16 @@ async def test_multiple_notes(app):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note.fn(title=title, folder=folder, content=content, tags=tags)
+        await write_note.fn(project=test_project.name, title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(permalink)
+        note = await read_note.fn(test_project.name, permalink)
         assert content in note
 
     # read multiple notes at once
 
-    result = await read_note.fn("test/*")
+    result = await read_note.fn(test_project.name, "test/*")
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -99,7 +100,7 @@ async def test_multiple_notes(app):
 
 
 @pytest.mark.asyncio
-async def test_multiple_notes_pagination(app):
+async def test_multiple_notes_pagination(app, test_project):
     """Test creating and managing multiple"""
     # Create several notes
     notes_data = [
@@ -109,15 +110,15 @@ async def test_multiple_notes_pagination(app):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note.fn(title=title, folder=folder, content=content, tags=tags)
+        await write_note.fn(project=test_project.name, title=title, folder=folder, content=content, tags=tags)
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(permalink)
+        note = await read_note.fn(test_project.name, permalink)
         assert content in note
 
     # read multiple notes at once with pagination
-    result = await read_note.fn("test/*", page=1, page_size=2)
+    result = await read_note.fn(test_project.name, "test/*", page=1, page_size=2)
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -128,7 +129,7 @@ async def test_multiple_notes_pagination(app):
 
 
 @pytest.mark.asyncio
-async def test_read_note_memory_url(app):
+async def test_read_note_memory_url(app, test_project):
     """Test reading a note using a memory:// URL.
 
     Should:
@@ -138,6 +139,7 @@ async def test_read_note_memory_url(app):
     """
     # First create a note
     result = await write_note.fn(
+        project=test_project.name,
         title="Memory URL Test",
         folder="test",
         content="Testing memory:// URL handling",
@@ -146,7 +148,7 @@ async def test_read_note_memory_url(app):
 
     # Should be able to read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    content = await read_note.fn(memory_url)
+    content = await read_note.fn(test_project.name, memory_url)
     assert "Testing memory:// URL handling" in content
 
 
@@ -154,7 +156,7 @@ class TestReadNoteSecurityValidation:
     """Test read_note security validation features."""
 
     @pytest.mark.asyncio
-    async def test_read_note_blocks_path_traversal_unix(self, app):
+    async def test_read_note_blocks_path_traversal_unix(self, app, test_project):
         """Test that Unix-style path traversal attacks are blocked in identifier parameter."""
         # Test various Unix-style path traversal patterns
         attack_identifiers = [
@@ -168,7 +170,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -176,7 +178,7 @@ class TestReadNoteSecurityValidation:
             assert attack_identifier in result
 
     @pytest.mark.asyncio
-    async def test_read_note_blocks_path_traversal_windows(self, app):
+    async def test_read_note_blocks_path_traversal_windows(self, app, test_project):
         """Test that Windows-style path traversal attacks are blocked in identifier parameter."""
         # Test various Windows-style path traversal patterns
         attack_identifiers = [
@@ -190,7 +192,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -198,7 +200,7 @@ class TestReadNoteSecurityValidation:
             assert attack_identifier in result
 
     @pytest.mark.asyncio
-    async def test_read_note_blocks_absolute_paths(self, app):
+    async def test_read_note_blocks_absolute_paths(self, app, test_project):
         """Test that absolute paths are blocked in identifier parameter."""
         # Test various absolute path patterns
         attack_identifiers = [
@@ -214,7 +216,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -222,7 +224,7 @@ class TestReadNoteSecurityValidation:
             assert attack_identifier in result
 
     @pytest.mark.asyncio
-    async def test_read_note_blocks_home_directory_access(self, app):
+    async def test_read_note_blocks_home_directory_access(self, app, test_project):
         """Test that home directory access patterns are blocked in identifier parameter."""
         # Test various home directory access patterns
         attack_identifiers = [
@@ -237,7 +239,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -245,7 +247,7 @@ class TestReadNoteSecurityValidation:
             assert attack_identifier in result
 
     @pytest.mark.asyncio
-    async def test_read_note_blocks_memory_url_attacks(self, app):
+    async def test_read_note_blocks_memory_url_attacks(self, app, test_project):
         """Test that memory URLs with path traversal are blocked."""
         # Test memory URLs with attacks embedded
         attack_identifiers = [
@@ -258,14 +260,14 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
     @pytest.mark.asyncio
-    async def test_read_note_blocks_mixed_attack_patterns(self, app):
+    async def test_read_note_blocks_mixed_attack_patterns(self, app, test_project):
         """Test that mixed legitimate/attack patterns are blocked in identifier parameter."""
         # Test mixed patterns that start legitimate but contain attacks
         attack_identifiers = [
@@ -278,14 +280,14 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
     @pytest.mark.asyncio
-    async def test_read_note_allows_safe_identifiers(self, app):
+    async def test_read_note_allows_safe_identifiers(self, app, test_project):
         """Test that legitimate identifiers are still allowed."""
         # Test various safe identifier patterns
         safe_identifiers = [
@@ -300,7 +302,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for safe_identifier in safe_identifiers:
-            result = await read_note.fn(identifier=safe_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=safe_identifier)
 
             assert isinstance(result, str)
             # Should not contain security error message
@@ -311,17 +313,18 @@ class TestReadNoteSecurityValidation:
             # but not due to security validation
 
     @pytest.mark.asyncio
-    async def test_read_note_allows_legitimate_titles(self, app):
+    async def test_read_note_allows_legitimate_titles(self, app, test_project):
         """Test that legitimate note titles work normally."""
         # Create a test note first
         await write_note.fn(
+            project=test_project.name,
             title="Security Test Note",
             folder="security-tests",
             content="# Security Test Note\nThis is a legitimate note for security testing.",
         )
 
         # Test reading by title (should work)
-        result = await read_note.fn("Security Test Note")
+        result = await read_note.fn(test_project.name, "Security Test Note")
 
         assert isinstance(result, str)
         # Should not be a security error
@@ -329,24 +332,24 @@ class TestReadNoteSecurityValidation:
         # Should either return the note content or search results
 
     @pytest.mark.asyncio
-    async def test_read_note_empty_identifier_security(self, app):
+    async def test_read_note_empty_identifier_security(self, app, test_project):
         """Test that empty identifier is handled securely."""
         # Empty identifier should be allowed (may return search results or error, but not security error)
-        result = await read_note.fn(identifier="")
+        result = await read_note.fn(test_project.name, identifier="")
 
         assert isinstance(result, str)
         # Empty identifier should not trigger security error
         assert "# Error" not in result or "paths must stay within project boundaries" not in result
 
     @pytest.mark.asyncio
-    async def test_read_note_security_with_all_parameters(self, app):
+    async def test_read_note_security_with_all_parameters(self, app, test_project):
         """Test security validation works with all read_note parameters."""
         # Test that security validation is applied even when all other parameters are provided
         result = await read_note.fn(
+            project=test_project.name,
             identifier="../../../etc/malicious",
             page=1,
             page_size=5,
-            project=None,  # Use default project
         )
 
         assert isinstance(result, str)
@@ -355,10 +358,10 @@ class TestReadNoteSecurityValidation:
         assert "../../../etc/malicious" in result
 
     @pytest.mark.asyncio
-    async def test_read_note_security_logging(self, app, caplog):
+    async def test_read_note_security_logging(self, app, caplog, test_project):
         """Test that security violations are properly logged."""
         # Attempt path traversal attack
-        result = await read_note.fn(identifier="../../../etc/passwd")
+        result = await read_note.fn(project=test_project.name, identifier="../../../etc/passwd")
 
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
@@ -368,10 +371,11 @@ class TestReadNoteSecurityValidation:
         # The security validation should generate a warning log entry
 
     @pytest.mark.asyncio
-    async def test_read_note_preserves_functionality_with_security(self, app):
+    async def test_read_note_preserves_functionality_with_security(self, app, test_project):
         """Test that security validation doesn't break normal note reading functionality."""
         # Create a note with complex content to ensure security validation doesn't interfere
         await write_note.fn(
+            project=test_project.name,
             title="Full Feature Security Test Note",
             folder="security-tests",
             content=dedent("""
@@ -394,7 +398,7 @@ class TestReadNoteSecurityValidation:
         )
 
         # Test reading by permalink
-        result = await read_note.fn("security-tests/full-feature-security-test-note")
+        result = await read_note.fn(test_project.name, "security-tests/full-feature-security-test-note")
 
         # Should succeed normally (not a security error)
         assert isinstance(result, str)
@@ -406,7 +410,7 @@ class TestReadNoteSecurityEdgeCases:
     """Test edge cases for read_note security validation."""
 
     @pytest.mark.asyncio
-    async def test_read_note_unicode_identifier_attacks(self, app):
+    async def test_read_note_unicode_identifier_attacks(self, app, test_project):
         """Test that Unicode-based path traversal attempts are blocked."""
         # Test Unicode path traversal attempts
         unicode_attack_identifiers = [
@@ -416,26 +420,26 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in unicode_attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
     @pytest.mark.asyncio
-    async def test_read_note_very_long_attack_identifier(self, app):
+    async def test_read_note_very_long_attack_identifier(self, app, test_project):
         """Test handling of very long attack identifiers."""
         # Create a very long path traversal attack
         long_attack_identifier = "../" * 1000 + "etc/malicious"
 
-        result = await read_note.fn(identifier=long_attack_identifier)
+        result = await read_note.fn(project=test_project.name, identifier=long_attack_identifier)
 
         assert isinstance(result, str)
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
 
     @pytest.mark.asyncio
-    async def test_read_note_case_variations_attacks(self, app):
+    async def test_read_note_case_variations_attacks(self, app, test_project):
         """Test that case variations don't bypass security."""
         # Test case variations (though case sensitivity depends on filesystem)
         case_attack_identifiers = [
@@ -446,14 +450,14 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in case_attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
             assert "paths must stay within project boundaries" in result
 
     @pytest.mark.asyncio
-    async def test_read_note_whitespace_in_attack_identifiers(self, app):
+    async def test_read_note_whitespace_in_attack_identifiers(self, app, test_project):
         """Test that whitespace doesn't help bypass security."""
         # Test attack identifiers with various whitespace
         whitespace_attack_identifiers = [
@@ -464,7 +468,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in whitespace_attack_identifiers:
-            result = await read_note.fn(identifier=attack_identifier)
+            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             # The attack should still be blocked even with whitespace
