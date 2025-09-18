@@ -290,7 +290,9 @@ class TestReadContentFunctionality:
                 with patch("basic_memory.mcp.tools.read_content.optimize_image") as mock_optimize:
                     mock_optimize.return_value = b"optimized_image_data"
 
-                    result = await read_content.fn(project=test_project.name, path="assets/safe-image.png")
+                    result = await read_content.fn(
+                        project=test_project.name, path="assets/safe-image.png"
+                    )
 
                     assert isinstance(result, dict)
                     assert result["type"] == "image"
@@ -334,7 +336,9 @@ class TestReadContentFunctionality:
 
             # This should pass security validation but fail on API call
             try:
-                result = await read_content.fn(project=test_project.name, path="docs/nonexistent-file.md")
+                result = await read_content.fn(
+                    project=test_project.name, path="docs/nonexistent-file.md"
+                )
                 # If no exception is raised, check the result format
                 assert isinstance(result, dict)
             except Exception as e:

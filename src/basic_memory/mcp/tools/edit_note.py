@@ -29,14 +29,14 @@ def _format_error_response(
 The note with identifier '{identifier}' could not be found. Edit operations require an exact match (no fuzzy matching).
 
 ## Suggestions to try:
-1. **Search for the note first**: Use `search_notes("{project or 'project-name'}", "{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
+1. **Search for the note first**: Use `search_notes("{project or "project-name"}", "{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
 2. **Try different exact identifier formats**:
    - If you used a permalink like "folder/note-title", try the exact title: "{identifier.split("/")[-1].replace("-", " ").title()}"
    - If you used a title, try the exact permalink format: "{identifier.lower().replace(" ", "-")}"
-   - Use `read_note("{project or 'project-name'}", "{identifier}")` first to verify the note exists and get the exact identifier
+   - Use `read_note("{project or "project-name"}", "{identifier}")` first to verify the note exists and get the exact identifier
 
 ## Alternative approach:
-Use `write_note("{project or 'project-name'}", "title", "content", "folder")` to create the note first, then edit it."""
+Use `write_note("{project or "project-name"}", "title", "content", "folder")` to create the note first, then edit it."""
 
     # Find/replace specific errors
     if operation == "find_replace":
@@ -46,7 +46,7 @@ Use `write_note("{project or 'project-name'}", "title", "content", "folder")` to
 The text '{find_text}' was not found in the note '{identifier}'.
 
 ## Suggestions to try:
-1. **Read the note first**: Use `read_note("{project or 'project-name'}", "{identifier}")` to see the current content
+1. **Read the note first**: Use `read_note("{project or "project-name"}", "{identifier}")` to see the current content
 2. **Check for exact matches**: The search is case-sensitive and must match exactly
 3. **Try a broader search**: Search for just part of the text you want to replace
 4. **Use expected_replacements=0**: If you want to verify the text doesn't exist
@@ -67,13 +67,13 @@ The text '{find_text}' was not found in the note '{identifier}'.
 Expected {expected_replacements} occurrences of '{find_text}' but found {actual_count}.
 
 ## How to fix:
-1. **Read the note first**: Use `read_note("{project or 'project-name'}", "{identifier}")` to see how many times '{find_text}' appears
+1. **Read the note first**: Use `read_note("{project or "project-name"}", "{identifier}")` to see how many times '{find_text}' appears
 2. **Update expected_replacements**: Set expected_replacements={actual_count} in your edit_note call
 3. **Be more specific**: If you only want to replace some occurrences, make your find_text more specific
 
 ## Example:
 ```
-edit_note("{project or 'project-name'}", "{identifier}", "find_replace", "new_text", find_text="{find_text}", expected_replacements={actual_count})
+edit_note("{project or "project-name"}", "{identifier}", "find_replace", "new_text", find_text="{find_text}", expected_replacements={actual_count})
 ```"""
 
     # Section replacement errors
@@ -83,7 +83,7 @@ edit_note("{project or 'project-name'}", "{identifier}", "find_replace", "new_te
 Multiple sections found with the same header in note '{identifier}'.
 
 ## How to fix:
-1. **Read the note first**: Use `read_note("{project or 'project-name'}", "{identifier}")` to see the document structure
+1. **Read the note first**: Use `read_note("{project or "project-name"}", "{identifier}")` to see the document structure
 2. **Make headers unique**: Add more specific text to distinguish sections
 3. **Use append instead**: Add content at the end rather than replacing a specific section
 
@@ -99,14 +99,14 @@ Use `find_replace` to update specific text within the duplicate sections."""
 There was a problem with the edit request to note '{identifier}': {error_message}.
 
 ## Common causes and fixes:
-1. **Note doesn't exist**: Use `search_notes("{project or 'project-name'}", "query")` or `read_note("{project or 'project-name'}", "{identifier}")` to verify the note exists
+1. **Note doesn't exist**: Use `search_notes("{project or "project-name"}", "query")` or `read_note("{project or "project-name"}", "{identifier}")` to verify the note exists
 2. **Invalid identifier format**: Try different identifier formats (title vs permalink)
 3. **Empty or invalid content**: Check that your content is properly formatted
 4. **Server error**: Try the operation again, or use `read_note()` first to verify the note state
 
 ## Troubleshooting steps:
-1. Verify the note exists: `read_note("{project or 'project-name'}", "{identifier}")`
-2. If not found, search for it: `search_notes("{project or 'project-name'}", "{identifier.split("/")[-1]}")`
+1. Verify the note exists: `read_note("{project or "project-name"}", "{identifier}")`
+2. If not found, search for it: `search_notes("{project or "project-name"}", "{identifier.split("/")[-1]}")`
 3. Try again with the correct identifier from the search results"""
 
     # Fallback for other errors
@@ -115,14 +115,14 @@ There was a problem with the edit request to note '{identifier}': {error_message
 Error editing note '{identifier}': {error_message}
 
 ## General troubleshooting:
-1. **Verify the note exists**: Use `read_note("{project or 'project-name'}", "{identifier}")` to check
+1. **Verify the note exists**: Use `read_note("{project or "project-name"}", "{identifier}")` to check
 2. **Check your parameters**: Ensure all required parameters are provided correctly
-3. **Read the note content first**: Use `read_note("{project or 'project-name'}", "{identifier}")` to understand the current structure
+3. **Read the note content first**: Use `read_note("{project or "project-name"}", "{identifier}")` to understand the current structure
 4. **Try a simpler operation**: Start with `append` if other operations fail
 
 ## Need help?
-- Use `search_notes("{project or 'project-name'}", "query")` to find notes
-- Use `read_note("{project or 'project-name'}", "identifier")` to examine content before editing
+- Use `search_notes("{project or "project-name"}", "query")` to find notes
+- Use `read_note("{project or "project-name"}", "identifier")` to examine content before editing
 - Check that identifiers, section headers, and find_text match exactly"""
 
 

@@ -1,7 +1,6 @@
 """CLI tool commands for Basic Memory."""
 
 import asyncio
-import configparser
 import sys
 from typing import Annotated, List, Optional
 
@@ -37,7 +36,10 @@ def write_note(
     title: Annotated[str, typer.Option(help="The title of the note")],
     folder: Annotated[str, typer.Option(help="The folder to create the note in")],
     project: Annotated[
-        Optional[str], typer.Option(help="The project to write to. If not provided, the default project will be used.")
+        Optional[str],
+        typer.Option(
+            help="The project to write to. If not provided, the default project will be used."
+        ),
     ] = None,
     content: Annotated[
         Optional[str],
@@ -157,9 +159,7 @@ def build_context(
     url: MemoryUrl,
     project: Annotated[
         Optional[str],
-        typer.Option(
-            help="The project to use. If not provided, the default project will be used."
-        ),
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
     ] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",

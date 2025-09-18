@@ -532,13 +532,19 @@ async def test_move_note_using_different_identifier_formats(mcp_server, app, tes
         assert "✅ Note moved successfully" in move3.content[0].text
 
         # Verify all notes can be accessed at their new locations
-        read1 = await client.call_tool("read_note", {"project": test_project.name, "identifier": "moved/title-moved.md"})
+        read1 = await client.call_tool(
+            "read_note", {"project": test_project.name, "identifier": "moved/title-moved.md"}
+        )
         assert "Move by title" in read1.content[0].text
 
-        read2 = await client.call_tool("read_note", {"project": test_project.name, "identifier": "moved/permalink-moved.md"})
+        read2 = await client.call_tool(
+            "read_note", {"project": test_project.name, "identifier": "moved/permalink-moved.md"}
+        )
         assert "Move by permalink" in read2.content[0].text
 
-        read3 = await client.call_tool("read_note", {"project": test_project.name, "identifier": "moved/folder-title-moved.md"})
+        read3 = await client.call_tool(
+            "read_note", {"project": test_project.name, "identifier": "moved/folder-title-moved.md"}
+        )
         assert "Move by folder/title" in read3.content[0].text
 
 

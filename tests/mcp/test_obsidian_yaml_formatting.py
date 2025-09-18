@@ -95,7 +95,7 @@ async def test_write_note_no_tags(app, project_config, test_project):
         title="No Tags Test",
         folder="test",
         content="Testing note without tags",
-        tags=None
+        tags=None,
     )
 
     file_path = project_config.home / "test" / "No Tags Test.md"
@@ -114,7 +114,7 @@ async def test_write_note_empty_tags_list(app, project_config, test_project):
         title="Empty Tags Test",
         folder="test",
         content="Testing empty tag list",
-        tags=[]
+        tags=[],
     )
 
     file_path = project_config.home / "test" / "Empty Tags Test.md"

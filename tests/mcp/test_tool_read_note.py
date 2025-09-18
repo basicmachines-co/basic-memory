@@ -37,7 +37,9 @@ async def mock_search():
 async def test_read_note_by_title(app, test_project):
     """Test reading a note by its title."""
     # First create a note
-    await write_note.fn(project=test_project.name, title="Special Note", folder="test", content="Note content here")
+    await write_note.fn(
+        project=test_project.name, title="Special Note", folder="test", content="Note content here"
+    )
 
     # Should be able to read it by title
     content = await read_note.fn(test_project.name, "Special Note")
@@ -48,7 +50,9 @@ async def test_read_note_by_title(app, test_project):
 async def test_note_unicode_content(app, test_project):
     """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    result = await write_note.fn(project=test_project.name, title="Unicode Test", folder="test", content=content)
+    result = await write_note.fn(
+        project=test_project.name, title="Unicode Test", folder="test", content=content
+    )
 
     assert (
         dedent(f"""
@@ -77,7 +81,9 @@ async def test_multiple_notes(app, test_project):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note.fn(project=test_project.name, title=title, folder=folder, content=content, tags=tags)
+        await write_note.fn(
+            project=test_project.name, title=title, folder=folder, content=content, tags=tags
+        )
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
@@ -110,7 +116,9 @@ async def test_multiple_notes_pagination(app, test_project):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note.fn(project=test_project.name, title=title, folder=folder, content=content, tags=tags)
+        await write_note.fn(
+            project=test_project.name, title=title, folder=folder, content=content, tags=tags
+        )
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
@@ -398,7 +406,9 @@ class TestReadNoteSecurityValidation:
         )
 
         # Test reading by permalink
-        result = await read_note.fn(test_project.name, "security-tests/full-feature-security-test-note")
+        result = await read_note.fn(
+            test_project.name, "security-tests/full-feature-security-test-note"
+        )
 
         # Should succeed normally (not a security error)
         assert isinstance(result, str)

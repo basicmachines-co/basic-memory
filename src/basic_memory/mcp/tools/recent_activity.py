@@ -11,7 +11,12 @@ from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import TimeFrame
-from basic_memory.schemas.memory import GraphContext, ProjectActivitySummary, ProjectActivity, ActivityStats, MemoryMetadata
+from basic_memory.schemas.memory import (
+    GraphContext,
+    ProjectActivitySummary,
+    ProjectActivity,
+    ActivityStats,
+)
 from basic_memory.schemas.project_info import ProjectList, ProjectItem
 from basic_memory.schemas.search import SearchItemType
 
@@ -179,14 +184,14 @@ async def recent_activity(
             total_items=total_items,
             total_entities=total_entities,
             total_relations=total_relations,
-            total_observations=total_observations
+            total_observations=total_observations,
         )
 
         return ProjectActivitySummary(
             projects=projects_activity,
             summary=summary,
             timeframe=str(timeframe),
-            generated_at=datetime.now()
+            generated_at=datetime.now(),
         )
 
     else:
@@ -205,11 +210,9 @@ async def recent_activity(
         )
         return GraphContext.model_validate(response.json())
 
+
 async def _get_project_activity(
-    client,
-    project_info: ProjectItem,
-    params: dict,
-    depth: int
+    client, project_info: ProjectItem, params: dict, depth: int
 ) -> ProjectActivity:
     """Get activity data for a single project.
 
@@ -240,7 +243,7 @@ async def _get_project_activity(
                 last_activity = result.primary_result.created_at
 
         # Extract folder from file_path
-        if hasattr(result.primary_result, 'file_path') and result.primary_result.file_path:
+        if hasattr(result.primary_result, "file_path") and result.primary_result.file_path:
             folder = "/".join(result.primary_result.file_path.split("/")[:-1])
             if folder:
                 active_folders.add(folder)
@@ -251,5 +254,5 @@ async def _get_project_activity(
         activity=activity,
         item_count=len(activity.results),
         last_activity=last_activity,
-        active_folders=list(active_folders)[:5]  # Limit to top 5 folders
+        active_folders=list(active_folders)[:5],  # Limit to top 5 folders
     )

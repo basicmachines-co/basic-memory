@@ -211,7 +211,9 @@ async def test_write_note_unicode_content(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_complex_content_with_observations_relations(mcp_server, app, test_project):
+async def test_write_note_complex_content_with_observations_relations(
+    mcp_server, app, test_project
+):
     """Test creating note with complex content including observations and relations."""
 
     async with Client(mcp_server) as client:

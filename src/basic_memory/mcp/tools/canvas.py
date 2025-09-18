@@ -4,7 +4,7 @@ This tool creates Obsidian canvas files (.canvas) using the JSON Canvas 1.0 spec
 """
 
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 from loguru import logger
 from fastmcp import Context

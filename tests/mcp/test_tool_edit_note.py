@@ -34,7 +34,6 @@ async def test_edit_note_append_operation(client, test_project):
     assert f"<!-- Project: {test_project.name} -->" in result
 
 
-
 @pytest.mark.asyncio
 async def test_edit_note_prepend_operation(client, test_project):
     """Test prepending content to an existing note."""
@@ -127,7 +126,7 @@ async def test_edit_note_nonexistent_note(client, test_project):
         project=test_project.name,
         identifier="nonexistent/note",
         operation="append",
-        content="Some content"
+        content="Some content",
     )
 
     assert isinstance(result, str)
@@ -152,7 +151,7 @@ async def test_edit_note_invalid_operation(client, test_project):
             project=test_project.name,
             identifier="test/test-note",
             operation="invalid_op",
-            content="Some content"
+            content="Some content",
         )
 
     assert "Invalid operation 'invalid_op'" in str(exc_info.value)
@@ -174,7 +173,7 @@ async def test_edit_note_find_replace_missing_find_text(client, test_project):
             project=test_project.name,
             identifier="test/test-note",
             operation="find_replace",
-            content="replacement"
+            content="replacement",
         )
 
     assert "find_text parameter is required for find_replace operation" in str(exc_info.value)
@@ -196,7 +195,7 @@ async def test_edit_note_replace_section_missing_section(client, test_project):
             project=test_project.name,
             identifier="test/test-note",
             operation="replace_section",
-            content="new content"
+            content="new content",
         )
 
     assert "section parameter is required for replace_section operation" in str(exc_info.value)
@@ -278,7 +277,7 @@ async def test_edit_note_identifier_variations(client, test_project):
             project=test_project.name,
             identifier=identifier,
             operation="append",
-            content=f"\n## Update via {identifier}"
+            content=f"\n## Update via {identifier}",
         )
 
         assert isinstance(result, str)
@@ -326,10 +325,7 @@ async def test_edit_note_empty_content_operations(client, test_project):
 
     # Test append with empty content
     result = await edit_note.fn(
-        project=test_project.name,
-        identifier="test/test-note",
-        operation="append",
-        content=""
+        project=test_project.name, identifier="test/test-note", operation="append", content=""
     )
 
     assert isinstance(result, str)

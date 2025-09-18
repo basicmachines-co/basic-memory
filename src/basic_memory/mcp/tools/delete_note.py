@@ -1,5 +1,4 @@
 from textwrap import dedent
-from typing import Optional
 
 from loguru import logger
 from fastmcp import Context
@@ -149,11 +148,7 @@ If the note should be deleted but the operation keeps failing, send a message to
 
 
 @mcp.tool(description="Delete a note by title or permalink")
-async def delete_note(
-    project: str,
-    identifier: str,
-    context: Context | None = None
-) -> bool | str:
+async def delete_note(project: str, identifier: str, context: Context | None = None) -> bool | str:
     """Delete a note from the knowledge base.
 
     Permanently removes a note from the specified project. Uses stateless
@@ -210,7 +205,9 @@ async def delete_note(
         result = DeleteEntitiesResponse.model_validate(response.json())
 
         if result.deleted:
-            logger.info(f"Successfully deleted note: {identifier} in project: {active_project.name}")
+            logger.info(
+                f"Successfully deleted note: {identifier} in project: {active_project.name}"
+            )
             return True
         else:
             logger.warning(f"Delete operation completed but note was not deleted: {identifier}")

@@ -18,7 +18,7 @@ class TestDeleteNoteErrorFormatting:
 
     def test_format_delete_error_permission_denied(self, test_project):
         """Test formatting for permission errors."""
-        result = _format_delete_error_response(test_project.name,"permission denied", "test-note")
+        result = _format_delete_error_response(test_project.name, "permission denied", "test-note")
 
         assert "# Delete Failed - Permission Error" in result
         assert "You don't have permission to delete 'test-note'" in result
@@ -35,7 +35,9 @@ class TestDeleteNoteErrorFormatting:
 
     def test_format_delete_error_server_error(self, test_project):
         """Test formatting for server errors."""
-        result = _format_delete_error_response(test_project.name, "server error occurred", "test-note")
+        result = _format_delete_error_response(
+            test_project.name, "server error occurred", "test-note"
+        )
 
         assert "# Delete Failed - System Error" in result
         assert "A system error occurred while deleting 'test-note'" in result
@@ -83,7 +85,9 @@ class TestDeleteNoteErrorFormatting:
 
     def test_format_delete_error_with_complex_identifier(self, test_project):
         """Test formatting with complex identifiers (permalinks)."""
-        result = _format_delete_error_response(test_project.name, "entity not found", "folder/note-title")
+        result = _format_delete_error_response(
+            test_project.name, "entity not found", "folder/note-title"
+        )
 
         assert 'search_notes("test-project", "note-title")' in result
         assert "Note Title" in result  # Title format

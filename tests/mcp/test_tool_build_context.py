@@ -1,13 +1,11 @@
 """Tests for discussion context MCP tool."""
 
-from os import name
 import pytest
 from datetime import datetime
 
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import build_context
-from basic_memory.models import project
 from basic_memory.schemas.memory import (
     GraphContext,
 )
@@ -108,8 +106,13 @@ async def test_build_context_timeframe_formats(client, test_graph, test_project)
     # Test each valid timeframe
     for timeframe in valid_timeframes:
         try:
-            result = await build_context.fn(project=test_project.name,
-                url=test_url, timeframe=timeframe, page=1, page_size=10, max_related=10
+            result = await build_context.fn(
+                project=test_project.name,
+                url=test_url,
+                timeframe=timeframe,
+                page=1,
+                page_size=10,
+                max_related=10,
             )
             assert result is not None
         except Exception as e:
@@ -122,7 +125,7 @@ async def test_build_context_timeframe_formats(client, test_graph, test_project)
 
 
 @pytest.mark.asyncio
-async def test_build_context_string_depth_parameter(client, test_graph,test_project):
+async def test_build_context_string_depth_parameter(client, test_graph, test_project):
     """Test that build_context handles string depth parameter correctly."""
     test_url = "memory://test/root"
 

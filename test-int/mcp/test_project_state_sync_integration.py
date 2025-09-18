@@ -15,7 +15,9 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_project_state_sync_after_default_change(mcp_server, app, config_manager, test_project):
+async def test_project_state_sync_after_default_change(
+    mcp_server, app, config_manager, test_project
+):
     """Test that MCP session stays in sync when default project is changed."""
 
     async with Client(mcp_server) as client:
@@ -31,7 +33,6 @@ async def test_project_state_sync_after_default_change(mcp_server, app, config_m
         assert len(create_result.content) == 1
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "minerva" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
 
         # Step 2: Test that note operations work in the new project context
         # This validates that the identifier resolution works correctly
@@ -74,11 +75,7 @@ async def test_project_state_sync_after_default_change(mcp_server, app, config_m
 
         # Step 5: Verify the edit was applied
         final_read_result = await client.call_tool(
-            "read_note",
-            {
-                "project": "minerva",
-                "identifier": "Test Consistency Note"
-            }
+            "read_note", {"project": "minerva", "identifier": "Test Consistency Note"}
         )
         assert len(final_read_result.content) == 1
         final_content = final_read_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]

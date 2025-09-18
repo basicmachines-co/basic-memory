@@ -5,7 +5,6 @@ supporting various file types including text, images, and other binary files.
 Files are read directly without any knowledge graph processing.
 """
 
-from typing import Optional
 import base64
 import io
 

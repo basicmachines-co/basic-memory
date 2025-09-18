@@ -1,7 +1,6 @@
 """View note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Optional
 
 from loguru import logger
 

@@ -208,7 +208,7 @@ async def test_image_conversion(app, synced_files, test_project):
     image_path = synced_files["image"].name
 
     # Test reading the resource
-    response = await read_content.fn(test_project.name,  image_path)
+    response = await read_content.fn(test_project.name, image_path)
 
     assert response["type"] == "image"
     assert response["source"]["media_type"] == "image/jpeg"

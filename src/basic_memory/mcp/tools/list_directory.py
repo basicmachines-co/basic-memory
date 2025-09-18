@@ -71,7 +71,9 @@ async def list_directory(
     if file_name_glob:
         params["file_name_glob"] = file_name_glob
 
-    logger.debug(f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'")
+    logger.debug(
+        f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
+    )
 
     # Call the API endpoint
     response = await call_get(

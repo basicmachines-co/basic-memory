@@ -27,7 +27,9 @@ async def recent_activity_prompt(
     ] = "7d",
     project: Annotated[
         Optional[str],
-        Field(description="Specific project to get activity from (None for discovery across all projects)"),
+        Field(
+            description="Specific project to get activity from (None for discovery across all projects)"
+        ),
     ] = None,
 ) -> str:
     """Get recent activity from a specific project or across all projects.
@@ -45,7 +47,9 @@ async def recent_activity_prompt(
     """
     logger.info(f"Getting recent activity, timeframe: {timeframe}, project: {project}")
 
-    recent = await recent_activity.fn(project=project, timeframe=timeframe, type=[SearchItemType.ENTITY])
+    recent = await recent_activity.fn(
+        project=project, timeframe=timeframe, type=[SearchItemType.ENTITY]
+    )
 
     # Extract primary results from the hierarchical structure
     primary_results = []
@@ -137,7 +141,11 @@ async def recent_activity_prompt(
     else:
         # Discovery mode suggestions
         project_count = len(recent.projects) if isinstance(recent, ProjectActivitySummary) else 0
-        most_active = getattr(recent.summary, 'most_active_project', 'Unknown') if isinstance(recent, ProjectActivitySummary) else 'Unknown'
+        most_active = (
+            getattr(recent.summary, "most_active_project", "Unknown")
+            if isinstance(recent, ProjectActivitySummary)
+            else "Unknown"
+        )
 
         capture_suggestions = f"""
     ## Cross-Project Activity Discovery
@@ -148,7 +156,7 @@ async def recent_activity_prompt(
 
     ```python
     await write_note(
-        "{most_active if most_active != 'Unknown' else 'main'}",
+        "{most_active if most_active != "Unknown" else "main"}",
         title="Cross-Project Activity Summary {timeframe}",
         content='''
         # Cross-Project Activity Summary ({timeframe})

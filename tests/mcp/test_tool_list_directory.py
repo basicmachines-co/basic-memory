@@ -54,7 +54,9 @@ async def test_list_directory_specific_path(client, test_graph, test_project):
 async def test_list_directory_with_glob_filter(client, test_graph, test_project):
     """Test listing directory with glob filtering."""
     # Filter for files containing "Connected"
-    result = await list_directory.fn(project=test_project.name, dir_name="/test", file_name_glob="*Connected*")
+    result = await list_directory.fn(
+        project=test_project.name, dir_name="/test", file_name_glob="*Connected*"
+    )
 
     assert isinstance(result, str)
     assert "Files in '/test' matching '*Connected*' (depth 1):" in result
@@ -70,7 +72,9 @@ async def test_list_directory_with_glob_filter(client, test_graph, test_project)
 @pytest.mark.asyncio
 async def test_list_directory_with_markdown_filter(client, test_graph, test_project):
     """Test listing directory with markdown file filter."""
-    result = await list_directory.fn(project=test_project.name, dir_name="/test", file_name_glob="*.md")
+    result = await list_directory.fn(
+        project=test_project.name, dir_name="/test", file_name_glob="*.md"
+    )
 
     assert isinstance(result, str)
     assert "Files in '/test' matching '*.md' (depth 1):" in result
@@ -120,7 +124,9 @@ async def test_list_directory_nonexistent_path(client, test_graph, test_project)
 @pytest.mark.asyncio
 async def test_list_directory_glob_no_matches(client, test_graph, test_project):
     """Test listing directory with glob that matches nothing."""
-    result = await list_directory.fn(project=test_project.name, dir_name="/test", file_name_glob="*.xyz")
+    result = await list_directory.fn(
+        project=test_project.name, dir_name="/test", file_name_glob="*.xyz"
+    )
 
     assert isinstance(result, str)
     assert "No files found in directory '/test' matching '*.xyz'" in result
@@ -173,7 +179,9 @@ async def test_list_directory_with_created_notes(client, test_project):
     assert "Total: 2 items (2 files)" in result_projects
 
     # Test glob filter for "Meeting"
-    result_meeting = await list_directory.fn(project=test_project.name, dir_name="/projects", file_name_glob="*Meeting*")
+    result_meeting = await list_directory.fn(
+        project=test_project.name, dir_name="/projects", file_name_glob="*Meeting*"
+    )
 
     assert isinstance(result_meeting, str)
     assert "Files in '/projects' matching '*Meeting*' (depth 1):" in result_meeting

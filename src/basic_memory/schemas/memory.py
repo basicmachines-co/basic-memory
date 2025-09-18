@@ -218,6 +218,7 @@ class GraphContext(BaseModel):
 
 class ActivityStats(BaseModel):
     """Statistics about activity across all projects."""
+
     total_projects: int
     active_projects: int = Field(description="Projects with activity in timeframe")
     most_active_project: Optional[str] = None
@@ -229,11 +230,14 @@ class ActivityStats(BaseModel):
 
 class ProjectActivity(BaseModel):
     """Activity summary for a single project."""
+
     project_name: str
     project_path: str
     activity: GraphContext = Field(description="The actual activity data for this project")
     item_count: int = Field(description="Total items in this project's activity")
-    last_activity: Optional[datetime] = Field(default=None, description="Most recent activity timestamp")
+    last_activity: Optional[datetime] = Field(
+        default=None, description="Most recent activity timestamp"
+    )
     active_folders: List[str] = Field(default_factory=list, description="Most active folders")
 
     @field_serializer("last_activity")
@@ -243,6 +247,7 @@ class ProjectActivity(BaseModel):
 
 class ProjectActivitySummary(BaseModel):
     """Summary of activity across all projects."""
+
     projects: Dict[str, ProjectActivity] = Field(
         description="Activity per project, keyed by project name"
     )

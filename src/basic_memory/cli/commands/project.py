@@ -126,7 +126,9 @@ def set_default_project(
         raise typer.Exit(1)
 
     # The API call above updates the config file default
-    console.print(f"[green]CLI commands will now use '{name}' when no --project flag is specified[/green]")
+    console.print(
+        f"[green]CLI commands will now use '{name}' when no --project flag is specified[/green]"
+    )
 
 
 @project_app.command("sync-config")

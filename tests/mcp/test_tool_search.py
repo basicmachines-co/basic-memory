@@ -75,7 +75,9 @@ async def test_search_permalink(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(test_project.name, query="test/test-search-note", search_type="permalink")
+    response = await search_notes.fn(
+        test_project.name, query="test/test-search-note", search_type="permalink"
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -101,7 +103,9 @@ async def test_search_permalink_match(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(test_project.name, query="test/test-search-*", search_type="permalink")
+    response = await search_notes.fn(
+        test_project.name, query="test/test-search-*", search_type="permalink"
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -198,7 +202,9 @@ async def test_search_with_date_filter(client, test_project):
 
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
-    response = await search_notes.fn(test_project.name, query="recent", after_date=one_hour_ago.isoformat())
+    response = await search_notes.fn(
+        test_project.name, query="recent", after_date=one_hour_ago.isoformat()
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -214,7 +220,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_fts5_syntax(self):
         """Test formatting for FTS5 syntax errors."""
-        result = _format_search_error_response("test-project", "syntax error in FTS5", "test query(")
+        result = _format_search_error_response(
+            "test-project", "syntax error in FTS5", "test query("
+        )
 
         assert "# Search Failed - Invalid Syntax" in result
         assert "The search query 'test query(' contains invalid syntax" in result
@@ -223,7 +231,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_no_results(self):
         """Test formatting for no results found."""
-        result = _format_search_error_response("test-project", "no results found", "very specific query")
+        result = _format_search_error_response(
+            "test-project", "no results found", "very specific query"
+        )
 
         assert "# Search Complete - No Results Found" in result
         assert "No content found matching 'very specific query'" in result
@@ -232,7 +242,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_server_error(self):
         """Test formatting for server errors."""
-        result = _format_search_error_response("test-project", "internal server error", "test query")
+        result = _format_search_error_response(
+            "test-project", "internal server error", "test query"
+        )
 
         assert "# Search Failed - Server Error" in result
         assert "The search service encountered an error while processing 'test query'" in result
@@ -249,7 +261,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_project_not_found(self):
         """Test formatting for project not found errors."""
-        result = _format_search_error_response("test-project", "current project not found", "test query")
+        result = _format_search_error_response(
+            "test-project", "current project not found", "test query"
+        )
 
         assert "# Search Failed - Project Not Found" in result
         assert "The current project is not accessible" in result

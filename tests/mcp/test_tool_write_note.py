@@ -60,10 +60,7 @@ async def test_write_note(app, test_project):
 async def test_write_note_no_tags(app, test_project):
     """Test creating a note without tags."""
     result = await write_note.fn(
-        project=test_project.name,
-        title="Simple Note",
-        folder="test",
-        content="Just some text"
+        project=test_project.name, title="Simple Note", folder="test", content="Just some text"
     )
 
     assert result
@@ -389,7 +386,9 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
     )
 
     # Verify the update was successful
-    assert ("Updated note\nproject: test-project\nfile_path: test/Custom Metadata Note.md") in result
+    assert (
+        "Updated note\nproject: test-project\nfile_path: test/Custom Metadata Note.md"
+    ) in result
     assert f"project: {test_project.name}" in result
 
     # Read the note back and check if custom frontmatter is preserved
@@ -477,7 +476,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
         project=test_project.name,
         title="Note 1",
         folder="test",
-        content="Original content for note 1"
+        content="Original content for note 1",
     )
     assert "# Created note" in result1
     assert f"project: {test_project.name}" in result1
@@ -485,10 +484,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
 
     # Step 2: Create second note with different title
     result2 = await write_note.fn(
-        project=test_project.name,
-        title="Note 2",
-        folder="test",
-        content="Content for note 2"
+        project=test_project.name, title="Note 2", folder="test", content="Content for note 2"
     )
     assert "# Created note" in result2
     assert f"project: {test_project.name}" in result2
@@ -715,10 +711,7 @@ async def test_write_note_respects_frontmatter_entity_type(app, test_project):
 
     # Call write_note without entity_type parameter - it should respect frontmatter type
     result = await write_note.fn(
-        project=test_project.name,
-        title="Test Guide",
-        folder="guides",
-        content=note
+        project=test_project.name, title="Test Guide", folder="guides", content=note
     )
 
     assert result

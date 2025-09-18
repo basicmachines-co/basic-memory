@@ -4,6 +4,7 @@ Provides project lookup utilities for MCP tools.
 Handles project validation and context management in one place.
 """
 
+import os
 from typing import Optional
 from httpx import AsyncClient
 from loguru import logger
@@ -15,15 +16,13 @@ from basic_memory.utils import generate_permalink
 
 
 async def get_active_project(
-    client: AsyncClient,
-    project: str,
-    context: Optional[Context] = None
+    client: AsyncClient, project: str, context: Optional[Context] = None
 ) -> ProjectItem:
     """Get and validate project, setting it in context if available.
 
     Args:
         client: HTTP client for API calls
-        project: Required project name
+        project: Required project name (may be overridden by server constraint)
         context: Optional FastMCP context to cache the result
 
     Returns:
@@ -32,6 +31,15 @@ async def get_active_project(
     Raises:
         HTTPError: If project doesn't exist or is inaccessible
     """
+    # Check for project constraint from MCP server
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        if project != constrained_project:
+            logger.debug(
+                f"Overriding project '{project}' with constrained project '{constrained_project}'"
+            )
+        project = constrained_project
+
     # Check if already cached in context
     if context:
         cached_project = context.get_state("active_project")

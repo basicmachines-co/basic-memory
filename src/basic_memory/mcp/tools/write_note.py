@@ -1,6 +1,6 @@
 """Write note tool for Basic Memory MCP server."""
 
-from typing import List, Union, Optional
+from typing import List, Union
 
 from loguru import logger
 
@@ -108,7 +108,9 @@ async def write_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If folder path attempts path traversal
     """
-    logger.info(f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}")
+    logger.info(
+        f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}"
+    )
 
     # Get and validate the project
     active_project = await get_active_project(client, project, context)
@@ -193,5 +195,5 @@ async def write_note(
     logger.info(
         f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} status_code={response.status_code}"
     )
-    result =  "\n".join(summary)
+    result = "\n".join(summary)
     return add_project_metadata(result, active_project.name)

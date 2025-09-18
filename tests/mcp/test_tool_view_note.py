@@ -74,10 +74,7 @@ async def test_view_note_with_frontmatter_title(app, test_project):
     """).strip()
 
     await write_note.fn(
-        project=test_project.name,
-        title="Frontmatter Title",
-        folder="test",
-        content=content
+        project=test_project.name, title="Frontmatter Title", folder="test", content=content
     )
 
     # View the note
@@ -95,10 +92,7 @@ async def test_view_note_with_heading_title(app, test_project):
     content = "# Heading Title\n\nContent with heading title."
 
     await write_note.fn(
-        project=test_project.name,
-        title="Heading Title",
-        folder="test",
-        content=content
+        project=test_project.name, title="Heading Title", folder="test", content=content
     )
 
     # View the note
@@ -115,10 +109,7 @@ async def test_view_note_unicode_content(app, test_project):
     content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦"
 
     await write_note.fn(
-        project=test_project.name,
-        title="Unicode Test 🚀",
-        folder="test",
-        content=content
+        project=test_project.name, title="Unicode Test 🚀", folder="test", content=content
     )
 
     # View the note
@@ -138,7 +129,7 @@ async def test_view_note_by_permalink(app, test_project):
         project=test_project.name,
         title="Permalink Test",
         folder="test",
-        content="Content for permalink test."
+        content="Content for permalink test.",
     )
 
     # View by permalink
@@ -190,7 +181,7 @@ async def test_view_note_pagination(app, test_project):
         project=test_project.name,
         title="Pagination Test",
         folder="test",
-        content="Content for pagination test."
+        content="Content for pagination test.",
     )
 
     # View with pagination
@@ -209,7 +200,7 @@ async def test_view_note_project_parameter(app, test_project):
         project=test_project.name,
         title="Project Test",
         folder="test",
-        content="Content for project test."
+        content="Content for project test.",
     )
 
     # View with explicit project
@@ -226,16 +217,10 @@ async def test_view_note_artifact_identifier_unique(app, test_project):
     """Test that different notes get different artifact identifiers."""
     # Create two notes
     await write_note.fn(
-        project=test_project.name,
-        title="Note One",
-        folder="test",
-        content="Content one"
+        project=test_project.name, title="Note One", folder="test", content="Content one"
     )
     await write_note.fn(
-        project=test_project.name,
-        title="Note Two",
-        folder="test",
-        content="Content two"
+        project=test_project.name, title="Note Two", folder="test", content="Content two"
     )
 
     # View both notes

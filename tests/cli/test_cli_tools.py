@@ -77,6 +77,7 @@ def test_write_note(cli_env, project_config):
     assert "Created" in result.stdout or "Updated" in result.stdout
     assert "permalink" in result.stdout
 
+
 def test_write_note_with_project_arg(cli_env, project_config, test_project):
     """Test write_note command with basic arguments."""
     result = runner.invoke(

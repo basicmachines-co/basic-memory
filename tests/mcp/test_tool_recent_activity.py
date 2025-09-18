@@ -36,7 +36,11 @@ async def test_recent_activity_timeframe_formats(client, test_project, test_grap
         try:
             result = await recent_activity.fn(
                 project=test_project.name,
-                type=["entity"], timeframe=timeframe, page=1, page_size=10, max_related=10
+                type=["entity"],
+                timeframe=timeframe,
+                page=1,
+                page_size=10,
+                max_related=10,
             )
             assert result is not None
             assert isinstance(result, GraphContext)
@@ -86,7 +90,9 @@ async def test_recent_activity_type_filters(client, test_project, test_graph):
     )
 
     # Test multiple types
-    result = await recent_activity.fn(project=test_project.name, type=[SearchItemType.ENTITY, SearchItemType.OBSERVATION])
+    result = await recent_activity.fn(
+        project=test_project.name, type=[SearchItemType.ENTITY, SearchItemType.OBSERVATION]
+    )
     assert result is not None
     assert isinstance(result, GraphContext)
     assert len(result.results) > 0
@@ -97,7 +103,9 @@ async def test_recent_activity_type_filters(client, test_project, test_graph):
     )
 
     # Test all types
-    result = await recent_activity.fn(project=test_project.name, type=["entity", "observation", "relation"])
+    result = await recent_activity.fn(
+        project=test_project.name, type=["entity", "observation", "relation"]
+    )
     assert result is not None
     assert isinstance(result, GraphContext)
     assert len(result.results) > 0
@@ -138,10 +146,10 @@ async def test_recent_activity_discovery_mode(client, test_project, test_graph):
     assert isinstance(result, ProjectActivitySummary)
 
     # Check that we get a summary with projects
-    assert hasattr(result, 'projects')
-    assert hasattr(result, 'summary')
-    assert hasattr(result, 'timeframe')
-    assert hasattr(result, 'generated_at')
+    assert hasattr(result, "projects")
+    assert hasattr(result, "summary")
+    assert hasattr(result, "timeframe")
+    assert hasattr(result, "generated_at")
 
     # Check summary stats
     assert result.summary.total_projects >= 1  # Should have at least the test project

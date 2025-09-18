@@ -13,7 +13,9 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
 
-def _format_search_error_response(project: str, error_message: str, query: str, search_type: str = "text") -> str:
+def _format_search_error_response(
+    project: str, error_message: str, query: str, search_type: str = "text"
+) -> str:
     """Format helpful error responses for search failures that guide users to successful searches."""
 
     # FTS5 syntax errors
@@ -366,7 +368,9 @@ async def search_notes(
 
         # Check if we got no results and provide helpful guidance
         if not result.results:
-            logger.info(f"Search returned no results for query: {query} in project {active_project.name}")
+            logger.info(
+                f"Search returned no results for query: {query} in project {active_project.name}"
+            )
             # Don't treat this as an error, but the user might want guidance
             # We return the empty result as normal - the user can decide if they need help
 
