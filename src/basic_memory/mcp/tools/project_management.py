@@ -52,7 +52,7 @@ async def list_memory_projects(context: Context | None = None) -> str:
         else:
             result += f"• {project.name}\n"
 
-    result += "\nNote: In stateless mode, specify project explicitly in each tool call.\n"
+    result += "\nNote: Specify project explicitly in each tool call.\n"
     return result
 
 
