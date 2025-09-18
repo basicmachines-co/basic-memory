@@ -4,18 +4,13 @@ These tools allow users to switch between projects, list available projects,
 and manage project context during conversations.
 """
 
-from textwrap import dedent
 
 from fastmcp import Context
-from loguru import logger
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_put, call_post, call_delete
-from basic_memory.schemas import ProjectInfoResponse
+from basic_memory.mcp.tools.utils import call_get, call_post, call_delete
 from basic_memory.schemas.project_info import (
-    ProjectItem,
     ProjectList,
     ProjectStatusResponse,
     ProjectInfoRequest,
@@ -28,8 +23,8 @@ async def list_memory_projects(context: Context | None = None) -> str:
     """List all available projects with their status.
 
     Shows all Basic Memory projects that are available, indicating which one
-    is the default. In stateless architecture, there is no "current" project
-    since each tool call specifies its own project.
+    is the CLI default. The default project is used by CLI commands when no
+    --project flag is specified. MCP tool calls always require explicit project parameters.
 
     Returns:
         Formatted list of projects with status indicators
@@ -48,52 +43,11 @@ async def list_memory_projects(context: Context | None = None) -> str:
 
     for project in project_list.projects:
         if project.is_default:
-            result += f"• {project.name} (default)\n"
+            result += f"• {project.name} (CLI default)\n"
         else:
             result += f"• {project.name}\n"
 
-    result += "\nNote: Specify project explicitly in each tool call.\n"
-    return result
-
-
-# switch_project and get_current_project removed - not needed in stateless architecture
-# Tools now require explicit project parameter instead of session state
-
-
-@mcp.tool()
-async def set_default_project(project_name: str, context: Context | None = None) -> str:
-    """Set default project in config.
-
-    Updates the configuration to use a different default project.
-    In stateless architecture, this only sets the system default - individual
-    tool calls still require explicit project parameters.
-
-    Args:
-        project_name: Name of the project to set as default
-
-    Returns:
-        Confirmation message about config update
-
-    Example:
-        set_default_project("work-notes")
-    """
-    if context:  # pragma: no cover
-        await context.info(f"Setting default project to: {project_name}")
-
-    # Call API to set default project using URL encoding for special characters
-    from urllib.parse import quote
-
-    encoded_name = quote(project_name, safe="")
-    response = await call_put(client, f"/projects/{encoded_name}/default")
-    status_response = ProjectStatusResponse.model_validate(response.json())
-
-    result = f"✓ {status_response.message}\n\n"
-    result += "This project will be the default for new Basic Memory sessions.\n"
-    result += "Tool calls in this MCP session still require explicit project parameters.\n"
-
-    if status_response.old_project:
-        result += f"\nPrevious default: {status_response.old_project.name}\n"
-
+    result += "\nNote: MCP tools require explicit project parameter in each call.\n"
     return result
 
 
@@ -109,7 +63,7 @@ async def create_memory_project(
     Args:
         project_name: Name for the new project (must be unique)
         project_path: File system path where the project will be stored
-        set_default: Whether to set this project as the default (optional, defaults to False)
+        set_default: Whether to set this project as the default for the cli (optional, defaults to False)
 
     Returns:
         Confirmation message with project details

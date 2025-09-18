@@ -5,7 +5,6 @@ import typer
 
 from basic_memory.cli.app import app
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.middleware import ProjectContextMiddleware
 
 # Import mcp instance
 from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover

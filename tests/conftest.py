@@ -181,7 +181,7 @@ async def test_project(config_home, engine_factory) -> Project:
         "description": "Project used as context for tests",
         "path": str(config_home),
         "is_active": True,
-        "is_default": True,  # Explicitly set as the default project
+        "is_default": True,  # Explicitly set as the default project (for cli operations)
     }
     engine, session_maker = engine_factory
     project_repository = ProjectRepository(session_maker)

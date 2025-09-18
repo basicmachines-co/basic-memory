@@ -32,14 +32,13 @@ async def test_project_state_sync_after_default_change(mcp_server, app, config_m
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "minerva" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-        # Step 2: Verify config manager also shows the new default
-        assert config_manager.default_project == "minerva"
 
-        # Step 3: Test that note operations work in the new project context
+        # Step 2: Test that note operations work in the new project context
         # This validates that the identifier resolution works correctly
         write_result = await client.call_tool(
             "write_note",
             {
+                "project": "minerva",
                 "title": "Test Consistency Note",
                 "folder": "test",
                 "content": "# Test Note\n\nThis note tests project state consistency.\n\n- [test] Project state sync working",
@@ -49,16 +48,19 @@ async def test_project_state_sync_after_default_change(mcp_server, app, config_m
         assert len(write_result.content) == 1
         assert "Test Consistency Note" in write_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-        # Step 7: Test that we can read the note we just created
-        read_result = await client.call_tool("read_note", {"identifier": "Test Consistency Note"})
+        # Step 3: Test that we can read the note we just created
+        read_result = await client.call_tool(
+            "read_note", {"project": "minerva", "identifier": "Test Consistency Note"}
+        )
         assert len(read_result.content) == 1
         assert "Test Consistency Note" in read_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "project state sync working" in read_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
 
-        # Step 8: Test that edit operations work (this was failing in the original issue)
+        # Step 4: Test that edit operations work (this was failing in the original issue)
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": "minerva",
                 "identifier": "Test Consistency Note",
                 "operation": "append",
                 "content": "\n\n## Update\n\nEdit operation successful after project switch!",
@@ -70,84 +72,14 @@ async def test_project_state_sync_after_default_change(mcp_server, app, config_m
             and "lines" in edit_result.content[0].text.lower()  # pyright: ignore [reportAttributeAccessIssue]
         )
 
-        # Step 9: Verify the edit was applied
+        # Step 5: Verify the edit was applied
         final_read_result = await client.call_tool(
-            "read_note", {"identifier": "Test Consistency Note"}
+            "read_note",
+            {
+                "project": "minerva",
+                "identifier": "Test Consistency Note"
+            }
         )
         assert len(final_read_result.content) == 1
         final_content = final_read_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "Edit operation successful" in final_content
-
-        # Clean up - switch back to test-project
-        await client.call_tool("switch_project", {"project_name": "test-project"})
-
-
-@pytest.mark.asyncio
-async def test_multiple_project_switches_maintain_consistency(mcp_server, app, config_manager):
-    """Test that multiple project switches maintain consistent state."""
-
-    async with Client(mcp_server) as client:
-        # Create multiple test projects
-        for project_name in ["project-a", "project-b", "project-c"]:
-            await client.call_tool(
-                "create_memory_project",
-                {
-                    "project_name": project_name,
-                    "project_path": f"/tmp/{project_name}",
-                    "set_default": False,
-                },
-            )
-
-        # Test switching between projects multiple times
-        for project_name in ["project-a", "project-b", "project-c", "test-project"]:
-            # Set as default
-            set_result = await client.call_tool(
-                "set_default_project", {"project_name": project_name}
-            )
-            assert "✓" in set_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-            # Verify MCP session immediately reflects the change
-            current_result = await client.call_tool("get_current_project", {})
-            assert f"Current project: {project_name}" in current_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-            # Verify config is also updated
-            assert config_manager.default_project == project_name
-
-            # Test that operations work in this project
-            note_title = f"Note in {project_name}"
-            write_result = await client.call_tool(
-                "write_note",
-                {
-                    "title": note_title,
-                    "folder": "test",
-                    "content": f"# {note_title}\n\nTesting operations in {project_name}.",
-                    "tags": "test",
-                },
-            )
-            assert note_title in write_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-        # Clean up - switch back to test-project
-        await client.call_tool("set_default_project", {"project_name": "test-project"})
-
-
-@pytest.mark.asyncio
-async def test_session_handles_nonexistent_project_gracefully(mcp_server, app):
-    """Test that session handles attempts to switch to nonexistent projects gracefully."""
-
-    async with Client(mcp_server) as client:
-        # Try to switch to a project that doesn't exist
-        switch_result = await client.call_tool(
-            "switch_project", {"project_name": "nonexistent-project"}
-        )
-        assert len(switch_result.content) == 1
-        result_text = switch_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-        # Should show an error message
-        assert "Error:" in result_text
-        assert "not found" in result_text.lower()
-        assert "Available projects:" in result_text
-        assert "test-project" in result_text  # Should list available projects
-
-        # Verify the session stays on the original project
-        current_result = await client.call_tool("get_current_project", {})
-        assert "Current project: test-project" in current_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]

@@ -77,6 +77,29 @@ def test_write_note(cli_env, project_config):
     assert "Created" in result.stdout or "Updated" in result.stdout
     assert "permalink" in result.stdout
 
+def test_write_note_with_project_arg(cli_env, project_config, test_project):
+    """Test write_note command with basic arguments."""
+    result = runner.invoke(
+        tool_app,
+        [
+            "write-note",
+            "--project",
+            test_project.name,
+            "--title",
+            "CLI Test Note",
+            "--content",
+            "This is a CLI test note",
+            "--folder",
+            "test",
+        ],
+    )
+    assert result.exit_code == 0
+
+    # Check for expected success message
+    assert "CLI Test Note" in result.stdout
+    assert "Created" in result.stdout or "Updated" in result.stdout
+    assert "permalink" in result.stdout
+
 
 def test_write_note_with_tags(cli_env, project_config):
     """Test write_note command with tags."""
@@ -366,7 +389,7 @@ def test_build_context_string_depth_parameter(cli_env, setup_test_note):
 # into separate files with improved error handling
 
 
-def test_recent_activity(cli_env, setup_test_note):
+def test_recent_activity(cli_env, setup_test_note, test_project):
     """Test recent_activity command with defaults."""
     result = runner.invoke(
         tool_app,
@@ -376,12 +399,11 @@ def test_recent_activity(cli_env, setup_test_note):
 
     # Result should be JSON containing recent activity
     activity_result = json.loads(result.stdout)
-    assert "results" in activity_result
-    assert "metadata" in activity_result
+    assert "projects" in activity_result
 
     # Our test note should be in the recent activity
     found = False
-    for item in activity_result["results"]:
+    for item in activity_result["projects"][f"{test_project.name}"]["activity"]["results"]:
         if "primary_result" in item and "permalink" in item["primary_result"]:
             if setup_test_note["permalink"] == item["primary_result"]["permalink"]:
                 found = True
@@ -390,7 +412,7 @@ def test_recent_activity(cli_env, setup_test_note):
     assert found, "Recent activity did not include the test note"
 
 
-def test_recent_activity_with_options(cli_env, setup_test_note):
+def test_recent_activity_with_options(cli_env, setup_test_note, test_project):
     """Test recent_activity command with options."""
     result = runner.invoke(
         tool_app,
@@ -417,7 +439,7 @@ def test_recent_activity_with_options(cli_env, setup_test_note):
 
     # Check that requested entity types are included
     entity_types = set()
-    for item in activity_result["results"]:
+    for item in activity_result["projects"][f"{test_project.name}"]["activity"]["results"]:
         if "primary_result" in item and "type" in item["primary_result"]:
             entity_types.add(item["primary_result"]["type"])
 

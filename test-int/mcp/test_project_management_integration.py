@@ -26,75 +26,7 @@ async def test_list_projects_basic_operation(mcp_server, app, test_project):
         # Should show available projects with status indicators
         assert "Available projects:" in list_text
         assert "test-project" in list_text  # Our default test project
-        assert "(current, default)" in list_text or "(default)" in list_text
-
-
-@pytest.mark.asyncio
-async def test_set_default_project_operation(mcp_server, app, test_project):
-    """Test set_default_project functionality."""
-
-    async with Client(mcp_server) as client:
-        # Set test-project as default
-        default_result = await client.call_tool(
-            "set_default_project",
-            {
-                "project_name": "test-project",
-            },
-        )
-
-        assert len(default_result.content) == 1
-        default_text = default_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-        # Should show success message and restart instructions
-        assert "✓" in default_text  # Success indicator
-        assert "test-project" in default_text
-        assert "set as default" in default_text
-
-
-@pytest.mark.asyncio
-async def test_set_default_project_operation_activate_by_default(mcp_server, app, test_project):
-    """Test set_default_project functionality."""
-
-    async with Client(mcp_server) as client:
-        # Set test-project as default
-        default_result = await client.call_tool(
-            "set_default_project",
-            {
-                "project_name": "test-project",
-            },
-        )
-
-        assert len(default_result.content) == 1
-        default_text = default_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-
-        # Should show success message and restart instructions
-        assert "✓" in default_text  # Success indicator
-        assert "test-project" in default_text
-        assert "set as default" in default_text
-
-
-@pytest.mark.asyncio
-async def test_set_default_project_not_found(mcp_server, app, test_project):
-    """Test set_default_project with non-existent project."""
-
-    async with Client(mcp_server) as client:
-        # Try to set non-existent project as default
-        with pytest.raises(Exception) as exc_info:
-            await client.call_tool(
-                "set_default_project",
-                {
-                    "project_name": "non-existent-project",
-                },
-            )
-
-        # Should show error about non-existent project
-        error_message = str(exc_info.value)
-        assert "set_default_project" in error_message
-        assert (
-            "non-existent-project" in error_message
-            or "Invalid request" in error_message
-            or "Client error" in error_message
-        )
+        assert "(CLI default)" in list_text
 
 
 @pytest.mark.asyncio

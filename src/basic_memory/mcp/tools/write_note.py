@@ -108,7 +108,7 @@ async def write_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If folder path attempts path traversal
     """
-    logger.info(f"MCP tool call tool=write_note folder={folder}, title={title}, tags={tags}")
+    logger.info(f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}")
 
     # Get and validate the project
     active_project = await get_active_project(client, project, context)
