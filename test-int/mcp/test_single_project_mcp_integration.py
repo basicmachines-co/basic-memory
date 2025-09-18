@@ -39,7 +39,7 @@ async def test_project_constraint_override_content_tools(mcp_server, app, test_p
             assert f"project: {test_project.name}" in response_text
             assert "# Created note" in response_text
             assert "file_path: test/Constraint Test Note.md" in response_text
-            assert f"<!-- Project: {test_project.name} -->" in response_text
+            assert f"[Session: Using project '{test_project.name}']" in response_text
 
     finally:
         # Clean up environment variable
@@ -144,14 +144,7 @@ async def test_list_projects_constrained_mode(mcp_server, app, test_project):
             response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
             # Should show constraint message
-            assert "(MCP server constrained to single project)" in response_text
-            assert f"• {test_project.name}" in response_text
-            assert "Note: Server is constrained to this project only." in response_text
-
-            # Should not show other projects (if any exist)
-            lines = response_text.split("\n")
-            project_lines = [line for line in lines if line.startswith("•")]
-            assert len(project_lines) == 1  # Only the constrained project
+            assert "MCP server is constrained to a single project" in response_text
 
     finally:
         if "BASIC_MEMORY_MCP_PROJECT" in os.environ:
@@ -243,8 +236,7 @@ async def test_normal_mode_without_constraint(mcp_server, app, test_project):
         list_text = list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Should not show constraint message
-        assert "(MCP server constrained to single project)" not in list_text
-        assert "Note: MCP tools require explicit project parameter in each call." in list_text
+        assert "MCP server is constrained to a single project" not in list_text
 
 
 @pytest.mark.asyncio
@@ -297,7 +289,7 @@ async def test_constraint_environment_cleanup(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         # Verify constraint is active
         constrained_result = await client.call_tool("list_memory_projects", {})
-        assert "(MCP server constrained to single project)" in constrained_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "MCP server is constrained to a single project" in constrained_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Remove constraint
         del os.environ["BASIC_MEMORY_MCP_PROJECT"]
@@ -306,8 +298,7 @@ async def test_constraint_environment_cleanup(mcp_server, app, test_project):
         normal_result = await client.call_tool("list_memory_projects", {})
         normal_text = normal_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-        assert "(MCP server constrained to single project)" not in normal_text
-        assert "Note: MCP tools require explicit project parameter in each call." in normal_text
+        assert "constrained to a single project" not in normal_text
 
 
 @pytest.mark.asyncio

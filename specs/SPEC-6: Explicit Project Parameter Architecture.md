@@ -71,8 +71,9 @@ The complete stateless architecture has been successfully implemented for Basic 
 - Removed `switch_project` and `get_current_project` tools ✅
 - Updated `set_default_project` to remove activate parameter ✅
 
-✅ **Comprehensive Testing Complete (147 tests)**
-- All test suites updated to use stateless architecture
+✅ **Comprehensive Testing Complete (157 tests)**
+- All test suites updated to use stateless architecture (147 existing tests)
+- Single project constraint mode integration tests (10 new tests)
 - 100% test pass rate across all tool test files
 - Security validations preserved and working
 - Error handling comprehensive and user-friendly
@@ -87,6 +88,13 @@ The complete stateless architecture has been successfully implemented for Basic 
 - ProjectActivitySummary schema provides cross-project insights
 - Recent activity prompt updated to support both modes
 - Comprehensive project distribution statistics and most active project tracking
+
+✅ **Single Project Constraint Mode Complete**
+- `--project` CLI parameter for MCP server constraint
+- Environment variable control (`BASIC_MEMORY_MCP_PROJECT`)
+- Automatic project override in `get_active_project()` function
+- Project management tools disabled in constrained mode with helpful CLI guidance
+- Comprehensive integration test suite (10 tests covering all constraint scenarios)
 
 ## What
 
@@ -118,11 +126,11 @@ Implementation Approach
 
 **Knowledge Graph Navigation** (require project parameter):
 - `build_context(project, url, timeframe, depth, max_related)`
-- `recent_activity(project, timeframe, depth, max_related)`
 - `list_directory(project, dir_name, depth, file_name_glob)`
-
-**Search & Discovery** (require project parameter):
 - `search_notes(project, query, search_type, types, entity_types)`
+
+**Search & Discovery** (use project parameter for specific project or none for discovery):
+- `recent_activity(project, timeframe, depth, max_related)`
 
 **Visualization** (require project parameter):
 - `canvas(project, nodes, edges, title, folder)`
@@ -207,7 +215,9 @@ Phase 1: Core Changes
 - [x] Verify direct function call compatibility (bypassing MCP layer)
 - [x] Test security validation with project parameters
 - [x] Validate error handling for non-existent projects
-- [x] **Total: 147 tests updated and passing (100% success rate)**                                                                   
+- [x] **Total: 157 tests updated and passing (100% success rate)**
+  - [x] **147 existing tests** updated for stateless architecture
+  - [x] **10 new tests** for single project constraint mode                                                                   
                                                                                                                              
 Phase 2: Testing & Validation
 

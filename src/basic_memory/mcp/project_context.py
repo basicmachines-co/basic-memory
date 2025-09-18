@@ -63,13 +63,16 @@ async def get_active_project(
 
 
 def add_project_metadata(result: str, project_name: str) -> str:
-    """Add project context as metadata footer for LLM awareness.
+    """Add project context as metadata footer for assistant session tracking.
+
+    Provides clear project context to help the assistant remember which
+    project is being used throughout the conversation session.
 
     Args:
         result: The tool result string
         project_name: The project name that was used
 
     Returns:
-        Result with project metadata footer
+        Result with project session tracking metadata
     """
-    return f"{result}\n\n<!-- Project: {project_name} -->"  # pragma: no cover
+    return f"{result}\n\n[Session: Using project '{project_name}']"

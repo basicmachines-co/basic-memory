@@ -22,12 +22,20 @@ from basic_memory.utils import generate_permalink
 async def list_memory_projects(context: Context | None = None) -> str:
     """List all available projects with their status.
 
-    Shows all Basic Memory projects that are available, indicating which one
-    is the CLI default. The default project is used by CLI commands when no
-    --project flag is specified. MCP tool calls always require explicit project parameters.
+    Shows all Basic Memory projects that are available for MCP operations.
+    Use this tool to discover projects when you need to know which project to use.
+
+    Use this tool:
+    - At conversation start when project is unknown
+    - When user asks about available projects
+    - Before any operation requiring a project
+
+    After calling:
+    - Ask user which project to use
+    - Remember their choice for the session
 
     Returns:
-        Formatted list of projects with status indicators
+        Formatted list of projects with session management guidance
 
     Example:
         list_memory_projects()
@@ -42,24 +50,22 @@ async def list_memory_projects(context: Context | None = None) -> str:
     response = await call_get(client, "/projects/projects")
     project_list = ProjectList.model_validate(response.json())
 
-    result = "Available projects:\n"
-
-    # Filter projects if constrained
-    projects_to_show = project_list.projects
     if constrained_project:
-        projects_to_show = [p for p in project_list.projects if p.name == constrained_project]
-        result += "(MCP server constrained to single project)\n"
+        result = f"Project: {constrained_project}\n\n"
+        result += "Note: This MCP server is constrained to a single project.\n"
+        result += "All operations will automatically use this project."
+    else:
+        # Show all projects with session guidance
+        result = "Available projects:\n"
 
-    for project in projects_to_show:
-        if project.is_default:
-            result += f"• {project.name} (CLI default)\n"
-        else:
+        for project in project_list.projects:
             result += f"• {project.name}\n"
 
-    if constrained_project:
-        result += "\nNote: Server is constrained to this project only.\n"
-    else:
-        result += "\nNote: MCP tools require explicit project parameter in each call.\n"
+        result += "\n" + "─" * 40 + "\n"
+        result += "Next: Ask which project to use for this session.\n"
+        result += "Example: 'Which project should I use for this task?'\n\n"
+        result += "Session reminder: Track the selected project for all subsequent operations in this conversation.\n"
+        result += "The user can say 'switch to [project]' to change projects."
 
     return result
 

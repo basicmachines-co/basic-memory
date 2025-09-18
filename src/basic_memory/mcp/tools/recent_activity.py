@@ -1,6 +1,6 @@
 """Recent activity tool for Basic Memory MCP server."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Union, Optional
 
 from loguru import logger
@@ -187,11 +187,56 @@ async def recent_activity(
             total_observations=total_observations,
         )
 
+        # Generate guidance for the assistant
+        guidance_lines = ["\n" + "─" * 40]
+
+        if most_active_project and most_active_count > 0:
+            guidance_lines.extend(
+                [
+                    f"Suggested project: '{most_active_project}' (most active with {most_active_count} items)",
+                    f"Ask user: 'Should I use {most_active_project} for this task, or would you prefer a different project?'",
+                ]
+            )
+        elif active_projects > 0:
+            # Has activity but no clear most active project
+            active_project_names = [
+                name for name, activity in projects_activity.items() if activity.item_count > 0
+            ]
+            if len(active_project_names) == 1:
+                guidance_lines.extend(
+                    [
+                        f"Suggested project: '{active_project_names[0]}' (only active project)",
+                        f"Ask user: 'Should I use {active_project_names[0]} for this task?'",
+                    ]
+                )
+            else:
+                guidance_lines.extend(
+                    [
+                        f"Multiple active projects found: {', '.join(active_project_names)}",
+                        "Ask user: 'Which project should I use for this task?'",
+                    ]
+                )
+        else:
+            # No recent activity
+            guidance_lines.extend(
+                [
+                    "No recent activity found in any project.",
+                    "Consider: Ask which project to use or if they want to create a new one.",
+                ]
+            )
+
+        guidance_lines.extend(
+            ["", "Session reminder: Remember their project choice throughout this conversation."]
+        )
+
+        guidance = "\n".join(guidance_lines)
+
         return ProjectActivitySummary(
             projects=projects_activity,
             summary=summary,
             timeframe=str(timeframe),
-            generated_at=datetime.now(),
+            generated_at=datetime.now(timezone.utc),
+            guidance=guidance,
         )
 
     else:
@@ -239,8 +284,14 @@ async def _get_project_activity(
 
     for result in activity.results:
         if result.primary_result.created_at:
-            if last_activity is None or result.primary_result.created_at > last_activity:
-                last_activity = result.primary_result.created_at
+            current_time = result.primary_result.created_at
+            try:
+                if last_activity is None or current_time > last_activity:
+                    last_activity = current_time
+            except TypeError:
+                # Handle timezone comparison issues by skipping this comparison
+                if last_activity is None:
+                    last_activity = current_time
 
         # Extract folder from file_path
         if hasattr(result.primary_result, "file_path") and result.primary_result.file_path:

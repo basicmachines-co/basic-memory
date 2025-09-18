@@ -217,6 +217,14 @@ async def search_notes(
     and date, with advanced boolean and phrase search capabilities. Uses stateless
     architecture - each call requires explicit project parameter.
 
+    Project Selection:
+    If you don't know which project to search:
+    1. Call list_memory_projects() to discover available projects
+    2. Or call recent_activity() to see project activity and get recommendations
+    3. Ask the user which project to search in
+    4. Remember their choice for the entire conversation session
+    5. Only ask again if the user explicitly mentions switching projects
+
     ## Search Syntax Examples
 
     ### Basic Searches

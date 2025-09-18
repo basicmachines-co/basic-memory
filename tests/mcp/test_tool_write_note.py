@@ -32,7 +32,7 @@ async def test_write_note(app, test_project):
     assert "permalink: test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Try reading it back via permalink
     content = await read_note.fn(test_project.name, "test/test-note")
@@ -68,7 +68,7 @@ async def test_write_note_no_tags(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Simple Note.md" in result
     assert "permalink: test/simple-note" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
     # Should be able to read it back
     content = await read_note.fn(test_project.name, "test/simple-note")
     assert (
@@ -112,7 +112,7 @@ async def test_write_note_update_existing(app, test_project):
     assert "permalink: test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     result = await write_note.fn(
         project=test_project.name,
@@ -127,7 +127,7 @@ async def test_write_note_update_existing(app, test_project):
     assert "permalink: test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Try reading it back
     content = await read_note.fn(test_project.name, "test/test-note")
@@ -182,7 +182,7 @@ async def test_issue_93_write_note_respects_custom_permalink_new_note(app, test_
     assert f"project: {test_project.name}" in result
     assert "file_path: notes/My New Note.md" in result
     assert "permalink: custom/my-desired-permalink" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -234,7 +234,7 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
     assert f"project: {test_project.name}" in result2
     assert "permalink: custom/new-permalink" in result2
     assert f"permalink: {initial_permalink}" not in result2
-    assert f"<!-- Project: {test_project.name} -->" in result2
+    assert f"[Session: Using project '{test_project.name}']" in result2
 
 
 @pytest.mark.asyncio
@@ -297,7 +297,7 @@ async def test_write_note_with_tag_array_from_bug_report(app, test_project):
     assert "permalink: folder/title" in result
     assert "Tags" in result
     assert "hipporag" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -333,7 +333,7 @@ async def test_write_note_verbose(app, test_project):
     assert "## Relations" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -548,7 +548,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
     assert "permalink: guides/test-guide" in result
     assert "## Tags" in result
     assert "- guide, documentation" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
     content = await read_note.fn(test_project.name, "guides/test-guide")
@@ -589,7 +589,7 @@ async def test_write_note_with_report_entity_type(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: reports/Monthly Report.md" in result
     assert "permalink: reports/monthly-report" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
     content = await read_note.fn(test_project.name, "reports/monthly-report")
@@ -613,7 +613,7 @@ async def test_write_note_with_config_entity_type(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: config/System Config.md" in result
     assert "permalink: config/system-config" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
     content = await read_note.fn(test_project.name, "config/system-config")
@@ -641,7 +641,7 @@ async def test_write_note_entity_type_default_behavior(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Default Type Test.md" in result
     assert "permalink: test/default-type-test" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type defaults to "note"
     content = await read_note.fn(test_project.name, "test/default-type-test")
@@ -719,7 +719,7 @@ async def test_write_note_respects_frontmatter_entity_type(app, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: guides/Test Guide.md" in result
     assert "permalink: guides/test-guide" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type from frontmatter is respected (should be "guide", not "note")
     content = await read_note.fn(test_project.name, "guides/test-guide")

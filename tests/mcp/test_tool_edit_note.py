@@ -31,7 +31,7 @@ async def test_edit_note_append_operation(client, test_project):
     assert "file_path: test/Test Note.md" in result
     assert "permalink: test/test-note" in result
     assert "Added 3 lines to end of note" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -59,7 +59,7 @@ async def test_edit_note_prepend_operation(client, test_project):
     assert "file_path: meetings/Meeting Notes.md" in result
     assert "permalink: meetings/meeting-notes" in result
     assert "Added 3 lines to beginning of note" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_edit_note_find_replace_operation(client, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: config/Config Document.md" in result
     assert "operation: Find and replace operation completed" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -116,7 +116,7 @@ async def test_edit_note_replace_section_operation(client, test_project):
     assert f"project: {test_project.name}" in result
     assert "file_path: specs/API Specification.md" in result
     assert "Replaced content under section '## Implementation'" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
@@ -225,7 +225,7 @@ async def test_edit_note_replace_section_nonexistent_section(client, test_projec
     assert "Edited note (replace_section)" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: docs/Document.md" in result
-    assert f"<!-- Project: {test_project.name} -->" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
     # Should succeed - the section gets appended if it doesn't exist
 
 
@@ -454,5 +454,5 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     assert "Edited note (append)" in second_result
     assert f"project: {test_project.name}" in second_result
     assert "permalink: test/test-note" in second_result
-    assert f"<!-- Project: {test_project.name} -->" in second_result
+    assert f"[Session: Using project '{test_project.name}']" in second_result
     # The edit should succeed without validation errors

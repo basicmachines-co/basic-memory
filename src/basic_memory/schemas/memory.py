@@ -254,6 +254,9 @@ class ProjectActivitySummary(BaseModel):
     summary: ActivityStats
     timeframe: str = Field(description="The timeframe used for the query")
     generated_at: datetime
+    guidance: Optional[str] = Field(
+        default=None, description="Assistant guidance for project selection and session management"
+    )
 
     @field_serializer("generated_at")
     def serialize_generated_at(self, dt: datetime) -> str:

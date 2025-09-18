@@ -40,7 +40,7 @@ async def test_write_note_basic_creation(mcp_server, app, test_project):
         assert "permalink: basic/simple-note" in response_text
         assert "## Tags" in response_text
         assert "- simple, test" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -108,7 +108,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
         assert "file_path: test/Update Test.md" in response_text
         assert "permalink: test/update-test" in response_text
         assert "- updated, modified" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -138,7 +138,7 @@ async def test_write_note_tag_array(mcp_server, app, test_project):
         assert "permalink: test/array-tags-test" in response_text
         assert "## Tags" in response_text
         assert "python" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -176,7 +176,7 @@ async def test_write_note_custom_permalink(mcp_server, app, test_project):
         assert f"project: {test_project.name}" in response_text
         assert "file_path: notes/Custom Permalink Note.md" in response_text
         assert "permalink: custom/my-special-permalink" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -207,7 +207,7 @@ async def test_write_note_unicode_content(mcp_server, app, test_project):
         # Permalink should be sanitized
         assert "permalink: test/unicode-test" in response_text
         assert "## Tags" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -268,7 +268,7 @@ async def test_write_note_complex_content_with_observations_relations(
 
         assert "## Tags" in response_text
         assert "complex, knowledge, relations" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -309,7 +309,7 @@ async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
         assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Frontmatter Note.md" in response_text
         assert "permalink: test/frontmatter-note" in response_text
-        assert f"<!-- Project: {test_project.name} -->" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
@@ -340,7 +340,7 @@ async def test_write_note_kebab_filenames_basic(mcp_server, test_project):
             assert f"project: {test_project.name}" in response_text
             assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
             assert "permalink: my-folder/my-note-with-invalid-chars" in response_text
-            assert f"<!-- Project: {test_project.name} -->" in response_text
+            assert f"[Session: Using project '{test_project.name}']" in response_text
 
     # Restore original config value
     config.kebab_filenames = curr_config_val
@@ -373,7 +373,7 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, test_projec
             assert f"project: {test_project.name}" in response_text
             assert "file_path: my-folder/crazy-note-name.md" in response_text
             assert "permalink: my-folder/crazy-note-name" in response_text
-            assert f"<!-- Project: {test_project.name} -->" in response_text
+            assert f"[Session: Using project '{test_project.name}']" in response_text
 
     # Restore original config value
     config.kebab_filenames = curr_config_val
@@ -427,7 +427,7 @@ async def test_write_note_file_path_os_path_join(mcp_server, test_project):
                 assert f"project: {test_project.name}" in response_text
                 assert f"file_path: {expected_path}" in response_text
                 assert f"permalink: {expected_permalink}" in response_text
-                assert f"<!-- Project: {test_project.name} -->" in response_text
+                assert f"[Session: Using project '{test_project.name}']" in response_text
 
     # Restore original config value
     config.kebab_filenames = curr_config_val

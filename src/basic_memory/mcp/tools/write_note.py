@@ -38,6 +38,14 @@ async def write_note(
     observations and relations. Uses stateless architecture - each call requires
     explicit project parameter.
 
+    Project Selection:
+    If you don't know which project to use:
+    1. Call list_memory_projects() to discover available projects
+    2. Or call recent_activity() to see project activity and get recommendations
+    3. Ask the user which project to use for this note
+    4. Remember their choice for the entire conversation session
+    5. Only ask again if the user explicitly mentions switching projects
+
     The content can include semantic observations and relations using markdown syntax:
 
     Observations format:
@@ -59,6 +67,7 @@ async def write_note(
 
     Args:
         project: Required project name to write to. Must be an existing project.
+                If unknown, use list_memory_projects() to discover available projects.
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
@@ -75,9 +84,14 @@ async def write_note(
         - Observation counts by category
         - Relation counts (resolved/unresolved)
         - Tags if present
-        - Project metadata footer for LLM awareness
+        - Session tracking metadata for project awareness
 
     Examples:
+        # Assistant flow when project is unknown
+        # 1. list_memory_projects() -> Ask user which project
+        # 2. User: "Use my-research"
+        # 3. write_note(...) and remember "my-research" for session
+
         # Create a simple note
         write_note(
             project="my-research",
