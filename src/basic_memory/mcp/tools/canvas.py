@@ -30,12 +30,16 @@ async def canvas(
 
     This tool creates a .canvas file compatible with Obsidian's Canvas feature,
     allowing visualization of relationships between concepts or documents.
-    Uses stateless architecture - each call requires explicit project parameter.
+
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     For the full JSON Canvas 1.0 specification, see the 'spec://canvas' resource.
 
     Args:
-        project: Required project name to create canvas in. Must be an existing project.
+        project: Project name to create canvas in. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         nodes: List of node objects following JSON Canvas 1.0 spec
         edges: List of edge objects following JSON Canvas 1.0 spec
         title: The title of the canvas (will be saved as title.canvas)

@@ -40,13 +40,21 @@ async def recent_activity(
 ) -> str:
     """Get recent activity for a specific project or across all projects.
 
-    This tool works in two modes based on the project parameter:
+    Project Resolution:
+    The server resolves projects in this order:
+    1. Single Project Mode - server constrained to one project, parameter ignored
+    2. Explicit project parameter - specify which project to query
+    3. Default project - server configured default if no project specified
 
-    **Discovery Mode (project=None)**: Returns activity summary across all projects,
-    enabling project discovery and cross-project activity overview.
+    Discovery Mode:
+    When no specific project can be resolved, returns activity across all projects
+    to help discover available projects and their recent activity.
 
-    **Project-Specific Mode (project provided)**: Returns detailed activity for a
-    specific project with filtering and graph traversal capabilities.
+    Project Discovery (when project is unknown):
+    1. Call list_memory_projects() to see available projects
+    2. Or use this tool without project parameter to see cross-project activity
+    3. Ask the user which project to focus on
+    4. Remember their choice for the conversation
 
     Args:
         type: Filter by content type(s). Can be a string or list of strings.
@@ -62,34 +70,30 @@ async def recent_activity(
             - Relative: "2 days ago", "last week", "yesterday"
             - Points in time: "2024-01-01", "January 1st"
             - Standard format: "7d", "24h"
-        project: Optional project name. If not provided, uses default_project (if default_project_mode=true)
-                or returns activity across all projects for discovery.
-                If unknown, use list_memory_projects() to discover available projects.
+        project: Project name to query. Optional - server will resolve using the
+                hierarchy above. If unknown, use list_memory_projects() to discover
+                available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        - ProjectActivitySummary: When project=None (discovery mode)
-        - GraphContext: When project is specified (project-specific mode)
+        Human-readable summary of recent activity. When no specific project is
+        resolved, returns cross-project discovery information. When a specific
+        project is resolved, returns detailed activity for that project.
 
     Examples:
-        # Default project mode or discovery mode
+        # Cross-project discovery mode
         recent_activity()
         recent_activity(timeframe="yesterday")
 
-        # Project-specific mode - detailed activity for one project
-        recent_activity(type="entity", timeframe="yesterday")
-        recent_activity(type=["entity"], timeframe="yesterday")
-        recent_activity(type=["relation", "observation"], timeframe="today")
-        recent_activity(type="entity", depth=2, timeframe="2 weeks ago")
-
-        # Explicit project specification
+        # Project-specific activity
         recent_activity(project="work-docs", type="entity", timeframe="yesterday")
+        recent_activity(project="research", type=["entity", "relation"], timeframe="today")
+        recent_activity(project="notes", type="entity", depth=2, timeframe="2 weeks ago")
 
     Raises:
         ToolError: If project doesn't exist or type parameter contains invalid values
 
     Notes:
-        - Discovery mode enables project selection without session state
         - Higher depth values (>3) may impact performance with large result sets
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past

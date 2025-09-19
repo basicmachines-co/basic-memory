@@ -20,7 +20,7 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
     """Resolve project parameter using three-tier hierarchy.
 
     Resolution order:
-    1. CLI constraint (BASIC_MEMORY_MCP_PROJECT env var) - highest priority
+    1. Single Project Mode  (--project cli arg, or BASIC_MEMORY_MCP_PROJECT env var) - highest priority
     2. Explicit project parameter - medium priority
     3. Default project if default_project_mode=true - lowest priority
 

@@ -349,16 +349,15 @@ async def move_note(
 
     Moves a note from one location to another within the project, updating all
     database references and maintaining semantic content. Uses stateless architecture -
-    each call requires explicit project parameter.
+    project parameter optional with server resolution.
 
     Args:
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
-        project: Optional project name to move within. If not provided, uses default_project
-                (if default_project_mode=true). If unknown, use list_memory_projects()
-                to discover available projects.
+        project: Project name to move within. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:

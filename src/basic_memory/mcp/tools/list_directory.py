@@ -25,8 +25,7 @@ async def list_directory(
 
     This tool provides 'ls' functionality for browsing the knowledge base directory structure.
     It can list immediate children or recursively explore subdirectories with depth control,
-    and supports glob pattern filtering for finding specific files. Uses stateless architecture -
-    each call requires explicit project parameter.
+    and supports glob pattern filtering for finding specific files.
 
     Args:
         dir_name: Directory path to list (default: root "/")
@@ -35,9 +34,8 @@ async def list_directory(
                Higher values show subdirectory contents recursively
         file_name_glob: Optional glob pattern for filtering file names
                        Examples: "*.md", "*meeting*", "project_*"
-        project: Optional project name to list directory from. If not provided, uses default_project
-                (if default_project_mode=true). If unknown, use list_memory_projects()
-                to discover available projects.
+        project: Project name to list directory from. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:

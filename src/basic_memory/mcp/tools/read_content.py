@@ -156,7 +156,7 @@ async def read_content(
 
     This tool provides direct access to file content in the knowledge base,
     handling different file types appropriately. Uses stateless architecture -
-    each call requires explicit project parameter.
+    project parameter optional with server resolution.
 
     Supported file types:
     - Text files (markdown, code, etc.) are returned as plain text
@@ -168,9 +168,8 @@ async def read_content(
             - A regular file path (docs/example.md)
             - A memory URL (memory://docs/example)
             - A permalink (docs/example)
-        project: Optional project name to read from. If not provided, uses default_project
-                (if default_project_mode=true). If unknown, use list_memory_projects()
-                to discover available projects.
+        project: Project name to read from. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:

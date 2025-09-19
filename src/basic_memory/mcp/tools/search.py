@@ -214,16 +214,11 @@ async def search_notes(
 
     This tool searches the knowledge base using full-text search, pattern matching,
     or exact permalink lookup. It supports filtering by content type, entity type,
-    and date, with advanced boolean and phrase search capabilities. Uses stateless
-    architecture - each call requires explicit project parameter.
+    and date, with advanced boolean and phrase search capabilities.
 
-    Project Selection:
-    If you don't know which project to search:
-    1. Call list_memory_projects() to discover available projects
-    2. Or call recent_activity() to see project activity and get recommendations
-    3. Ask the user which project to search in
-    4. Remember their choice for the entire conversation session
-    5. Only ask again if the user explicitly mentions switching projects
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     ## Search Syntax Examples
 
@@ -263,9 +258,8 @@ async def search_notes(
 
     Args:
         query: The search query string (supports boolean operators, phrases, patterns)
-        project: Optional project name to search in. If not provided, uses default_project
-                (if default_project_mode=true). If unknown, use list_memory_projects()
-                to discover available projects.
+        project: Project name to search in. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of: "text", "title", "permalink" (default: "text")

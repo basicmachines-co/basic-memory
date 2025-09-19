@@ -50,11 +50,15 @@ async def build_context(
 
     This tool enables natural continuation of discussions by loading relevant context
     from memory:// URIs. It uses pattern matching to find relevant content and builds
-    a rich context graph of related information. Uses stateless architecture - each
-    call requires explicit project parameter.
+    a rich context graph of related information.
+
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     Args:
-        project: Required project name to build context from. Must be an existing project.
+        project: Project name to build context from. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         url: memory:// URI pointing to discussion content (e.g. memory://specs/search)
         depth: How many relation hops to traverse (1-3 recommended for performance)
         timeframe: How far back to look. Supports natural language like "2 days ago", "last week"

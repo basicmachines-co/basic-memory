@@ -29,15 +29,10 @@ async def read_note(
 
     Finds and retrieves a note by its title, permalink, or content search,
     returning the raw markdown content including observations, relations, and metadata.
-    Uses stateless architecture - each call requires explicit project parameter.
 
-    Project Selection:
-    If you don't know which project to use:
-    1. Call list_memory_projects() to discover available projects
-    2. Or call recent_activity() to see project activity and get recommendations
-    3. Ask the user which project to read from
-    4. Remember their choice for the entire conversation session
-    5. Only ask again if the user explicitly mentions switching projects
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     This tool will try multiple lookup strategies to find the most relevant note:
     1. Direct permalink lookup
@@ -45,8 +40,9 @@ async def read_note(
     3. Text search as last resort
 
     Args:
-        project: Required project name to read from. Must be an existing project.
-                If unknown, use list_memory_projects() to discover available projects.
+        project: Project name to read from. Optional - server will resolve using the
+                hierarchy above. If unknown, use list_memory_projects() to discover
+                available projects.
         identifier: The title or permalink of the note to read
                    Can be a full memory:// URL, a permalink, a title, or search text
         page: Page number for paginated results (default: 1)

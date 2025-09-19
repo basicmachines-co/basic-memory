@@ -24,7 +24,7 @@ async def view_note(
 
     This tool reads a note using the same logic as read_note but displays the content
     as a markdown artifact for better viewing experience in Claude Desktop.
-    Uses stateless architecture - each call requires explicit project parameter.
+    Project parameter optional with server resolution.
 
     After calling this tool, create an artifact using the returned content to display
     the note in a readable format. The tool returns the note content that should be
@@ -32,9 +32,8 @@ async def view_note(
 
     Args:
         identifier: The title or permalink of the note to view
-        project: Optional project name to read from. If not provided, uses default_project
-                (if default_project_mode=true) or CLI constraint. If unknown, use list_memory_projects()
-                to discover available projects.
+        project: Project name to read from. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         page: Page number for paginated results (default: 1)
         page_size: Number of items per page (default: 10)
         context: Optional FastMCP context for performance caching.

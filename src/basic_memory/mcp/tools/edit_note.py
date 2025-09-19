@@ -142,10 +142,10 @@ async def edit_note(
     """Edit an existing markdown note in the knowledge base.
 
     Makes targeted changes to existing notes without rewriting the entire content.
-    Supports three project resolution modes:
-    1. Explicit project parameter (highest priority)
-    2. Default project mode (if enabled in config)
-    3. CLI constraint mode (--project flag)
+
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     Args:
         identifier: The exact title, permalink, or memory:// URL of the note to edit.
@@ -157,8 +157,8 @@ async def edit_note(
                   - "find_replace": Replace occurrences of find_text with content
                   - "replace_section": Replace content under a specific markdown header
         content: The content to add or use for replacement
-        project: Optional project name. If not provided, uses default_project (if default_project_mode=true)
-               . If unknown, use list_memory_projects() to discover available projects.
+        project: Project name to edit in. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)

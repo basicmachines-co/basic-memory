@@ -35,16 +35,10 @@ async def write_note(
     """Write a markdown note to the knowledge base.
 
     Creates or updates a markdown note with semantic observations and relations.
-    Supports three project resolution modes:
-    1. Explicit project parameter (highest priority)
-    2. Default project mode (if enabled in config)
-    3. Single project mode (--project flag passed to mcp server)
 
-    Project Selection:
-    - If default_project_mode=true in config: project parameter is optional
-    - If default_project_mode=false: provide project parameter or use project discovery
-    - For project discovery: call list_memory_projects() or recent_activity()
-    - Remember project choice for the entire conversation session
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     The content can include semantic observations and relations using markdown syntax:
 
@@ -70,8 +64,9 @@ async def write_note(
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
                 Use forward slashes (/) as separators. Examples: "notes", "projects/2025", "research/ml"
-        project: Optional project name. If not provided, uses default_project (if default_project_mode=true)
-               . If unknown, use list_memory_projects() to discover available projects.
+        project: Project name to write to. Optional - server will resolve using the
+                hierarchy above. If unknown, use list_memory_projects() to discover
+                available projects.
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.

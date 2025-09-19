@@ -154,15 +154,17 @@ async def delete_note(
 ) -> bool | str:
     """Delete a note from the knowledge base.
 
-    Permanently removes a note from the specified project. Uses stateless
-    architecture - each call requires explicit project parameter.
+    Permanently removes a note from the specified project. The note is identified
+    by title or permalink. If the note doesn't exist, the operation returns False
+    without error. If deletion fails due to other issues, helpful error messages are provided.
 
-    The note is identified by title or permalink. If the note doesn't exist,
-    the operation returns False without error. If deletion fails due to other
-    issues, helpful error messages are provided.
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
 
     Args:
-        project: Required project name to delete from. Must be an existing project.
+        project: Project name to delete from. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         identifier: Note title or permalink to delete
                    Can be a title like "Meeting Notes" or permalink like "notes/meeting-notes"
         context: Optional FastMCP context for performance caching.
