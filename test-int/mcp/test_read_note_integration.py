@@ -9,7 +9,7 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_read_note_after_write(mcp_server, app):
+async def test_read_note_after_write(mcp_server, app, test_project):
     """Test read_note after write_note using real database."""
 
     async with Client(mcp_server) as client:
@@ -17,6 +17,7 @@ async def test_read_note_after_write(mcp_server, app):
         write_result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Test Note",
                 "folder": "test",
                 "content": "# Test Note\n\nThis is test content.",
@@ -32,6 +33,7 @@ async def test_read_note_after_write(mcp_server, app):
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Test Note",
             },
         )

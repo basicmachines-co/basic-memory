@@ -56,12 +56,38 @@ async def setup_test_note(entity_service, search_service) -> AsyncGenerator[dict
     }
 
 
-def test_write_note(cli_env, project_config):
+def test_write_note(cli_env, project_config, test_project):
     """Test write_note command with basic arguments."""
     result = runner.invoke(
         tool_app,
         [
             "write-note",
+            "--title",
+            "CLI Test Note",
+            "--content",
+            "This is a CLI test note",
+            "--folder",
+            "test",
+            "--project",
+            test_project.name,
+        ],
+    )
+    assert result.exit_code == 0
+
+    # Check for expected success message
+    assert "CLI Test Note" in result.stdout
+    assert "Created" in result.stdout or "Updated" in result.stdout
+    assert "permalink" in result.stdout
+
+
+def test_write_note_with_project_arg(cli_env, project_config, test_project):
+    """Test write_note command with basic arguments."""
+    result = runner.invoke(
+        tool_app,
+        [
+            "write-note",
+            "--project",
+            test_project.name,
             "--title",
             "CLI Test Note",
             "--content",
@@ -209,11 +235,11 @@ def test_read_note(cli_env, setup_test_note):
     # so we're not asserting their presence
 
 
-def test_search_basic(cli_env, setup_test_note):
+def test_search_basic(cli_env, setup_test_note, test_project):
     """Test basic search command."""
     result = runner.invoke(
         tool_app,
-        ["search-notes", "test observation"],
+        ["search-notes", "test observation", "--project", test_project.name],
     )
     assert result.exit_code == 0
 
@@ -366,7 +392,7 @@ def test_build_context_string_depth_parameter(cli_env, setup_test_note):
 # into separate files with improved error handling
 
 
-def test_recent_activity(cli_env, setup_test_note):
+def test_recent_activity(cli_env, setup_test_note, test_project):
     """Test recent_activity command with defaults."""
     result = runner.invoke(
         tool_app,
@@ -374,23 +400,16 @@ def test_recent_activity(cli_env, setup_test_note):
     )
     assert result.exit_code == 0
 
-    # Result should be JSON containing recent activity
-    activity_result = json.loads(result.stdout)
-    assert "results" in activity_result
-    assert "metadata" in activity_result
+    # Result should be human-readable string containing recent activity
+    output = result.stdout
+    assert "Recent Activity Summary" in output
+    assert "Most Active Project:" in output or "Other Active Projects:" in output
 
-    # Our test note should be in the recent activity
-    found = False
-    for item in activity_result["results"]:
-        if "primary_result" in item and "permalink" in item["primary_result"]:
-            if setup_test_note["permalink"] == item["primary_result"]["permalink"]:
-                found = True
-                break
-
-    assert found, "Recent activity did not include the test note"
+    # Our test note should be referenced in the output
+    assert setup_test_note["permalink"] in output or setup_test_note["title"] in output
 
 
-def test_recent_activity_with_options(cli_env, setup_test_note):
+def test_recent_activity_with_options(cli_env, setup_test_note, test_project):
     """Test recent_activity command with options."""
     result = runner.invoke(
         tool_app,
@@ -402,27 +421,17 @@ def test_recent_activity_with_options(cli_env, setup_test_note):
             "2",
             "--timeframe",
             "7d",
-            "--page",
-            "1",
-            "--page-size",
-            "20",
-            "--max-related",
-            "20",
         ],
     )
     assert result.exit_code == 0
 
-    # Result should be JSON containing recent activity
-    activity_result = json.loads(result.stdout)
+    # Result should be human-readable string containing recent activity
+    output = result.stdout
+    assert "Recent Activity Summary" in output
+    assert "Most Active Project:" in output or "Other Active Projects:" in output
 
-    # Check that requested entity types are included
-    entity_types = set()
-    for item in activity_result["results"]:
-        if "primary_result" in item and "type" in item["primary_result"]:
-            entity_types.add(item["primary_result"]["type"])
-
-    # Should find entity type since we requested it
-    assert "entity" in entity_types
+    # Should include information about entities since we requested entity type
+    assert setup_test_note["permalink"] in output or setup_test_note["title"] in output
 
 
 def test_continue_conversation(cli_env, setup_test_note):

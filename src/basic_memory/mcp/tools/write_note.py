@@ -5,7 +5,7 @@ from typing import List, Union, Optional
 from loguru import logger
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
 from basic_memory.schemas import EntityResponse
@@ -27,15 +27,20 @@ async def write_note(
     title: str,
     content: str,
     folder: str,
-    tags=None,  # Remove type hint completely to avoid schema issues
-    entity_type: str = "note",
     project: Optional[str] = None,
+    tags=None,
+    entity_type: str = "note",
     context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
 
-    The content can include semantic observations and relations using markdown syntax.
-    Relations can be specified either explicitly or through inline wiki-style links:
+    Creates or updates a markdown note with semantic observations and relations.
+
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
+
+    The content can include semantic observations and relations using markdown syntax:
 
     Observations format:
         `- [category] Observation text #tag1 #tag2 (optional context)`
@@ -52,31 +57,72 @@ async def write_note(
         Examples:
         `- depends_on [[Content Parser]] (Need for semantic extraction)`
         `- implements [[Search Spec]] (Initial implementation)`
-        `- This feature extends [[Base Design]] andst uses [[Core Utils]]`
+        `- This feature extends [[Base Design]] and uses [[Core Utils]]`
 
     Args:
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
                 Use forward slashes (/) as separators. Examples: "notes", "projects/2025", "research/ml"
+        project: Project name to write to. Optional - server will resolve using the
+                hierarchy above. If unknown, use list_memory_projects() to discover
+                available projects.
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
-        project: Optional project name to write to. If not provided, uses current active project.
-        context: Optional FastMCP context for project session management (cloud mode).
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         A markdown formatted summary of the semantic content, including:
-        - Creation/update status
+        - Creation/update status with project name
         - File path and checksum
         - Observation counts by category
         - Relation counts (resolved/unresolved)
         - Tags if present
-    """
-    logger.info(f"MCP tool call tool=write_note folder={folder}, title={title}, tags={tags}")
+        - Session tracking metadata for project awareness
 
-    # Get the active project first to check project-specific sync status
-    active_project = await get_active_project(client, context=context, project_override=project)
+    Examples:
+        # Assistant flow when project is unknown
+        # 1. list_memory_projects() -> Ask user which project
+        # 2. User: "Use my-research"
+        # 3. write_note(...) and remember "my-research" for session
+
+        # Create a simple note
+        write_note(
+            project="my-research",
+            title="Meeting Notes",
+            folder="meetings",
+            content="# Weekly Standup\\n\\n- [decision] Use SQLite for storage #tech"
+        )
+
+        # Create a note with tags and entity type
+        write_note(
+            project="work-project",
+            title="API Design",
+            folder="specs",
+            content="# REST API Specification\\n\\n- implements [[Authentication]]",
+            tags=["api", "design"],
+            entity_type="guide"
+        )
+
+        # Update existing note (same title/folder)
+        write_note(
+            project="my-research",
+            title="Meeting Notes",
+            folder="meetings",
+            content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech"
+        )
+
+    Raises:
+        HTTPError: If project doesn't exist or is inaccessible
+        SecurityError: If folder path attempts path traversal
+    """
+    logger.info(
+        f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}"
+    )
+
+    # Get and validate the project (supports optional project parameter)
+    active_project = await get_active_project(client, project, context)
 
     # Validate folder path to prevent path traversal attacks
     project_path = active_project.home
@@ -119,6 +165,7 @@ async def write_note(
     action = "Created" if response.status_code == 201 else "Updated"
     summary = [
         f"# {action} note",
+        f"project: {active_project.name}",
         f"file_path: {result.file_path}",
         f"permalink: {result.permalink}",
         f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
@@ -155,6 +202,7 @@ async def write_note(
 
     # Log the response with structured data
     logger.info(
-        f"MCP tool response: tool=write_note action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} status_code={response.status_code}"
+        f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} status_code={response.status_code}"
     )
-    return "\n".join(summary)
+    result = "\n".join(summary)
+    return add_project_metadata(result, active_project.name)

@@ -9,7 +9,7 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_delete_note_by_title(mcp_server, app):
+async def test_delete_note_by_title(mcp_server, app, test_project):
     """Test deleting a note by its title."""
 
     async with Client(mcp_server) as client:
@@ -17,6 +17,7 @@ async def test_delete_note_by_title(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Note to Delete",
                 "folder": "test",
                 "content": "# Note to Delete\n\nThis note will be deleted.",
@@ -28,6 +29,7 @@ async def test_delete_note_by_title(mcp_server, app):
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Note to Delete",
             },
         )
@@ -38,6 +40,7 @@ async def test_delete_note_by_title(mcp_server, app):
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "Note to Delete",
             },
         )
@@ -51,6 +54,7 @@ async def test_delete_note_by_title(mcp_server, app):
         read_after_delete = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Note to Delete",
             },
         )
@@ -63,7 +67,7 @@ async def test_delete_note_by_title(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_by_permalink(mcp_server, app):
+async def test_delete_note_by_permalink(mcp_server, app, test_project):
     """Test deleting a note by its permalink."""
 
     async with Client(mcp_server) as client:
@@ -71,6 +75,7 @@ async def test_delete_note_by_permalink(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Permalink Delete Test",
                 "folder": "tests",
                 "content": "# Permalink Delete Test\n\nTesting deletion by permalink.",
@@ -82,6 +87,7 @@ async def test_delete_note_by_permalink(mcp_server, app):
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "tests/permalink-delete-test",
             },
         )
@@ -94,6 +100,7 @@ async def test_delete_note_by_permalink(mcp_server, app):
         search_result = await client.call_tool(
             "search_notes",
             {
+                "project": test_project.name,
                 "query": "Permalink Delete Test",
             },
         )
@@ -106,7 +113,7 @@ async def test_delete_note_by_permalink(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_with_observations_and_relations(mcp_server, app):
+async def test_delete_note_with_observations_and_relations(mcp_server, app, test_project):
     """Test deleting a note that has observations and relations."""
 
     async with Client(mcp_server) as client:
@@ -131,6 +138,7 @@ The system handles multiple projects and users."""
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Project Management System",
                 "folder": "projects",
                 "content": complex_content,
@@ -142,6 +150,7 @@ The system handles multiple projects and users."""
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Project Management System",
             },
         )
@@ -154,6 +163,7 @@ The system handles multiple projects and users."""
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "projects/project-management-system",
             },
         )
@@ -165,6 +175,7 @@ The system handles multiple projects and users."""
         read_after_delete_2 = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Project Management System",
             },
         )
@@ -177,7 +188,7 @@ The system handles multiple projects and users."""
 
 
 @pytest.mark.asyncio
-async def test_delete_note_special_characters_in_title(mcp_server, app):
+async def test_delete_note_special_characters_in_title(mcp_server, app, test_project):
     """Test deleting notes with special characters in the title."""
 
     async with Client(mcp_server) as client:
@@ -195,6 +206,7 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
             await client.call_tool(
                 "write_note",
                 {
+                    "project": test_project.name,
                     "title": title,
                     "folder": "special",
                     "content": f"# {title}\n\nContent for {title}",
@@ -207,6 +219,7 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
             delete_result = await client.call_tool(
                 "delete_note",
                 {
+                    "project": test_project.name,
                     "identifier": title,
                 },
             )
@@ -220,6 +233,7 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
             read_after_delete = await client.call_tool(
                 "read_note",
                 {
+                    "project": test_project.name,
                     "identifier": title,
                 },
             )
@@ -232,7 +246,7 @@ async def test_delete_note_special_characters_in_title(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_nonexistent_note(mcp_server, app):
+async def test_delete_nonexistent_note(mcp_server, app, test_project):
     """Test attempting to delete a note that doesn't exist."""
 
     async with Client(mcp_server) as client:
@@ -240,6 +254,7 @@ async def test_delete_nonexistent_note(mcp_server, app):
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "Nonexistent Note",
             },
         )
@@ -250,7 +265,7 @@ async def test_delete_nonexistent_note(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_by_file_path(mcp_server, app):
+async def test_delete_note_by_file_path(mcp_server, app, test_project):
     """Test deleting a note using its file path."""
 
     async with Client(mcp_server) as client:
@@ -258,6 +273,7 @@ async def test_delete_note_by_file_path(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "File Path Delete",
                 "folder": "docs",
                 "content": "# File Path Delete\n\nTesting deletion by file path.",
@@ -269,6 +285,7 @@ async def test_delete_note_by_file_path(mcp_server, app):
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "docs/File Path Delete.md",
             },
         )
@@ -280,6 +297,7 @@ async def test_delete_note_by_file_path(mcp_server, app):
         read_after_delete = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "File Path Delete",
             },
         )
@@ -292,7 +310,7 @@ async def test_delete_note_by_file_path(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_case_insensitive(mcp_server, app):
+async def test_delete_note_case_insensitive(mcp_server, app, test_project):
     """Test that note deletion is case insensitive for titles."""
 
     async with Client(mcp_server) as client:
@@ -300,6 +318,7 @@ async def test_delete_note_case_insensitive(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "CamelCase Note Title",
                 "folder": "test",
                 "content": "# CamelCase Note Title\n\nTesting case sensitivity.",
@@ -311,6 +330,7 @@ async def test_delete_note_case_insensitive(mcp_server, app):
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "camelcase note title",
             },
         )
@@ -320,7 +340,7 @@ async def test_delete_note_case_insensitive(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_multiple_notes_sequentially(mcp_server, app):
+async def test_delete_multiple_notes_sequentially(mcp_server, app, test_project):
     """Test deleting multiple notes in sequence."""
 
     async with Client(mcp_server) as client:
@@ -337,6 +357,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
             await client.call_tool(
                 "write_note",
                 {
+                    "project": test_project.name,
                     "title": title,
                     "folder": "batch",
                     "content": f"# {title}\n\nContent for {title}",
@@ -349,6 +370,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
             delete_result = await client.call_tool(
                 "delete_note",
                 {
+                    "project": test_project.name,
                     "identifier": title,
                 },
             )
@@ -360,6 +382,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
         search_result = await client.call_tool(
             "search_notes",
             {
+                "project": test_project.name,
                 "query": "batch",
             },
         )
@@ -372,7 +395,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_with_unicode_content(mcp_server, app):
+async def test_delete_note_with_unicode_content(mcp_server, app, test_project):
     """Test deleting notes with Unicode content."""
 
     async with Client(mcp_server) as client:
@@ -396,6 +419,7 @@ This note contains various Unicode characters:
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Unicode Test Note",
                 "folder": "unicode",
                 "content": unicode_content,
@@ -407,6 +431,7 @@ This note contains various Unicode characters:
         delete_result = await client.call_tool(
             "delete_note",
             {
+                "project": test_project.name,
                 "identifier": "Unicode Test Note",
             },
         )
@@ -418,6 +443,7 @@ This note contains various Unicode characters:
         read_after_delete = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Unicode Test Note",
             },
         )

@@ -1,5 +1,7 @@
 """Project info tool for Basic Memory MCP server."""
 
+from typing import Optional
+
 from loguru import logger
 from fastmcp import Context
 
@@ -14,7 +16,9 @@ from basic_memory.schemas import ProjectInfoResponse
     uri="memory://{project}/info",
     description="Get information and statistics about the current Basic Memory project.",
 )
-async def project_info(project: str, context: Context | None) -> ProjectInfoResponse:
+async def project_info(
+    project: Optional[str] = None, context: Context | None = None
+) -> ProjectInfoResponse:
     """Get comprehensive information about the current Basic Memory project.
 
     This tool provides detailed statistics and status information about your
@@ -33,14 +37,20 @@ async def project_info(project: str, context: Context | None) -> ProjectInfoResp
     - Identify potential issues like unresolved relations
 
     Args:
-        project (str): The name of the project.
+        project: Optional project name. If not provided, uses default_project
+                (if default_project_mode=true) or CLI constraint. If unknown,
+                use list_memory_projects() to discover available projects.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         Detailed project information and statistics
 
     Examples:
-        # Get information about the current project
-        info = await project_info(name)
+        # Get information about the current/default project
+        info = await project_info()
+
+        # Get information about a specific project
+        info = await project_info(project="my-project")
 
         # Check entity counts
         print(f"Total entities: {info.statistics.total_entities}")
@@ -49,7 +59,7 @@ async def project_info(project: str, context: Context | None) -> ProjectInfoResp
         print(f"Basic Memory version: {info.system.version}")
     """
     logger.info("Getting project info")
-    project_config = await get_active_project(client, context=context, project_override=project)
+    project_config = await get_active_project(client, project, context)
     project_url = project_config.permalink
 
     # Call the API endpoint

@@ -54,6 +54,10 @@ class BasicMemoryConfig(BaseSettings):
         default="main",
         description="Name of the default project to use",
     )
+    default_project_mode: bool = Field(
+        default=False,
+        description="When True, MCP tools automatically use default_project when no project parameter is specified. Enables simplified UX for single-project workflows.",
+    )
 
     # overridden by ~/.basic-memory/config.json
     log_level: str = "INFO"

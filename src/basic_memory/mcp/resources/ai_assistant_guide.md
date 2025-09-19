@@ -14,6 +14,44 @@ natural conversations. The system automatically creates a semantic knowledge gra
 - **Semantic**: Simple patterns create a structured knowledge graph
 - **Persistent**: Knowledge persists across sessions and conversations
 
+## Project Management and Configuration
+
+Basic Memory uses a **stateless architecture** where each tool call can specify which project to work with. This provides three ways to determine the active project:
+
+### Three-Tier Project Resolution
+
+1. **CLI Constraint (Highest Priority)**: When Basic Memory is started with `--project project-name`, all operations are constrained to that project
+2. **Explicit Project Parameter (Medium Priority)**: When you specify `project="project-name"` in tool calls
+3. **Default Project Mode (Lowest Priority)**: When `default_project_mode=true` in configuration, tools automatically use the configured `default_project`
+
+### Default Project Mode
+
+When `default_project_mode` is enabled in the user's configuration:
+- All tools become more convenient - no need to specify project repeatedly
+- Perfect for users who primarily work with a single project
+- Still allows explicit project specification when needed
+- Falls back gracefully to multi-project mode if no default is configured
+
+```python
+# With default_project_mode enabled, these are equivalent:
+await write_note("My Note", "Content", "folder")
+await write_note("My Note", "Content", "folder", project="default-project")
+
+# You can still override with explicit project:
+await write_note("My Note", "Content", "folder", project="other-project")
+```
+
+### Project Discovery
+
+If you're unsure which project to use:
+```python
+# Discover available projects
+projects = await list_memory_projects()
+
+# See recent activity across projects for recommendations
+activity = await recent_activity()  # Shows cross-project activity and suggestions
+```
+
 ## The Importance of the Knowledge Graph
 
 **Basic Memory's value comes from connections between notes, not just the notes themselves.**
@@ -33,49 +71,120 @@ build these connections!
 
 ## Core Tools Reference
 
+### Knowledge Creation and Editing
+
 ```python
 # Writing knowledge - THE MOST IMPORTANT TOOL!
 response = await write_note(
     title="Search Design",  # Required: Note title
     content="# Search Design\n...",  # Required: Note content
-    folder="specs",  # Optional: Folder to save in
+    folder="specs",  # Required: Folder to save in
     tags=["search", "design"],  # Optional: Tags for categorization
-    verbose=True  # Optional: Get parsing details
+    project="my-project"  # Optional: Explicit project (uses default if not specified)
 )
 
+# Editing existing notes
+await edit_note(
+    identifier="Search Design",  # Required: Note to edit
+    operation="append",  # Required: append, prepend, find_replace, replace_section
+    content="\n## New Section\nAdditional content",  # Required: Content to add/replace
+    project="my-project"  # Optional: Explicit project
+)
+
+# Moving notes
+await move_note(
+    identifier="Search Design",  # Required: Note to move
+    destination_path="archive/old-search-design.md",  # Required: New location
+    project="my-project"  # Optional: Explicit project
+)
+
+# Deleting notes
+success = await delete_note(
+    identifier="Old Draft",  # Required: Note to delete
+    project="my-project"  # Optional: Explicit project
+)
+```
+
+### Knowledge Reading and Discovery
+
+```python
 # Reading knowledge
-content = await read_note("Search Design")  # By title
+content = await read_note("Search Design")  # By title (uses default project)
 content = await read_note("specs/search-design")  # By path
 content = await read_note("memory://specs/search")  # By memory URL
+content = await read_note("Search Design", project="work-docs")  # Explicit project
 
+# Reading raw file content (text, images, binaries)
+file_data = await read_content(
+    path="assets/diagram.png",  # Required: File path
+    project="my-project"  # Optional: Explicit project
+)
+
+# Viewing notes as formatted artifacts
+await view_note(
+    identifier="Search Design",  # Required: Note to view
+    project="my-project",  # Optional: Explicit project
+    page=1,  # Optional: Pagination
+    page_size=10  # Optional: Items per page
+)
+
+# Browsing directory contents
+listing = await list_directory(
+    dir_name="/specs",  # Optional: Directory path (default: "/")
+    depth=2,  # Optional: Recursion depth
+    file_name_glob="*.md",  # Optional: File pattern filter
+    project="my-project"  # Optional: Explicit project
+)
+```
+
+### Search and Context
+
+```python
 # Searching for knowledge
 results = await search_notes(
-    query="authentication system",  # Text to search for
+    query="authentication system",  # Required: Text to search for
+    project="my-project",  # Optional: Explicit project
     page=1,  # Optional: Pagination
-    page_size=10  # Optional: Results per page
+    page_size=10,  # Optional: Results per page
+    search_type="text",  # Optional: "text", "title", or "permalink"
+    types=["entity"],  # Optional: Filter by content types
+    entity_types=["observation"],  # Optional: Filter by entity types
+    after_date="1 week"  # Optional: Recent content only
 )
 
 # Building context from the knowledge graph
 context = await build_context(
-    url="memory://specs/search",  # Starting point
+    url="memory://specs/search",  # Required: Starting point
+    project="my-project",  # Optional: Explicit project
     depth=2,  # Optional: How many hops to follow
-    timeframe="1 month"  # Optional: Recent timeframe
+    timeframe="1 month",  # Optional: Recent timeframe
+    max_related=10  # Optional: Max related items
 )
 
 # Checking recent changes
 activity = await recent_activity(
-    type="all",  # Optional: Entity types to include
+    type=["entity", "relation"],  # Optional: Entity types to include
     depth=1,  # Optional: Related items to include
-    timeframe="1 week"  # Optional: Time window
+    timeframe="1 week",  # Optional: Time window
+    project="my-project"  # Optional: Explicit project (None for cross-project discovery)
 )
+```
 
+### Visualization and Project Management
+
+```python
 # Creating a knowledge visualization
 canvas_result = await canvas(
-    nodes=[{"id": "note1", "label": "Search Design"}],  # Nodes to display
-    edges=[{"from": "note1", "to": "note2"}],  # Connections
-    title="Project Overview",  # Canvas title
-    folder="diagrams"  # Storage location
+    nodes=[{"id": "note1", "type": "file", "file": "Search Design.md"}],  # Required: Nodes
+    edges=[{"id": "edge1", "fromNode": "note1", "toNode": "note2"}],  # Required: Edges
+    title="Project Overview",  # Required: Canvas title
+    folder="diagrams",  # Required: Storage location
+    project="my-project"  # Optional: Explicit project
 )
+
+# Project management
+projects = await list_memory_projects()  # List all available projects
+project_info = await project_info(project="my-project")  # Get project statistics
 ```
 
 ## memory:// URLs Explained
@@ -135,27 +244,31 @@ Users will interact with Basic Memory in patterns like:
 1. **Creating knowledge**:
    ```
    Human: "Let's write up what we discussed about search."
-   
+
    You: I'll create a note capturing our discussion about the search functionality.
-   [Use write_note() to record the conversation details]
+   await write_note(
+       title="Search Functionality Discussion",
+       content="# Search Functionality Discussion\n...",
+       folder="discussions"
+   )
    ```
 
 2. **Referencing existing knowledge**:
    ```
    Human: "Take a look at memory://specs/search"
-   
+
    You: I'll examine that information.
-   [Use build_context() to gather related information]
-   [Then read_note() to access specific content]
+   context = await build_context(url="memory://specs/search")
+   content = await read_note("specs/search")
    ```
 
 3. **Finding information**:
    ```
    Human: "What were our decisions about auth?"
-   
+
    You: Let me find that information for you.
-   [Use search_notes() to find relevant notes]
-   [Then build_context() to understand connections]
+   results = await search_notes(query="auth decisions")
+   context = await build_context(url=f"memory://{results[0].permalink}")
    ```
 
 ## Key Things to Remember
@@ -263,7 +376,7 @@ When creating relations, you can:
 # Example workflow for creating notes with effective relations
 async def create_note_with_effective_relations():
     # Search for existing entities to reference
-    search_results = await search_notes("travel")
+    search_results = await search_notes(query="travel")
     existing_entities = [result.title for result in search_results.primary_results]
 
     # Check if specific entities exist
@@ -297,7 +410,7 @@ async def create_note_with_effective_relations():
 
     # Now create the note with both verified and forward relations
     content = f"""# Tokyo Neighborhood Guide
-    
+
 ## Overview
 Details about different Tokyo neighborhoods and their unique characteristics.
 
@@ -313,7 +426,7 @@ Details about different Tokyo neighborhoods and their unique characteristics.
     result = await write_note(
         title="Tokyo Neighborhood Guide",
         content=content,
-        verbose=True
+        folder="travel"
     )
 
     # You can check which relations were resolved and which are forward references
@@ -335,7 +448,7 @@ Common issues to watch for:
        content = await read_note("Document")
    except:
        # Try search instead
-       results = await search_notes("Document")
+       results = await search_notes(query="Document")
        if results and results.primary_results:
            # Found something similar
            content = await read_note(results.primary_results[0].permalink)
@@ -343,23 +456,40 @@ Common issues to watch for:
 
 2. **Forward References (Unresolved Relations)**
    ```python
-   response = await write_note(..., verbose=True)
+   response = await write_note(
+       title="My Note",
+       content="Content with [[Forward Reference]]",
+       folder="notes"
+   )
    # Check for forward references (unresolved relations)
    forward_refs = []
    for relation in response.get('relations', []):
        if not relation.get('target_id'):
            forward_refs.append(relation.get('to_name'))
-   
+
    if forward_refs:
        # This is a feature, not an error! Inform the user about forward references
        print(f"Note created with forward references to: {forward_refs}")
        print("These will be automatically linked when those notes are created.")
-       
+
        # Optionally suggest creating those entities now
        print("Would you like me to create any of these notes now to complete the connections?")
    ```
 
-3. **Sync Issues**
+3. **Project Discovery Issues**
+   ```python
+   # If user asks about content but no default project is configured
+   try:
+       results = await search_notes(query="user query")
+   except Exception as e:
+       if "project" in str(e).lower():
+           # Show available projects and ask user to choose
+           projects = await list_memory_projects()
+           print(f"Available projects: {[p.name for p in projects]}")
+           print("Which project should I search in?")
+   ```
+
+4. **Sync Issues**
    ```python
    # If information seems outdated
    activity = await recent_activity(timeframe="1 hour")
@@ -369,14 +499,21 @@ Common issues to watch for:
 
 ## Best Practices
 
-1. **Proactively Record Context**
+1. **Smart Project Management**
+    - **For new users**: Call `recent_activity()` without project parameter to discover active projects and get recommendations
+    - **For known projects**: Use explicit project parameters when switching between multiple projects
+    - **For single-project users**: Rely on default_project_mode for convenience
+    - **When uncertain**: Use `list_memory_projects()` to show available options and ask the user
+    - **Remember choices**: Once a user indicates their preferred project, use it consistently throughout the conversation
+
+2. **Proactively Record Context**
     - Offer to capture important discussions
     - Record decisions, rationales, and conclusions
     - Link to related topics
     - Ask for permission first: "Would you like me to save our discussion about [topic]?"
     - Confirm when complete: "I've saved our discussion to Basic Memory"
 
-2. **Create a Rich Semantic Graph**
+3. **Create a Rich Semantic Graph**
     - **Add meaningful observations**: Include at least 3-5 categorized observations in each note
     - **Create deliberate relations**: Connect each note to at least 2-3 related entities
     - **Use existing entities**: Before creating a new relation, search for existing entities
@@ -386,7 +523,7 @@ Common issues to watch for:
       of "relates_to")
     - **Consider bidirectional relations**: When appropriate, create inverse relations in both entities
 
-3. **Structure Content Thoughtfully**
+4. **Structure Content Thoughtfully**
     - Use clear, descriptive titles
     - Organize with logical sections (Context, Decision, Implementation, etc.)
     - Include relevant context and background
@@ -394,20 +531,21 @@ Common issues to watch for:
     - Use a consistent format for similar types of notes
     - Balance detail with conciseness
 
-4. **Navigate Knowledge Effectively**
-    - Start with specific searches
-    - Follow relation paths
+5. **Navigate Knowledge Effectively**
+    - Start with specific searches using `search_notes()`
+    - Follow relation paths with `build_context()`
     - Combine information from multiple sources
-    - Verify information is current
+    - Verify information is current with `recent_activity()`
     - Build a complete picture before responding
+    - Use appropriate project context for searches
 
-5. **Help Users Maintain Their Knowledge**
-    - Suggest organizing related topics
-    - Identify potential duplicates
+6. **Help Users Maintain Their Knowledge**
+    - Suggest organizing related topics across projects when appropriate
+    - Identify potential duplicates using search
     - Recommend adding relations between topics
     - Offer to create summaries of scattered information
-    - Suggest potential missing relations: "I notice this might relate to [topic], would you like me to add that
-      connection?"
+    - Suggest potential missing relations: "I notice this might relate to [topic], would you like me to add that connection?"
+    - Help users decide when to use explicit vs default project parameters
 
 Built with ♥️ b
 y Basic Machines

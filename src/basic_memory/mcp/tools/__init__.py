@@ -21,9 +21,6 @@ from basic_memory.mcp.tools.move_note import move_note
 from basic_memory.mcp.tools.sync_status import sync_status
 from basic_memory.mcp.tools.project_management import (
     list_memory_projects,
-    switch_project,
-    get_current_project,
-    set_default_project,
     create_memory_project,
     delete_project,
 )
@@ -35,7 +32,6 @@ __all__ = [
     "delete_note",
     "delete_project",
     "edit_note",
-    "get_current_project",
     "list_directory",
     "list_memory_projects",
     "move_note",
@@ -43,8 +39,6 @@ __all__ = [
     "read_note",
     "recent_activity",
     "search_notes",
-    "set_default_project",
-    "switch_project",
     "sync_status",
     "view_note",
     "write_note",

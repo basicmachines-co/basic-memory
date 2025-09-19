@@ -5,7 +5,7 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_build_context_valid_urls(mcp_server, app):
+async def test_build_context_valid_urls(mcp_server, app, test_project):
     """Test that build_context works with valid memory URLs."""
 
     async with Client(mcp_server) as client:
@@ -13,6 +13,7 @@ async def test_build_context_valid_urls(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "URL Validation Test",
                 "folder": "testing",
                 "content": "# URL Validation Test\n\nThis note tests URL validation.",
@@ -28,17 +29,19 @@ async def test_build_context_valid_urls(mcp_server, app):
         ]
 
         for url in valid_urls:
-            result = await client.call_tool("build_context", {"url": url})
+            result = await client.call_tool(
+                "build_context", {"project": test_project.name, "url": url}
+            )
 
             # Should return a valid GraphContext response
             assert len(result.content) == 1
-            response = result.content[0].text
+            response = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
             assert '"results"' in response  # Should contain results structure
             assert '"metadata"' in response  # Should contain metadata
 
 
 @pytest.mark.asyncio
-async def test_build_context_invalid_urls_fail_validation(mcp_server, app):
+async def test_build_context_invalid_urls_fail_validation(mcp_server, app, test_project):
     """Test that build_context properly validates and rejects invalid memory URLs."""
 
     async with Client(mcp_server) as client:
@@ -52,7 +55,9 @@ async def test_build_context_invalid_urls_fail_validation(mcp_server, app):
 
         for invalid_url, expected_error in invalid_test_cases:
             with pytest.raises(Exception) as exc_info:
-                await client.call_tool("build_context", {"url": invalid_url})
+                await client.call_tool(
+                    "build_context", {"project": test_project.name, "url": invalid_url}
+                )
 
             error_message = str(exc_info.value).lower()
             assert expected_error in error_message, (
@@ -61,7 +66,7 @@ async def test_build_context_invalid_urls_fail_validation(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_build_context_empty_urls_fail_validation(mcp_server, app):
+async def test_build_context_empty_urls_fail_validation(mcp_server, app, test_project):
     """Test that empty or whitespace-only URLs fail validation."""
 
     async with Client(mcp_server) as client:
@@ -73,7 +78,9 @@ async def test_build_context_empty_urls_fail_validation(mcp_server, app):
 
         for empty_url in empty_urls:
             with pytest.raises(Exception) as exc_info:
-                await client.call_tool("build_context", {"url": empty_url})
+                await client.call_tool(
+                    "build_context", {"project": test_project.name, "url": empty_url}
+                )
 
             error_message = str(exc_info.value)
             # Should fail with validation error (either MinLen or our custom validation)
@@ -87,7 +94,7 @@ async def test_build_context_empty_urls_fail_validation(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_build_context_nonexistent_urls_return_empty_results(mcp_server, app):
+async def test_build_context_nonexistent_urls_return_empty_results(mcp_server, app, test_project):
     """Test that valid but nonexistent URLs return empty results (not errors)."""
 
     async with Client(mcp_server) as client:
@@ -99,24 +106,28 @@ async def test_build_context_nonexistent_urls_return_empty_results(mcp_server, a
         ]
 
         for url in nonexistent_valid_urls:
-            result = await client.call_tool("build_context", {"url": url})
+            result = await client.call_tool(
+                "build_context", {"project": test_project.name, "url": url}
+            )
 
             # Should return valid response with empty results
             assert len(result.content) == 1
-            response = result.content[0].text
+            response = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
             assert '"results":[]' in response  # Empty results
             assert '"total_results":0' in response  # Zero count
             assert '"metadata"' in response  # But should have metadata
 
 
 @pytest.mark.asyncio
-async def test_build_context_error_messages_are_helpful(mcp_server, app):
+async def test_build_context_error_messages_are_helpful(mcp_server, app, test_project):
     """Test that validation error messages provide helpful guidance."""
 
     async with Client(mcp_server) as client:
         # Test double slash error message
         with pytest.raises(Exception) as exc_info:
-            await client.call_tool("build_context", {"url": "memory//bad"})
+            await client.call_tool(
+                "build_context", {"project": test_project.name, "url": "memory//bad"}
+            )
 
         error_msg = str(exc_info.value).lower()
         # Should contain validation error info
@@ -128,7 +139,9 @@ async def test_build_context_error_messages_are_helpful(mcp_server, app):
 
         # Test protocol scheme error message
         with pytest.raises(Exception) as exc_info:
-            await client.call_tool("build_context", {"url": "http://example.com"})
+            await client.call_tool(
+                "build_context", {"project": test_project.name, "url": "http://example.com"}
+            )
 
         error_msg = str(exc_info.value).lower()
         assert (
@@ -140,7 +153,7 @@ async def test_build_context_error_messages_are_helpful(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_build_context_pattern_matching_works(mcp_server, app):
+async def test_build_context_pattern_matching_works(mcp_server, app, test_project):
     """Test that valid pattern matching URLs work correctly."""
 
     async with Client(mcp_server) as client:
@@ -155,6 +168,7 @@ async def test_build_context_pattern_matching_works(mcp_server, app):
             await client.call_tool(
                 "write_note",
                 {
+                    "project": test_project.name,
                     "title": title,
                     "folder": folder,
                     "content": content,
@@ -162,10 +176,12 @@ async def test_build_context_pattern_matching_works(mcp_server, app):
             )
 
         # Test pattern matching
-        result = await client.call_tool("build_context", {"url": "patterns/*"})
+        result = await client.call_tool(
+            "build_context", {"project": test_project.name, "url": "patterns/*"}
+        )
 
         assert len(result.content) == 1
-        response = result.content[0].text
+        response = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Should find the pattern matches but not the other note
         assert '"total_results":2' in response or '"primary_count":2' in response

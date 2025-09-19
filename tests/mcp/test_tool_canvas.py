@@ -9,7 +9,7 @@ from basic_memory.mcp.tools import canvas
 
 
 @pytest.mark.asyncio
-async def test_create_canvas(app, project_config):
+async def test_create_canvas(app, project_config, test_project):
     """Test creating a new canvas file.
 
     Should:
@@ -34,7 +34,9 @@ async def test_create_canvas(app, project_config):
     folder = "visualizations"
 
     # Execute
-    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(
+        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+    )
 
     # Verify result message
     assert result
@@ -52,7 +54,7 @@ async def test_create_canvas(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_create_canvas_with_extension(app, project_config):
+async def test_create_canvas_with_extension(app, project_config, test_project):
     """Test creating a canvas file with .canvas extension already in the title."""
     # Test data
     nodes = [
@@ -71,7 +73,9 @@ async def test_create_canvas_with_extension(app, project_config):
     folder = "visualizations"
 
     # Execute
-    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(
+        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+    )
 
     # Verify
     assert "Created: visualizations/extension-test.canvas" in result
@@ -86,7 +90,7 @@ async def test_create_canvas_with_extension(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_update_existing_canvas(app, project_config):
+async def test_update_existing_canvas(app, project_config, test_project):
     """Test updating an existing canvas file."""
     # First create a canvas
     nodes = [
@@ -105,7 +109,7 @@ async def test_update_existing_canvas(app, project_config):
     folder = "visualizations"
 
     # Create initial canvas
-    await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
+    await canvas.fn(project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder)
 
     # Verify file exists
     file_path = Path(project_config.home) / folder / f"{title}.canvas"
@@ -128,7 +132,13 @@ async def test_update_existing_canvas(app, project_config):
     ]
 
     # Execute update
-    result = await canvas.fn(nodes=updated_nodes, edges=updated_edges, title=title, folder=folder)
+    result = await canvas.fn(
+        project=test_project.name,
+        nodes=updated_nodes,
+        edges=updated_edges,
+        title=title,
+        folder=folder,
+    )
 
     # Verify result indicates update
     assert "Updated: visualizations/update-test.canvas" in result
@@ -140,7 +150,7 @@ async def test_update_existing_canvas(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_create_canvas_with_nested_folders(app, project_config):
+async def test_create_canvas_with_nested_folders(app, project_config, test_project):
     """Test creating a canvas in nested folders that don't exist yet."""
     # Test data
     nodes = [
@@ -159,7 +169,9 @@ async def test_create_canvas_with_nested_folders(app, project_config):
     folder = "visualizations/nested/folders"  # Deep path
 
     # Execute
-    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(
+        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+    )
 
     # Verify
     assert "Created: visualizations/nested/folders/nested-test.canvas" in result
@@ -171,7 +183,7 @@ async def test_create_canvas_with_nested_folders(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_create_canvas_complex_content(app, project_config):
+async def test_create_canvas_complex_content(app, project_config, test_project):
     """Test creating a canvas with complex content structures."""
     # Test data - more complex structure with all node types
     nodes = [
@@ -242,7 +254,9 @@ async def test_create_canvas_complex_content(app, project_config):
     test_file_path.write_text("# Test File\nThis is referenced by the canvas")
 
     # Execute
-    result = await canvas.fn(nodes=nodes, edges=edges, title=title, folder=folder)
+    result = await canvas.fn(
+        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+    )
 
     # Verify
     assert "Created: visualizations/complex-test.canvas" in result

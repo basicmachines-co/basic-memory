@@ -6,10 +6,11 @@ from basic_memory.mcp.tools import write_note
 
 
 @pytest.mark.asyncio
-async def test_write_note_tags_yaml_format(app, project_config):
+async def test_write_note_tags_yaml_format(app, project_config, test_project):
     """Test that write_note creates files with proper YAML list format for tags."""
     # Create a note with tags using write_note
     result = await write_note.fn(
+        project=test_project.name,
         title="YAML Format Test",
         folder="test",
         content="Testing YAML tag formatting",
@@ -37,10 +38,11 @@ async def test_write_note_tags_yaml_format(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_write_note_stringified_json_tags(app, project_config):
+async def test_write_note_stringified_json_tags(app, project_config, test_project):
     """Test that stringified JSON arrays are handled correctly."""
     # This simulates the issue where AI assistants pass tags as stringified JSON
     result = await write_note.fn(
+        project=test_project.name,
         title="Stringified JSON Test",
         folder="test",
         content="Testing stringified JSON tag input",
@@ -67,9 +69,10 @@ async def test_write_note_stringified_json_tags(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_write_note_single_tag_yaml_format(app, project_config):
+async def test_write_note_single_tag_yaml_format(app, project_config, test_project):
     """Test that single tags are still formatted as YAML lists."""
     await write_note.fn(
+        project=test_project.name,
         title="Single Tag Test",
         folder="test",
         content="Testing single tag formatting",
@@ -85,10 +88,14 @@ async def test_write_note_single_tag_yaml_format(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_write_note_no_tags(app, project_config):
+async def test_write_note_no_tags(app, project_config, test_project):
     """Test that notes without tags work normally."""
     await write_note.fn(
-        title="No Tags Test", folder="test", content="Testing note without tags", tags=None
+        project=test_project.name,
+        title="No Tags Test",
+        folder="test",
+        content="Testing note without tags",
+        tags=None,
     )
 
     file_path = project_config.home / "test" / "No Tags Test.md"
@@ -100,10 +107,14 @@ async def test_write_note_no_tags(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_write_note_empty_tags_list(app, project_config):
+async def test_write_note_empty_tags_list(app, project_config, test_project):
     """Test that empty tag lists are handled properly."""
     await write_note.fn(
-        title="Empty Tags Test", folder="test", content="Testing empty tag list", tags=[]
+        project=test_project.name,
+        title="Empty Tags Test",
+        folder="test",
+        content="Testing empty tag list",
+        tags=[],
     )
 
     file_path = project_config.home / "test" / "Empty Tags Test.md"
@@ -114,10 +125,11 @@ async def test_write_note_empty_tags_list(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_write_note_update_preserves_yaml_format(app, project_config):
+async def test_write_note_update_preserves_yaml_format(app, project_config, test_project):
     """Test that updating a note preserves the YAML list format."""
     # First, create the note
     await write_note.fn(
+        project=test_project.name,
         title="Update Format Test",
         folder="test",
         content="Initial content",
@@ -126,6 +138,7 @@ async def test_write_note_update_preserves_yaml_format(app, project_config):
 
     # Then update it with new tags
     result = await write_note.fn(
+        project=test_project.name,
         title="Update Format Test",
         folder="test",
         content="Updated content",
@@ -155,9 +168,10 @@ async def test_write_note_update_preserves_yaml_format(app, project_config):
 
 
 @pytest.mark.asyncio
-async def test_complex_tags_yaml_format(app, project_config):
+async def test_complex_tags_yaml_format(app, project_config, test_project):
     """Test that complex tags with special characters format correctly."""
     await write_note.fn(
+        project=test_project.name,
         title="Complex Tags Test",
         folder="test",
         content="Testing complex tag formats",

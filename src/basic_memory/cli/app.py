@@ -2,7 +2,7 @@ from typing import Optional
 
 import typer
 
-from basic_memory.config import get_project_config, ConfigManager
+from basic_memory.config import ConfigManager
 
 
 def version_callback(value: bool) -> None:
@@ -10,10 +10,7 @@ def version_callback(value: bool) -> None:
     if value:  # pragma: no cover
         import basic_memory
 
-        config = get_project_config()
         typer.echo(f"Basic Memory version: {basic_memory.__version__}")
-        typer.echo(f"Current project: {config.project}")
-        typer.echo(f"Project path: {config.home}")
         raise typer.Exit()
 
 
@@ -23,13 +20,6 @@ app = typer.Typer(name="basic-memory")
 @app.callback()
 def app_callback(
     ctx: typer.Context,
-    project: Optional[str] = typer.Option(
-        None,
-        "--project",
-        "-p",
-        help="Specify which project to use",
-        envvar="BASIC_MEMORY_PROJECT",
-    ),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -47,14 +37,6 @@ def app_callback(
 
         app_config = ConfigManager().config
         ensure_initialization(app_config)
-
-        # Initialize MCP session with the specified project or default
-        if project:  # pragma: no cover
-            # Update the global config to use this project
-            from basic_memory.config import update_current_project
-
-            # TODO set active project via cli
-            update_current_project(project)
 
 
 ## import

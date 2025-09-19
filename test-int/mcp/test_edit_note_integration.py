@@ -9,7 +9,7 @@ from fastmcp import Client
 
 
 @pytest.mark.asyncio
-async def test_edit_note_append_operation(mcp_server, app):
+async def test_edit_note_append_operation(mcp_server, app, test_project):
     """Test appending content to an existing note."""
 
     async with Client(mcp_server) as client:
@@ -17,6 +17,7 @@ async def test_edit_note_append_operation(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Append Test Note",
                 "folder": "test",
                 "content": "# Append Test Note\n\nOriginal content here.",
@@ -28,6 +29,7 @@ async def test_edit_note_append_operation(mcp_server, app):
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Append Test Note",
                 "operation": "append",
                 "content": "\n\n## New Section\n\nThis content was appended.",
@@ -45,6 +47,7 @@ async def test_edit_note_append_operation(mcp_server, app):
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Append Test Note",
             },
         )
@@ -56,7 +59,7 @@ async def test_edit_note_append_operation(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_prepend_operation(mcp_server, app):
+async def test_edit_note_prepend_operation(mcp_server, app, test_project):
     """Test prepending content to an existing note."""
 
     async with Client(mcp_server) as client:
@@ -64,6 +67,7 @@ async def test_edit_note_prepend_operation(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Prepend Test Note",
                 "folder": "test",
                 "content": "# Prepend Test Note\n\nExisting content.",
@@ -75,6 +79,7 @@ async def test_edit_note_prepend_operation(mcp_server, app):
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "test/prepend-test-note",
                 "operation": "prepend",
                 "content": "## Important Update\n\nThis was added at the top.\n\n",
@@ -91,6 +96,7 @@ async def test_edit_note_prepend_operation(mcp_server, app):
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "test/prepend-test-note",
             },
         )
@@ -106,7 +112,7 @@ async def test_edit_note_prepend_operation(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_find_replace_operation(mcp_server, app):
+async def test_edit_note_find_replace_operation(mcp_server, app, test_project):
     """Test find and replace operation on an existing note."""
 
     async with Client(mcp_server) as client:
@@ -114,6 +120,7 @@ async def test_edit_note_find_replace_operation(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Find Replace Test",
                 "folder": "test",
                 "content": """# Find Replace Test
@@ -134,6 +141,7 @@ v1.0.0 introduces new features.""",
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Find Replace Test",
                 "operation": "find_replace",
                 "content": "v1.2.0",
@@ -152,6 +160,7 @@ v1.0.0 introduces new features.""",
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Find Replace Test",
             },
         )
@@ -163,7 +172,7 @@ v1.0.0 introduces new features.""",
 
 
 @pytest.mark.asyncio
-async def test_edit_note_replace_section_operation(mcp_server, app):
+async def test_edit_note_replace_section_operation(mcp_server, app, test_project):
     """Test replacing content under a specific section header."""
 
     async with Client(mcp_server) as client:
@@ -171,6 +180,7 @@ async def test_edit_note_replace_section_operation(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Section Replace Test",
                 "folder": "test",
                 "content": """# Section Replace Test
@@ -192,6 +202,7 @@ Some future work notes.""",
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "test/section-replace-test",
                 "operation": "replace_section",
                 "content": """New implementation approach using microservices.
@@ -215,6 +226,7 @@ All services communicate via message queues.""",
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Section Replace Test",
             },
         )
@@ -229,7 +241,7 @@ All services communicate via message queues.""",
 
 
 @pytest.mark.asyncio
-async def test_edit_note_with_observations_and_relations(mcp_server, app):
+async def test_edit_note_with_observations_and_relations(mcp_server, app, test_project):
     """Test editing a note that has observations and relations, and verify they're updated."""
 
     async with Client(mcp_server) as client:
@@ -254,6 +266,7 @@ Current endpoints include user management."""
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "API Documentation",
                 "folder": "docs",
                 "content": complex_content,
@@ -275,6 +288,7 @@ Current endpoints include user management."""
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "API Documentation",
                 "operation": "append",
                 "content": new_content,
@@ -297,6 +311,7 @@ Current endpoints include user management."""
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "API Documentation",
             },
         )
@@ -307,7 +322,7 @@ Current endpoints include user management."""
 
 
 @pytest.mark.asyncio
-async def test_edit_note_error_handling_note_not_found(mcp_server, app):
+async def test_edit_note_error_handling_note_not_found(mcp_server, app, test_project):
     """Test error handling when trying to edit a non-existent note."""
 
     async with Client(mcp_server) as client:
@@ -315,6 +330,7 @@ async def test_edit_note_error_handling_note_not_found(mcp_server, app):
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Non-existent Note",
                 "operation": "append",
                 "content": "Some content to add",
@@ -330,7 +346,7 @@ async def test_edit_note_error_handling_note_not_found(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_error_handling_text_not_found(mcp_server, app):
+async def test_edit_note_error_handling_text_not_found(mcp_server, app, test_project):
     """Test error handling when find_text is not found in the note."""
 
     async with Client(mcp_server) as client:
@@ -338,6 +354,7 @@ async def test_edit_note_error_handling_text_not_found(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Error Test Note",
                 "folder": "test",
                 "content": "# Error Test Note\n\nThis note has specific content.",
@@ -349,6 +366,7 @@ async def test_edit_note_error_handling_text_not_found(mcp_server, app):
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Error Test Note",
                 "operation": "find_replace",
                 "content": "replacement text",
@@ -366,7 +384,7 @@ async def test_edit_note_error_handling_text_not_found(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_error_handling_wrong_replacement_count(mcp_server, app):
+async def test_edit_note_error_handling_wrong_replacement_count(mcp_server, app, test_project):
     """Test error handling when expected_replacements doesn't match actual occurrences."""
 
     async with Client(mcp_server) as client:
@@ -374,6 +392,7 @@ async def test_edit_note_error_handling_wrong_replacement_count(mcp_server, app)
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Count Test Note",
                 "folder": "test",
                 "content": """# Count Test Note
@@ -389,6 +408,7 @@ Final test of the content.""",
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Count Test Note",
                 "operation": "find_replace",
                 "content": "example",
@@ -407,7 +427,7 @@ Final test of the content.""",
 
 
 @pytest.mark.asyncio
-async def test_edit_note_invalid_operation(mcp_server, app):
+async def test_edit_note_invalid_operation(mcp_server, app, test_project):
     """Test error handling for invalid operation parameter."""
 
     async with Client(mcp_server) as client:
@@ -415,6 +435,7 @@ async def test_edit_note_invalid_operation(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Invalid Op Test",
                 "folder": "test",
                 "content": "# Invalid Op Test\n\nSome content.",
@@ -427,6 +448,7 @@ async def test_edit_note_invalid_operation(mcp_server, app):
             await client.call_tool(
                 "edit_note",
                 {
+                    "project": test_project.name,
                     "identifier": "Invalid Op Test",
                     "operation": "invalid_operation",
                     "content": "Some content",
@@ -440,7 +462,7 @@ async def test_edit_note_invalid_operation(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_missing_required_parameters(mcp_server, app):
+async def test_edit_note_missing_required_parameters(mcp_server, app, test_project):
     """Test error handling when required parameters are missing."""
 
     async with Client(mcp_server) as client:
@@ -448,6 +470,7 @@ async def test_edit_note_missing_required_parameters(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Param Test Note",
                 "folder": "test",
                 "content": "# Param Test Note\n\nContent here.",
@@ -460,6 +483,7 @@ async def test_edit_note_missing_required_parameters(mcp_server, app):
             await client.call_tool(
                 "edit_note",
                 {
+                    "project": test_project.name,
                     "identifier": "Param Test Note",
                     "operation": "find_replace",
                     "content": "replacement",
@@ -473,7 +497,7 @@ async def test_edit_note_missing_required_parameters(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_special_characters_in_content(mcp_server, app):
+async def test_edit_note_special_characters_in_content(mcp_server, app, test_project):
     """Test editing notes with special characters, Unicode, and markdown formatting."""
 
     async with Client(mcp_server) as client:
@@ -481,6 +505,7 @@ async def test_edit_note_special_characters_in_content(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Special Chars Test",
                 "folder": "test",
                 "content": "# Special Chars Test\n\nBasic content here.",
@@ -514,6 +539,7 @@ def test_function():
         edit_result = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Special Chars Test",
                 "operation": "append",
                 "content": special_content,
@@ -532,6 +558,7 @@ def test_function():
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "Special Chars Test",
             },
         )
@@ -545,7 +572,7 @@ def test_function():
 
 
 @pytest.mark.asyncio
-async def test_edit_note_using_different_identifiers(mcp_server, app):
+async def test_edit_note_using_different_identifiers(mcp_server, app, test_project):
     """Test editing notes using different identifier formats (title, permalink, folder/title)."""
 
     async with Client(mcp_server) as client:
@@ -553,6 +580,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
         await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Identifier Test Note",
                 "folder": "docs",
                 "content": "# Identifier Test Note\n\nOriginal content.",
@@ -564,6 +592,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
         edit_result1 = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "Identifier Test Note",  # by title
                 "operation": "append",
                 "content": "\n\nEdited by title.",
@@ -575,6 +604,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
         edit_result2 = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "docs/identifier-test-note",  # by permalink
                 "operation": "append",
                 "content": "\n\nEdited by permalink.",
@@ -586,6 +616,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
         edit_result3 = await client.call_tool(
             "edit_note",
             {
+                "project": test_project.name,
                 "identifier": "docs/Identifier Test Note",  # by folder/title
                 "operation": "append",
                 "content": "\n\nEdited by folder/title.",
@@ -597,6 +628,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app):
         read_result = await client.call_tool(
             "read_note",
             {
+                "project": test_project.name,
                 "identifier": "docs/identifier-test-note",
             },
         )

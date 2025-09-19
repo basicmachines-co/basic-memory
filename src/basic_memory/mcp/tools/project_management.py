@@ -4,19 +4,13 @@ These tools allow users to switch between projects, list available projects,
 and manage project context during conversations.
 """
 
-from textwrap import dedent
-
+import os
 from fastmcp import Context
-from loguru import logger
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_context import add_project_metadata, set_active_project
-from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_put, call_post, call_delete
-from basic_memory.schemas import ProjectInfoResponse
+from basic_memory.mcp.tools.utils import call_get, call_post, call_delete
 from basic_memory.schemas.project_info import (
-    ProjectItem,
     ProjectList,
     ProjectStatusResponse,
     ProjectInfoRequest,
@@ -28,11 +22,20 @@ from basic_memory.utils import generate_permalink
 async def list_memory_projects(context: Context | None = None) -> str:
     """List all available projects with their status.
 
-    Shows all Basic Memory projects that are available, indicating which one
-    is currently active and which is the default.
+    Shows all Basic Memory projects that are available for MCP operations.
+    Use this tool to discover projects when you need to know which project to use.
+
+    Use this tool:
+    - At conversation start when project is unknown
+    - When user asks about available projects
+    - Before any operation requiring a project
+
+    After calling:
+    - Ask user which project to use
+    - Remember their choice for the session
 
     Returns:
-        Formatted list of projects with status indicators
+        Formatted list of projects with session management guidance
 
     Example:
         list_memory_projects()
@@ -40,225 +43,31 @@ async def list_memory_projects(context: Context | None = None) -> str:
     if context:  # pragma: no cover
         await context.info("Listing all available projects")
 
+    # Check if server is constrained to a specific project
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+
     # Get projects from API
     response = await call_get(client, "/projects/projects")
     project_list = ProjectList.model_validate(response.json())
 
-    active_project = await get_active_project(client, context=context)
+    if constrained_project:
+        result = f"Project: {constrained_project}\n\n"
+        result += "Note: This MCP server is constrained to a single project.\n"
+        result += "All operations will automatically use this project."
+    else:
+        # Show all projects with session guidance
+        result = "Available projects:\n"
 
-    result = "Available projects:\n"
-
-    for project in project_list.projects:
-        indicators = []
-        if project.name == active_project.name:
-            indicators.append("current")
-        if project.is_default:
-            indicators.append("default")
-
-        if indicators:
-            result += f"• {project.name} ({', '.join(indicators)})\n"
-        else:
+        for project in project_list.projects:
             result += f"• {project.name}\n"
 
-    return add_project_metadata(result, active_project.name)
+        result += "\n" + "─" * 40 + "\n"
+        result += "Next: Ask which project to use for this session.\n"
+        result += "Example: 'Which project should I use for this task?'\n\n"
+        result += "Session reminder: Track the selected project for all subsequent operations in this conversation.\n"
+        result += "The user can say 'switch to [project]' to change projects."
 
-
-@mcp.tool()
-async def switch_project(project_name: str, context: Context | None = None) -> str:
-    """Switch to a different project context.
-
-    Changes the active project context for all subsequent tool calls.
-    Shows a project summary after switching successfully.
-
-    Args:
-        project_name: Name of the project to switch to
-
-    Returns:
-        Confirmation message with project summary
-
-    Example:
-        switch_project("work-notes")
-        switch_project("personal-journal")
-    """
-    if context:  # pragma: no cover
-        await context.info(f"Switching to project: {project_name}")
-
-    project_permalink = generate_permalink(project_name)
-    current_project = await get_active_project(client, context=context)
-
-    try:
-        # Validate project exists by getting project list
-        response = await call_get(client, "/projects/projects")
-        project_list = ProjectList.model_validate(response.json())
-
-        # Find the project by name (case-insensitive) or permalink
-        target_project = None
-        for p in project_list.projects:
-            # Match by permalink (handles case-insensitive input)
-            if p.permalink == project_permalink:
-                target_project = p
-                break
-            # Also match by name comparison (case-insensitive)
-            if p.name.lower() == project_name.lower():
-                target_project = p
-                break
-
-        if not target_project:
-            available_projects = [p.name for p in project_list.projects]
-            return f"Error: Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
-
-        # Switch to the project using the canonical name from database
-        await set_active_project(client, context=context, project=target_project)
-        current_project = target_project
-        canonical_name = target_project.name
-
-        # Get project info to show summary
-        try:
-            current_project_permalink = generate_permalink(canonical_name)
-            response = await call_get(
-                client,
-                f"/{current_project_permalink}/project/info",
-                params={"project_name": canonical_name},
-            )
-            project_info = ProjectInfoResponse.model_validate(response.json())
-
-            result = f"✓ Switched to {canonical_name} project\n\n"
-            result += "Project Summary:\n"
-            result += f"• {project_info.statistics.total_entities} entities\n"
-            result += f"• {project_info.statistics.total_observations} observations\n"
-            result += f"• {project_info.statistics.total_relations} relations\n"
-
-        except Exception as e:
-            # If we can't get project info, still confirm the switch
-            logger.warning(f"Could not get project info for {canonical_name}: {e}")
-            result = f"✓ Switched to {canonical_name} project\n\n"
-            result += "Project summary unavailable.\n"
-
-        return add_project_metadata(result, canonical_name)
-
-    except Exception as e:
-        logger.error(f"Error switching to project {project_name}: {e}")
-        # Revert to previous project on error
-        await set_active_project(client, context=context, project=current_project)
-
-        # Return user-friendly error message instead of raising exception
-        return dedent(f"""
-            # Project Switch Failed
-
-            Could not switch to project '{project_name}': {str(e)}
-
-            ## Current project: {current_project}
-            Your session remains on the previous project.
-
-            ## Troubleshooting:
-            1. **Check available projects**: Use `list_memory_projects()` to see valid project names
-            2. **Verify spelling**: Ensure the project name is spelled correctly
-            3. **Check permissions**: Verify you have access to the requested project
-            4. **Try again**: The error might be temporary
-
-            ## Available options:
-            - See all projects: `list_memory_projects()`
-            - Stay on current project: `get_current_project()`
-            - Try different project: `switch_project("correct-project-name")`
-
-            If the project should exist but isn't listed, send a message to support@basicmemory.com.
-            """).strip()
-
-
-@mcp.tool()
-async def get_current_project(
-    context: Context | None = None,
-) -> str:
-    """Show the currently active project and basic stats.
-
-    Displays which project is currently active and provides basic information
-    about it.
-
-    Returns:
-        Current project name and basic statistics
-
-    Example:
-        get_current_project()
-    """
-    if context:  # pragma: no cover
-        await context.info("Getting current project information")
-
-    active_project = await get_active_project(client, context=context)
-    current_project = active_project.name
-    result = f"Current project: {current_project}\n\n"
-
-    # get project stats (use permalink in URL path)
-    current_project_permalink = generate_permalink(current_project)
-    response = await call_get(
-        client,
-        f"/{current_project_permalink}/project/info",
-        params={"project_name": current_project},
-    )
-    project_info = ProjectInfoResponse.model_validate(response.json())
-
-    result += f"• {project_info.statistics.total_entities} entities\n"
-    result += f"• {project_info.statistics.total_observations} observations\n"
-    result += f"• {project_info.statistics.total_relations} relations\n"
-
-    default_project = project_info.default_project
-    if current_project != default_project:
-        result += f"• Default project: {default_project}\n"
-
-    return add_project_metadata(result, current_project)
-
-
-@mcp.tool()
-async def set_default_project(
-    project_name: str, activate=True, context: Context | None = None
-) -> str:
-    """Set default project in config.
-
-    Updates the configuration to use a different default project.
-    If activate is True, the default project is activated.
-
-    Args:
-        project_name: Name of the project to set as default
-        activate (bool): Whether the project should be activated or not after setting default. Defaults to True.
-
-    Returns:
-        Confirmation message about config update
-
-    Example:
-        set_default_project("work-notes")
-    """
-    if context:  # pragma: no cover
-        await context.info(f"Setting default project to: {project_name}")
-
-    # Call API to set default project using URL encoding for special characters
-    from urllib.parse import quote
-
-    encoded_name = quote(project_name, safe="")
-    response = await call_put(client, f"/projects/{encoded_name}/default")
-    status_response = ProjectStatusResponse.model_validate(response.json())
-
-    new_default_project = status_response.new_project
-    if new_default_project and activate:
-        # make the project active
-        await set_active_project(
-            client,
-            context=context,
-            project=ProjectItem(
-                name=new_default_project.name, path=new_default_project.path, is_default=True
-            ),
-        )
-
-    result = f"✓ {status_response.message}\n\n"
-    if activate:
-        result += f"Project {project_name} is now active.\n"
-    else:
-        result += "Restart Basic Memory for this change to take effect:\n"
-    result += "basic-memory mcp\n"
-
-    if status_response.old_project:
-        result += f"\nPrevious default: {status_response.old_project.name}\n"
-
-    active_project = await get_active_project(client, context=context)
-    return add_project_metadata(result, active_project.name)
+    return result
 
 
 @mcp.tool("create_memory_project")
@@ -282,6 +91,11 @@ async def create_memory_project(
         create_memory_project("my-research", "~/Documents/research")
         create_memory_project("work-notes", "/home/user/work", set_default=True)
     """
+    # Check if server is constrained to a specific project
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        return f'# Error\n\nProject creation disabled - MCP server is constrained to project \'{constrained_project}\'.\nUse the CLI to create projects: `basic-memory project add "{project_name}" "{project_path}"`'
+
     if context:  # pragma: no cover
         await context.info(f"Creating project: {project_name} at {project_path}")
 
@@ -304,18 +118,10 @@ async def create_memory_project(
         if set_default:
             result += "• Set as default project\n"
 
-    result += "\nProject is now available for use.\n"
+    result += "\nProject is now available for use in tool calls.\n"
+    result += f"Use '{project_name}' as the project parameter in MCP tool calls.\n"
 
-    # If project was set as default, set as active
-    if set_default:
-        await set_active_project(
-            client,
-            context=context,
-            project=ProjectItem(name=project_name, path=project_path, is_default=True),
-        )
-
-    active_project = await get_active_project(client, context=context)
-    return add_project_metadata(result, active_project.name)
+    return result
 
 
 @mcp.tool()
@@ -339,17 +145,13 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
         This action cannot be undone. The project will need to be re-added
         to access its content through Basic Memory again.
     """
+    # Check if server is constrained to a specific project
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        return f"# Error\n\nProject deletion disabled - MCP server is constrained to project '{constrained_project}'.\nUse the CLI to delete projects: `basic-memory project remove \"{project_name}\"`"
+
     if context:  # pragma: no cover
         await context.info(f"Deleting project: {project_name}")
-
-    active_project = await get_active_project(client, context=context)
-    current_project = active_project.name
-
-    # Check if trying to delete current project
-    if project_name == current_project:
-        raise ValueError(
-            f"Cannot delete the currently active project '{project_name}'. Switch to a different project first."
-        )
 
     # Get project info before deletion to validate it exists
     response = await call_get(client, "/projects/projects")
@@ -392,4 +194,4 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
     result += "Files remain on disk but project is no longer tracked by Basic Memory.\n"
     result += "Re-add the project to access its content again.\n"
 
-    return add_project_metadata(result, current_project)
+    return result
