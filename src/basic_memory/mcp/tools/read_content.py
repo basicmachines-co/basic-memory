@@ -8,6 +8,8 @@ Files are read directly without any knowledge graph processing.
 import base64
 import io
 
+from typing import Optional
+
 from loguru import logger
 from PIL import Image as PILImage
 from fastmcp import Context
@@ -147,7 +149,9 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 
 
 @mcp.tool(description="Read a file's raw content by path or permalink")
-async def read_content(project: str, path: str, context: Context | None = None) -> dict:
+async def read_content(
+    path: str, project: Optional[str] = None, context: Context | None = None
+) -> dict:
     """Read a file's raw content by path or permalink.
 
     This tool provides direct access to file content in the knowledge base,
@@ -160,11 +164,13 @@ async def read_content(project: str, path: str, context: Context | None = None) 
     - Other binary files are returned as base64 if below size limits
 
     Args:
-        project: Required project name to read from. Must be an existing project.
         path: The path or permalink to the file. Can be:
             - A regular file path (docs/example.md)
             - A memory URL (memory://docs/example)
             - A permalink (docs/example)
+        project: Optional project name to read from. If not provided, uses default_project
+                (if default_project_mode=true). If unknown, use list_memory_projects()
+                to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -176,16 +182,19 @@ async def read_content(project: str, path: str, context: Context | None = None) 
 
     Examples:
         # Read a markdown file
-        result = await read_content("my-project", "docs/project-specs.md")
+        result = await read_content("docs/project-specs.md")
 
         # Read an image
-        image_data = await read_content("work-docs", "assets/diagram.png")
+        image_data = await read_content("assets/diagram.png")
 
         # Read using memory URL
-        content = await read_content("research", "memory://docs/architecture")
+        content = await read_content("memory://docs/architecture")
 
         # Read configuration file
-        config = await read_content("api-project", "config/settings.json")
+        config = await read_content("config/settings.json")
+
+        # Explicit project specification
+        result = await read_content("docs/project-specs.md", project="my-project")
 
     Raises:
         HTTPError: If project doesn't exist or is inaccessible

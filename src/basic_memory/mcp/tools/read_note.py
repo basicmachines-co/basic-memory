@@ -1,6 +1,7 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
+from typing import Optional
 
 from loguru import logger
 from fastmcp import Context
@@ -18,8 +19,8 @@ from basic_memory.utils import validate_project_path
     description="Read a markdown note by title or permalink.",
 )
 async def read_note(
-    project: str,
     identifier: str,
+    project: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
     context: Context | None = None,
@@ -170,7 +171,7 @@ async def read_note(
         return format_related_results(project, identifier, text_results.results[:5])
 
 
-def format_not_found_message(project: str, identifier: str) -> str:
+def format_not_found_message(project: str | None, identifier: str) -> str:
     """Format a helpful message when no note was found."""
     return dedent(f"""
         # Note Not Found in {project}: "{identifier}"
@@ -217,7 +218,7 @@ def format_not_found_message(project: str, identifier: str) -> str:
     """)
 
 
-def format_related_results(project: str, identifier: str, results) -> str:
+def format_related_results(project: str | None, identifier: str, results) -> str:
     """Format a helpful message with related results when an exact match wasn't found."""
     message = dedent(f"""
         # Note Not Found in {project}: "{identifier}"

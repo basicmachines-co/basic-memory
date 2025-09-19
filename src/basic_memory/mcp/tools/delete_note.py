@@ -1,4 +1,5 @@
 from textwrap import dedent
+from typing import Optional
 
 from loguru import logger
 from fastmcp import Context
@@ -148,7 +149,9 @@ If the note should be deleted but the operation keeps failing, send a message to
 
 
 @mcp.tool(description="Delete a note by title or permalink")
-async def delete_note(project: str, identifier: str, context: Context | None = None) -> bool | str:
+async def delete_note(
+    identifier: str, project: Optional[str] = None, context: Context | None = None
+) -> bool | str:
     """Delete a note from the knowledge base.
 
     Permanently removes a note from the specified project. Uses stateless

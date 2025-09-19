@@ -350,9 +350,9 @@ delete_note("{identifier}")
     description="Move a note to a new location, updating database and maintaining links.",
 )
 async def move_note(
-    project: str,
     identifier: str,
     destination_path: str,
+    project: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """Move a note to a new file location within the same project.
@@ -362,11 +362,13 @@ async def move_note(
     each call requires explicit project parameter.
 
     Args:
-        project: Required project name to move within. Must be an existing project.
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
+        project: Optional project name to move within. If not provided, uses default_project
+                (if default_project_mode=true). If unknown, use list_memory_projects()
+                to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -374,17 +376,20 @@ async def move_note(
 
     Examples:
         # Move to new folder (exact title match)
-        move_note("work-project", "My Note", "work/notes/my-note.md")
+        move_note("My Note", "work/notes/my-note.md")
 
         # Move by exact permalink
-        move_note("my-project", "my-note-permalink", "archive/old-notes/my-note.md")
+        move_note("my-note-permalink", "archive/old-notes/my-note.md")
 
         # Move with complex path structure
-        move_note("research", "experiments/ml-results", "archive/2025/ml-experiments.md")
+        move_note("experiments/ml-results", "archive/2025/ml-experiments.md")
+
+        # Explicit project specification
+        move_note("My Note", "work/notes/my-note.md", project="work-project")
 
         # If uncertain about identifier, search first:
-        # search_notes("my-project", "my note")  # Find available notes
-        # move_note("my-project", "docs/my-note-2025", "archive/my-note.md")  # Use exact result
+        # search_notes("my note")  # Find available notes
+        # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
 
     Raises:
         ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid

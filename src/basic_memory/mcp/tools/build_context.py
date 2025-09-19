@@ -37,8 +37,8 @@ type StringOrInt = str | int
     """,
 )
 async def build_context(
-    project: str,
     url: MemoryUrl,
+    project: Optional[str] = None,
     depth: Optional[StringOrInt] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,

@@ -219,6 +219,55 @@ Phase 1: Core Changes
   - [x] **147 existing tests** updated for stateless architecture
   - [x] **10 new tests** for single project constraint mode                                                                   
                                                                                                                              
+### Phase 1.5: Default Project Mode Enhancement
+
+#### Problem
+While the stateless architecture solves reliability issues, it introduces UX friction for single-project users (estimated 80% of usage) who must specify the project parameter in every tool call.
+
+#### Solution: Default Project Mode
+Add optional `default_project_mode` configuration that allows single-project users to have the simplicity of implicit project selection while maintaining the reliability of stateless architecture.
+
+#### Configuration
+```json
+{
+  "default_project": "main",
+  "default_project_mode": true  // NEW: Auto-use default_project when not specified
+}
+```
+
+#### Implementation Details
+1. **Config Enhancement** (`src/basic_memory/config.py`)
+   - Add `default_project_mode: bool = Field(default=False)`
+   - Preserves backward compatibility (defaults to false)
+
+2. **Project Resolution Logic** (`src/basic_memory/mcp/project_context.py`)
+   Three-tier resolution hierarchy:
+   - Priority 1: CLI `--project` constraint (BASIC_MEMORY_MCP_PROJECT env var)
+   - Priority 2: Explicit project parameter in tool call
+   - Priority 3: `default_project` if `default_project_mode=true` and no project specified
+
+3. **Assistant Guide Updates** (`src/basic_memory/mcp/resources/ai_assistant_guide.md`)
+   - Detect `default_project_mode` at runtime
+   - Provide mode-specific instructions to LLMs
+   - In default mode: "All operations use project 'main' automatically"
+   - In regular mode: Current project discovery guidance
+
+4. **Tool Parameter Handling** (all MCP tools)
+   - Make project parameter Optional[str] = None
+   - Add resolution logic: `project = project or get_default_project()`
+   - Maintain explicit project override capability
+
+#### Usage Modes Summary
+- **Regular Mode**: Multi-project users, assistant tracks project per conversation
+- **Default Project Mode**: Single-project users, automatic default project
+- **Constrained Mode**: CLI --project flag, locked to specific project
+
+#### Testing Requirements
+- Integration test for default_project_mode=true with missing parameters
+- Test explicit project override in default_project_mode
+- Test mode=false requires explicit parameters
+- Test CLI constraint overrides default_project_mode
+
 Phase 2: Testing & Validation
 
 8. Update Tests

@@ -35,7 +35,7 @@ async def test_write_note(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Try reading it back via permalink
-    content = await read_note.fn(test_project.name, "test/test-note")
+    content = await read_note.fn("test/test-note", project=test_project.name)
     assert (
         normalize_newlines(
             dedent("""
@@ -70,7 +70,7 @@ async def test_write_note_no_tags(app, test_project):
     assert "permalink: test/simple-note" in result
     assert f"[Session: Using project '{test_project.name}']" in result
     # Should be able to read it back
-    content = await read_note.fn(test_project.name, "test/simple-note")
+    content = await read_note.fn("test/simple-note", project=test_project.name)
     assert (
         normalize_newlines(
             dedent("""
@@ -130,7 +130,7 @@ async def test_write_note_update_existing(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Try reading it back
-    content = await read_note.fn(test_project.name, "test/test-note")
+    content = await read_note.fn("test/test-note", project=test_project.name)
     assert (
         normalize_newlines(
             dedent(
@@ -257,7 +257,7 @@ async def test_delete_note_existing(app, test_project):
     assert result
     assert f"project: {test_project.name}" in result
 
-    deleted = await delete_note.fn(test_project.name, "test/test-note")
+    deleted = await delete_note.fn("test/test-note", project=test_project.name)
     assert deleted is True
 
 
@@ -269,7 +269,7 @@ async def test_delete_note_doesnt_exist(app, test_project):
     - Delete the note
     - verify returns false
     """
-    deleted = await delete_note.fn(test_project.name, "doesnt-exist")
+    deleted = await delete_note.fn("doesnt-exist", project=test_project.name)
     assert deleted is False
 
 
@@ -358,7 +358,7 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
     )
 
     # Read the note to get its permalink
-    content = await read_note.fn(test_project.name, "test/custom-metadata-note")
+    content = await read_note.fn("test/custom-metadata-note", project=test_project.name)
 
     # Now directly update the file with custom frontmatter
     # We need to use a direct file update to add custom frontmatter
@@ -392,7 +392,7 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
     assert f"project: {test_project.name}" in result
 
     # Read the note back and check if custom frontmatter is preserved
-    content = await read_note.fn(test_project.name, "test/custom-metadata-note")
+    content = await read_note.fn("test/custom-metadata-note", project=test_project.name)
 
     # Custom frontmatter should be preserved
     assert "Status: In Progress" in content
@@ -433,7 +433,7 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
     )
 
     # Try reading it back via permalink
-    content = await read_note.fn(test_project.name, "test/test-note")
+    content = await read_note.fn("test/test-note", project=test_project.name)
     assert (
         normalize_newlines(
             dedent(
@@ -514,7 +514,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     # Verify we can read back the content
     if "permalink: test/note-1" in result3:
         # Updated existing note case
-        content = await read_note.fn(test_project.name, "test/note-1")
+        content = await read_note.fn("test/note-1", project=test_project.name)
         assert "Replacement content for note 1" in content
     else:
         # Created new note with unique permalink case
@@ -551,7 +551,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
-    content = await read_note.fn(test_project.name, "guides/test-guide")
+    content = await read_note.fn("guides/test-guide", project=test_project.name)
     assert (
         normalize_newlines(
             dedent("""
@@ -592,7 +592,7 @@ async def test_write_note_with_report_entity_type(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
-    content = await read_note.fn(test_project.name, "reports/monthly-report")
+    content = await read_note.fn("reports/monthly-report", project=test_project.name)
     assert "type: report" in content
     assert "# Monthly Report" in content
 
@@ -616,7 +616,7 @@ async def test_write_note_with_config_entity_type(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
-    content = await read_note.fn(test_project.name, "config/system-config")
+    content = await read_note.fn("config/system-config", project=test_project.name)
     assert "type: config" in content
     assert "# System Configuration" in content
 
@@ -644,7 +644,7 @@ async def test_write_note_entity_type_default_behavior(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type defaults to "note"
-    content = await read_note.fn(test_project.name, "test/default-type-test")
+    content = await read_note.fn("test/default-type-test", project=test_project.name)
     assert "type: note" in content
     assert "# Default Type Test" in content
 
@@ -681,7 +681,7 @@ async def test_write_note_update_existing_with_different_entity_type(app, test_p
     assert f"project: {test_project.name}" in result2
 
     # Verify the entity type was updated
-    content = await read_note.fn(test_project.name, "test/changeable-type")
+    content = await read_note.fn("test/changeable-type", project=test_project.name)
     assert "type: guide" in content
     assert "# Updated Content" in content
     assert "- guide" in content
@@ -722,7 +722,7 @@ async def test_write_note_respects_frontmatter_entity_type(app, test_project):
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type from frontmatter is respected (should be "guide", not "note")
-    content = await read_note.fn(test_project.name, "guides/test-guide")
+    content = await read_note.fn("guides/test-guide", project=test_project.name)
     assert "type: guide" in content
     assert "# Guide Content" in content
     assert "- guide" in content

@@ -42,7 +42,7 @@ async def test_read_note_by_title(app, test_project):
     )
 
     # Should be able to read it by title
-    content = await read_note.fn(test_project.name, "Special Note")
+    content = await read_note.fn("Special Note", project=test_project.name)
     assert "Note content here" in content
 
 
@@ -66,7 +66,7 @@ async def test_note_unicode_content(app, test_project):
     )
 
     # Read back should preserve unicode
-    result = await read_note.fn(test_project.name, "test/unicode-test")
+    result = await read_note.fn("test/unicode-test", project=test_project.name)
     assert normalize_newlines(content) in result
 
 
@@ -87,12 +87,12 @@ async def test_multiple_notes(app, test_project):
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(test_project.name, permalink)
+        note = await read_note.fn(permalink, project=test_project.name)
         assert content in note
 
     # read multiple notes at once
 
-    result = await read_note.fn(test_project.name, "test/*")
+    result = await read_note.fn("test/*", project=test_project.name)
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -122,11 +122,11 @@ async def test_multiple_notes_pagination(app, test_project):
 
     # Should be able to read each one
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(test_project.name, permalink)
+        note = await read_note.fn(permalink, project=test_project.name)
         assert content in note
 
     # read multiple notes at once with pagination
-    result = await read_note.fn(test_project.name, "test/*", page=1, page_size=2)
+    result = await read_note.fn("test/*", page=1, page_size=2, project=test_project.name)
 
     # note we can't compare times
     assert "--- memory://test/note-1" in result
@@ -156,7 +156,7 @@ async def test_read_note_memory_url(app, test_project):
 
     # Should be able to read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    content = await read_note.fn(test_project.name, memory_url)
+    content = await read_note.fn(memory_url, project=test_project.name)
     assert "Testing memory:// URL handling" in content
 
 
@@ -178,7 +178,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note.fn(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -200,7 +200,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note.fn(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -332,7 +332,7 @@ class TestReadNoteSecurityValidation:
         )
 
         # Test reading by title (should work)
-        result = await read_note.fn(test_project.name, "Security Test Note")
+        result = await read_note.fn("Security Test Note", project=test_project.name)
 
         assert isinstance(result, str)
         # Should not be a security error
@@ -343,7 +343,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_empty_identifier_security(self, app, test_project):
         """Test that empty identifier is handled securely."""
         # Empty identifier should be allowed (may return search results or error, but not security error)
-        result = await read_note.fn(test_project.name, identifier="")
+        result = await read_note.fn(identifier="", project=test_project.name)
 
         assert isinstance(result, str)
         # Empty identifier should not trigger security error
@@ -369,7 +369,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_security_logging(self, app, caplog, test_project):
         """Test that security violations are properly logged."""
         # Attempt path traversal attack
-        result = await read_note.fn(project=test_project.name, identifier="../../../etc/passwd")
+        result = await read_note.fn(identifier="../../../etc/passwd", project=test_project.name)
 
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
@@ -407,7 +407,7 @@ class TestReadNoteSecurityValidation:
 
         # Test reading by permalink
         result = await read_note.fn(
-            test_project.name, "security-tests/full-feature-security-test-note"
+            "security-tests/full-feature-security-test-note", project=test_project.name
         )
 
         # Should succeed normally (not a security error)
@@ -430,7 +430,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in unicode_attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note.fn(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -442,7 +442,7 @@ class TestReadNoteSecurityEdgeCases:
         # Create a very long path traversal attack
         long_attack_identifier = "../" * 1000 + "etc/malicious"
 
-        result = await read_note.fn(project=test_project.name, identifier=long_attack_identifier)
+        result = await read_note.fn(long_attack_identifier, project=test_project.name)
 
         assert isinstance(result, str)
         assert "# Error" in result
@@ -460,7 +460,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in case_attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note.fn(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -478,7 +478,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in whitespace_attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note.fn(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             # The attack should still be blocked even with whitespace

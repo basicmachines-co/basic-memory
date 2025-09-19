@@ -7,7 +7,7 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_active_project, resolve_project_parameter
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import TimeFrame
@@ -70,8 +70,9 @@ async def recent_activity(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
-        project: Optional project name. If None, returns activity across all projects.
-                 If provided, returns detailed activity for that specific project.
+        project: Optional project name. If not provided, uses default_project (if default_project_mode=true)
+                or returns activity across all projects for discovery.
+                If unknown, use list_memory_projects() to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -79,16 +80,18 @@ async def recent_activity(
         - GraphContext: When project is specified (project-specific mode)
 
     Examples:
-        # Discovery mode - see activity across all projects
+        # Default project mode or discovery mode
         recent_activity()
         recent_activity(timeframe="yesterday")
 
         # Project-specific mode - detailed activity for one project
-        recent_activity(project="my-project")
+        recent_activity(type="entity", timeframe="yesterday")
+        recent_activity(type=["entity"], timeframe="yesterday")
+        recent_activity(type=["relation", "observation"], timeframe="today")
+        recent_activity(type="entity", depth=2, timeframe="2 weeks ago")
+
+        # Explicit project specification
         recent_activity(project="work-docs", type="entity", timeframe="yesterday")
-        recent_activity(project="research", type=["entity"], timeframe="yesterday")
-        recent_activity(project="dev-notes", type=["relation", "observation"], timeframe="today")
-        recent_activity(project="team-docs", type="entity", depth=2, timeframe="2 weeks ago")
 
     Raises:
         ToolError: If project doesn't exist or type parameter contains invalid values
@@ -132,7 +135,10 @@ async def recent_activity(
         # Add validated types to params
         params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
-    if project is None:
+    # Resolve project parameter using the three-tier hierarchy
+    resolved_project = await resolve_project_parameter(project)
+
+    if resolved_project is None:
         # Discovery Mode: Get activity across all projects
         logger.info(
             f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
@@ -242,10 +248,10 @@ async def recent_activity(
     else:
         # Project-Specific Mode: Get activity for specific project
         logger.info(
-            f"Getting recent activity from project {project}: type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
+            f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}, page={page}, page_size={page_size}, max_related={max_related}"
         )
 
-        active_project = await get_active_project(client, project, context)
+        active_project = await get_active_project(client, resolved_project, context)
         project_url = active_project.project_url
 
         response = await call_get(

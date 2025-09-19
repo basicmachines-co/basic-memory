@@ -130,10 +130,10 @@ Error editing note '{identifier}': {error_message}
     description="Edit an existing markdown note using various operations like append, prepend, find_replace, or replace_section.",
 )
 async def edit_note(
-    project: str,
     identifier: str,
     operation: str,
     content: str,
+    project: Optional[str] = None,
     section: Optional[str] = None,
     find_text: Optional[str] = None,
     expected_replacements: int = 1,
@@ -142,11 +142,12 @@ async def edit_note(
     """Edit an existing markdown note in the knowledge base.
 
     Makes targeted changes to existing notes without rewriting the entire content.
-    Uses stateless architecture - each call requires explicit project parameter.
-    Supports various operations for different editing scenarios with precise control.
+    Supports three project resolution modes:
+    1. Explicit project parameter (highest priority)
+    2. Default project mode (if enabled in config)
+    3. CLI constraint mode (--project flag)
 
     Args:
-        project: Required project name to edit in. Must be an existing project.
         identifier: The exact title, permalink, or memory:// URL of the note to edit.
                    Must be an exact match - fuzzy matching is not supported for edit operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
@@ -156,6 +157,8 @@ async def edit_note(
                   - "find_replace": Replace occurrences of find_text with content
                   - "replace_section": Replace content under a specific markdown header
         content: The content to add or use for replacement
+        project: Optional project name. If not provided, uses default_project (if default_project_mode=true)
+               . If unknown, use list_memory_projects() to discover available projects.
         section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)

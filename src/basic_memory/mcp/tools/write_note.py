@@ -1,6 +1,6 @@
 """Write note tool for Basic Memory MCP server."""
 
-from typing import List, Union
+from typing import List, Union, Optional
 
 from loguru import logger
 
@@ -24,27 +24,27 @@ TagType = Union[List[str], str, None]
     description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
 )
 async def write_note(
-    project: str,
     title: str,
     content: str,
     folder: str,
+    project: Optional[str] = None,
     tags=None,
     entity_type: str = "note",
     context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
 
-    Creates or updates a markdown note in the specified project with semantic
-    observations and relations. Uses stateless architecture - each call requires
-    explicit project parameter.
+    Creates or updates a markdown note with semantic observations and relations.
+    Supports three project resolution modes:
+    1. Explicit project parameter (highest priority)
+    2. Default project mode (if enabled in config)
+    3. CLI constraint mode (--project flag)
 
     Project Selection:
-    If you don't know which project to use:
-    1. Call list_memory_projects() to discover available projects
-    2. Or call recent_activity() to see project activity and get recommendations
-    3. Ask the user which project to use for this note
-    4. Remember their choice for the entire conversation session
-    5. Only ask again if the user explicitly mentions switching projects
+    - If default_project_mode=true in config: project parameter is optional
+    - If default_project_mode=false: provide project parameter or use project discovery
+    - For project discovery: call list_memory_projects() or recent_activity()
+    - Remember project choice for the entire conversation session
 
     The content can include semantic observations and relations using markdown syntax:
 
@@ -66,12 +66,12 @@ async def write_note(
         `- This feature extends [[Base Design]] and uses [[Core Utils]]`
 
     Args:
-        project: Required project name to write to. Must be an existing project.
-                If unknown, use list_memory_projects() to discover available projects.
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
                 Use forward slashes (/) as separators. Examples: "notes", "projects/2025", "research/ml"
+        project: Optional project name. If not provided, uses default_project (if default_project_mode=true)
+               . If unknown, use list_memory_projects() to discover available projects.
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
@@ -126,7 +126,7 @@ async def write_note(
         f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}"
     )
 
-    # Get and validate the project
+    # Get and validate the project (supports optional project parameter)
     active_project = await get_active_project(client, project, context)
 
     # Validate folder path to prevent path traversal attacks

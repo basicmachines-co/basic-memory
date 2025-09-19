@@ -56,7 +56,7 @@ async def setup_test_note(entity_service, search_service) -> AsyncGenerator[dict
     }
 
 
-def test_write_note(cli_env, project_config):
+def test_write_note(cli_env, project_config, test_project):
     """Test write_note command with basic arguments."""
     result = runner.invoke(
         tool_app,
@@ -68,6 +68,8 @@ def test_write_note(cli_env, project_config):
             "This is a CLI test note",
             "--folder",
             "test",
+            "--project",
+            test_project.name,
         ],
     )
     assert result.exit_code == 0
@@ -233,11 +235,11 @@ def test_read_note(cli_env, setup_test_note):
     # so we're not asserting their presence
 
 
-def test_search_basic(cli_env, setup_test_note):
+def test_search_basic(cli_env, setup_test_note, test_project):
     """Test basic search command."""
     result = runner.invoke(
         tool_app,
-        ["search-notes", "test observation"],
+        ["search-notes", "test observation", "--project", test_project.name],
     )
     assert result.exit_code == 0
 

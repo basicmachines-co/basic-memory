@@ -42,7 +42,7 @@ async def test_view_note_basic_functionality(app, test_project):
     )
 
     # View the note
-    result = await view_note.fn(test_project.name, "Test View Note")
+    result = await view_note.fn("Test View Note", project=test_project.name)
 
     # Should contain artifact XML
     assert '<artifact identifier="note-' in result
@@ -78,7 +78,7 @@ async def test_view_note_with_frontmatter_title(app, test_project):
     )
 
     # View the note
-    result = await view_note.fn(test_project.name, "Frontmatter Title")
+    result = await view_note.fn("Frontmatter Title", project=test_project.name)
 
     # Should extract title from frontmatter
     assert 'title="Frontmatter Title"' in result
@@ -96,7 +96,7 @@ async def test_view_note_with_heading_title(app, test_project):
     )
 
     # View the note
-    result = await view_note.fn(test_project.name, "Heading Title")
+    result = await view_note.fn("Heading Title", project=test_project.name)
 
     # Should extract title from heading
     assert 'title="Heading Title"' in result
@@ -113,7 +113,7 @@ async def test_view_note_unicode_content(app, test_project):
     )
 
     # View the note
-    result = await view_note.fn(test_project.name, "Unicode Test 🚀")
+    result = await view_note.fn("Unicode Test 🚀", project=test_project.name)
 
     # Should handle Unicode properly
     assert "🚀" in result
@@ -133,7 +133,7 @@ async def test_view_note_by_permalink(app, test_project):
     )
 
     # View by permalink
-    result = await view_note.fn(test_project.name, "test/permalink-test")
+    result = await view_note.fn("test/permalink-test", project=test_project.name)
 
     # Should work with permalink
     assert '<artifact identifier="note-' in result
@@ -152,7 +152,7 @@ async def test_view_note_with_memory_url(app, test_project):
     )
 
     # View with memory:// URL
-    result = await view_note.fn(test_project.name, "memory://test/memory-url-test")
+    result = await view_note.fn("memory://test/memory-url-test", project=test_project.name)
 
     # Should work with memory:// URL
     assert '<artifact identifier="note-' in result
@@ -164,7 +164,7 @@ async def test_view_note_with_memory_url(app, test_project):
 async def test_view_note_not_found(app, test_project):
     """Test viewing a non-existent note returns error without artifact."""
     # Try to view non-existent note
-    result = await view_note.fn(test_project.name, "NonExistent Note")
+    result = await view_note.fn("NonExistent Note", project=test_project.name)
 
     # Should return error message without artifact
     assert "# Note Not Found" in result
@@ -185,7 +185,7 @@ async def test_view_note_pagination(app, test_project):
     )
 
     # View with pagination
-    result = await view_note.fn(test_project.name, "Pagination Test", page=1, page_size=5)
+    result = await view_note.fn("Pagination Test", page=1, page_size=5, project=test_project.name)
 
     # Should work with pagination
     assert '<artifact identifier="note-' in result
@@ -204,7 +204,7 @@ async def test_view_note_project_parameter(app, test_project):
     )
 
     # View with explicit project
-    result = await view_note.fn(test_project.name, "Project Test")
+    result = await view_note.fn("Project Test", project=test_project.name)
 
     # Should work with project parameter
     assert '<artifact identifier="note-' in result
@@ -224,8 +224,8 @@ async def test_view_note_artifact_identifier_unique(app, test_project):
     )
 
     # View both notes
-    result1 = await view_note.fn(test_project.name, "Note One")
-    result2 = await view_note.fn(test_project.name, "Note Two")
+    result1 = await view_note.fn("Note One", project=test_project.name)
+    result2 = await view_note.fn("Note Two", project=test_project.name)
 
     # Should have different artifact identifiers
     import re
@@ -250,7 +250,7 @@ async def test_view_note_fallback_identifier_as_title(app, test_project):
     )
 
     # View the note
-    result = await view_note.fn(test_project.name, "Simple Note")
+    result = await view_note.fn("Simple Note", project=test_project.name)
 
     # Should use identifier as fallback title
     assert 'title="Simple Note"' in result
@@ -276,7 +276,7 @@ async def test_view_note_direct_success(app, test_project, mock_call_get):
     mock_call_get.return_value = mock_response
 
     # Call the function
-    result = await view_note.fn(test_project.name, "test/test-note")
+    result = await view_note.fn("test/test-note", project=test_project.name)
 
     # Verify direct lookup was used
     mock_call_get.assert_called_once()

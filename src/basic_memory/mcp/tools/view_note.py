@@ -1,8 +1,10 @@
 """View note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
+from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.read_note import read_note
@@ -11,7 +13,13 @@ from basic_memory.mcp.tools.read_note import read_note
 @mcp.tool(
     description="View a note as a formatted artifact for better readability.",
 )
-async def view_note(project: str, identifier: str, page: int = 1, page_size: int = 10) -> str:
+async def view_note(
+    identifier: str,
+    project: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 10,
+    context: Context | None = None,
+) -> str:
     """View a markdown note as a formatted artifact.
 
     This tool reads a note using the same logic as read_note but displays the content
@@ -23,23 +31,29 @@ async def view_note(project: str, identifier: str, page: int = 1, page_size: int
     used to create a markdown artifact.
 
     Args:
-        project: Required project name to read from. Must be an existing project.
         identifier: The title or permalink of the note to view
+        project: Optional project name to read from. If not provided, uses default_project
+                (if default_project_mode=true) or CLI constraint. If unknown, use list_memory_projects()
+                to discover available projects.
         page: Page number for paginated results (default: 1)
         page_size: Number of items per page (default: 10)
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         The note content as a markdown artifact with a confirmation message.
 
     Examples:
         # View a note by title
-        view_note("my-project", "Meeting Notes")
+        view_note("Meeting Notes")
 
         # View a note by permalink
-        view_note("work-docs", "meetings/weekly-standup")
+        view_note("meetings/weekly-standup")
 
         # View with pagination
-        view_note("research", "large-document", page=2, page_size=5)
+        view_note("large-document", page=2, page_size=5)
+
+        # Explicit project specification
+        view_note("Meeting Notes", project="my-project")
 
     Raises:
         HTTPError: If project doesn't exist or is inaccessible
@@ -49,7 +63,7 @@ async def view_note(project: str, identifier: str, page: int = 1, page_size: int
     logger.info(f"Viewing note: {identifier} in project: {project}")
 
     # Call the existing read_note logic
-    content = await read_note.fn(project, identifier, page, page_size)
+    content = await read_note.fn(identifier, project, page, page_size, context)
 
     # Check if this is an error message (note not found)
     if "# Note Not Found" in content:

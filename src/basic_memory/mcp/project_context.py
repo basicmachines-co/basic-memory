@@ -10,35 +10,78 @@ from httpx import AsyncClient
 from loguru import logger
 from fastmcp import Context
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink
 
 
+async def resolve_project_parameter(project: Optional[str] = None) -> Optional[str]:
+    """Resolve project parameter using three-tier hierarchy.
+
+    Resolution order:
+    1. CLI constraint (BASIC_MEMORY_MCP_PROJECT env var) - highest priority
+    2. Explicit project parameter - medium priority
+    3. Default project if default_project_mode=true - lowest priority
+
+    Args:
+        project: Optional explicit project parameter
+
+    Returns:
+        Resolved project name or None if no resolution possible
+    """
+    # Priority 1: CLI constraint overrides everything (--project arg sets env var)
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        logger.debug(f"Using CLI constrained project: {constrained_project}")
+        return constrained_project
+
+    # Priority 2: Explicit project parameter
+    if project:
+        logger.debug(f"Using explicit project parameter: {project}")
+        return project
+
+    # Priority 3: Default project mode
+    config = ConfigManager().config
+    if config.default_project_mode:
+        logger.debug(f"Using default project from config: {config.default_project}")
+        return config.default_project
+
+    # No resolution possible
+    return None
+
+
 async def get_active_project(
-    client: AsyncClient, project: str, context: Optional[Context] = None
+    client: AsyncClient, project: Optional[str] = None, context: Optional[Context] = None
 ) -> ProjectItem:
     """Get and validate project, setting it in context if available.
 
+    Uses three-tier resolution:
+    1. CLI constraint (BASIC_MEMORY_MCP_PROJECT env var)
+    2. Explicit project parameter
+    3. Default project if default_project_mode=true
+
     Args:
         client: HTTP client for API calls
-        project: Required project name (may be overridden by server constraint)
+        project: Optional project name (resolved using hierarchy)
         context: Optional FastMCP context to cache the result
 
     Returns:
         The validated project item
 
     Raises:
+        ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
-    # Check for project constraint from MCP server
-    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
-    if constrained_project:
-        if project != constrained_project:
-            logger.debug(
-                f"Overriding project '{project}' with constrained project '{constrained_project}'"
-            )
-        project = constrained_project
+    # Resolve project using three-tier hierarchy
+    resolved_project = await resolve_project_parameter(project)
+    if not resolved_project:
+        raise ValueError(
+            "No project specified. Either provide project parameter, "
+            "set default_project_mode=true in config, or use --project constraint."
+        )
+
+    project = resolved_project
 
     # Check if already cached in context
     if context:

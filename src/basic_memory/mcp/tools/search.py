@@ -200,8 +200,8 @@ Error searching for '{query}': {error_message}
     description="Search across all content in the knowledge base with advanced syntax support.",
 )
 async def search_notes(
-    project: str,
     query: str,
+    project: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
@@ -262,8 +262,10 @@ async def search_notes(
     - `search_notes("archive", "docs/2024-*", search_type="permalink")` - Year-based permalink search
 
     Args:
-        project: Required project name to search in. Must be an existing project.
         query: The search query string (supports boolean operators, phrases, patterns)
+        project: Optional project name to search in. If not provided, uses default_project
+                (if default_project_mode=true). If unknown, use list_memory_projects()
+                to discover available projects.
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of: "text", "title", "permalink" (default: "text")
@@ -277,65 +279,62 @@ async def search_notes(
 
     Examples:
         # Basic text search
-        results = await search_notes("my-project", "project planning")
+        results = await search_notes("project planning")
 
         # Boolean AND search (both terms must be present)
-        results = await search_notes("work-docs", "project AND planning")
+        results = await search_notes("project AND planning")
 
         # Boolean OR search (either term can be present)
-        results = await search_notes("research", "project OR meeting")
+        results = await search_notes("project OR meeting")
 
         # Boolean NOT search (exclude terms)
-        results = await search_notes("team-notes", "project NOT meeting")
+        results = await search_notes("project NOT meeting")
 
         # Boolean search with grouping
-        results = await search_notes("work-project", "(project OR planning) AND notes")
+        results = await search_notes("(project OR planning) AND notes")
 
         # Exact phrase search
-        results = await search_notes("meeting-docs", "\"weekly standup meeting\"")
+        results = await search_notes("\"weekly standup meeting\"")
 
         # Search with type filter
         results = await search_notes(
-            "my-project",
             "meeting notes",
             types=["entity"],
         )
 
         # Search with entity type filter
         results = await search_notes(
-            "work-docs",
             "meeting notes",
             entity_types=["observation"],
         )
 
         # Search for recent content
         results = await search_notes(
-            "dev-notes",
             "bug report",
             after_date="1 week"
         )
 
         # Pattern matching on permalinks
         results = await search_notes(
-            "archive",
             "docs/meeting-*",
             search_type="permalink"
         )
 
         # Title-only search
         results = await search_notes(
-            "research",
             "Machine Learning",
             search_type="title"
         )
 
         # Complex search with multiple filters
         results = await search_notes(
-            "dev-notes",
             "(bug OR issue) AND NOT resolved",
             types=["entity"],
             after_date="2024-01-01"
         )
+
+        # Explicit project specification
+        results = await search_notes("project planning", project="my-project")
     """
     # Create a SearchQuery object based on the parameters
     search_query = SearchQuery()

@@ -109,7 +109,7 @@ def write_note(
         # use the project name, or the default from the config
         project_name = project_name or config_manager.default_project
 
-        note = asyncio.run(mcp_write_note.fn(project_name, title, content, folder, tags))
+        note = asyncio.run(mcp_write_note.fn(title, content, folder, project_name, tags))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -145,7 +145,7 @@ def read_note(
     project_name = project_name or config_manager.default_project
 
     try:
-        note = asyncio.run(mcp_read_note.fn(project_name, identifier, page, page_size))
+        note = asyncio.run(mcp_read_note.fn(identifier, project_name, page, page_size))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -290,8 +290,8 @@ def search_notes(
 
         results = asyncio.run(
             mcp_search.fn(
-                project_name,
                 query,
+                project_name,
                 search_type=search_type,
                 page=page,
                 after_date=after_date,

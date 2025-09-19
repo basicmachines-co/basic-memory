@@ -35,7 +35,7 @@ async def test_read_file_text_file(app, synced_files, test_project):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_content.fn(test_project.name, "test/text-resource")
+    response = await read_content.fn("test/text-resource", project=test_project.name)
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -63,7 +63,7 @@ async def test_read_content_file_path(app, synced_files, test_project):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_content.fn(test_project.name, "test/Text Resource.md")
+    response = await read_content.fn("test/Text Resource.md", project=test_project.name)
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -84,7 +84,7 @@ async def test_read_file_image_file(app, synced_files, test_project):
     image_path = synced_files["image"].name
 
     # Read it as a resource
-    response = await read_content.fn(test_project.name, image_path)
+    response = await read_content.fn(image_path, project=test_project.name)
 
     assert response["type"] == "image"
     assert response["source"]["type"] == "base64"
@@ -112,7 +112,7 @@ async def test_read_file_pdf_file(app, synced_files, test_project):
     pdf_path = synced_files["pdf"].name
 
     # Read it as a resource
-    response = await read_content.fn(test_project.name, pdf_path)
+    response = await read_content.fn(pdf_path, project=test_project.name)
 
     assert response["type"] == "document"
     assert response["source"]["type"] == "base64"
@@ -128,7 +128,7 @@ async def test_read_file_pdf_file(app, synced_files, test_project):
 async def test_read_file_not_found(app, test_project):
     """Test trying to read a non-existent"""
     with pytest.raises(ToolError, match="Resource not found"):
-        await read_content.fn(test_project.name, "does-not-exist")
+        await read_content.fn("does-not-exist", project=test_project.name)
 
 
 @pytest.mark.asyncio
@@ -144,7 +144,7 @@ async def test_read_file_memory_url(app, synced_files, test_project):
 
     # Read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    response = await read_content.fn(test_project.name, memory_url)
+    response = await read_content.fn(memory_url, project=test_project.name)
 
     assert response["type"] == "text"
     assert "Testing memory:// URL handling for resources" in response["text"]
@@ -208,7 +208,7 @@ async def test_image_conversion(app, synced_files, test_project):
     image_path = synced_files["image"].name
 
     # Test reading the resource
-    response = await read_content.fn(test_project.name, image_path)
+    response = await read_content.fn(image_path, project=test_project.name)
 
     assert response["type"] == "image"
     assert response["source"]["media_type"] == "image/jpeg"
