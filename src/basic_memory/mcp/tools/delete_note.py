@@ -39,7 +39,7 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
                - If you used a title, try the permalink format: "{permalink_format}"
 
             3. **Check if already deleted**: Use `list_directory("/")` to see what notes exist
-            4. **Check current project**: Use `get_current_project()` to verify you're in the right project
+            4. **List notes in project**: Use `list_directory("/")` to see what notes exist in the current project
 
             ## If the note actually exists:
             ```
@@ -70,9 +70,9 @@ You don't have permission to delete '{identifier}': {error_message}
 3. **Project access**: Ensure you're in the correct project with proper permissions
 
 ## Alternative actions:
-- Check current project: `get_current_project()`
-- Switch to correct project: `switch_project("project-name")`
-- Verify note exists first: `read_note("{identifier}")`
+- List available projects: `list_memory_projects()`
+- Specify the correct project: `delete_note("{identifier}", project="project-name")`
+- Verify note exists first: `read_note("{identifier}", project="project-name")`
 
 ## If you have read-only access:
 Ask someone with write access to delete the note."""

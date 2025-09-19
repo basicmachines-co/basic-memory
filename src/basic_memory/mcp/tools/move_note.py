@@ -80,17 +80,12 @@ def _format_cross_project_error_response(
         # 1. Read the note content from current project
         read_note("{identifier}")
         
-        # 2. Switch to the target project
-        switch_project("{target_project}")
+        # 2. Create the note in the target project
+        write_note("Note Title", "content from step 1", "target-folder", project="{target_project}")
+
+        # 3. Delete the original note if desired
+        delete_note("{identifier}", project="{current_project}")
         
-        # 3. Create the note in the target project
-        write_note("Note Title", "content from step 1", "target-folder")
-        
-        # 4. Switch back to original project (optional)
-        switch_project("{current_project}")
-        
-        # 5. Delete the original note if desired
-        delete_note("{identifier}")
         ```
         
         ### Alternative: Stay in current project
@@ -100,7 +95,7 @@ def _format_cross_project_error_response(
         ```
         
         ## Available projects:
-        Use `list_projects()` to see all available projects and `switch_project("project-name")` to change projects.
+        Use `list_memory_projects()` to see all available projects.
         """).strip()
 
 
@@ -131,20 +126,16 @@ def _format_potential_cross_project_guidance(
         # 1. Read the content
         read_note("{identifier}")
         
-        # 2. Switch to target project
-        switch_project("target-project-name")
-        
-        # 3. Create note in target project
-        write_note("Title", "content", "folder")
-        
-        # 4. Switch back and delete original if desired
-        switch_project("{current_project}")
-        delete_note("{identifier}")
+        # 2. Create note in target project
+        write_note("Title", "content", "folder", project="target-project-name")
+
+        # 3. Delete original if desired
+        delete_note("{identifier}", project="{current_project}")
         ```
         
         ### To see all projects:
         ```
-        list_projects()
+        list_memory_projects()
         ```
         """).strip()
 
@@ -172,7 +163,7 @@ def _format_move_error_response(error_message: str, identifier: str, destination
                - If you used a title, try the exact permalink format: "{permalink_format}"
                - Use `read_note()` first to verify the note exists and get the exact identifier
 
-            3. **Check current project**: Use `get_current_project()` to verify you're in the right project
+            3. **List available notes**: Use `list_directory("/")` to see what notes exist in the current project
             4. **List available notes**: Use `list_directory("/")` to see what notes exist
 
             ## Before trying again:
@@ -249,9 +240,8 @@ You don't have permission to move '{identifier}': {error_message}
 3. **Check file locks**: The file might be open in another application
 
 ## Alternative actions:
-- Check current project: `get_current_project()`
-- Switch projects if needed: `switch_project("project-name")`
-- Try copying content instead: `read_note("{identifier}")` then `write_note()` to new location"""
+- List available projects: `list_memory_projects()`
+- Try copying content instead: `read_note("{identifier}", project="project-name")` then `write_note()` to new location"""
 
     # Source file not found errors
     if "source" in error_message.lower() and (

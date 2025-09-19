@@ -24,7 +24,7 @@ class TestDeleteNoteErrorFormatting:
         assert "You don't have permission to delete 'test-note'" in result
         assert "Check permissions" in result
         assert "File locks" in result
-        assert "get_current_project()" in result
+        assert "list_memory_projects()" in result
 
     def test_format_delete_error_access_forbidden(self, test_project):
         """Test formatting for access forbidden errors."""
