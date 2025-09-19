@@ -38,7 +38,7 @@ async def write_note(
     Supports three project resolution modes:
     1. Explicit project parameter (highest priority)
     2. Default project mode (if enabled in config)
-    3. CLI constraint mode (--project flag)
+    3. Single project mode (--project flag passed to mcp server)
 
     Project Selection:
     - If default_project_mode=true in config: project parameter is optional
