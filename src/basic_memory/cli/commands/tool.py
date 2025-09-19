@@ -210,30 +210,21 @@ def recent_activity(
     type: Annotated[Optional[List[SearchItemType]], typer.Option()] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
-    page: int = 1,
-    page_size: int = 10,
-    max_related: int = 10,
 ):
     """Get recent activity across the knowledge base."""
     try:
-        context = asyncio.run(
+        result = asyncio.run(
             mcp_recent_activity.fn(
                 type=type,  # pyright: ignore [reportArgumentType]
                 depth=depth,
                 timeframe=timeframe,
-                page=page,
-                page_size=page_size,
-                max_related=max_related,
             )
         )
-        # Use json module for more controlled serialization
-        import json
-
-        context_dict = context.model_dump(exclude_none=True)
-        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
+        # The tool now returns a formatted string directly
+        print(result)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during build_context: {e}", err=True)
+            typer.echo(f"Error during recent_activity: {e}", err=True)
             raise typer.Exit(1)
         raise
 

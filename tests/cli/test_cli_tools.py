@@ -400,19 +400,13 @@ def test_recent_activity(cli_env, setup_test_note, test_project):
     )
     assert result.exit_code == 0
 
-    # Result should be JSON containing recent activity
-    activity_result = json.loads(result.stdout)
-    assert "projects" in activity_result
+    # Result should be human-readable string containing recent activity
+    output = result.stdout
+    assert "Recent Activity Summary" in output
+    assert "Most Active Project:" in output or "Other Active Projects:" in output
 
-    # Our test note should be in the recent activity
-    found = False
-    for item in activity_result["projects"][f"{test_project.name}"]["activity"]["results"]:
-        if "primary_result" in item and "permalink" in item["primary_result"]:
-            if setup_test_note["permalink"] == item["primary_result"]["permalink"]:
-                found = True
-                break
-
-    assert found, "Recent activity did not include the test note"
+    # Our test note should be referenced in the output
+    assert setup_test_note["permalink"] in output or setup_test_note["title"] in output
 
 
 def test_recent_activity_with_options(cli_env, setup_test_note, test_project):
@@ -427,27 +421,17 @@ def test_recent_activity_with_options(cli_env, setup_test_note, test_project):
             "2",
             "--timeframe",
             "7d",
-            "--page",
-            "1",
-            "--page-size",
-            "20",
-            "--max-related",
-            "20",
         ],
     )
     assert result.exit_code == 0
 
-    # Result should be JSON containing recent activity
-    activity_result = json.loads(result.stdout)
+    # Result should be human-readable string containing recent activity
+    output = result.stdout
+    assert "Recent Activity Summary" in output
+    assert "Most Active Project:" in output or "Other Active Projects:" in output
 
-    # Check that requested entity types are included
-    entity_types = set()
-    for item in activity_result["projects"][f"{test_project.name}"]["activity"]["results"]:
-        if "primary_result" in item and "type" in item["primary_result"]:
-            entity_types.add(item["primary_result"]["type"])
-
-    # Should find entity type since we requested it
-    assert "entity" in entity_types
+    # Should include information about entities since we requested entity type
+    assert setup_test_note["permalink"] in output or setup_test_note["title"] in output
 
 
 def test_continue_conversation(cli_env, setup_test_note):

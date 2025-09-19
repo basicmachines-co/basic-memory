@@ -5,14 +5,6 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import recent_activity
-from basic_memory.schemas.memory import (
-    EntitySummary,
-    ObservationSummary,
-    RelationSummary,
-    GraphContext,
-    ProjectActivitySummary,
-    ProjectActivity,
-)
 from basic_memory.schemas.search import SearchItemType
 
 # Test data for different timeframe formats
@@ -38,12 +30,11 @@ async def test_recent_activity_timeframe_formats(client, test_project, test_grap
                 project=test_project.name,
                 type=["entity"],
                 timeframe=timeframe,
-                page=1,
-                page_size=10,
-                max_related=10,
             )
             assert result is not None
-            assert isinstance(result, GraphContext)
+            assert isinstance(result, str)
+            assert "Recent Activity:" in result
+            assert timeframe in result
         except Exception as e:
             pytest.fail(f"Failed with valid timeframe '{timeframe}': {str(e)}")
 
@@ -60,62 +51,50 @@ async def test_recent_activity_type_filters(client, test_project, test_graph):
     # Test single string type
     result = await recent_activity.fn(project=test_project.name, type=SearchItemType.ENTITY)
     assert result is not None
-    assert isinstance(result, GraphContext)
-    assert len(result.results) > 0
-    assert all(isinstance(item.primary_result, EntitySummary) for item in result.results)
+    assert isinstance(result, str)
+    assert "Recent Activity:" in result
+    assert "Recent Notes & Documents" in result
 
     # Test single string type
     result = await recent_activity.fn(project=test_project.name, type="entity")
     assert result is not None
-    assert isinstance(result, GraphContext)
-    assert len(result.results) > 0
-    assert all(isinstance(item.primary_result, EntitySummary) for item in result.results)
+    assert isinstance(result, str)
+    assert "Recent Activity:" in result
+    assert "Recent Notes & Documents" in result
 
     # Test single type
     result = await recent_activity.fn(project=test_project.name, type=["entity"])
     assert result is not None
-    assert isinstance(result, GraphContext)
-    assert len(result.results) > 0
-    assert all(isinstance(item.primary_result, EntitySummary) for item in result.results)
+    assert isinstance(result, str)
+    assert "Recent Activity:" in result
+    assert "Recent Notes & Documents" in result
 
     # Test multiple types
     result = await recent_activity.fn(project=test_project.name, type=["entity", "observation"])
     assert result is not None
-    assert isinstance(result, GraphContext)
-    assert len(result.results) > 0
-    assert all(
-        isinstance(item.primary_result, EntitySummary)
-        or isinstance(item.primary_result, ObservationSummary)
-        for item in result.results
-    )
+    assert isinstance(result, str)
+    assert "Recent Activity:" in result
+    # Should contain sections for both types
+    assert "Recent Notes & Documents" in result or "Recent Observations" in result
 
     # Test multiple types
     result = await recent_activity.fn(
         project=test_project.name, type=[SearchItemType.ENTITY, SearchItemType.OBSERVATION]
     )
     assert result is not None
-    assert isinstance(result, GraphContext)
-    assert len(result.results) > 0
-    assert all(
-        isinstance(item.primary_result, EntitySummary)
-        or isinstance(item.primary_result, ObservationSummary)
-        for item in result.results
-    )
+    assert isinstance(result, str)
+    assert "Recent Activity:" in result
+    # Should contain sections for both types
+    assert "Recent Notes & Documents" in result or "Recent Observations" in result
 
     # Test all types
     result = await recent_activity.fn(
         project=test_project.name, type=["entity", "observation", "relation"]
     )
     assert result is not None
-    assert isinstance(result, GraphContext)
-    assert len(result.results) > 0
-    # Results can be any type
-    assert all(
-        isinstance(item.primary_result, EntitySummary)
-        or isinstance(item.primary_result, ObservationSummary)
-        or isinstance(item.primary_result, RelationSummary)
-        for item in result.results
-    )
+    assert isinstance(result, str)
+    assert "Recent Activity:" in result
+    assert "Activity Summary:" in result
 
 
 @pytest.mark.asyncio
@@ -143,26 +122,14 @@ async def test_recent_activity_discovery_mode(client, test_project, test_graph):
     # Test discovery mode (no project parameter)
     result = await recent_activity.fn()
     assert result is not None
-    assert isinstance(result, ProjectActivitySummary)
+    assert isinstance(result, str)
 
-    # Check that we get a summary with projects
-    assert hasattr(result, "projects")
-    assert hasattr(result, "summary")
-    assert hasattr(result, "timeframe")
-    assert hasattr(result, "generated_at")
+    # Check that we get a formatted summary
+    assert "Recent Activity Summary" in result
+    assert "Most Active Project:" in result or "Other Active Projects:" in result
+    assert "Summary:" in result
+    assert "active projects" in result
 
-    # Check summary stats
-    assert result.summary.total_projects >= 1  # Should have at least the test project
-    assert isinstance(result.summary.active_projects, int)
-    assert isinstance(result.summary.total_items, int)
-
-    # Check projects dictionary structure
-    assert isinstance(result.projects, dict)
-
-    # Each project should have proper activity structure
-    for project_name, project_activity in result.projects.items():
-        assert isinstance(project_activity, ProjectActivity)
-        assert project_activity.project_name == project_name
-        assert isinstance(project_activity.activity, GraphContext)
-        assert isinstance(project_activity.item_count, int)
-        assert isinstance(project_activity.active_folders, list)
+    # Should contain project discovery guidance
+    assert "Suggested project:" in result or "Multiple active projects" in result
+    assert "Session reminder:" in result
