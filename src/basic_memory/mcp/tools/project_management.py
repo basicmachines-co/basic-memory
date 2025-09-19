@@ -82,7 +82,7 @@ async def create_memory_project(
     Args:
         project_name: Name for the new project (must be unique)
         project_path: File system path where the project will be stored
-        set_default: Whether to set this project as the default for the cli (optional, defaults to False)
+        set_default: Whether to set this project as the default (optional, defaults to False)
 
     Returns:
         Confirmation message with project details
