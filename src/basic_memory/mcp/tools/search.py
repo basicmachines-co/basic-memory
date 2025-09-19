@@ -229,7 +229,7 @@ async def search_notes(
 
     ### Basic Searches
     - `search_notes("my-project", "keyword")` - Find any content containing "keyword"
-    - `search_notes("work-docs", "exact phrase")` - Search for exact phrase match
+    - `search_notes("work-docs", "'exact phrase'")` - Search for exact phrase match
 
     ### Advanced Boolean Searches
     - `search_notes("my-project", "term1 term2")` - Find content with both terms (implicit AND)
