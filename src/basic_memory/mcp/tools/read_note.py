@@ -165,10 +165,10 @@ async def read_note(
     # We didn't find a direct match, construct a helpful error message
     if not text_results or not text_results.results:
         # No results at all
-        return format_not_found_message(project, identifier)
+        return format_not_found_message(active_project.name, identifier)
     else:
         # We found some related results
-        return format_related_results(project, identifier, text_results.results[:5])
+        return format_related_results(active_project.name, identifier, text_results.results[:5])
 
 
 def format_not_found_message(project: str | None, identifier: str) -> str:
