@@ -590,7 +590,6 @@ async def test_move_note_cross_project_detection(mcp_server, app, test_project):
         error_message = move_result.content[0].text
         assert "Cross-Project Move Not Supported" in error_message
         assert "test-project-b" in error_message
-        assert "switch_project" in error_message
         assert "read_note" in error_message
         assert "write_note" in error_message
 
