@@ -27,6 +27,8 @@ from basic_memory.mcp.tools.project_management import (
     create_memory_project,
     delete_project,
 )
+# ChatGPT-compatible tools
+from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 
 __all__ = [
     "build_context",
@@ -35,6 +37,7 @@ __all__ = [
     "delete_note",
     "delete_project",
     "edit_note",
+    "fetch",
     "get_current_project",
     "list_directory",
     "list_memory_projects",
@@ -42,6 +45,7 @@ __all__ = [
     "read_content",
     "read_note",
     "recent_activity",
+    "search",
     "search_notes",
     "set_default_project",
     "switch_project",
