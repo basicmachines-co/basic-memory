@@ -18,9 +18,12 @@ test-int:
 # Run all tests
 test: test-unit test-int
 
+# Lint and fix code (calls fix)
+lint: fix
+
 # Lint and fix code
-lint:
-    uv run ruff check . --fix
+fix:
+    uv run ruff check --fix --unsafe-fixes src tests
 
 # Type check code
 typecheck:
