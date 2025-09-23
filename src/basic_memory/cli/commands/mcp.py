@@ -1,11 +1,12 @@
 """MCP server command with streamable HTTP transport."""
 
 import asyncio
+import os
 import typer
+from typing import Optional
 
 from basic_memory.cli.app import app
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.middleware import ProjectContextMiddleware
 
 # Import mcp instance
 from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
@@ -26,6 +27,7 @@ def mcp(
     ),
     port: int = typer.Option(8000, help="Port for HTTP transports"),
     path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
+    project: Optional[str] = typer.Option(None, help="Restrict MCP server to single project"),
 ):  # pragma: no cover
     """Run the MCP server with configurable transport options.
 
@@ -36,10 +38,21 @@ def mcp(
     - sse: Server-Sent Events (for compatibility with existing clients)
     """
 
-    from basic_memory.services.initialization import initialize_file_sync
+    # Validate and set project constraint if specified
+    if project:
+        config_manager = ConfigManager()
+        project_name, _ = config_manager.get_project(project)
+        if not project_name:
+            typer.echo(f"No project found named: {project}", err=True)
+            raise typer.Exit(1)
+
+        # Set env var with validated project name
+        os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
+        logger.info(f"MCP server constrained to project: {project_name}")
 
     # Use unified thread-based sync approach for both transports
     import threading
+    from basic_memory.services.initialization import initialize_file_sync
 
     app_config = ConfigManager().config
 
@@ -63,9 +76,6 @@ def mcp(
 
     # Now run the MCP server (blocks)
     logger.info(f"Starting MCP server with {transport.upper()} transport")
-
-    # middleware to store the active project
-    mcp_server.add_middleware(ProjectContextMiddleware())
 
     if transport == "stdio":
         mcp_server.run(

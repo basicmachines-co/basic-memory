@@ -31,16 +31,21 @@ async def canvas(
     This tool creates a .canvas file compatible with Obsidian's Canvas feature,
     allowing visualization of relationships between concepts or documents.
 
+    Project Resolution:
+    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    If project unknown, use list_memory_projects() or recent_activity() first.
+
     For the full JSON Canvas 1.0 specification, see the 'spec://canvas' resource.
 
     Args:
+        project: Project name to create canvas in. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
         nodes: List of node objects following JSON Canvas 1.0 spec
         edges: List of edge objects following JSON Canvas 1.0 spec
         title: The title of the canvas (will be saved as title.canvas)
         folder: Folder path relative to project root where the canvas should be saved.
                 Use forward slashes (/) as separators. Examples: "diagrams", "projects/2025", "visual/maps"
-        project: Optional project name to create canvas in. If not provided, uses current active project.
-        context: Optional context to use for this tool.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
         A summary of the created canvas file
@@ -80,13 +85,16 @@ async def canvas(
     ```
 
     Examples:
-        # Create canvas in current project
-        canvas(nodes=[...], edges=[...], title="My Canvas", folder="diagrams")
+        # Create canvas in project
+        canvas("my-project", nodes=[...], edges=[...], title="My Canvas", folder="diagrams")
 
-        # Create canvas in specific project
-        canvas(nodes=[...], edges=[...], title="My Canvas", folder="diagrams", project="work-project")
+        # Create canvas in work project
+        canvas("work-project", nodes=[...], edges=[...], title="Process Flow", folder="visual/maps")
+
+    Raises:
+        ToolError: If project doesn't exist or folder path is invalid
     """
-    active_project = await get_active_project(client, context=context, project_override=project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     # Ensure path has .canvas extension
@@ -100,7 +108,7 @@ async def canvas(
     canvas_json = json.dumps(canvas_data, indent=2)
 
     # Write the file using the resource API
-    logger.info(f"Creating canvas file: {file_path}")
+    logger.info(f"Creating canvas file: {file_path} in project {project}")
     response = await call_put(client, f"{project_url}/resource/{file_path}", json=canvas_json)
 
     # Parse response

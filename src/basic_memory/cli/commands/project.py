@@ -112,9 +112,9 @@ def remove_project(
 
 @project_app.command("default")
 def set_default_project(
-    name: str = typer.Argument(..., help="Name of the project to set as default"),
+    name: str = typer.Argument(..., help="Name of the project to set as CLI default"),
 ) -> None:
-    """Set the default project and activate it for the current session."""
+    """Set the default project for CLI operations (when no --project flag is specified)."""
     try:
         project_permalink = generate_permalink(name)
         response = asyncio.run(call_put(client, f"/projects/{project_permalink}/default"))
@@ -125,9 +125,10 @@ def set_default_project(
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
         raise typer.Exit(1)
 
-    # The API call above should have updated both config and MCP session
-    # No need for manual reload - the project service handles this automatically
-    console.print("[green]Project activated for current session[/green]")
+    # The API call above updates the config file default
+    console.print(
+        f"[green]CLI commands will now use '{name}' when no --project flag is specified[/green]"
+    )
 
 
 @project_app.command("sync-config")

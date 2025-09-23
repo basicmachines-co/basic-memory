@@ -15,13 +15,14 @@ from basic_memory.config import ConfigManager
 
 
 @pytest.mark.asyncio
-async def test_write_note_basic_creation(mcp_server, app):
+async def test_write_note_basic_creation(mcp_server, app, test_project):
     """Test creating a simple note with basic content."""
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Simple Note",
                 "folder": "basic",
                 "content": "# Simple Note\n\nThis is a simple note for testing.",
@@ -34,20 +35,23 @@ async def test_write_note_basic_creation(mcp_server, app):
         response_text = result.content[0].text
 
         assert "# Created note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: basic/Simple Note.md" in response_text
         assert "permalink: basic/simple-note" in response_text
         assert "## Tags" in response_text
         assert "- simple, test" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_no_tags(mcp_server, app):
+async def test_write_note_no_tags(mcp_server, app, test_project):
     """Test creating a note without tags."""
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "No Tags Note",
                 "folder": "test",
                 "content": "Just some plain text without tags.",
@@ -65,7 +69,7 @@ async def test_write_note_no_tags(mcp_server, app):
 
 
 @pytest.mark.asyncio
-async def test_write_note_update_existing(mcp_server, app):
+async def test_write_note_update_existing(mcp_server, app, test_project):
     """Test updating an existing note."""
 
     async with Client(mcp_server) as client:
@@ -73,6 +77,7 @@ async def test_write_note_update_existing(mcp_server, app):
         result1 = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Update Test",
                 "folder": "test",
                 "content": "# Update Test\n\nOriginal content.",
@@ -80,12 +85,13 @@ async def test_write_note_update_existing(mcp_server, app):
             },
         )
 
-        assert "# Created note" in result1.content[0].text
+        assert "# Created note" in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Update the same note
         result2 = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Update Test",
                 "folder": "test",
                 "content": "# Update Test\n\nUpdated content with changes.",
@@ -98,13 +104,15 @@ async def test_write_note_update_existing(mcp_server, app):
         response_text = result2.content[0].text
 
         assert "# Updated note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Update Test.md" in response_text
         assert "permalink: test/update-test" in response_text
         assert "- updated, modified" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_tag_array(mcp_server, app):
+async def test_write_note_tag_array(mcp_server, app, test_project):
     """Test creating a note with tag array (Issue #38 regression test)."""
 
     async with Client(mcp_server) as client:
@@ -112,6 +120,7 @@ async def test_write_note_tag_array(mcp_server, app):
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Array Tags Test",
                 "folder": "test",
                 "content": "Testing tag array handling",
@@ -124,14 +133,16 @@ async def test_write_note_tag_array(mcp_server, app):
         response_text = result.content[0].text
 
         assert "# Created note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Array Tags Test.md" in response_text
         assert "permalink: test/array-tags-test" in response_text
         assert "## Tags" in response_text
         assert "python" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_custom_permalink(mcp_server, app):
+async def test_write_note_custom_permalink(mcp_server, app, test_project):
     """Test custom permalink handling (Issue #93 regression test)."""
 
     async with Client(mcp_server) as client:
@@ -139,17 +150,18 @@ async def test_write_note_custom_permalink(mcp_server, app):
             ---
             permalink: custom/my-special-permalink
             ---
-            
+
             # Custom Permalink Note
-            
+
             This note has a custom permalink in frontmatter.
-            
+
             - [note] Testing custom permalink preservation
         """).strip()
 
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Custom Permalink Note",
                 "folder": "notes",
                 "content": content_with_custom_permalink,
@@ -161,13 +173,15 @@ async def test_write_note_custom_permalink(mcp_server, app):
         response_text = result.content[0].text
 
         assert "# Created note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: notes/Custom Permalink Note.md" in response_text
         assert "permalink: custom/my-special-permalink" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_unicode_content(mcp_server, app):
-    """Test handling unicode content including emojis."""
+async def test_write_note_unicode_content(mcp_server, app, test_project):
+    """Test handling Unicode content including emojis."""
 
     async with Client(mcp_server) as client:
         unicode_content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦\n\n- [note] Testing unicode handling 测试"
@@ -175,6 +189,7 @@ async def test_write_note_unicode_content(mcp_server, app):
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Unicode Test 🌟",
                 "folder": "test",
                 "content": unicode_content,
@@ -187,40 +202,45 @@ async def test_write_note_unicode_content(mcp_server, app):
         response_text = result.content[0].text
 
         assert "# Created note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Unicode Test 🌟.md" in response_text
         # Permalink should be sanitized
         assert "permalink: test/unicode-test" in response_text
         assert "## Tags" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_complex_content_with_observations_relations(mcp_server, app):
+async def test_write_note_complex_content_with_observations_relations(
+    mcp_server, app, test_project
+):
     """Test creating note with complex content including observations and relations."""
 
     async with Client(mcp_server) as client:
         complex_content = dedent("""
             # Complex Note
-            
+
             This note demonstrates the full knowledge format.
-            
+
             ## Observations
             - [tech] Uses Python and FastAPI
             - [design] Follows MCP protocol specification
             - [note] Integration tests are comprehensive
-            
+
             ## Relations
             - implements [[MCP Protocol]]
             - depends_on [[FastAPI Framework]]
             - tested_by [[Integration Tests]]
-            
+
             ## Additional Content
-            
+
             Some more regular markdown content here.
         """).strip()
 
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Complex Knowledge Note",
                 "folder": "knowledge",
                 "content": complex_content,
@@ -233,6 +253,7 @@ async def test_write_note_complex_content_with_observations_relations(mcp_server
         response_text = result.content[0].text
 
         assert "# Created note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: knowledge/Complex Knowledge Note.md" in response_text
         assert "permalink: knowledge/complex-knowledge-note" in response_text
 
@@ -247,10 +268,11 @@ async def test_write_note_complex_content_with_observations_relations(mcp_server
 
         assert "## Tags" in response_text
         assert "complex, knowledge, relations" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_preserve_frontmatter(mcp_server, app):
+async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
     """Test that custom frontmatter is preserved when updating notes."""
 
     async with Client(mcp_server) as client:
@@ -262,15 +284,16 @@ async def test_write_note_preserve_frontmatter(mcp_server, app):
             author: Test Author
             status: draft
             ---
-            
+
             # Frontmatter Note
-            
+
             This note has custom frontmatter that should be preserved.
         """).strip()
 
         result = await client.call_tool(
             "write_note",
             {
+                "project": test_project.name,
                 "title": "Frontmatter Note",
                 "folder": "test",
                 "content": content_with_frontmatter,
@@ -283,12 +306,14 @@ async def test_write_note_preserve_frontmatter(mcp_server, app):
         response_text = result.content[0].text
 
         assert "# Created note" in response_text
+        assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Frontmatter Note.md" in response_text
         assert "permalink: test/frontmatter-note" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_kebab_filenames_basic(mcp_server):
+async def test_write_note_kebab_filenames_basic(mcp_server, test_project):
     """Test note creation with kebab_filenames=True and invalid filename characters."""
 
     config = ConfigManager().config
@@ -300,6 +325,7 @@ async def test_write_note_kebab_filenames_basic(mcp_server):
             result = await client.call_tool(
                 "write_note",
                 {
+                    "project": test_project.name,
                     "title": "My Note: With/Invalid|Chars?",
                     "folder": "my-folder",
                     "content": "Testing kebab-case and invalid characters.",
@@ -308,18 +334,20 @@ async def test_write_note_kebab_filenames_basic(mcp_server):
             )
 
             assert len(result.content) == 1
-            response_text = result.content[0].text
+            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
             # File path and permalink should be kebab-case and sanitized
+            assert f"project: {test_project.name}" in response_text
             assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
             assert "permalink: my-folder/my-note-with-invalid-chars" in response_text
+            assert f"[Session: Using project '{test_project.name}']" in response_text
 
     # Restore original config value
     config.kebab_filenames = curr_config_val
 
 
 @pytest.mark.asyncio
-async def test_write_note_kebab_filenames_repeat_invalid(mcp_server):
+async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, test_project):
     """Test note creation with multiple invalid and repeated characters."""
 
     config = ConfigManager().config
@@ -331,6 +359,7 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server):
             result = await client.call_tool(
                 "write_note",
                 {
+                    "project": test_project.name,
                     "title": 'Crazy<>:"|?*Note/Name',
                     "folder": "my-folder",
                     "content": "Should be fully kebab-case and safe.",
@@ -339,17 +368,19 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server):
             )
 
             assert len(result.content) == 1
-            response_text = result.content[0].text
+            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
+            assert f"project: {test_project.name}" in response_text
             assert "file_path: my-folder/crazy-note-name.md" in response_text
             assert "permalink: my-folder/crazy-note-name" in response_text
+            assert f"[Session: Using project '{test_project.name}']" in response_text
 
     # Restore original config value
     config.kebab_filenames = curr_config_val
 
 
 @pytest.mark.asyncio
-async def test_write_note_file_path_os_path_join(mcp_server):
+async def test_write_note_file_path_os_path_join(mcp_server, test_project):
     """Test that os.path.join logic in Entity.file_path works for various folder/title combinations."""
 
     config = ConfigManager().config
@@ -381,6 +412,7 @@ async def test_write_note_file_path_os_path_join(mcp_server):
                 result = await client.call_tool(
                     "write_note",
                     {
+                        "project": test_project.name,
                         "title": title,
                         "folder": folder,
                         "content": "Testing os.path.join logic.",
@@ -389,11 +421,13 @@ async def test_write_note_file_path_os_path_join(mcp_server):
                 )
 
                 assert len(result.content) == 1
-                response_text = result.content[0].text
+                response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
                 print(response_text)
 
+                assert f"project: {test_project.name}" in response_text
                 assert f"file_path: {expected_path}" in response_text
                 assert f"permalink: {expected_permalink}" in response_text
+                assert f"[Session: Using project '{test_project.name}']" in response_text
 
     # Restore original config value
     config.kebab_filenames = curr_config_val

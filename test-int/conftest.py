@@ -60,7 +60,6 @@ from httpx import AsyncClient, ASGITransport
 
 from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
 from basic_memory.db import engine_session_factory, DatabaseType
-from basic_memory.mcp.middleware import ProjectContextMiddleware
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
 from fastapi import FastAPI
@@ -199,9 +198,6 @@ async def search_service(engine_factory, test_project):
 def mcp_server(config_manager, search_service):
     # Import mcp instance
     from basic_memory.mcp.server import mcp as server
-
-    session_state_middleware = ProjectContextMiddleware()
-    server.add_middleware(session_state_middleware)
 
     # Import mcp tools to register them
     import basic_memory.mcp.tools  # noqa: F401

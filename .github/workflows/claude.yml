@@ -9,106 +9,57 @@ on:
     types: [opened, assigned]
   pull_request_review:
     types: [submitted]
+  pull_request_target:
+    types: [opened, synchronize]
 
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
-
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+        (github.event_name == 'pull_request_target' && contains(github.event.pull_request.body, '@claude'))
+      ) && (
+        github.event.sender.author_association == 'OWNER' ||
+        github.event.sender.author_association == 'MEMBER' ||
+        github.event.sender.author_association == 'COLLABORATOR' ||
+        github.event.pull_request.author_association == 'OWNER' ||
+        github.event.pull_request.author_association == 'MEMBER' ||
+        github.event.pull_request.author_association == 'COLLABORATOR'
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
       issues: read
       id-token: write
+      actions: read # Required for Claude to read CI results on PRs
     steps:
-      - name: Check user permissions
-        id: check_membership
-        uses: actions/github-script@v7
-        with:
-          script: |
-            let actor;
-            if (context.eventName === 'issue_comment') {
-              actor = context.payload.comment.user.login;
-            } else if (context.eventName === 'pull_request_review_comment') {
-              actor = context.payload.comment.user.login;
-            } else if (context.eventName === 'pull_request_review') {
-              actor = context.payload.review.user.login;
-            } else if (context.eventName === 'issues') {
-              actor = context.payload.issue.user.login;
-            }
-            
-            console.log(`Checking permissions for user: ${actor}`);
-            
-            // List of explicitly allowed users (organization members)
-            const allowedUsers = [
-              'phernandez',
-              'groksrc',
-              'nellins',
-              'bm-claudeai'
-            ];
-            
-            if (allowedUsers.includes(actor)) {
-              console.log(`User ${actor} is in the allowed list`);
-              core.setOutput('is_member', true);
-              return;
-            }
-            
-            // Fallback: Check if user has repository permissions
-            try {
-              const collaboration = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: actor
-              });
-              
-              const permission = collaboration.data.permission;
-              console.log(`User ${actor} has permission level: ${permission}`);
-              
-              // Allow if user has push access or higher (write, maintain, admin)
-              const allowed = ['write', 'maintain', 'admin'].includes(permission);
-              
-              core.setOutput('is_member', allowed);
-              
-              if (!allowed) {
-                core.notice(`User ${actor} does not have sufficient repository permissions (has: ${permission})`);
-              }
-            } catch (error) {
-              console.log(`Error checking permissions: ${error.message}`);
-              
-              // Final fallback: Check if user is a public member of the organization
-              try {
-                const membership = await github.rest.orgs.getMembershipForUser({
-                  org: 'basicmachines-co',
-                  username: actor
-                });
-                
-                const allowed = membership.data.state === 'active';
-                core.setOutput('is_member', allowed);
-                
-                if (!allowed) {
-                  core.notice(`User ${actor} is not a public member of basicmachines-co organization`);
-                }
-              } catch (membershipError) {
-                console.log(`Error checking organization membership: ${membershipError.message}`);
-                core.setOutput('is_member', false);
-                core.notice(`User ${actor} does not have access to this repository`);
-              }
-            }
-
       - name: Checkout repository
-        if: steps.check_membership.outputs.is_member == 'true'
         uses: actions/checkout@v4
         with:
+          # For pull_request_target, checkout the PR head to review the actual changes
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
 
       - name: Run Claude Code
-        if: steps.check_membership.outputs.is_member == 'true'
         id: claude
-        uses: anthropics/claude-code-action@beta
+        uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_tools: Bash(uv run pytest),Bash(uv run ruff check . --fix),Bash(uv run ruff format .),Bash(uv run pyright),Bash(just test),Bash(just lint),Bash(just format),Bash(just type-check),Bash(just check),Read,Write,Edit,MultiEdit,Glob,Grep,LS, mcp__web_search
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true  # Enable visual progress tracking
+          
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+
+          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
+          # prompt: 'Update the pull request description to include a summary of changes.'
+
+          # Optional: Add claude_args to customize behavior and configuration
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://docs.claude.com/en/docs/claude-code/sdk#command-line for available options
+          # claude_args: '--model claude-opus-4-1-20250805 --allowed-tools Bash(gh pr:*)'
+

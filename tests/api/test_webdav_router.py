@@ -537,7 +537,8 @@ async def test_webdav_put_without_timestamp_headers(client, project_config, proj
     stat = full_path.stat()
 
     # File timestamp should be between before and after upload times
-    assert before_upload <= stat.st_mtime <= after_upload
+    # Allow small tolerance for file system timestamp precision differences
+    assert before_upload - 0.1 <= stat.st_mtime <= after_upload + 0.1
 
 
 @pytest.mark.asyncio
@@ -593,7 +594,8 @@ async def test_webdav_put_invalid_timestamp_headers(client, project_config, proj
     stat = full_path.stat()
 
     # Should fall back to current time when all headers are invalid
-    assert before_upload <= stat.st_mtime <= after_upload
+    # Allow small tolerance for file system timestamp precision differences
+    assert before_upload - 0.1 <= stat.st_mtime <= after_upload + 0.1
 
 
 @pytest.mark.asyncio

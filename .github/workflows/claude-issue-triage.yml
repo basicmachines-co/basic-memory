@@ -1,0 +1,71 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true  # Show triage progress
+          prompt: |
+            Analyze this new Basic Memory issue and perform triage:
+
+            **Issue Analysis:**
+            1. **Type Classification:**
+               - Bug report (code defect)
+               - Feature request (new functionality)
+               - Enhancement (improvement to existing feature)
+               - Documentation (docs improvement)
+               - Question/Support (user help)
+               - MCP tool issue (specific to MCP functionality)
+
+            2. **Priority Assessment:**
+               - Critical: Security issues, data loss, complete breakage
+               - High: Major functionality broken, affects many users
+               - Medium: Minor bugs, usability issues
+               - Low: Nice-to-have improvements, cosmetic issues
+
+            3. **Component Classification:**
+               - CLI commands
+               - MCP tools
+               - Database/sync
+               - Cloud functionality
+               - Documentation
+               - Testing
+
+            4. **Complexity Estimate:**
+               - Simple: Quick fix, documentation update
+               - Medium: Requires some investigation/testing
+               - Complex: Major feature work, architectural changes
+
+            **Actions to Take:**
+            1. Add appropriate labels using: `gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"`
+            2. Check for duplicates using: `gh search issues`
+            3. If duplicate found, comment mentioning the original issue
+            4. For feature requests, ask clarifying questions if needed
+            5. For bugs, request reproduction steps if missing
+
+            **Available Labels:**
+            - Type: bug, enhancement, feature, documentation, question, mcp-tool
+            - Priority: critical, high, medium, low
+            - Component: cli, mcp, database, cloud, docs, testing
+            - Complexity: simple, medium, complex
+            - Status: needs-reproduction, needs-clarification, duplicate
+
+            Read the issue carefully and provide helpful triage with appropriate labels.
+
+          claude_args: '--allowed-tools "Bash(gh issue:*),Bash(gh search:*),Read"'

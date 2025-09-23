@@ -39,8 +39,6 @@ def memory_json(
     1. Read entities and relations from the JSON file
     2. Create markdown files for each entity
     3. Include outgoing relations in each entity's markdown
-
-    After importing, run 'basic-memory sync' to index the new files.
     """
 
     if not json_path.exists():
@@ -81,8 +79,6 @@ def memory_json(
                 expand=False,
             )
         )
-
-        console.print("\nRun 'basic-memory sync' to index the new files.")
 
     except Exception as e:
         logger.error("Import failed")

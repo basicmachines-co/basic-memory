@@ -1,99 +1,121 @@
-"""Project session management for Basic Memory MCP server.
+"""Project context utilities for Basic Memory MCP server.
 
-Provides simple in-memory project context for MCP tools, allowing users to switch
-between projects during a conversation without restarting the server.
-
-Session Persistence Flow:
-  1. Pre-tool: Middleware loads self.sessions[session_id] → sets context state
-  2. Tool execution: Uses context.get_state("active_project")
-  3. Project switching: Tool calls set_active_project() → updates context state
-  4. Post-tool: Middleware detects context change → saves to self.sessions[session_id]
+Provides project lookup utilities for MCP tools.
+Handles project validation and context management in one place.
 """
 
+import os
 from typing import Optional
 from httpx import AsyncClient
 from loguru import logger
-
 from fastmcp import Context
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink
 
 
-async def set_active_project(
-    client: AsyncClient, *, context: Context | None, project: ProjectItem
-) -> None:
-    """Set the active project context.
+async def resolve_project_parameter(project: Optional[str] = None) -> Optional[str]:
+    """Resolve project parameter using three-tier hierarchy.
+
+    Resolution order:
+    1. Single Project Mode  (--project cli arg, or BASIC_MEMORY_MCP_PROJECT env var) - highest priority
+    2. Explicit project parameter - medium priority
+    3. Default project if default_project_mode=true - lowest priority
 
     Args:
-        client (AsyncClient): The client to use for making requests to fastapi.
-        project_name: The project to switch to
-        context: Optional FastMCP context containing project session state
+        project: Optional explicit project parameter
+
+    Returns:
+        Resolved project name or None if no resolution possible
     """
-    active_project = await get_active_project(client, context=context)
-    if active_project.name != project.name:
-        previous_project = active_project
-        # set project in the context
-        if context:
-            context.set_state("active_project", project)
-            await context.info(
-                f"Context {context.session_id} Switched active project: {previous_project} -> {project.name}"
-            )
-            logger.info(f"Switched active project: {previous_project} -> {project.name}")
-    else:
-        logger.debug(f"No change for active project: {active_project}")
+    # Priority 1: CLI constraint overrides everything (--project arg sets env var)
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        logger.debug(f"Using CLI constrained project: {constrained_project}")
+        return constrained_project
+
+    # Priority 2: Explicit project parameter
+    if project:
+        logger.debug(f"Using explicit project parameter: {project}")
+        return project
+
+    # Priority 3: Default project mode
+    config = ConfigManager().config
+    if config.default_project_mode:
+        logger.debug(f"Using default project from config: {config.default_project}")
+        return config.default_project
+
+    # No resolution possible
+    return None
 
 
 async def get_active_project(
-    client: AsyncClient, *, context: Context | None, project_override: Optional[str] = None
+    client: AsyncClient, project: Optional[str] = None, context: Optional[Context] = None
 ) -> ProjectItem:
-    """
-    Get the active project for a tool call.
-    If no context is provided, the active project is returned from the default project
+    """Get and validate project, setting it in context if available.
+
+    Uses three-tier resolution:
+    1. CLI constraint (BASIC_MEMORY_MCP_PROJECT env var)
+    2. Explicit project parameter
+    3. Default project if default_project_mode=true
 
     Args:
-        client (AsyncClient): The client to use for making requests to fastapi.
-        project_override: Optional explicit project name from tool parameter
-        context: Optional FastMCP context containing project session state
+        client: HTTP client for API calls
+        project: Optional project name (resolved using hierarchy)
+        context: Optional FastMCP context to cache the result
 
     Returns:
-        The project to use for the tool call
+        The validated project item
+
+    Raises:
+        ValueError: If no project can be resolved
+        HTTPError: If project doesn't exist or is inaccessible
     """
+    # Resolve project using three-tier hierarchy
+    resolved_project = await resolve_project_parameter(project)
+    if not resolved_project:
+        raise ValueError(
+            "No project specified. Either provide project parameter, "
+            "set default_project_mode=true in config, or use --project constraint."
+        )
 
-    # Try to get active project from context first
+    project = resolved_project
+
+    # Check if already cached in context
     if context:
-        active_project = context.get_state("active_project")
-        logger.debug(f"Context {context.session_id} found active project: {active_project}")
-    else:
-        response = await call_get(
-            client,
-            "/projects/default",
-        )
-        active_project = ProjectItem.model_validate(response.json())
-        logger.debug(f"No context provided. Using default project: {active_project}")
+        cached_project = context.get_state("active_project")
+        if cached_project and cached_project.name == project:
+            logger.debug(f"Using cached project from context: {project}")
+            return cached_project
 
-    # Handle project override
-    if project_override:
-        logger.debug(f"overriding active project: {project_override}")
-        permalink = generate_permalink(project_override)
-        response = await call_get(
-            client,
-            f"/{permalink}/project/item",
-        )
-        active_project = ProjectItem.model_validate(response.json())
+    # Validate project exists by calling API
+    logger.debug(f"Validating project: {project}")
+    permalink = generate_permalink(project)
+    response = await call_get(client, f"/{permalink}/project/item")
+    active_project = ProjectItem.model_validate(response.json())
 
+    # Cache in context if available
+    if context:
+        context.set_state("active_project", active_project)
+        logger.debug(f"Cached project in context: {project}")
+
+    logger.debug(f"Validated project: {active_project.name}")
     return active_project
 
 
 def add_project_metadata(result: str, project_name: str) -> str:
-    """Add project context as metadata footer for LLM awareness.
+    """Add project context as metadata footer for assistant session tracking.
+
+    Provides clear project context to help the assistant remember which
+    project is being used throughout the conversation session.
 
     Args:
         result: The tool result string
         project_name: The project name that was used
 
     Returns:
-        Result with project metadata footer
+        Result with project session tracking metadata
     """
-    return f"{result}\n\n<!-- Project: {project_name} -->"  # pragma: no cover
+    return f"{result}\n\n[Session: Using project '{project_name}']"

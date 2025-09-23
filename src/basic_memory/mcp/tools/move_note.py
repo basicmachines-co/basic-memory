@@ -80,17 +80,12 @@ def _format_cross_project_error_response(
         # 1. Read the note content from current project
         read_note("{identifier}")
         
-        # 2. Switch to the target project
-        switch_project("{target_project}")
+        # 2. Create the note in the target project
+        write_note("Note Title", "content from step 1", "target-folder", project="{target_project}")
+
+        # 3. Delete the original note if desired
+        delete_note("{identifier}", project="{current_project}")
         
-        # 3. Create the note in the target project
-        write_note("Note Title", "content from step 1", "target-folder")
-        
-        # 4. Switch back to original project (optional)
-        switch_project("{current_project}")
-        
-        # 5. Delete the original note if desired
-        delete_note("{identifier}")
         ```
         
         ### Alternative: Stay in current project
@@ -100,7 +95,7 @@ def _format_cross_project_error_response(
         ```
         
         ## Available projects:
-        Use `list_projects()` to see all available projects and `switch_project("project-name")` to change projects.
+        Use `list_memory_projects()` to see all available projects.
         """).strip()
 
 
@@ -131,20 +126,16 @@ def _format_potential_cross_project_guidance(
         # 1. Read the content
         read_note("{identifier}")
         
-        # 2. Switch to target project
-        switch_project("target-project-name")
-        
-        # 3. Create note in target project
-        write_note("Title", "content", "folder")
-        
-        # 4. Switch back and delete original if desired
-        switch_project("{current_project}")
-        delete_note("{identifier}")
+        # 2. Create note in target project
+        write_note("Title", "content", "folder", project="target-project-name")
+
+        # 3. Delete original if desired
+        delete_note("{identifier}", project="{current_project}")
         ```
         
         ### To see all projects:
         ```
-        list_projects()
+        list_memory_projects()
         ```
         """).strip()
 
@@ -172,7 +163,7 @@ def _format_move_error_response(error_message: str, identifier: str, destination
                - If you used a title, try the exact permalink format: "{permalink_format}"
                - Use `read_note()` first to verify the note exists and get the exact identifier
 
-            3. **Check current project**: Use `get_current_project()` to verify you're in the right project
+            3. **List available notes**: Use `list_directory("/")` to see what notes exist in the current project
             4. **List available notes**: Use `list_directory("/")` to see what notes exist
 
             ## Before trying again:
@@ -249,9 +240,8 @@ You don't have permission to move '{identifier}': {error_message}
 3. **Check file locks**: The file might be open in another application
 
 ## Alternative actions:
-- Check current project: `get_current_project()`
-- Switch projects if needed: `switch_project("project-name")`
-- Try copying content instead: `read_note("{identifier}")` then `write_note()` to new location"""
+- List available projects: `list_memory_projects()`
+- Try copying content instead: `read_note("{identifier}", project="project-name")` then `write_note()` to new location"""
 
     # Source file not found errors
     if "source" in error_message.lower() and (
@@ -357,15 +347,21 @@ async def move_note(
 ) -> str:
     """Move a note to a new file location within the same project.
 
+    Moves a note from one location to another within the project, updating all
+    database references and maintaining semantic content. Uses stateless architecture -
+    project parameter optional with server resolution.
+
     Args:
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
-        project: Optional project name (defaults to current active project)
+        project: Project name to move within. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
-        Success message with move details
+        Success message with move details and project information.
 
     Examples:
         # Move to new folder (exact title match)
@@ -374,15 +370,22 @@ async def move_note(
         # Move by exact permalink
         move_note("my-note-permalink", "archive/old-notes/my-note.md")
 
-        # Specify project with exact identifier
-        move_note("My Note", "archive/my-note.md", project="work-project")
+        # Move with complex path structure
+        move_note("experiments/ml-results", "archive/2025/ml-experiments.md")
+
+        # Explicit project specification
+        move_note("My Note", "work/notes/my-note.md", project="work-project")
 
         # If uncertain about identifier, search first:
         # search_notes("my note")  # Find available notes
         # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
 
-    Note: This operation moves notes within the specified project only. Moving notes
-    between different projects is not currently supported.
+    Raises:
+        ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
+
+    Note:
+        This operation moves notes within the specified project only. Moving notes
+        between different projects is not currently supported.
 
     The move operation:
     - Updates the entity's file_path in the database
@@ -391,9 +394,9 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
-    logger.debug(f"Moving note: {identifier} to {destination_path}")
+    logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 
-    active_project = await get_active_project(client, context=context, project_override=project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     # Validate destination path to prevent path traversal attacks
