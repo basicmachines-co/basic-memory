@@ -11,6 +11,20 @@ import pytest
 from fastmcp import Client
 
 
+def extract_mcp_json_content(mcp_result):
+    """
+    Helper to extract JSON content from MCP CallToolResult.
+
+    FastMCP auto-serializes our List[Dict[str, Any]] return values, so we need to:
+    1. Get the content list from the CallToolResult
+    2. Parse the JSON string in the text field (which is our serialized list)
+    3. Extract the actual JSON from the MCP content array structure
+    """
+    content_list = mcp_result.content
+    mcp_content_list = json.loads(content_list[0].text)
+    return json.loads(mcp_content_list[0]["text"])
+
+
 @pytest.mark.asyncio
 async def test_chatgpt_search_basic(mcp_server, app, test_project):
     """Test basic ChatGPT search functionality with MCP content array format."""
@@ -68,13 +82,8 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
             },
         )
 
-        # Verify MCP content array format
-        assert isinstance(search_result, list)
-        assert len(search_result) == 1
-        assert search_result[0]["type"] == "text"
-
-        # Parse JSON response
-        results_json = json.loads(search_result[0]["text"])
+        # Extract JSON content from MCP result
+        results_json = extract_mcp_json_content(search_result)
         assert "results" in results_json
         assert len(results_json["results"]) > 0
 
@@ -104,13 +113,8 @@ async def test_chatgpt_search_empty_results(mcp_server, app, test_project):
             },
         )
 
-        # Verify MCP content array format
-        assert isinstance(search_result, list)
-        assert len(search_result) == 1
-        assert search_result[0]["type"] == "text"
-
-        # Parse JSON response
-        results_json = json.loads(search_result[0]["text"])
+        # Extract JSON content from MCP result
+        results_json = extract_mcp_json_content(search_result)
         assert "results" in results_json
         assert len(results_json["results"]) == 0
         assert results_json["query"] == "NonExistentTopic12345"
@@ -156,7 +160,7 @@ async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_proje
             },
         )
 
-        results_json = json.loads(search_result[0]["text"])
+        results_json = extract_mcp_json_content(search_result)
         titles = [r["title"] for r in results_json["results"]]
         assert "Python Web Frameworks" in titles
         assert "JavaScript Frameworks" not in titles
@@ -208,13 +212,8 @@ def my_decorator(func):
             },
         )
 
-        # Verify MCP content array format
-        assert isinstance(fetch_result, list)
-        assert len(fetch_result) == 1
-        assert fetch_result[0]["type"] == "text"
-
-        # Parse JSON response
-        document_json = json.loads(fetch_result[0]["text"])
+        # Extract JSON content from MCP result
+        document_json = extract_mcp_json_content(fetch_result)
         assert "id" in document_json
         assert "title" in document_json
         assert "text" in document_json
@@ -254,7 +253,7 @@ async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
             },
         )
 
-        results_json = json.loads(search_result[0]["text"])
+        results_json = extract_mcp_json_content(search_result)
         assert len(results_json["results"]) > 0
         permalink = results_json["results"][0]["id"]
 
@@ -268,7 +267,7 @@ async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
         )
 
         # Verify the fetched document
-        document_json = json.loads(fetch_result[0]["text"])
+        document_json = extract_mcp_json_content(fetch_result)
         assert document_json["id"] == permalink
         assert "Test Document" in document_json["title"]
         assert "test content for permalink fetching" in document_json["text"]
@@ -288,13 +287,8 @@ async def test_chatgpt_fetch_nonexistent_document(mcp_server, app, test_project)
             },
         )
 
-        # Verify MCP content array format
-        assert isinstance(fetch_result, list)
-        assert len(fetch_result) == 1
-        assert fetch_result[0]["type"] == "text"
-
-        # Parse JSON response
-        document_json = json.loads(fetch_result[0]["text"])
+        # Extract JSON content from MCP result
+        document_json = extract_mcp_json_content(fetch_result)
 
         # Should have document structure even for errors
         assert "id" in document_json
@@ -333,7 +327,7 @@ async def test_chatgpt_fetch_with_empty_title(mcp_server, app, test_project):
         )
 
         # Parse JSON response
-        document_json = json.loads(fetch_result[0]["text"])
+        document_json = extract_mcp_json_content(fetch_result)
 
         # Should have a title even if content doesn't have one
         assert "title" in document_json
@@ -369,7 +363,7 @@ async def test_chatgpt_search_pagination_default(mcp_server, app, test_project):
             },
         )
 
-        results_json = json.loads(search_result[0]["text"])
+        results_json = extract_mcp_json_content(search_result)
 
         # Should have at most 10 results (the default page_size)
         assert len(results_json["results"]) <= 10
@@ -392,12 +386,14 @@ async def test_chatgpt_tools_error_handling(mcp_server, app, test_project):
         )
 
         # Should still return MCP content array format
-        assert isinstance(search_result, list)
-        assert len(search_result) == 1
-        assert search_result[0]["type"] == "text"
+        assert hasattr(search_result, 'content')
+        content_list = search_result.content
+        assert isinstance(content_list, list)
+        assert len(content_list) == 1
+        assert content_list[0].type == "text"
 
         # Should be valid JSON even on error
-        results_json = json.loads(search_result[0]["text"])
+        results_json = extract_mcp_json_content(search_result)
         assert "results" in results_json  # Should have results key even if empty
 
 
@@ -452,7 +448,7 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
             },
         )
 
-        results_json = json.loads(search_result[0]["text"])
+        results_json = extract_mcp_json_content(search_result)
         assert len(results_json["results"]) >= 2
 
         # Step 3: Fetch one of the search results (as ChatGPT would)
@@ -465,7 +461,7 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
             },
         )
 
-        document_json = json.loads(fetch_result[0]["text"])
+        document_json = extract_mcp_json_content(fetch_result)
 
         # Verify the fetched document matches search result
         assert document_json["id"] == first_result_id
