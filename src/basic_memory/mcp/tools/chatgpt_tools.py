@@ -77,24 +77,27 @@ def _format_document_for_chatgpt(
 )
 async def search(
     query: str,
+    project: Optional[str] = None,
     context: Context | None = None,
 ) -> List[Dict[str, Any]]:
     """ChatGPT/OpenAI MCP search adapter returning a single text content item.
 
     Args:
         query: Search query (full-text syntax supported by `search_notes`)
+        project: Optional project name for multi-project support
         context: Optional FastMCP context passed through for auth/session data
 
     Returns:
         List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
         where the JSON body contains `results`, `total_count`, and echo of `query`.
     """
-    logger.info(f"ChatGPT search request: query='{query}'")
+    logger.info(f"ChatGPT search request: query='{query}', project='{project}'")
 
     try:
         # Call underlying search_notes with sensible defaults for ChatGPT
         results = await search_notes.fn(
             query=query,
+            project=project,
             page=1,
             page_size=10,  # Reasonable default for ChatGPT consumption
             search_type="text",  # Default to full-text search
@@ -147,24 +150,27 @@ async def search(
 )
 async def fetch(
     id: str,
+    project: Optional[str] = None,
     context: Context | None = None,
 ) -> List[Dict[str, Any]]:
     """ChatGPT/OpenAI MCP fetch adapter returning a single text content item.
 
     Args:
         id: Document identifier (permalink, title, or memory URL)
+        project: Optional project name for multi-project support
         context: Optional FastMCP context passed through for auth/session data
 
     Returns:
         List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
         where the JSON body includes `id`, `title`, `text`, `url`, and metadata.
     """
-    logger.info(f"ChatGPT fetch request: id='{id}'")
+    logger.info(f"ChatGPT fetch request: id='{id}', project='{project}'")
 
     try:
         # Call underlying read_note function
         content = await read_note.fn(
             identifier=id,
+            project=project,
             page=1,
             page_size=10,  # Default pagination
             context=context

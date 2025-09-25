@@ -64,6 +64,7 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
             "search",
             {
                 "query": "Machine Learning",
+                "project": test_project.name,
             },
         )
 
@@ -99,6 +100,7 @@ async def test_chatgpt_search_empty_results(mcp_server, app, test_project):
             "search",
             {
                 "query": "NonExistentTopic12345",
+                "project": test_project.name,
             },
         )
 
@@ -150,6 +152,7 @@ async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_proje
             "search",
             {
                 "query": "Python AND frameworks",
+                "project": test_project.name,
             },
         )
 
@@ -201,6 +204,7 @@ def my_decorator(func):
             "fetch",
             {
                 "id": "Advanced Python Techniques",
+                "project": test_project.name,
             },
         )
 
@@ -246,6 +250,7 @@ async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
             "search",
             {
                 "query": "Test Document",
+                "project": test_project.name,
             },
         )
 
@@ -258,6 +263,7 @@ async def test_chatgpt_fetch_by_permalink(mcp_server, app, test_project):
             "fetch",
             {
                 "id": permalink,
+                "project": test_project.name,
             },
         )
 
@@ -278,6 +284,7 @@ async def test_chatgpt_fetch_nonexistent_document(mcp_server, app, test_project)
             "fetch",
             {
                 "id": "NonExistentDocument12345",
+                "project": test_project.name,
             },
         )
 
@@ -321,6 +328,7 @@ async def test_chatgpt_fetch_with_empty_title(mcp_server, app, test_project):
             "fetch",
             {
                 "id": "untitled-note",
+                "project": test_project.name,
             },
         )
 
@@ -357,6 +365,7 @@ async def test_chatgpt_search_pagination_default(mcp_server, app, test_project):
             "search",
             {
                 "query": "Test Note",
+                "project": test_project.name,
             },
         )
 
@@ -378,6 +387,7 @@ async def test_chatgpt_tools_error_handling(mcp_server, app, test_project):
             "search",
             {
                 "query": "",  # Empty query might cause an error
+                "project": test_project.name,
             },
         )
 
@@ -438,6 +448,7 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
             "search",
             {
                 "query": "API",
+                "project": test_project.name,
             },
         )
 
@@ -450,6 +461,7 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
             "fetch",
             {
                 "id": first_result_id,
+                "project": test_project.name,
             },
         )
 
