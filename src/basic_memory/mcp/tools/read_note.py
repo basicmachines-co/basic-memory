@@ -25,7 +25,7 @@ async def read_note(
     page_size: int = 10,
     context: Context | None = None,
 ) -> str:
-    """Read a markdown note from the knowledge base.
+    """Return the raw markdown for a note, or guidance text if no match is found.
 
     Finds and retrieves a note by its title, permalink, or content search,
     returning the raw markdown content including observations, relations, and metadata.
@@ -171,25 +171,25 @@ def format_not_found_message(project: str | None, identifier: str) -> str:
     """Format a helpful message when no note was found."""
     return dedent(f"""
         # Note Not Found in {project}: "{identifier}"
-        
+
         I couldn't find any notes matching "{identifier}". Here are some suggestions:
-        
+
         ## Check Identifier Type
         - If you provided a title, try using the exact permalink instead
         - If you provided a permalink, check for typos or try a broader search
-        
+
         ## Search Instead
         Try searching for related content:
         ```
         search_notes(project="{project}", query="{identifier}")
         ```
-        
+
         ## Recent Activity
         Check recently modified notes:
         ```
         recent_activity(timeframe="7d")
         ```
-        
+
         ## Create New Note
         This might be a good opportunity to create a new note on this topic:
         ```
@@ -198,13 +198,13 @@ def format_not_found_message(project: str | None, identifier: str) -> str:
             title="{identifier.capitalize()}",
             content='''
             # {identifier.capitalize()}
-            
+
             ## Overview
             [Your content here]
-            
+
             ## Observations
             - [category] [Observation about {identifier}]
-            
+
             ## Relations
             - relates_to [[Related Topic]]
             ''',
@@ -218,9 +218,9 @@ def format_related_results(project: str | None, identifier: str, results) -> str
     """Format a helpful message with related results when an exact match wasn't found."""
     message = dedent(f"""
         # Note Not Found in {project}: "{identifier}"
-        
+
         I couldn't find an exact match for "{identifier}", but I found some related notes:
-        
+
         """)
 
     for i, result in enumerate(results):
@@ -228,24 +228,24 @@ def format_related_results(project: str | None, identifier: str, results) -> str
             ## {i + 1}. {result.title}
             - **Type**: {result.type.value}
             - **Permalink**: {result.permalink}
-            
+
             You can read this note with:
             ```
             read_note(project="{project}", {result.permalink}")
             ```
-            
+
             """)
 
     message += dedent(f"""
         ## Try More Specific Lookup
         For exact matches, try using the full permalink from one of the results above.
-        
+
         ## Search For More Results
         To see more related content:
         ```
         search_notes(project="{project}", query="{identifier}")
         ```
-        
+
         ## Create New Note
         If none of these match what you're looking for, consider creating a new note:
         ```

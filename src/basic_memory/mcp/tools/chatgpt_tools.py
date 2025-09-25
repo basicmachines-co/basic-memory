@@ -1,14 +1,8 @@
 """ChatGPT-compatible MCP tools for Basic Memory.
 
-This module provides simplified 'search' and 'fetch' tools that adapt Basic Memory's
-rich MCP interface to ChatGPT's expected naming conventions and MCP content array format.
-
-ChatGPT's MCP integration expects:
-- search(query: str) -> MCP content array with JSON-encoded results
-- fetch(id: str) -> MCP content array with JSON-encoded document
-
-These tools wrap our existing search_notes and read_note functions and format
-responses according to OpenAI's MCP specification.
+These adapters expose Basic Memory's search/fetch functionality using the exact
+tool names and response structure OpenAI's MCP clients expect: each call returns
+a list containing a single `{"type": "text", "text": "{...json...}"}` item.
 """
 
 import json
@@ -83,27 +77,15 @@ async def search(
     query: str,
     context: Context | None = None,
 ) -> List[Dict[str, Any]]:
-    """Search for content across the knowledge base.
-
-    This tool provides a simplified search interface optimized for ChatGPT's
-    MCP integration. It returns results in the required MCP content array format.
+    """ChatGPT/OpenAI MCP search adapter returning a single text content item.
 
     Args:
-        query: Search query string (supports boolean operators, phrases)
-        context: MCP context for authentication and routing
+        query: Search query (full-text syntax supported by `search_notes`)
+        context: Optional FastMCP context passed through for auth/session data
 
     Returns:
-        MCP content array with exactly one item containing JSON-encoded search results
-
-    The response follows OpenAI's MCP specification:
-    {
-        "content": [
-            {
-                "type": "text",
-                "text": "{\"results\":[{\"id\":\"doc-1\",\"title\":\"...\",\"url\":\"...\"}]}"
-            }
-        ]
-    }
+        List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
+        where the JSON body contains `results`, `total_count`, and echo of `query`.
     """
     logger.info(f"ChatGPT search request: query='{query}'")
 
@@ -165,27 +147,15 @@ async def fetch(
     id: str,
     context: Context | None = None,
 ) -> List[Dict[str, Any]]:
-    """Fetch the full content of a specific document.
-
-    This tool provides a simplified fetch interface optimized for ChatGPT's
-    MCP integration. It returns document content in the required MCP content array format.
+    """ChatGPT/OpenAI MCP fetch adapter returning a single text content item.
 
     Args:
-        id: Document identifier (permalink, title, or memory:// URL)
-        context: MCP context for authentication and routing
+        id: Document identifier (permalink, title, or memory URL)
+        context: Optional FastMCP context passed through for auth/session data
 
     Returns:
-        MCP content array with exactly one item containing JSON-encoded document
-
-    The response follows OpenAI's MCP specification:
-    {
-        "content": [
-            {
-                "type": "text",
-                "text": "{\"id\":\"doc-1\",\"title\":\"...\",\"text\":\"full text...\",\"url\":\"...\",\"metadata\":{}}"
-            }
-        ]
-    }
+        List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
+        where the JSON body includes `id`, `title`, `text`, `url`, and metadata.
     """
     logger.info(f"ChatGPT fetch request: id='{id}'")
 
