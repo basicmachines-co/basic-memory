@@ -35,7 +35,6 @@ __all__ = [
     "delete_project",
     "edit_note",
     "fetch",
-    "get_current_project",
     "list_directory",
     "list_memory_projects",
     "move_note",
