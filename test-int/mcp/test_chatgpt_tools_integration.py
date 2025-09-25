@@ -23,7 +23,10 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
                 "project": test_project.name,
                 "title": "Machine Learning Fundamentals",
                 "folder": "ai",
-                "content": "# Machine Learning Fundamentals\n\nIntroduction to ML concepts and algorithms.",
+                "content": (
+                    "# Machine Learning Fundamentals\n\n"
+                    "Introduction to ML concepts and algorithms."
+                ),
                 "tags": "ml,ai,fundamentals",
             },
         )
@@ -34,7 +37,10 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
                 "project": test_project.name,
                 "title": "Deep Learning with PyTorch",
                 "folder": "ai",
-                "content": "# Deep Learning with PyTorch\n\nBuilding neural networks using PyTorch framework.",
+                "content": (
+                    "# Deep Learning with PyTorch\n\n"
+                    "Building neural networks using PyTorch framework."
+                ),
                 "tags": "pytorch,deep-learning,ai",
             },
         )
@@ -45,7 +51,10 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
                 "project": test_project.name,
                 "title": "Data Visualization Guide",
                 "folder": "data",
-                "content": "# Data Visualization Guide\n\nCreating charts and graphs for data analysis.",
+                "content": (
+                    "# Data Visualization Guide\n\n"
+                    "Creating charts and graphs for data analysis."
+                ),
                 "tags": "visualization,data,charts",
             },
         )
@@ -117,7 +126,10 @@ async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_proje
                 "project": test_project.name,
                 "title": "Python Web Frameworks",
                 "folder": "dev",
-                "content": "# Python Web Frameworks\n\nComparing Django and Flask for web development.",
+                "content": (
+                    "# Python Web Frameworks\n\n"
+                    "Comparing Django and Flask for web development."
+                ),
                 "tags": "python,web,frameworks",
             },
         )
@@ -388,7 +400,10 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
         docs = [
             {
                 "title": "API Design Best Practices",
-                "content": "# API Design Best Practices\n\nRESTful API design principles and patterns.",
+                "content": (
+                    "# API Design Best Practices\n\n"
+                    "RESTful API design principles and patterns."
+                ),
                 "tags": "api,rest,design",
             },
             {
@@ -398,7 +413,10 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
             },
             {
                 "title": "Database Design Patterns",
-                "content": "# Database Design Patterns\n\nCommon database design patterns and anti-patterns.",
+                "content": (
+                    "# Database Design Patterns\n\n"
+                    "Common database design patterns and anti-patterns."
+                ),
                 "tags": "database,design,patterns",
             },
         ]

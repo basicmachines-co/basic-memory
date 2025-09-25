@@ -34,7 +34,9 @@ def _format_search_results_for_chatgpt(results: SearchResponse) -> List[Dict[str
     return formatted_results
 
 
-def _format_document_for_chatgpt(content: str, identifier: str, title: Optional[str] = None) -> Dict[str, Any]:
+def _format_document_for_chatgpt(
+    content: str, identifier: str, title: Optional[str] = None
+) -> Dict[str, Any]:
     """Format document content according to ChatGPT's expected schema.
 
     Returns a document object with id, title, text, url, and metadata fields.

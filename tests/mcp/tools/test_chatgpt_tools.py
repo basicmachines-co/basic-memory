@@ -34,7 +34,10 @@ async def test_search_successful_results():
         page_size=10
     )
 
-    with patch('basic_memory.mcp.tools.chatgpt_tools.search_notes.fn', new_callable=AsyncMock) as mock_search:
+    with patch(
+        'basic_memory.mcp.tools.chatgpt_tools.search_notes.fn',
+        new_callable=AsyncMock
+    ) as mock_search:
         mock_search.return_value = mock_results
 
         # Import and call the actual function
@@ -67,7 +70,10 @@ async def test_search_with_error_response():
     """Test search when underlying search_notes returns error string."""
     error_message = "# Search Failed - Invalid Syntax\n\nThe search query contains errors..."
 
-    with patch('basic_memory.mcp.tools.chatgpt_tools.search_notes.fn', new_callable=AsyncMock) as mock_search:
+    with patch(
+        'basic_memory.mcp.tools.chatgpt_tools.search_notes.fn',
+        new_callable=AsyncMock
+    ) as mock_search:
         mock_search.return_value = error_message
 
         from basic_memory.mcp.tools.chatgpt_tools import search
@@ -102,7 +108,10 @@ Some content here.
 - relates_to [[Another Document]]
 """
 
-    with patch('basic_memory.mcp.tools.chatgpt_tools.read_note.fn', new_callable=AsyncMock) as mock_read:
+    with patch(
+        'basic_memory.mcp.tools.chatgpt_tools.read_note.fn',
+        new_callable=AsyncMock
+    ) as mock_read:
         mock_read.return_value = document_content
 
         from basic_memory.mcp.tools.chatgpt_tools import fetch
@@ -133,7 +142,10 @@ I couldn't find any notes matching "nonexistent-doc". Here are some suggestions:
 - If you provided a title, try using the exact permalink instead
 """
 
-    with patch('basic_memory.mcp.tools.chatgpt_tools.read_note.fn', new_callable=AsyncMock) as mock_read:
+    with patch(
+        'basic_memory.mcp.tools.chatgpt_tools.read_note.fn',
+        new_callable=AsyncMock
+    ) as mock_read:
         mock_read.return_value = error_content
 
         from basic_memory.mcp.tools.chatgpt_tools import fetch
