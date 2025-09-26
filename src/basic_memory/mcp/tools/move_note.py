@@ -460,6 +460,41 @@ async def move_note(
             All examples in Basic Memory expect file extensions to be explicitly provided.
             """).strip()
 
+    # Get the source entity to check its file extension
+    try:
+        # Fetch source entity information
+        url = f"{project_url}/knowledge/entities/{identifier}"
+        response = await call_get(client, url)
+        source_entity = EntityResponse.model_validate(response.json())
+
+        # Extract file extensions
+        source_ext = source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+        dest_ext = destination_path.split(".")[-1] if "." in destination_path else ""
+
+        # Check if extensions match
+        if source_ext and dest_ext and source_ext.lower() != dest_ext.lower():
+            logger.warning(f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}")
+            return dedent(f"""
+                # Move Failed - File Extension Mismatch
+
+                The destination file extension '.{dest_ext}' does not match the source file extension '.{source_ext}'.
+
+                To preserve file type consistency, the destination must have the same extension as the source.
+
+                ## Source file:
+                - Path: `{source_entity.file_path}`
+                - Extension: `.{source_ext}`
+
+                ## Try again with matching extension:
+                ```
+                move_note("{identifier}", "{destination_path.rsplit('.', 1)[0]}.{source_ext}")
+                ```
+                """).strip()
+    except Exception as e:
+        # If we can't fetch the source entity, log it but continue
+        # This might happen if the identifier is not yet resolved
+        logger.debug(f"Could not fetch source entity for extension check: {e}")
+
     try:
         # Prepare move request
         move_data = {

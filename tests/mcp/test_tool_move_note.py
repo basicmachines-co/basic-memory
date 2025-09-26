@@ -232,6 +232,69 @@ async def test_move_note_missing_file_extension(client):
 
 
 @pytest.mark.asyncio
+async def test_move_note_file_extension_mismatch(client):
+    """Test that moving note with different extension is blocked."""
+    # Create initial note with .md extension
+    await write_note.fn(
+        title="MarkdownNote",
+        folder="source",
+        content="# Markdown Note\nThis is a markdown file.",
+    )
+
+    # Try to move with .txt extension
+    result = await move_note.fn(
+        identifier="source/markdown-note",
+        destination_path="target/renamed-note.txt",
+    )
+
+    # Should return error about extension mismatch
+    assert isinstance(result, str)
+    assert "# Move Failed - File Extension Mismatch" in result
+    assert "does not match the source file extension" in result
+    assert ".md" in result
+    assert ".txt" in result
+    assert "renamed-note.md" in result  # Should suggest correct extension
+
+    # Test that note still exists at original location with original extension
+    content = await read_note.fn("source/markdown-note")
+    assert "# Markdown Note" in content
+    assert "This is a markdown file" in content
+
+
+@pytest.mark.asyncio
+async def test_move_note_preserves_file_extension(client):
+    """Test that moving note with matching extension succeeds."""
+    # Create initial note with .md extension
+    await write_note.fn(
+        title="PreserveExtension",
+        folder="source",
+        content="# Preserve Extension\nTesting that extension is preserved.",
+    )
+
+    # Move with same .md extension
+    result = await move_note.fn(
+        identifier="source/preserve-extension",
+        destination_path="target/preserved-note.md",
+    )
+
+    # Should succeed
+    assert isinstance(result, str)
+    assert "✅ Note moved successfully" in result
+
+    # Verify note exists at new location with same extension
+    content = await read_note.fn("target/preserved-note")
+    assert "# Preserve Extension" in content
+    assert "Testing that extension is preserved" in content
+
+    # Verify old location no longer exists
+    try:
+        await read_note.fn("source/preserve-extension")
+        assert False, "Original note should not exist after move"
+    except Exception:
+        pass  # Expected
+
+
+@pytest.mark.asyncio
 async def test_move_note_destination_exists(client):
     """Test moving note to existing destination."""
     # Create source note
