@@ -9,6 +9,7 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tool_history import track_tool_call
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
@@ -199,6 +200,7 @@ Error searching for '{query}': {error_message}
 @mcp.tool(
     description="Search across all content in the knowledge base with advanced syntax support.",
 )
+@track_tool_call
 async def search_notes(
     query: str,
     project: Optional[str] = None,

@@ -9,6 +9,7 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tool_history import track_tool_call
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.memory import memory_url_path
@@ -18,6 +19,7 @@ from basic_memory.utils import validate_project_path
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
 )
+@track_tool_call
 async def read_note(
     identifier: str,
     project: Optional[str] = None,

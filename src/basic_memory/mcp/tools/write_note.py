@@ -7,6 +7,7 @@ from loguru import logger
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.tool_history import track_tool_call
 from basic_memory.mcp.tools.utils import call_put
 from basic_memory.schemas import EntityResponse
 from fastmcp import Context
@@ -23,6 +24,7 @@ TagType = Union[List[str], str, None]
 @mcp.tool(
     description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
 )
+@track_tool_call
 async def write_note(
     title: str,
     content: str,

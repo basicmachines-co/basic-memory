@@ -26,15 +26,19 @@ from basic_memory.mcp.tools.project_management import (
 )
 # ChatGPT-compatible tools
 from basic_memory.mcp.tools.chatgpt_tools import search, fetch
+# Tool history tracking
+from basic_memory.mcp.tools.tool_history import tool_history, get_tool_call, clear_tool_history
 
 __all__ = [
     "build_context",
     "canvas",
+    "clear_tool_history",
     "create_memory_project",
     "delete_note",
     "delete_project",
     "edit_note",
     "fetch",
+    "get_tool_call",
     "list_directory",
     "list_memory_projects",
     "move_note",
@@ -44,6 +48,7 @@ __all__ = [
     "search",
     "search_notes",
     "sync_status",
+    "tool_history",
     "view_note",
     "write_note",
 ]
