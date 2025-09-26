@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import has_frontmatter
+from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -609,16 +610,31 @@ class SyncService:
         logger.debug(f"Scanning directory {directory}")
         result = ScanResult()
 
+        # Load gitignore patterns
+        ignore_patterns = load_gitignore_patterns(directory)
+        ignored_count = 0
+
         for root, dirnames, filenames in os.walk(str(directory)):
-            # Skip dot directories in-place
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            # Filter directories using ignore patterns
+            remaining_dirs = []
+            for d in dirnames:
+                dir_path = Path(root) / d
+                if should_ignore_path(dir_path, directory, ignore_patterns):
+                    ignored_count += 1
+                    logger.trace(f"Ignoring directory: {dir_path.relative_to(directory)}")
+                else:
+                    remaining_dirs.append(d)
+            dirnames[:] = remaining_dirs
 
             for filename in filenames:
-                # Skip dot files
-                if filename.startswith("."):
+                path = Path(root) / filename
+
+                # Check if file should be ignored
+                if should_ignore_path(path, directory, ignore_patterns):
+                    ignored_count += 1
+                    logger.trace(f"Ignoring file: {path.relative_to(directory)}")
                     continue
 
-                path = Path(root) / filename
                 rel_path = path.relative_to(directory).as_posix()
                 checksum = await self.file_service.compute_checksum(rel_path)
                 result.files[rel_path] = checksum
@@ -631,6 +647,7 @@ class SyncService:
             f"{directory} scan completed "
             f"directory={str(directory)} "
             f"files_found={len(result.files)} "
+            f"ignored_files={ignored_count} "
             f"duration_ms={duration_ms}"
         )
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Set, Sequence
 
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
+from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from loguru import logger
@@ -81,6 +82,7 @@ class WatchService:
         self.state = WatchServiceState()
         self.status_path = Path.home() / ".basic-memory" / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ignore_patterns_cache: dict[Path, Set[str]] = {}
 
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
@@ -89,6 +91,12 @@ class WatchService:
         """Schedule a restart of the watch service after the configured interval."""
         await asyncio.sleep(self.app_config.watch_project_reload_interval)
         stop_event.set()
+
+    def _get_ignore_patterns(self, project_path: Path) -> Set[str]:
+        """Get or load ignore patterns for a project path."""
+        if project_path not in self._ignore_patterns_cache:
+            self._ignore_patterns_cache[project_path] = load_gitignore_patterns(project_path)
+        return self._ignore_patterns_cache[project_path]
 
     async def _watch_projects_cycle(self, projects: Sequence[Project], stop_event: asyncio.Event):
         """Run one cycle of watching the given projects until stop_event is set."""
@@ -101,11 +109,20 @@ class WatchService:
             recursive=True,
             stop_event=stop_event,
         ):
-            # group changes by project
+            # group changes by project and filter using ignore patterns
             project_changes = defaultdict(list)
             for change, path in changes:
                 for project in projects:
                     if self.is_project_path(project, path):
+                        # Check if the file should be ignored based on gitignore patterns
+                        project_path = Path(project.path)
+                        file_path = Path(path)
+                        ignore_patterns = self._get_ignore_patterns(project_path)
+
+                        if should_ignore_path(file_path, project_path, ignore_patterns):
+                            logger.trace(f"Ignoring watched file change: {file_path.relative_to(project_path)}")
+                            continue
+
                         project_changes[project].append((change, path))
                         break
 
@@ -133,6 +150,9 @@ class WatchService:
 
         try:
             while self.state.running:
+                # Clear ignore patterns cache to pick up any .gitignore changes
+                self._ignore_patterns_cache.clear()
+
                 # Reload projects to catch any new/removed projects
                 projects = await self.project_repository.get_active_projects()
 
