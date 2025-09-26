@@ -22,7 +22,7 @@ from basic_memory.api.routers import (
     webdav,
 )
 from basic_memory.config import ConfigManager
-from basic_memory.services.initialization import initialize_app, initialize_file_sync
+from basic_memory.services.initialization import initialize_file_sync
 
 
 @asynccontextmanager
@@ -30,10 +30,15 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     """Lifecycle manager for the FastAPI app."""
 
     app_config = ConfigManager().config
-    # Initialize app and database
     logger.info("Starting Basic Memory API")
     print(f"fastapi {app_config.projects}")
-    await initialize_app(app_config)
+
+    # Cache database connections in app state for performance (no project reconciliation)
+    logger.info("Initializing database and caching connections...")
+    engine, session_maker = await db.get_or_create_db(app_config.database_path)
+    app.state.engine = engine
+    app.state.session_maker = session_maker
+    logger.info("Database connections cached in app state")
 
     logger.info(f"Sync changes enabled: {app_config.sync_changes}")
     if app_config.sync_changes:

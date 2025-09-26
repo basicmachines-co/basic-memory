@@ -93,6 +93,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",
     )
 
+    skip_initialization_sync: bool = Field(
+        default=False,
+        description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
+    )
+
     # API connection configuration
     api_url: Optional[str] = Field(
         default=None,
@@ -339,8 +344,6 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
         file_path.write_text(json.dumps(config.model_dump(), indent=2))
     except Exception as e:  # pragma: no cover
         logger.error(f"Failed to save config: {e}")
-
-
 
 
 # setup logging to a single log file in user home directory
