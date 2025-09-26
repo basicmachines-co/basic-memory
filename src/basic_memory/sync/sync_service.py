@@ -332,8 +332,8 @@ class SyncService:
         # entity markdown will always contain front matter, so it can be used up create/update the entity
         entity_markdown = await self.entity_parser.parse_file(path)
 
-        # if the file contains frontmatter, resolve a permalink
-        if file_contains_frontmatter:
+        # if the file contains frontmatter, resolve a permalink (unless disabled)
+        if file_contains_frontmatter and not self.app_config.disable_permalinks:
             # Resolve permalink - this handles all the cases including conflicts
             permalink = await self.entity_service.resolve_permalink(path, markdown=entity_markdown)
 
@@ -524,8 +524,10 @@ class SyncService:
             updates = {"file_path": new_path}
 
             # If configured, also update permalink to match new path
-            if self.app_config.update_permalinks_on_move and self.file_service.is_markdown(
-                new_path
+            if (
+                self.app_config.update_permalinks_on_move
+                and not self.app_config.disable_permalinks
+                and self.file_service.is_markdown(new_path)
             ):
                 # generate new permalink value
                 new_permalink = await self.entity_service.resolve_permalink(new_path)

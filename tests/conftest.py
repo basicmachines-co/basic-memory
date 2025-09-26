@@ -200,6 +200,7 @@ async def entity_service(
     entity_parser: EntityParser,
     file_service: FileService,
     link_resolver: LinkResolver,
+    app_config: BasicMemoryConfig,
 ) -> EntityService:
     """Create EntityService."""
     return EntityService(
@@ -209,6 +210,7 @@ async def entity_service(
         relation_repository=relation_repository,
         file_service=file_service,
         link_resolver=link_resolver,
+        app_config=app_config,
     )
 
 

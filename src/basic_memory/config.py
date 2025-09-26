@@ -93,6 +93,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",
     )
 
+    disable_permalinks: bool = Field(
+        default=False,
+        description="Disable automatic permalink generation in frontmatter. When enabled, new notes won't have permalinks added and sync won't update permalinks. Existing permalinks will still work for reading.",
+    )
+
     # API connection configuration
     api_url: Optional[str] = Field(
         default=None,
