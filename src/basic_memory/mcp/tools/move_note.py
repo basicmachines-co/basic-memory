@@ -471,12 +471,16 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
         source_entity = EntityResponse.model_validate(response.json())
 
         # Extract file extensions
-        source_ext = source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+        source_ext = (
+            source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+        )
         dest_ext = destination_path.split(".")[-1] if "." in destination_path else ""
 
         # Check if extensions match
         if source_ext and dest_ext and source_ext.lower() != dest_ext.lower():
-            logger.warning(f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}")
+            logger.warning(
+                f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}"
+            )
             return dedent(f"""
                 # Move Failed - File Extension Mismatch
 
@@ -490,7 +494,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
 
                 ## Try again with matching extension:
                 ```
-                move_note("{identifier}", "{destination_path.rsplit('.', 1)[0]}.{source_ext}")
+                move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
                 ```
                 """).strip()
     except Exception as e:
