@@ -79,6 +79,9 @@ Testing permalink generation.
         ("archive/François Müller.md", "archive/francois-muller"),
         ("research/Søren Kierkegård.md", "research/soren-kierkegard"),
         ("articles/El Niño.md", "articles/el-nino"),
+        ("ArticlesElNiño.md", "articles-el-nino"),
+        ("articleselniño.md", "articleselnino"),
+        ("articles-El-Niño.md", "articles-el-nino"),
     ],
 )
 def test_latin_accents_transliteration(input_path, expected):

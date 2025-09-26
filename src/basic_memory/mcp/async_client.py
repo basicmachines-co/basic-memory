@@ -1,25 +1,25 @@
+import os
 from httpx import ASGITransport, AsyncClient
 from loguru import logger
 
 from basic_memory.api.app import app as fastapi_app
-from basic_memory.config import ConfigManager
 
 
 def create_client() -> AsyncClient:
     """Create an HTTP client based on configuration.
 
     Returns:
-        AsyncClient configured for either local ASGI or remote HTTP transport
+        AsyncClient configured for either local ASGI or remote proxy
     """
-    config_manager = ConfigManager()
-    config = config_manager.load_config()
+    proxy_base_url = os.getenv("BASIC_MEMORY_PROXY_URL", None)
+    logger.info(f"BASIC_MEMORY_PROXY_URL: {proxy_base_url}")
 
-    if config.api_url:
-        # Use HTTP transport for remote API
-        logger.info(f"Creating HTTP client for remote Basic Memory API: {config.api_url}")
-        return AsyncClient(base_url=config.api_url)
+    if proxy_base_url:
+        # Use HTTP transport to proxy endpoint
+        logger.info(f"Creating HTTP client for proxy at: {proxy_base_url}")
+        return AsyncClient(base_url=proxy_base_url)
     else:
-        # Use ASGI transport for local API
+        # Default: use ASGI transport for local API (development mode)
         logger.debug("Creating ASGI client for local Basic Memory API")
         return AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test")
 

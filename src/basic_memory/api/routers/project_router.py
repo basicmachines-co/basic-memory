@@ -14,6 +14,7 @@ from basic_memory.schemas.project_info import (
 )
 
 # Router for resources in a specific project
+# The ProjectPathDep is used in the path as a prefix, so the request path is like /{project}/project/info
 project_router = APIRouter(prefix="/project", tags=["project"])
 
 # Router for managing project resources
@@ -27,6 +28,25 @@ async def get_project_info(
 ) -> ProjectInfoResponse:
     """Get comprehensive information about the specified Basic Memory project."""
     return await project_service.get_project_info(project)
+
+
+@project_router.get("/item", response_model=ProjectItem)
+async def get_project(
+    project_service: ProjectServiceDep,
+    project: ProjectPathDep,
+) -> ProjectItem:
+    """Get bassic info about the specified Basic Memory project."""
+    found_project = await project_service.get_project(project)
+    if not found_project:
+        raise HTTPException(
+            status_code=404, detail=f"Project: '{project}' does not exist"
+        )  # pragma: no cover
+
+    return ProjectItem(
+        name=found_project.name,
+        path=found_project.path,
+        is_default=found_project.is_default or False,
+    )
 
 
 # Update a project
@@ -215,6 +235,27 @@ async def set_default_project(
         )
     except ValueError as e:  # pragma: no cover
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# Get the default project
+@project_resource_router.get("/default", response_model=ProjectItem)
+async def get_default_project(
+    project_service: ProjectServiceDep,
+) -> ProjectItem:
+    """Get the default project.
+
+    Returns:
+        Response with project default information
+    """
+    # Get the old default project
+    default_name = project_service.default_project
+    default_project = await project_service.get_project(default_name)
+    if not default_project:  # pragma: no cover
+        raise HTTPException(  # pragma: no cover
+            status_code=404, detail=f"Default Project: '{default_name}' does not exist"
+        )
+
+    return ProjectItem(name=default_project.name, path=default_project.path, is_default=True)
 
 
 # Synchronize projects between config and database

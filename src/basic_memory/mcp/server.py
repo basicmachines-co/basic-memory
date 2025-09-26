@@ -22,15 +22,9 @@ class AppContext:
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:  # pragma: no cover
     """ """
-    # defer import so tests can monkeypatch
-    from basic_memory.mcp.project_session import session
-
     app_config = ConfigManager().config
     # Initialize on startup (now returns migration_manager)
     migration_manager = await initialize_app(app_config)
-
-    # Initialize project session with default project
-    session.initialize(app_config.default_project)
 
     try:
         yield AppContext(watch_task=None, migration_manager=migration_manager)

@@ -14,4 +14,5 @@ __all__ = [
     "import_chatgpt",
     "tool",
     "project",
+    "cloud",
 ]

@@ -54,6 +54,10 @@ class BasicMemoryConfig(BaseSettings):
         default="main",
         description="Name of the default project to use",
     )
+    default_project_mode: bool = Field(
+        default=False,
+        description="When True, MCP tools automatically use default_project when no project parameter is specified. Enables simplified UX for single-project workflows.",
+    )
 
     # overridden by ~/.basic-memory/config.json
     log_level: str = "INFO"
@@ -61,6 +65,10 @@ class BasicMemoryConfig(BaseSettings):
     # Watch service configuration
     sync_delay: int = Field(
         default=1000, description="Milliseconds to wait after changes before syncing", gt=0
+    )
+
+    watch_project_reload_interval: int = Field(
+        default=30, description="Seconds between reloading project list in watch service", gt=0
     )
 
     # update permalinks on move
@@ -83,6 +91,22 @@ class BasicMemoryConfig(BaseSettings):
     api_url: Optional[str] = Field(
         default=None,
         description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
+    )
+
+    # Cloud configuration
+    cloud_client_id: str = Field(
+        default="client_01K4DGBWAZWP83N3H8VVEMRX6W",
+        description="OAuth client ID for Basic Memory Cloud",
+    )
+
+    cloud_domain: str = Field(
+        default="https://eloquent-lotus-05.authkit.app",
+        description="AuthKit domain for Basic Memory Cloud",
+    )
+
+    cloud_host: str = Field(
+        default="https://cloud.basicmemory.com",
+        description="Basic Memory Cloud proxy host URL",
     )
 
     model_config = SettingsConfigDict(
@@ -157,6 +181,10 @@ class BasicMemoryConfig(BaseSettings):
                     logger.error(f"Failed to create project path: {e}")
                     raise e
         return v
+
+    @property
+    def data_dir_path(self):
+        return Path.home() / DATA_DIR_NAME
 
 
 class ConfigManager:
@@ -247,7 +275,7 @@ class ConfigManager:
 
         # Load config, modify, and save
         config = self.load_config()
-        config.default_project = name
+        config.default_project = project_name
         self.save_config(config)
 
     def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:

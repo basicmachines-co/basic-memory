@@ -2,6 +2,54 @@
 
 import pytest
 
+from basic_memory.schemas.project_info import ProjectItem
+
+
+@pytest.mark.asyncio
+async def test_get_project_item(test_graph, client, project_config, test_project, project_url):
+    """Test the project item endpoint returns correctly structured data."""
+    # Set up some test data in the database
+
+    # Call the endpoint
+    response = await client.get(f"{project_url}/project/item")
+
+    # Verify response
+    assert response.status_code == 200
+    project_info = ProjectItem.model_validate(response.json())
+    assert project_info.name == test_project.name
+    assert project_info.path == test_project.path
+    assert project_info.is_default == test_project.is_default
+
+
+@pytest.mark.asyncio
+async def test_get_project_item_not_found(
+    test_graph, client, project_config, test_project, project_url
+):
+    """Test the project item endpoint returns correctly structured data."""
+    # Set up some test data in the database
+
+    # Call the endpoint
+    response = await client.get("/not-found/project/item")
+
+    # Verify response
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_default_project(test_graph, client, project_config, test_project, project_url):
+    """Test the default project item endpoint returns the default project."""
+    # Set up some test data in the database
+
+    # Call the endpoint
+    response = await client.get("/projects/default")
+
+    # Verify response
+    assert response.status_code == 200
+    project_info = ProjectItem.model_validate(response.json())
+    assert project_info.name == test_project.name
+    assert project_info.path == test_project.path
+    assert project_info.is_default == test_project.is_default
+
 
 @pytest.mark.asyncio
 async def test_get_project_info_endpoint(test_graph, client, project_config, project_url):

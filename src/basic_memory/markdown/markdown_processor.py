@@ -2,11 +2,11 @@ from pathlib import Path
 from typing import Optional
 from collections import OrderedDict
 
-import frontmatter
 from frontmatter import Post
 from loguru import logger
 
 from basic_memory import file_utils
+from basic_memory.file_utils import dump_frontmatter
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
 
@@ -115,7 +115,7 @@ class MarkdownProcessor:
 
         # Create Post object for frontmatter
         post = Post(content, **frontmatter_dict)
-        final_content = frontmatter.dumps(post, sort_keys=False)
+        final_content = dump_frontmatter(post)
 
         logger.debug(f"writing file {path} with content:\n{final_content}")
 

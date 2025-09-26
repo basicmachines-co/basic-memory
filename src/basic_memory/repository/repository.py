@@ -10,13 +10,13 @@ from sqlalchemy import (
     Executable,
     inspect,
     Result,
-    Column,
     and_,
     delete,
 )
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.sql.elements import ColumnElement
 
 from basic_memory import db
 from basic_memory.models import Base
@@ -38,7 +38,7 @@ class Repository[T: Base]:
         if Model:
             self.Model = Model
             self.mapper = inspect(self.Model).mapper
-            self.primary_key: Column[Any] = self.mapper.primary_key[0]
+            self.primary_key: ColumnElement[Any] = self.mapper.primary_key[0]
             self.valid_columns = [column.key for column in self.mapper.columns]
             # Check if this model has a project_id column
             self.has_project_id = "project_id" in self.valid_columns

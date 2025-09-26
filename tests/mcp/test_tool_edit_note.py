@@ -7,10 +7,11 @@ from basic_memory.mcp.tools.write_note import write_note
 
 
 @pytest.mark.asyncio
-async def test_edit_note_append_operation(client):
+async def test_edit_note_append_operation(client, test_project):
     """Test appending content to an existing note."""
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test Note\nOriginal content here.",
@@ -18,6 +19,7 @@ async def test_edit_note_append_operation(client):
 
     # Append content
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="test/test-note",
         operation="append",
         content="\n## New Section\nAppended content here.",
@@ -25,16 +27,19 @@ async def test_edit_note_append_operation(client):
 
     assert isinstance(result, str)
     assert "Edited note (append)" in result
+    assert f"project: {test_project.name}" in result
     assert "file_path: test/Test Note.md" in result
     assert "permalink: test/test-note" in result
     assert "Added 3 lines to end of note" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
-async def test_edit_note_prepend_operation(client):
+async def test_edit_note_prepend_operation(client, test_project):
     """Test prepending content to an existing note."""
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="Meeting Notes",
         folder="meetings",
         content="# Meeting Notes\nExisting content.",
@@ -42,6 +47,7 @@ async def test_edit_note_prepend_operation(client):
 
     # Prepend content
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="meetings/meeting-notes",
         operation="prepend",
         content="## 2025-05-25 Update\nNew meeting notes.\n",
@@ -49,16 +55,19 @@ async def test_edit_note_prepend_operation(client):
 
     assert isinstance(result, str)
     assert "Edited note (prepend)" in result
+    assert f"project: {test_project.name}" in result
     assert "file_path: meetings/Meeting Notes.md" in result
     assert "permalink: meetings/meeting-notes" in result
     assert "Added 3 lines to beginning of note" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
-async def test_edit_note_find_replace_operation(client):
+async def test_edit_note_find_replace_operation(client, test_project):
     """Test find and replace operation."""
     # Create initial note with version info
     await write_note.fn(
+        project=test_project.name,
         title="Config Document",
         folder="config",
         content="# Configuration\nVersion: v0.12.0\nSettings for v0.12.0 release.",
@@ -66,6 +75,7 @@ async def test_edit_note_find_replace_operation(client):
 
     # Replace version - expecting 2 replacements
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="config/config-document",
         operation="find_replace",
         content="v0.13.0",
@@ -75,15 +85,18 @@ async def test_edit_note_find_replace_operation(client):
 
     assert isinstance(result, str)
     assert "Edited note (find_replace)" in result
+    assert f"project: {test_project.name}" in result
     assert "file_path: config/Config Document.md" in result
     assert "operation: Find and replace operation completed" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
-async def test_edit_note_replace_section_operation(client):
+async def test_edit_note_replace_section_operation(client, test_project):
     """Test replacing content under a specific section."""
     # Create initial note with sections
     await write_note.fn(
+        project=test_project.name,
         title="API Specification",
         folder="specs",
         content="# API Spec\n\n## Overview\nAPI overview here.\n\n## Implementation\nOld implementation details.\n\n## Testing\nTest info here.",
@@ -91,6 +104,7 @@ async def test_edit_note_replace_section_operation(client):
 
     # Replace implementation section
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="specs/api-specification",
         operation="replace_section",
         content="New implementation approach using FastAPI.\nImproved error handling.\n",
@@ -99,15 +113,20 @@ async def test_edit_note_replace_section_operation(client):
 
     assert isinstance(result, str)
     assert "Edited note (replace_section)" in result
+    assert f"project: {test_project.name}" in result
     assert "file_path: specs/API Specification.md" in result
     assert "Replaced content under section '## Implementation'" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
 
 
 @pytest.mark.asyncio
-async def test_edit_note_nonexistent_note(client):
+async def test_edit_note_nonexistent_note(client, test_project):
     """Test editing a note that doesn't exist - should return helpful guidance."""
     result = await edit_note.fn(
-        identifier="nonexistent/note", operation="append", content="Some content"
+        project=test_project.name,
+        identifier="nonexistent/note",
+        operation="append",
+        content="Some content",
     )
 
     assert isinstance(result, str)
@@ -117,10 +136,11 @@ async def test_edit_note_nonexistent_note(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_invalid_operation(client):
+async def test_edit_note_invalid_operation(client, test_project):
     """Test using an invalid operation."""
     # Create a note first
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test\nContent here.",
@@ -128,17 +148,21 @@ async def test_edit_note_invalid_operation(client):
 
     with pytest.raises(ValueError) as exc_info:
         await edit_note.fn(
-            identifier="test/test-note", operation="invalid_op", content="Some content"
+            project=test_project.name,
+            identifier="test/test-note",
+            operation="invalid_op",
+            content="Some content",
         )
 
     assert "Invalid operation 'invalid_op'" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_edit_note_find_replace_missing_find_text(client):
+async def test_edit_note_find_replace_missing_find_text(client, test_project):
     """Test find_replace operation without find_text parameter."""
     # Create a note first
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test\nContent here.",
@@ -146,17 +170,21 @@ async def test_edit_note_find_replace_missing_find_text(client):
 
     with pytest.raises(ValueError) as exc_info:
         await edit_note.fn(
-            identifier="test/test-note", operation="find_replace", content="replacement"
+            project=test_project.name,
+            identifier="test/test-note",
+            operation="find_replace",
+            content="replacement",
         )
 
     assert "find_text parameter is required for find_replace operation" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_edit_note_replace_section_missing_section(client):
+async def test_edit_note_replace_section_missing_section(client, test_project):
     """Test replace_section operation without section parameter."""
     # Create a note first
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test\nContent here.",
@@ -164,17 +192,21 @@ async def test_edit_note_replace_section_missing_section(client):
 
     with pytest.raises(ValueError) as exc_info:
         await edit_note.fn(
-            identifier="test/test-note", operation="replace_section", content="new content"
+            project=test_project.name,
+            identifier="test/test-note",
+            operation="replace_section",
+            content="new content",
         )
 
     assert "section parameter is required for replace_section operation" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_edit_note_replace_section_nonexistent_section(client):
+async def test_edit_note_replace_section_nonexistent_section(client, test_project):
     """Test replacing a section that doesn't exist - should append it."""
     # Create initial note without the target section
     await write_note.fn(
+        project=test_project.name,
         title="Document",
         folder="docs",
         content="# Document\n\n## Existing Section\nSome content here.",
@@ -182,6 +214,7 @@ async def test_edit_note_replace_section_nonexistent_section(client):
 
     # Try to replace non-existent section
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="docs/document",
         operation="replace_section",
         content="New section content here.\n",
@@ -190,15 +223,18 @@ async def test_edit_note_replace_section_nonexistent_section(client):
 
     assert isinstance(result, str)
     assert "Edited note (replace_section)" in result
+    assert f"project: {test_project.name}" in result
     assert "file_path: docs/Document.md" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
     # Should succeed - the section gets appended if it doesn't exist
 
 
 @pytest.mark.asyncio
-async def test_edit_note_with_observations_and_relations(client):
+async def test_edit_note_with_observations_and_relations(client, test_project):
     """Test editing a note that contains observations and relations."""
     # Create note with semantic content
     await write_note.fn(
+        project=test_project.name,
         title="Feature Spec",
         folder="features",
         content="# Feature Spec\n\n- [design] Initial design thoughts #architecture\n- implements [[Base System]]\n\nOriginal content.",
@@ -206,6 +242,7 @@ async def test_edit_note_with_observations_and_relations(client):
 
     # Append more semantic content
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="features/feature-spec",
         operation="append",
         content="\n## Updates\n\n- [implementation] Added new feature #development\n- relates_to [[User Guide]]",
@@ -218,10 +255,11 @@ async def test_edit_note_with_observations_and_relations(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_identifier_variations(client):
+async def test_edit_note_identifier_variations(client, test_project):
     """Test that various identifier formats work."""
     # Create a note
     await write_note.fn(
+        project=test_project.name,
         title="Test Document",
         folder="docs",
         content="# Test Document\nOriginal content.",
@@ -236,19 +274,24 @@ async def test_edit_note_identifier_variations(client):
 
     for identifier in identifiers_to_test:
         result = await edit_note.fn(
-            identifier=identifier, operation="append", content=f"\n## Update via {identifier}"
+            project=test_project.name,
+            identifier=identifier,
+            operation="append",
+            content=f"\n## Update via {identifier}",
         )
 
         assert isinstance(result, str)
         assert "Edited note (append)" in result
+        assert f"project: {test_project.name}" in result
         assert "file_path: docs/Test Document.md" in result
 
 
 @pytest.mark.asyncio
-async def test_edit_note_find_replace_no_matches(client):
+async def test_edit_note_find_replace_no_matches(client, test_project):
     """Test find_replace when the find_text doesn't exist - should return error."""
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test Note\nSome content here.",
@@ -256,6 +299,7 @@ async def test_edit_note_find_replace_no_matches(client):
 
     # Try to replace text that doesn't exist - should fail with default expected_replacements=1
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="test/test-note",
         operation="find_replace",
         content="replacement",
@@ -269,17 +313,20 @@ async def test_edit_note_find_replace_no_matches(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_empty_content_operations(client):
+async def test_edit_note_empty_content_operations(client, test_project):
     """Test operations with empty content."""
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test Note\nOriginal content.",
     )
 
     # Test append with empty content
-    result = await edit_note.fn(identifier="test/test-note", operation="append", content="")
+    result = await edit_note.fn(
+        project=test_project.name, identifier="test/test-note", operation="append", content=""
+    )
 
     assert isinstance(result, str)
     assert "Edited note (append)" in result
@@ -287,10 +334,11 @@ async def test_edit_note_empty_content_operations(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_find_replace_wrong_count(client):
+async def test_edit_note_find_replace_wrong_count(client, test_project):
     """Test find_replace when replacement count doesn't match expected."""
     # Create initial note with version info
     await write_note.fn(
+        project=test_project.name,
         title="Config Document",
         folder="config",
         content="# Configuration\nVersion: v0.12.0\nSettings for v0.12.0 release.",
@@ -298,6 +346,7 @@ async def test_edit_note_find_replace_wrong_count(client):
 
     # Try to replace expecting 1 occurrence, but there are actually 2
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="config/config-document",
         operation="find_replace",
         content="v0.13.0",
@@ -314,10 +363,11 @@ async def test_edit_note_find_replace_wrong_count(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_replace_section_multiple_sections(client):
+async def test_edit_note_replace_section_multiple_sections(client, test_project):
     """Test replace_section with multiple sections having same header - should return helpful error."""
     # Create note with duplicate section headers
     await write_note.fn(
+        project=test_project.name,
         title="Sample Note",
         folder="docs",
         content="# Main Title\n\n## Section 1\nFirst instance\n\n## Section 2\nSome content\n\n## Section 1\nSecond instance",
@@ -325,6 +375,7 @@ async def test_edit_note_replace_section_multiple_sections(client):
 
     # Try to replace section when multiple exist
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="docs/sample-note",
         operation="replace_section",
         content="New content",
@@ -339,10 +390,11 @@ async def test_edit_note_replace_section_multiple_sections(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_find_replace_empty_find_text(client):
+async def test_edit_note_find_replace_empty_find_text(client, test_project):
     """Test find_replace with empty/whitespace find_text - should return helpful error."""
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test Note\nSome content here.",
@@ -350,6 +402,7 @@ async def test_edit_note_find_replace_empty_find_text(client):
 
     # Try with whitespace-only find_text - this should be caught by service validation
     result = await edit_note.fn(
+        project=test_project.name,
         identifier="test/test-note",
         operation="find_replace",
         content="replacement",
@@ -362,7 +415,7 @@ async def test_edit_note_find_replace_empty_find_text(client):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_preserves_permalink_when_frontmatter_missing(client):
+async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, test_project):
     """Test that editing a note preserves the permalink when frontmatter doesn't contain one.
 
     This is a regression test for issue #170 where edit_note would fail with a validation error
@@ -371,6 +424,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client):
     """
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="Test Note",
         folder="test",
         content="# Test Note\nOriginal content here.",
@@ -378,6 +432,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client):
 
     # Verify the note was created with a permalink
     first_result = await edit_note.fn(
+        project=test_project.name,
         identifier="test/test-note",
         operation="append",
         content="\nFirst edit.",
@@ -389,6 +444,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client):
     # Perform another edit - this should preserve the permalink even if the
     # file doesn't have a permalink in its frontmatter
     second_result = await edit_note.fn(
+        project=test_project.name,
         identifier="test/test-note",
         operation="append",
         content="\nSecond edit.",
@@ -396,5 +452,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client):
 
     assert isinstance(second_result, str)
     assert "Edited note (append)" in second_result
+    assert f"project: {test_project.name}" in second_result
     assert "permalink: test/test-note" in second_result
+    assert f"[Session: Using project '{test_project.name}']" in second_result
     # The edit should succeed without validation errors

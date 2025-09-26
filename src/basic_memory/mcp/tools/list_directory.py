@@ -3,9 +3,10 @@
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
-from basic_memory.mcp.project_session import get_active_project
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 
@@ -18,6 +19,7 @@ async def list_directory(
     depth: int = 1,
     file_name_glob: Optional[str] = None,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
 
@@ -32,7 +34,10 @@ async def list_directory(
                Higher values show subdirectory contents recursively
         file_name_glob: Optional glob pattern for filtering file names
                        Examples: "*.md", "*meeting*", "project_*"
-        project: Optional project name to delete from. If not provided, uses current active project.
+        project: Project name to list directory from. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
+        context: Optional FastMCP context for performance caching.
+
     Returns:
         Formatted listing of directory contents with file metadata
 
@@ -43,8 +48,8 @@ async def list_directory(
         # List specific folder
         list_directory(dir_name="/projects")
 
-        # Find all Python files
-        list_directory(file_name_glob="*.py")
+        # Find all markdown files
+        list_directory(file_name_glob="*.md")
 
         # Deep exploration of research folder
         list_directory(dir_name="/research", depth=3)
@@ -52,10 +57,13 @@ async def list_directory(
         # Find meeting notes in projects folder
         list_directory(dir_name="/projects", file_name_glob="*meeting*")
 
-        # Find meeting notes in a specific project
-        list_directory(dir_name="/projects", file_name_glob="*meeting*", project="work-project")
+        # Explicit project specification
+        list_directory(project="work-docs", dir_name="/projects")
+
+    Raises:
+        ToolError: If project doesn't exist or directory path is invalid
     """
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     # Prepare query parameters
@@ -66,7 +74,9 @@ async def list_directory(
     if file_name_glob:
         params["file_name_glob"] = file_name_glob
 
-    logger.debug(f"Listing directory '{dir_name}' with depth={depth}, glob='{file_name_glob}'")
+    logger.debug(
+        f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
+    )
 
     # Call the API endpoint
     response = await call_get(

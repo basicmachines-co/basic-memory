@@ -18,12 +18,15 @@ test-int:
 # Run all tests
 test: test-unit test-int
 
+# Lint and fix code (calls fix)
+lint: fix
+
 # Lint and fix code
-lint:
-    uv run ruff check . --fix
+fix:
+    uv run ruff check --fix --unsafe-fixes src tests
 
 # Type check code
-type-check:
+typecheck:
     uv run pyright
 
 # Clean build artifacts and cache files
@@ -55,7 +58,7 @@ update-deps:
     uv sync --upgrade
 
 # Run all code quality checks and tests
-check: lint format type-check test
+check: lint format typecheck test
 
 # Generate Alembic migration with descriptive message
 migration message:

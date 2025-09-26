@@ -2,8 +2,7 @@ from typing import Optional
 
 import typer
 
-from basic_memory.config import get_project_config, ConfigManager
-from basic_memory.mcp.project_session import session
+from basic_memory.config import ConfigManager
 
 
 def version_callback(value: bool) -> None:
@@ -11,10 +10,7 @@ def version_callback(value: bool) -> None:
     if value:  # pragma: no cover
         import basic_memory
 
-        config = get_project_config()
         typer.echo(f"Basic Memory version: {basic_memory.__version__}")
-        typer.echo(f"Current project: {config.project}")
-        typer.echo(f"Project path: {config.home}")
         raise typer.Exit()
 
 
@@ -24,13 +20,6 @@ app = typer.Typer(name="basic-memory")
 @app.callback()
 def app_callback(
     ctx: typer.Context,
-    project: Optional[str] = typer.Option(
-        None,
-        "--project",
-        "-p",
-        help="Specify which project to use 1",
-        envvar="BASIC_MEMORY_PROJECT",
-    ),
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -49,25 +38,17 @@ def app_callback(
         app_config = ConfigManager().config
         ensure_initialization(app_config)
 
-        # Initialize MCP session with the specified project or default
-        if project:  # pragma: no cover
-            # Use the project specified via --project flag
-            current_project_config = get_project_config(project)
-            session.set_current_project(current_project_config.name)
 
-            # Update the global config to use this project
-            from basic_memory.config import update_current_project
-
-            update_current_project(project)
-        else:
-            # Use the default project
-            current_project = app_config.default_project
-            session.set_current_project(current_project)
-
-
+## import
 # Register sub-command groups
 import_app = typer.Typer(help="Import data from various sources")
 app.add_typer(import_app, name="import")
 
-claude_app = typer.Typer()
+claude_app = typer.Typer(help="Import Conversations from Claude JSON export.")
 import_app.add_typer(claude_app, name="claude")
+
+
+## cloud
+
+cloud_app = typer.Typer(help="Access Basic Memory Cloud")
+app.add_typer(cloud_app, name="cloud")

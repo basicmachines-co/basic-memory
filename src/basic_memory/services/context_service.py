@@ -246,7 +246,11 @@ class ContextService:
         values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
 
         # Parameters for bindings - include project_id for security filtering
-        params = {"max_depth": max_depth, "max_results": max_results, "project_id": self.search_repository.project_id}
+        params = {
+            "max_depth": max_depth,
+            "max_results": max_results,
+            "project_id": self.search_repository.project_id,
+        }
 
         # Build date and timeframe filters conditionally based on since parameter
         if since:
@@ -258,7 +262,7 @@ class ContextService:
             date_filter = ""
             relation_date_filter = ""
             timeframe_condition = ""
-        
+
         # Add project filtering for security - ensure all entities and relations belong to the same project
         project_filter = "AND e.project_id = :project_id"
         relation_project_filter = "AND e_from.project_id = :project_id"

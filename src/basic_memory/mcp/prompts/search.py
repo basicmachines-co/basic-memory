@@ -17,7 +17,7 @@ from basic_memory.schemas.prompt import SearchPromptRequest
 
 
 @mcp.prompt(
-    name="Search Knowledge Base",
+    name="search_knowledge_base",
     description="Search across all content in basic-memory",
 )
 async def search_prompt(

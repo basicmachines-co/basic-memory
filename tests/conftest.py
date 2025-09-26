@@ -11,7 +11,6 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-import basic_memory.mcp.project_session
 from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager
 from basic_memory.db import DatabaseType
@@ -53,7 +52,7 @@ def config_home(tmp_path, monkeypatch) -> Path:
     # Patch HOME environment variable for the duration of the test
     monkeypatch.setenv("HOME", str(tmp_path))
     # On Windows, also set USERPROFILE
-    if os.name == 'nt':
+    if os.name == "nt":
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
     # Set BASIC_MEMORY_HOME to the test directory
     monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path / "basic-memory"))
@@ -89,15 +88,6 @@ def config_manager(
     # Ensure the config file is written to disk
     config_manager.save_config(app_config)
     return config_manager
-
-
-@pytest.fixture(autouse=True)
-def project_session(test_project: Project):
-    # initialize the project session with the test project
-    basic_memory.mcp.project_session.session.initialize(test_project.name)
-    # Explicitly set current project as well to ensure it's used
-    basic_memory.mcp.project_session.session.set_current_project(test_project.name)
-    return basic_memory.mcp.project_session.session
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -191,7 +181,7 @@ async def test_project(config_home, engine_factory) -> Project:
         "description": "Project used as context for tests",
         "path": str(config_home),
         "is_active": True,
-        "is_default": True,  # Explicitly set as the default project
+        "is_default": True,  # Explicitly set as the default project (for cli operations)
     }
     engine, session_maker = engine_factory
     project_repository = ProjectRepository(session_maker)

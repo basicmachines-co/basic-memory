@@ -140,16 +140,6 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     return config_manager
 
 
-@pytest.fixture(scope="function")
-def project_session(test_project: Project, config_manager):
-    # Initialize the global session directly with the test project
-    # This ensures all MCP tools use the test project context
-    import basic_memory.mcp.project_session
-
-    basic_memory.mcp.project_session.session.initialize(test_project.name)
-    return basic_memory.mcp.project_session.session
-
-
 @pytest.fixture(scope="function", autouse=True)
 def project_config(test_project):
     """Create test project configuration."""
@@ -163,9 +153,7 @@ def project_config(test_project):
 
 
 @pytest.fixture(scope="function")
-def app(
-    app_config, project_config, engine_factory, test_project, project_session, config_manager
-) -> FastAPI:
+def app(app_config, project_config, engine_factory, test_project, config_manager) -> FastAPI:
     """Create test FastAPI application with single project."""
 
     # Import the FastAPI app AFTER the config_manager has written the test config to disk
@@ -207,7 +195,7 @@ async def search_service(engine_factory, test_project):
 
 
 @pytest.fixture(scope="function")
-def mcp_server(config_manager, search_service, project_session):
+def mcp_server(config_manager, search_service):
     # Import mcp instance
     from basic_memory.mcp.server import mcp as server
 

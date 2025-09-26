@@ -11,7 +11,7 @@ All test results are recorded as notes in a dedicated test project.
 **Parameters:**
 - `phase` (optional): Specific test phase to run (`recent`, `core`, `features`, `edge`, `workflows`, `stress`, or `all`)
 - `recent` - Focus on recent changes and new features (recommended for regular testing)
-- `core` - Essential tools only (Tier 1: write_note, read_note, search_notes, edit_note, list_projects, switch_project)
+- `core` - Essential tools only (Tier 1: write_note, read_note, search_notes, edit_note, list_memory_projects, recent_activity)
 - `features` - Core + important workflows (Tier 1 + Tier 2)
 - `all` - Comprehensive testing of all tools and scenarios
 
@@ -24,30 +24,66 @@ When the user runs `/project:test-live`, execute comprehensive test plan:
 
 ### **Tier 1: Critical Core (Always Test)**
 1. **write_note** - Foundation of all knowledge creation
-2. **read_note** - Primary knowledge retrieval mechanism  
+2. **read_note** - Primary knowledge retrieval mechanism
 3. **search_notes** - Essential for finding information
 4. **edit_note** - Core content modification capability
-5. **list_memory_projects** - Project discovery and status
-6. **switch_project** - Context switching for multi-project workflows
+5. **list_memory_projects** - Project discovery and session guidance
+6. **recent_activity** - Project discovery mode and activity analysis
 
 ### **Tier 2: Important Workflows (Usually Test)**
-7. **recent_activity** - Understanding what's changed
-8. **build_context** - Conversation continuity via memory:// URLs
-9. **create_memory_project** - Essential for project setup
-10. **move_note** - Knowledge organization
-11. **sync_status** - Understanding system state
+7. **build_context** - Conversation continuity via memory:// URLs
+8. **create_memory_project** - Essential for project setup
+9. **move_note** - Knowledge organization
+10. **sync_status** - Understanding system state
+11. **delete_project** - Project lifecycle management
 
 ### **Tier 3: Enhanced Functionality (Sometimes Test)**
 12. **view_note** - Claude Desktop artifact display
 13. **read_content** - Raw content access
 14. **delete_note** - Content removal
 15. **list_directory** - File system exploration
-16. **set_default_project** - Configuration
-17. **delete_project** - Administrative cleanup
+16. **edit_note** (advanced modes) - Complex find/replace operations
 
 ### **Tier 4: Specialized (Rarely Test)**
-18. **canvas** - Obsidian visualization (specialized use case)
-19. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
+17. **canvas** - Obsidian visualization (specialized use case)
+18. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
+
+## Stateless Architecture Testing
+
+### **Project Discovery Workflow (CRITICAL)**
+Test the new stateless project selection flow:
+
+1. **Initial Discovery**
+   - Call `list_memory_projects()` without knowing which project to use
+   - Verify clear session guidance appears: "Next: Ask which project to use"
+   - Confirm removal of CLI-specific references
+
+2. **Activity-Based Discovery**
+   - Call `recent_activity()` without project parameter (discovery mode)
+   - Verify intelligent project suggestions based on activity
+   - Test guidance: "Should I use [most-active-project] for this task?"
+
+3. **Session Tracking Validation**
+   - Verify all tool responses include `[Session: Using project 'name']`
+   - Confirm guidance reminds about session-wide project tracking
+
+4. **Single Project Constraint Mode**
+   - Test MCP server with `--project` parameter
+   - Verify all operations constrained to specified project
+   - Test project override behavior in constrained mode
+
+### **Explicit Project Parameters (CRITICAL)**
+All tools must require explicit project parameters:
+
+1. **Parameter Validation**
+   - Test all Tier 1 tools require `project` parameter
+   - Verify clear error messages for missing project
+   - Test invalid project name handling
+
+2. **No Session State Dependencies**
+   - Confirm no tool relies on "current project" concept
+   - Test rapid project switching within conversation
+   - Verify each call is truly independent
 
 ### Pre-Test Setup
 
@@ -72,7 +108,7 @@ Run the bash `date` command to get the current date/time.
    Purpose: Record all test observations and results
    ```
 
-Make sure to switch to the newly created project with the `switch_project()` tool.
+Make sure to use the newly created project for all subsequent test operations by specifying it in the `project` parameter of each tool call.
 
 4. **Baseline Documentation**
    Create initial test session note with:
@@ -143,46 +179,42 @@ Test essential MCP tools that form the foundation of Basic Memory:
 - ⚠️ Error scenarios (invalid operations)
 
 **5. list_memory_projects Tests (Critical):**
-- ✅ Display all projects with status indicators
-- ✅ Current and default project identification
+- ✅ Display all projects with clear session guidance
+- ✅ Project discovery workflow prompts
+- ✅ Removal of CLI-specific references
 - ✅ Empty project list handling
-- ✅ Project metadata accuracy
+- ✅ Single project constraint mode display
 
-**6. switch_project Tests (Critical):**
-- ✅ Switch between existing projects
-- ✅ Context preservation during switch
-- ⚠️ Invalid project name handling
-- ✅ Confirmation of successful switch
+**6. recent_activity Tests (Critical - Discovery Mode):**
+- ✅ Discovery mode without project parameter
+- ✅ Intelligent project suggestions based on activity
+- ✅ Guidance prompts for project selection
+- ✅ Session tracking reminders in responses
+- ⚠️ Performance with multiple projects
 
 ### Phase 2: Important Workflows (Tier 2 Tools)
 
-**7. recent_activity Tests (Important):**
-- ✅ Various timeframes ("today", "1 week", "1d")
-- ✅ Type filtering capabilities
-- ✅ Empty project scenarios
-- ⚠️ Performance with many recent changes
-
-**8. build_context Tests (Important):**
+**7. build_context Tests (Important):**
 - ✅ Different depth levels (1, 2, 3+)
 - ✅ Various timeframes for context
 - ✅ memory:// URL navigation
 - ⚠️ Performance with complex relation graphs
 
-**9. create_memory_project Tests (Important):**
+**8. create_memory_project Tests (Important):**
 - ✅ Create projects dynamically
 - ✅ Set default during creation
 - ✅ Path validation and creation
 - ⚠️ Invalid paths and names
 - ✅ Integration with existing projects
 
-**10. move_note Tests (Important):**
+**9. move_note Tests (Important):**
 - ✅ Move within same project
 - ✅ Cross-project moves with detection (#161)
 - ✅ Automatic folder creation
 - ✅ Database consistency validation
 - ⚠️ Special characters in paths
 
-**11. sync_status Tests (Important):**
+**10. sync_status Tests (Important):**
 - ✅ Background operation monitoring
 - ✅ File synchronization status
 - ✅ Project sync state reporting
@@ -190,36 +222,31 @@ Test essential MCP tools that form the foundation of Basic Memory:
 
 ### Phase 3: Enhanced Functionality (Tier 3 Tools)
 
-**12. view_note Tests (Enhanced):**
+**11. view_note Tests (Enhanced):**
 - ✅ Claude Desktop artifact display
 - ✅ Title extraction from frontmatter
 - ✅ Unicode and emoji content rendering
 - ⚠️ Error handling for non-existent notes
 
-**13. read_content Tests (Enhanced):**
+**12. read_content Tests (Enhanced):**
 - ✅ Raw file content access
 - ✅ Binary file handling
 - ✅ Image file reading
 - ⚠️ Large file performance
 
-**14. delete_note Tests (Enhanced):**
+**13. delete_note Tests (Enhanced):**
 - ✅ Single note deletion
 - ✅ Database consistency after deletion
 - ⚠️ Non-existent note handling
 - ✅ Confirmation of successful deletion
 
-**15. list_directory Tests (Enhanced):**
+**14. list_directory Tests (Enhanced):**
 - ✅ Directory content listing
 - ✅ Depth control and filtering
 - ✅ File name globbing
 - ⚠️ Empty directory handling
 
-**16. set_default_project Tests (Enhanced):**
-- ✅ Change default project
-- ✅ Configuration persistence
-- ⚠️ Invalid project handling
-
-**17. delete_project Tests (Enhanced):**
+**15. delete_project Tests (Enhanced):**
 - ✅ Project removal from config
 - ✅ Database cleanup
 - ⚠️ Default project protection
@@ -269,7 +296,7 @@ Test essential MCP tools that form the foundation of Basic Memory:
 1. Technical documentation project
 2. Personal recipe collection project
 3. Learning/course notes project
-4. Switch contexts during conversation
+4. Specify different projects for different operations
 5. Cross-reference related concepts
 
 **Content Evolution:**
@@ -281,13 +308,13 @@ Test essential MCP tools that form the foundation of Basic Memory:
 
 ### Phase 6: Specialized Tools Testing (Tier 4)
 
-**18. canvas Tests (Specialized):**
+**16. canvas Tests (Specialized):**
 - ✅ JSON Canvas generation
 - ✅ Node and edge creation
 - ✅ Obsidian compatibility
 - ⚠️ Complex graph handling
 
-**19. MCP Prompts Tests (Specialized):**
+**17. MCP Prompts Tests (Specialized):**
 - ✅ ai_assistant_guide output
 - ✅ continue_conversation functionality
 - ✅ Formatted search results
@@ -382,7 +409,7 @@ permalink: test-session-[phase]-[timestamp]
 ### 📊 Performance Metrics
 - Average write_note time: 0.3s
 - Search with 100+ notes: 0.6s
-- Project switch overhead: 0.1s
+- Project parameter overhead: <0.1s
 - Memory usage: [observed levels]
 
 ## Relations
@@ -402,7 +429,7 @@ permalink: test-session-[phase]-[timestamp]
 - Learning curve and intuitiveness
 
 **System Behavior:**
-- Context preservation across operations
+- Stateless operation independence
 - memory:// URL navigation reliability
 - Multi-step workflow cohesion
 - Edge case graceful handling

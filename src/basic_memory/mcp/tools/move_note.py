@@ -4,6 +4,7 @@ from textwrap import dedent
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
@@ -78,18 +79,13 @@ def _format_cross_project_error_response(
         ```
         # 1. Read the note content from current project
         read_note("{identifier}")
+        
+        # 2. Create the note in the target project
+        write_note("Note Title", "content from step 1", "target-folder", project="{target_project}")
 
-        # 2. Switch to the target project
-        switch_project("{target_project}")
-
-        # 3. Create the note in the target project
-        write_note("Note Title", "content from step 1", "target-folder")
-
-        # 4. Switch back to original project (optional)
-        switch_project("{current_project}")
-
-        # 5. Delete the original note if desired
-        delete_note("{identifier}")
+        # 3. Delete the original note if desired
+        delete_note("{identifier}", project="{current_project}")
+        
         ```
 
         ### Alternative: Stay in current project
@@ -99,7 +95,7 @@ def _format_cross_project_error_response(
         ```
 
         ## Available projects:
-        Use `list_projects()` to see all available projects and `switch_project("project-name")` to change projects.
+        Use `list_memory_projects()` to see all available projects.
         """).strip()
 
 
@@ -113,37 +109,33 @@ def _format_potential_cross_project_guidance(
 
     return dedent(f"""
         # Move Failed - Check Project Context
-
+        
         Cannot move '{identifier}' to '{destination_path}' within the current project '{current_project}'.
-
+        
         ## If you intended to move within the current project:
         The destination path should be relative to the project root:
         ```
         move_note("{identifier}", "folder/filename.md")
         ```
-
+        
         ## If you intended to move to a different project:
         Cross-project moves require switching projects first. Available projects: {other_projects}
-
+        
         ### To move to another project:
         ```
         # 1. Read the content
         read_note("{identifier}")
+        
+        # 2. Create note in target project
+        write_note("Title", "content", "folder", project="target-project-name")
 
-        # 2. Switch to target project
-        switch_project("target-project-name")
-
-        # 3. Create note in target project
-        write_note("Title", "content", "folder")
-
-        # 4. Switch back and delete original if desired
-        switch_project("{current_project}")
-        delete_note("{identifier}")
+        # 3. Delete original if desired
+        delete_note("{identifier}", project="{current_project}")
         ```
-
+        
         ### To see all projects:
         ```
-        list_projects()
+        list_memory_projects()
         ```
         """).strip()
 
@@ -171,7 +163,7 @@ def _format_move_error_response(error_message: str, identifier: str, destination
                - If you used a title, try the exact permalink format: "{permalink_format}"
                - Use `read_note()` first to verify the note exists and get the exact identifier
 
-            3. **Check current project**: Use `get_current_project()` to verify you're in the right project
+            3. **List available notes**: Use `list_directory("/")` to see what notes exist in the current project
             4. **List available notes**: Use `list_directory("/")` to see what notes exist
 
             ## Before trying again:
@@ -186,55 +178,51 @@ def _format_move_error_response(error_message: str, identifier: str, destination
 
     # Destination already exists errors
     if "already exists" in error_message.lower() or "file exists" in error_message.lower():
-        return dedent(f"""
-            # Move Failed - Destination Already Exists
+        return f"""# Move Failed - Destination Already Exists
 
-            Cannot move '{identifier}' to '{destination_path}' because a file already exists at that location.
+Cannot move '{identifier}' to '{destination_path}' because a file already exists at that location.
 
-            ## How to resolve:
-            1. **Choose a different destination**: Try a different filename or folder
-               - Add timestamp: `{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md`
-               - Use different folder: `archive/{destination_path}` or `backup/{destination_path}`
+## How to resolve:
+1. **Choose a different destination**: Try a different filename or folder
+   - Add timestamp: `{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md`
+   - Use different folder: `archive/{destination_path}` or `backup/{destination_path}`
 
-            2. **Check the existing file**: Use `read_note("{destination_path}")` to see what's already there
-            3. **Remove or rename existing**: If safe to do so, move the existing file first
+2. **Check the existing file**: Use `read_note("{destination_path}")` to see what's already there
+3. **Remove or rename existing**: If safe to do so, move the existing file first
 
-            ## Try these alternatives:
-            ```
-            # Option 1: Add timestamp to make unique
-            move_note("{identifier}", "{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md")
+## Try these alternatives:
+```
+# Option 1: Add timestamp to make unique
+move_note("{identifier}", "{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md")
 
-            # Option 2: Use archive folder
-            move_note("{identifier}", "archive/{destination_path}")
+# Option 2: Use archive folder  
+move_note("{identifier}", "archive/{destination_path}")
 
-            # Option 3: Check what's at destination first
-            read_note("{destination_path}")
-            ```
-            """).strip()
+# Option 3: Check what's at destination first
+read_note("{destination_path}")
+```"""
 
     # Invalid path errors
     if "invalid" in error_message.lower() and "path" in error_message.lower():
-        return dedent(f"""
-            # Move Failed - Invalid Destination Path
+        return f"""# Move Failed - Invalid Destination Path
 
-            The destination path '{destination_path}' is not valid: {error_message}
+The destination path '{destination_path}' is not valid: {error_message}
 
-            ## Path requirements:
-            1. **Relative paths only**: Don't start with `/` (use `notes/file.md` not `/notes/file.md`)
-            2. **Include file extension**: Add `.md` for markdown files
-            3. **Use forward slashes**: For folder separators (`folder/subfolder/file.md`)
-            4. **No special characters**: Avoid `\\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`
+## Path requirements:
+1. **Relative paths only**: Don't start with `/` (use `notes/file.md` not `/notes/file.md`)
+2. **Include file extension**: Add `.md` for markdown files
+3. **Use forward slashes**: For folder separators (`folder/subfolder/file.md`)
+4. **No special characters**: Avoid `\\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`
 
-            ## Valid path examples:
-            - `notes/my-note.md`
-            - `projects/2025/meeting-notes.md`
-            - `archive/old-projects/legacy-note.md`
+## Valid path examples:
+- `notes/my-note.md`
+- `projects/2025/meeting-notes.md`
+- `archive/old-projects/legacy-note.md`
 
-            ## Try again with:
-            ```
-            move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
-            ```
-            """).strip()
+## Try again with:
+```
+move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+```"""
 
     # Permission/access errors
     if (
@@ -242,48 +230,43 @@ def _format_move_error_response(error_message: str, identifier: str, destination
         or "access" in error_message.lower()
         or "forbidden" in error_message.lower()
     ):
-        return dedent(f"""
-            # Move Failed - Permission Error
+        return f"""# Move Failed - Permission Error
 
-            You don't have permission to move '{identifier}': {error_message}
+You don't have permission to move '{identifier}': {error_message}
 
-            ## How to resolve:
-            1. **Check file permissions**: Ensure you have write access to both source and destination
-            2. **Verify project access**: Make sure you have edit permissions for this project
-            3. **Check file locks**: The file might be open in another application
+## How to resolve:
+1. **Check file permissions**: Ensure you have write access to both source and destination
+2. **Verify project access**: Make sure you have edit permissions for this project
+3. **Check file locks**: The file might be open in another application
 
-            ## Alternative actions:
-            - Check current project: `get_current_project()`
-            - Switch projects if needed: `switch_project("project-name")`
-            - Try copying content instead: `read_note("{identifier}")` then `write_note()` to new location
-            """).strip()
+## Alternative actions:
+- List available projects: `list_memory_projects()`
+- Try copying content instead: `read_note("{identifier}", project="project-name")` then `write_note()` to new location"""
 
     # Source file not found errors
     if "source" in error_message.lower() and (
         "not found" in error_message.lower() or "missing" in error_message.lower()
     ):
-        return dedent(f"""
-            # Move Failed - Source File Missing
+        return f"""# Move Failed - Source File Missing
 
-            The source file for '{identifier}' was not found on disk: {error_message}
+The source file for '{identifier}' was not found on disk: {error_message}
 
-            This usually means the database and filesystem are out of sync.
+This usually means the database and filesystem are out of sync.
 
-            ## How to resolve:
-            1. **Check if note exists in database**: `read_note("{identifier}")`
-            2. **Run sync operation**: The file might need to be re-synced
-            3. **Recreate the file**: If data exists in database, recreate the physical file
+## How to resolve:
+1. **Check if note exists in database**: `read_note("{identifier}")`
+2. **Run sync operation**: The file might need to be re-synced
+3. **Recreate the file**: If data exists in database, recreate the physical file
 
-            ## Troubleshooting steps:
-            ```
-            # Check if note exists in Basic Memory
-            read_note("{identifier}")
+## Troubleshooting steps:
+```
+# Check if note exists in Basic Memory
+read_note("{identifier}")
 
-            # If it exists, the file is missing on disk - send a message to support@basicmachines.co
-            # If it doesn't exist, use search to find the correct identifier
-            search_notes("{identifier}")
-            ```
-            """).strip()
+# If it exists, the file is missing on disk - send a message to support@basicmachines.co
+# If it doesn't exist, use search to find the correct identifier
+search_notes("{identifier}")
+```"""
 
     # Server/filesystem errors
     if (
@@ -291,70 +274,66 @@ def _format_move_error_response(error_message: str, identifier: str, destination
         or "filesystem" in error_message.lower()
         or "disk" in error_message.lower()
     ):
-        return dedent(f"""
-            # Move Failed - System Error
+        return f"""# Move Failed - System Error
 
-            A system error occurred while moving '{identifier}': {error_message}
+A system error occurred while moving '{identifier}': {error_message}
 
-            ## Immediate steps:
-            1. **Try again**: The error might be temporary
-            2. **Check disk space**: Ensure adequate storage is available
-            3. **Verify filesystem permissions**: Check if the destination directory is writable
+## Immediate steps:
+1. **Try again**: The error might be temporary
+2. **Check disk space**: Ensure adequate storage is available
+3. **Verify filesystem permissions**: Check if the destination directory is writable
 
-            ## Alternative approaches:
-            - Copy content to new location: Use `read_note("{identifier}")` then `write_note()`
-            - Use a different destination folder that you know works
-            - Send a message to support@basicmachines.co if the problem persists
+## Alternative approaches:
+- Copy content to new location: Use `read_note("{identifier}")` then `write_note()` 
+- Use a different destination folder that you know works
+- Send a message to support@basicmachines.co if the problem persists
 
-            ## Backup approach:
-            ```
-            # Read current content
-            content = read_note("{identifier}")
+## Backup approach:
+```
+# Read current content
+content = read_note("{identifier}")
 
-            # Create new note at desired location
-            write_note("New Note Title", content, "{destination_path.split("/")[0] if "/" in destination_path else "notes"}")
+# Create new note at desired location  
+write_note("New Note Title", content, "{destination_path.split("/")[0] if "/" in destination_path else "notes"}")
 
-            # Then delete original if successful
-            delete_note("{identifier}")
-            ```
-            """).strip()
+# Then delete original if successful
+delete_note("{identifier}")
+```"""
 
     # Generic fallback
-    return dedent(f"""
-        # Move Failed
+    return f"""# Move Failed
 
-        Error moving '{identifier}' to '{destination_path}': {error_message}
+Error moving '{identifier}' to '{destination_path}': {error_message}
 
-        ## General troubleshooting:
-        1. **Verify the note exists**: `read_note("{identifier}")` or `search_notes("{identifier}")`
-        2. **Check destination path**: Ensure it's a valid relative path with `.md` extension
-        3. **Verify permissions**: Make sure you can edit files in this project
-        4. **Try a simpler path**: Use a basic folder structure like `notes/filename.md`
+## General troubleshooting:
+1. **Verify the note exists**: `read_note("{identifier}")` or `search_notes("{identifier}")`
+2. **Check destination path**: Ensure it's a valid relative path with `.md` extension
+3. **Verify permissions**: Make sure you can edit files in this project
+4. **Try a simpler path**: Use a basic folder structure like `notes/filename.md`
 
-        ## Step-by-step approach:
-        ```
-        # 1. Confirm note exists
-        read_note("{identifier}")
+## Step-by-step approach:
+```
+# 1. Confirm note exists
+read_note("{identifier}")
 
-        # 2. Try a simple destination first
-        move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+# 2. Try a simple destination first
+move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 
-        # 3. If that works, then try your original destination
-        ```
+# 3. If that works, then try your original destination
+```
 
-        ## Alternative approach:
-        If moving continues to fail, you can copy the content manually:
-        ```
-        # Read current content
-        content = read_note("{identifier}")
+## Alternative approach:
+If moving continues to fail, you can copy the content manually:
+```
+# Read current content
+content = read_note("{identifier}")
 
-        # Create new note
-        write_note("Title", content, "target-folder")
+# Create new note
+write_note("Title", content, "target-folder") 
 
-        # Delete original once confirmed
-        delete_note("{identifier}")
-        ```
-        """).strip()
+# Delete original once confirmed
+delete_note("{identifier}")
+```"""
 
 
 @mcp.tool(
@@ -364,19 +343,25 @@ async def move_note(
     identifier: str,
     destination_path: str,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Move a note to a new file location within the same project.
+
+    Moves a note from one location to another within the project, updating all
+    database references and maintaining semantic content. Uses stateless architecture -
+    project parameter optional with server resolution.
 
     Args:
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
-        destination_path: New path relative to project root with file extension (e.g., "work/meetings/2025-05-26.md").
-                         Must include a file extension (typically .md for markdown files).
-        project: Optional project name (defaults to current session project)
+        destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
+        project: Project name to move within. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
-        Success message with move details
+        Success message with move details and project information.
 
     Examples:
         # Move to new folder (exact title match)
@@ -385,15 +370,22 @@ async def move_note(
         # Move by exact permalink
         move_note("my-note-permalink", "archive/old-notes/my-note.md")
 
-        # Specify project with exact identifier
-        move_note("My Note", "archive/my-note.md", project="work-project")
+        # Move with complex path structure
+        move_note("experiments/ml-results", "archive/2025/ml-experiments.md")
+
+        # Explicit project specification
+        move_note("My Note", "work/notes/my-note.md", project="work-project")
 
         # If uncertain about identifier, search first:
         # search_notes("my note")  # Find available notes
         # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
 
-    Note: This operation moves notes within the specified project only. Moving notes
-    between different projects is not currently supported.
+    Raises:
+        ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
+
+    Note:
+        This operation moves notes within the specified project only. Moving notes
+        between different projects is not currently supported.
 
     The move operation:
     - Updates the entity's file_path in the database
@@ -402,9 +394,9 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
-    logger.debug(f"Moving note: {identifier} to {destination_path}")
+    logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 
-    active_project = get_active_project(project)
+    active_project = await get_active_project(client, project, context)
     project_url = active_project.project_url
 
     # Validate destination path to prevent path traversal attacks
@@ -415,28 +407,26 @@ async def move_note(
             destination_path=destination_path,
             project=active_project.name,
         )
-        return dedent(f"""
-            # Move Failed - Security Validation Error
+        return f"""# Move Failed - Security Validation Error
 
-            The destination path '{destination_path}' is not allowed - paths must stay within project boundaries.
+The destination path '{destination_path}' is not allowed - paths must stay within project boundaries.
 
-            ## Valid path examples:
-            - `notes/my-file.md`
-            - `projects/2025/meeting-notes.md`
-            - `archive/old-notes.md`
+## Valid path examples:
+- `notes/my-file.md`
+- `projects/2025/meeting-notes.md`
+- `archive/old-notes.md`
 
-            ## Try again with a safe path:
-            ```
-            move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
-            ```
-            """).strip()
+## Try again with a safe path:
+```
+move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+```"""
 
     # Check for potential cross-project move attempts
     cross_project_error = await _detect_cross_project_move_attempt(
         identifier, destination_path, active_project.name
     )
     if cross_project_error:
-        logger.warning(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
+        logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
         return cross_project_error
 
     # Validate that destination path includes a file extension

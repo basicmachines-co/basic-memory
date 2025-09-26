@@ -11,9 +11,10 @@ Key Concepts:
 4. Everything is stored in both SQLite and markdown files
 """
 
+import os
 import mimetypes
 import re
-from datetime import datetime, time, timezone
+from datetime import datetime, time
 from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
@@ -23,7 +24,7 @@ from dateparser import parse
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from basic_memory.config import ConfigManager
-from basic_memory.file_utils import sanitize_for_filename
+from basic_memory.file_utils import sanitize_for_filename, sanitize_for_folder
 from basic_memory.utils import generate_permalink
 
 
@@ -71,7 +72,7 @@ def parse_timeframe(timeframe: str) -> datetime:
         parsed = parse(timeframe)
         if not parsed:
             raise ValueError(f"Could not parse timeframe: {timeframe}")
-        
+
         # If the parsed datetime is naive, make it timezone-aware in local system timezone
         if parsed.tzinfo is None:
             return parsed.astimezone()
@@ -192,6 +193,10 @@ class Entity(BaseModel):
         default="text/markdown",
     )
 
+    def __init__(self, **data):
+        data["folder"] = sanitize_for_folder(data.get("folder", ""))
+        super().__init__(**data)
+
     @property
     def safe_title(self) -> str:
         """
@@ -218,9 +223,11 @@ class Entity(BaseModel):
         """Get the file path for this entity based on its permalink."""
         safe_title = self.safe_title
         if self.content_type == "text/markdown":
-            return f"{self.folder}/{safe_title}.md" if self.folder else f"{safe_title}.md"
+            return (
+                os.path.join(self.folder, f"{safe_title}.md") if self.folder else f"{safe_title}.md"
+            )
         else:
-            return f"{self.folder}/{safe_title}" if self.folder else safe_title
+            return os.path.join(self.folder, safe_title) if self.folder else safe_title
 
     @property
     def permalink(self) -> Permalink:
