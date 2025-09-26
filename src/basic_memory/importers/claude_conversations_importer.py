@@ -153,7 +153,14 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             # Handle message content
             content = msg.get("text", "")
             if msg.get("content"):
-                content = " ".join(c.get("text", "") for c in msg["content"])
+                # Filter out None values and ensure all items are strings
+                valid_content = []
+                for c in msg["content"]:
+                    if c and isinstance(c, dict):
+                        text = c.get("text")
+                        if text is not None:
+                            valid_content.append(str(text))
+                content = " ".join(valid_content) if valid_content else ""
             lines.append(content)
 
             # Handle attachments
