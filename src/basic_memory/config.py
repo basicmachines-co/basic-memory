@@ -82,6 +82,12 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to sync changes in real time. default (True)",
     )
 
+    sync_thread_pool_size: int = Field(
+        default=4,
+        description="Size of thread pool for file I/O operations in sync service",
+        gt=0,
+    )
+
     kebab_filenames: bool = Field(
         default=False,
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",

@@ -1,7 +1,9 @@
 """Service for syncing files between filesystem and database."""
 
+import asyncio
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +82,41 @@ class SyncService:
         self.relation_repository = relation_repository
         self.search_service = search_service
         self.file_service = file_service
+        self._thread_pool = ThreadPoolExecutor(max_workers=app_config.sync_thread_pool_size)
+
+    async def _read_file_async(self, file_path: Path) -> str:
+        """Read file content in thread pool to avoid blocking the event loop."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._thread_pool, file_path.read_text, "utf-8")
+
+    async def _compute_checksum_async(self, path: str) -> str:
+        """Compute file checksum in thread pool to avoid blocking the event loop."""
+
+        def _sync_compute_checksum(path_str: str) -> str:
+            # Synchronous version for thread pool execution
+            path_obj = self.file_service.base_path / path_str
+
+            if self.file_service.is_markdown(path_str):
+                content = path_obj.read_text(encoding="utf-8")
+            else:
+                content = path_obj.read_bytes()
+
+            # Use the synchronous version of compute_checksum
+            import hashlib
+
+            if isinstance(content, str):
+                content_bytes = content.encode("utf-8")
+            else:
+                content_bytes = content
+            return hashlib.sha256(content_bytes).hexdigest()
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self._thread_pool, _sync_compute_checksum, path)
+
+    def __del__(self):
+        """Cleanup thread pool when service is destroyed."""
+        if hasattr(self, "_thread_pool"):
+            self._thread_pool.shutdown(wait=False)
 
     async def sync(self, directory: Path, project_name: Optional[str] = None) -> SyncReport:
         """Sync all files with database."""
@@ -289,7 +326,7 @@ class SyncService:
         logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
 
         file_path = self.entity_parser.base_path / path
-        file_content = file_path.read_text(encoding="utf-8")
+        file_content = await self._read_file_async(file_path)
         file_contains_frontmatter = has_frontmatter(file_content)
 
         # entity markdown will always contain front matter, so it can be used up create/update the entity
@@ -326,7 +363,7 @@ class SyncService:
         # After updating relations, we need to compute the checksum again
         # This is necessary for files with wikilinks to ensure consistent checksums
         # after relation processing is complete
-        final_checksum = await self.file_service.compute_checksum(path)
+        final_checksum = await self._compute_checksum_async(path)
 
         # set checksum
         await self.entity_repository.update(entity.id, {"checksum": final_checksum})
@@ -350,7 +387,7 @@ class SyncService:
         Returns:
             Tuple of (entity, checksum)
         """
-        checksum = await self.file_service.compute_checksum(path)
+        checksum = await self._compute_checksum_async(path)
         if new:
             # Generate permalink from path
             await self.entity_service.resolve_permalink(path)
@@ -620,7 +657,7 @@ class SyncService:
 
                 path = Path(root) / filename
                 rel_path = path.relative_to(directory).as_posix()
-                checksum = await self.file_service.compute_checksum(rel_path)
+                checksum = await self._compute_checksum_async(rel_path)
                 result.files[rel_path] = checksum
                 result.checksums[checksum] = rel_path
 

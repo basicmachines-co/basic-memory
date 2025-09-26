@@ -1,6 +1,5 @@
 """Tests for the initialization service."""
 
-from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -127,10 +126,11 @@ async def test_reconcile_projects_with_error_handling(mock_get_db, app_config):
 @patch("basic_memory.services.initialization.db.get_or_create_db")
 @patch("basic_memory.cli.commands.sync.get_sync_service")
 @patch("basic_memory.sync.WatchService")
-async def test_initialize_file_sync_sequential(
-    mock_watch_service_class, mock_get_sync_service, mock_get_db, app_config
+@patch("basic_memory.services.initialization.asyncio.create_task")
+async def test_initialize_file_sync_background_tasks(
+    mock_create_task, mock_watch_service_class, mock_get_sync_service, mock_get_db, app_config
 ):
-    """Test file sync initialization with sequential project processing."""
+    """Test file sync initialization with background task processing."""
     # Setup mocks
     mock_session_maker = AsyncMock()
     mock_get_db.return_value = (None, mock_session_maker)
@@ -154,6 +154,11 @@ async def test_initialize_file_sync_sequential(
     mock_sync_service.sync = AsyncMock()
     mock_get_sync_service.return_value = mock_sync_service
 
+    # Mock background tasks
+    mock_task1 = MagicMock()
+    mock_task2 = MagicMock()
+    mock_create_task.side_effect = [mock_task1, mock_task2]
+
     # Mock the repository
     with patch("basic_memory.services.initialization.ProjectRepository") as mock_repo_class:
         mock_repo_class.return_value = mock_repository
@@ -165,22 +170,11 @@ async def test_initialize_file_sync_sequential(
         # Assertions
         mock_repository.get_active_projects.assert_called_once()
 
-        # Should call sync for each project sequentially
-        assert mock_get_sync_service.call_count == 2
-        mock_get_sync_service.assert_any_call(mock_project1)
-        mock_get_sync_service.assert_any_call(mock_project2)
+        # Should create background tasks for each project (non-blocking)
+        assert mock_create_task.call_count == 2
 
-        # Should call sync on each project
-        assert mock_sync_service.sync.call_count == 2
-        mock_sync_service.sync.assert_any_call(
-            Path(mock_project1.path), project_name=mock_project1.name
-        )
-        mock_sync_service.sync.assert_any_call(
-            Path(mock_project2.path), project_name=mock_project2.name
-        )
-
-        # Should start the watch service
-        mock_watch_service.run.assert_called_once()
-
-        # Should return None
+        # Verify tasks were created but not awaited (function returns immediately)
         assert result is None
+
+        # Watch service should still be started
+        mock_watch_service.run.assert_called_once()
