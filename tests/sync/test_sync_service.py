@@ -639,7 +639,7 @@ Testing file timestamps
     entity_updated_epoch = file_entity.updated_at.timestamp()
 
     # Allow 2s difference on Windows due to filesystem timing precision
-    tolerance = 2 if os.name == 'nt' else 1
+    tolerance = 2 if os.name == "nt" else 1
     assert abs(entity_created_epoch - file_stats.st_ctime) < tolerance
     assert abs(entity_updated_epoch - file_stats.st_mtime) < tolerance  # Allow tolerance difference
 
