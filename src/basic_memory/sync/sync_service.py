@@ -389,7 +389,7 @@ class SyncService:
                         logger.error(f"Entity not found after constraint violation, path={path}")
                         raise ValueError(f"Entity not found after constraint violation: {path}")
 
-                    updated = await self.entity_repository.update_entity_optimistic(
+                    updated = await self.entity_repository.update_by_file_path(
                         path, {"checksum": checksum}
                     )
 
@@ -407,7 +407,7 @@ class SyncService:
                 logger.error(f"Entity not found for existing file, path={path}")
                 raise ValueError(f"Entity not found for existing file: {path}")
 
-            updated = await self.entity_repository.update_entity_optimistic(
+            updated = await self.entity_repository.update_by_file_path(
                 path, {"checksum": checksum}
             )
 
@@ -477,7 +477,7 @@ class SyncService:
                     f"new_checksum={new_checksum}"
                 )
 
-            updated = await self.entity_repository.update_entity_by_id_optimistic(entity.id, updates)
+            updated = await self.entity_repository.update(entity.id, updates)
 
             if updated is None:  # pragma: no cover
                 logger.error(
