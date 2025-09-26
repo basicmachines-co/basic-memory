@@ -206,10 +206,11 @@ async def test_move_note_invalid_destination_path(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_move_note_missing_file_extension(client):
+async def test_move_note_missing_file_extension(client, test_project):
     """Test moving note without file extension in destination path."""
     # Create initial note
     await write_note.fn(
+        project=test_project.name,
         title="ExtensionTest",
         folder="source",
         content="# Extension Test\nTesting extension validation.",
@@ -217,6 +218,7 @@ async def test_move_note_missing_file_extension(client):
 
     # Test path without extension
     result = await move_note.fn(
+        project=test_project.name,
         identifier="source/extension-test",
         destination_path="target/renamed-note",
     )
@@ -230,6 +232,7 @@ async def test_move_note_missing_file_extension(client):
 
     # Test path with empty extension (edge case)
     result = await move_note.fn(
+        project=test_project.name,
         identifier="source/extension-test",
         destination_path="target/renamed-note.",
     )
@@ -239,7 +242,7 @@ async def test_move_note_missing_file_extension(client):
     assert "must include a file extension" in result
 
     # Test that note still exists at original location
-    content = await read_note.fn("source/extension-test")
+    content = await read_note.fn("source/extension-test", project=test_project.name)
     assert "# Extension Test" in content
     assert "Testing extension validation" in content
 

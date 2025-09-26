@@ -9,7 +9,7 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post, call_get
-from basic_memory.mcp.project_session import get_active_project
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.project_info import ProjectList
 from basic_memory.utils import validate_project_path
@@ -429,6 +429,19 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
         logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
         return cross_project_error
 
+    # Get the source entity information for extension validation
+    source_ext = "md"  # Default to .md if we can't determine source extension
+    try:
+        # Fetch source entity information to get the current file extension
+        url = f"{project_url}/knowledge/entities/{identifier}"
+        response = await call_get(client, url)
+        source_entity = EntityResponse.model_validate(response.json())
+        if "." in source_entity.file_path:
+            source_ext = source_entity.file_path.split(".")[-1]
+    except Exception as e:
+        # If we can't fetch the source entity, default to .md extension
+        logger.debug(f"Could not fetch source entity for extension check: {e}")
+
     # Validate that destination path includes a file extension
     if "." not in destination_path or not destination_path.split(".")[-1]:
         logger.warning(f"Move failed - no file extension provided: {destination_path}")
@@ -444,7 +457,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
 
             ## Try again with extension:
             ```
-            move_note("{identifier}", "{destination_path}.EXTENSION")
+            move_note("{identifier}", "{destination_path}.{source_ext}")
             ```
 
             All examples in Basic Memory expect file extensions to be explicitly provided.
