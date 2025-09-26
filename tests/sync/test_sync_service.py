@@ -1,6 +1,7 @@
 """Test general sync behavior."""
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
@@ -637,8 +638,10 @@ Testing file timestamps
     entity_created_epoch = file_entity.created_at.timestamp()
     entity_updated_epoch = file_entity.updated_at.timestamp()
 
-    assert abs(entity_created_epoch - file_stats.st_ctime) < 1
-    assert abs(entity_updated_epoch - file_stats.st_mtime) < 1  # Allow 1s difference
+    # Allow 2s difference on Windows due to filesystem timing precision
+    tolerance = 2 if os.name == 'nt' else 1
+    assert abs(entity_created_epoch - file_stats.st_ctime) < tolerance
+    assert abs(entity_updated_epoch - file_stats.st_mtime) < tolerance  # Allow tolerance difference
 
 
 @pytest.mark.asyncio

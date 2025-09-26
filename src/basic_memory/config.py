@@ -310,7 +310,7 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     os_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
     if os_project_name:  # pragma: no cover
         logger.warning(
-            f"BASIC_MEMORY_PROJECT is not supported anymore. Use the --project flag or set the default project in the config instead. Setting default project to {os_project_name}"
+            f"BASIC_MEMORY_PROJECT is not supported anymore. Set the default project in the config instead. Setting default project to {os_project_name}"
         )
         actual_project_name = project_name
     # if the project_name is passed in, use it
