@@ -102,18 +102,20 @@ class ContextService:
 
         if memory_url:
             path = memory_url_path(memory_url)
+            # Normalize the path by converting underscores to hyphens to match stored permalinks
+            normalized_path = generate_permalink(path, split_extension=False)
             # Pattern matching - use search
-            if "*" in path:
-                logger.debug(f"Pattern search for '{path}'")
+            if "*" in normalized_path:
+                logger.debug(f"Pattern search for '{normalized_path}'")
                 primary = await self.search_repository.search(
-                    permalink_match=path, limit=limit, offset=offset
+                    permalink_match=normalized_path, limit=limit, offset=offset
                 )
 
             # Direct lookup for exact path
             else:
-                logger.debug(f"Direct lookup for '{path}'")
+                logger.debug(f"Direct lookup for '{normalized_path}'")
                 primary = await self.search_repository.search(
-                    permalink=path, limit=limit, offset=offset
+                    permalink=normalized_path, limit=limit, offset=offset
                 )
         else:
             logger.debug(f"Build context for '{types}'")
@@ -151,7 +153,7 @@ class ContextService:
 
         # Create metadata dataclass
         metadata = ContextMetadata(
-            uri=memory_url_path(memory_url) if memory_url else None,
+            uri=normalized_path if memory_url else None,
             types=types,
             depth=depth,
             timeframe=since.isoformat() if since else None,
