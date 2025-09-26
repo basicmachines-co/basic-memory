@@ -42,6 +42,7 @@ class EntityService(BaseService[EntityModel]):
         relation_repository: RelationRepository,
         file_service: FileService,
         link_resolver: LinkResolver,
+        app_config: Optional[BasicMemoryConfig] = None,
     ):
         super().__init__(entity_repository)
         self.observation_repository = observation_repository
@@ -49,6 +50,7 @@ class EntityService(BaseService[EntityModel]):
         self.entity_parser = entity_parser
         self.file_service = file_service
         self.link_resolver = link_resolver
+        self.app_config = app_config
 
     async def detect_file_path_conflicts(self, file_path: str) -> List[Entity]:
         """Detect potential file path conflicts for a given file path.
@@ -194,9 +196,13 @@ class EntityService(BaseService[EntityModel]):
                     relations=[],
                 )
 
-        # Get unique permalink (prioritizing content frontmatter)
-        permalink = await self.resolve_permalink(file_path, content_markdown)
-        schema._permalink = permalink
+        # Get unique permalink (prioritizing content frontmatter) unless disabled
+        if self.app_config and not self.app_config.disable_permalinks:
+            permalink = await self.resolve_permalink(file_path, content_markdown)
+            schema._permalink = permalink
+        else:
+            # If permalinks are disabled, set to None
+            schema._permalink = None
 
         post = await schema_to_markdown(schema)
 
@@ -254,15 +260,16 @@ class EntityService(BaseService[EntityModel]):
                     relations=[],
                 )
 
-        # Check if we need to update the permalink based on content frontmatter
+        # Check if we need to update the permalink based on content frontmatter (unless disabled)
         new_permalink = entity.permalink  # Default to existing
-        if content_markdown and content_markdown.frontmatter.permalink:
-            # Resolve permalink with the new content frontmatter
-            resolved_permalink = await self.resolve_permalink(file_path, content_markdown)
-            if resolved_permalink != entity.permalink:
-                new_permalink = resolved_permalink
-                # Update the schema to use the new permalink
-                schema._permalink = new_permalink
+        if self.app_config and not self.app_config.disable_permalinks:
+            if content_markdown and content_markdown.frontmatter.permalink:
+                # Resolve permalink with the new content frontmatter
+                resolved_permalink = await self.resolve_permalink(file_path, content_markdown)
+                if resolved_permalink != entity.permalink:
+                    new_permalink = resolved_permalink
+                    # Update the schema to use the new permalink
+                    schema._permalink = new_permalink
 
         # Create post with new content from schema
         post = await schema_to_markdown(schema)
@@ -733,8 +740,11 @@ class EntityService(BaseService[EntityModel]):
             # 6. Prepare database updates
             updates = {"file_path": destination_path}
 
-            # 7. Update permalink if configured or if entity has null permalink
-            if app_config.update_permalinks_on_move or old_permalink is None:
+            # 7. Update permalink if configured or if entity has null permalink (unless disabled)
+            if (
+                not app_config.disable_permalinks
+                and (app_config.update_permalinks_on_move or old_permalink is None)
+            ):
                 # Generate new permalink from destination path
                 new_permalink = await self.resolve_permalink(destination_path)
 

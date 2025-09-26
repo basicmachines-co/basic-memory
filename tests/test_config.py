@@ -169,3 +169,13 @@ class TestConfigManager:
 
         with pytest.raises(ValueError, match="Project 'nonexistent' not found"):
             config_manager.set_default_project("nonexistent")
+
+    def test_disable_permalinks_flag_default(self):
+        """Test that disable_permalinks flag defaults to False."""
+        config = BasicMemoryConfig()
+        assert config.disable_permalinks is False
+
+    def test_disable_permalinks_flag_can_be_enabled(self):
+        """Test that disable_permalinks flag can be set to True."""
+        config = BasicMemoryConfig(disable_permalinks=True)
+        assert config.disable_permalinks is True
