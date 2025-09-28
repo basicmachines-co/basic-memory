@@ -221,8 +221,10 @@ def test_permalink_generation():
         ("last week", True),
         ("3 weeks ago", True),
         ("invalid", False),
-        ("tomorrow", False),
-        ("next week", False),
+        # NOTE: "tomorrow" and "next week" now return 1 day ago due to timezone safety
+        # They no longer raise errors - this is intentional for remote MCP
+        ("tomorrow", True),  # Now valid - returns 1 day ago
+        ("next week", True),  # Now valid - returns 1 day ago
         ("", False),
         ("0d", True),
         ("366d", False),
@@ -316,25 +318,27 @@ class TestTimeframeParsing:
     """Test cases for parse_timeframe() and validate_timeframe() functions."""
 
     def test_parse_timeframe_today(self):
-        """Test that parse_timeframe('today') returns start of current day with timezone."""
+        """Test that parse_timeframe('today') returns 1 day ago for remote MCP timezone safety."""
         result = parse_timeframe("today")
-        expected = datetime.combine(datetime.now().date(), time.min).astimezone()
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
 
-        assert result == expected
-        assert result.hour == 0
-        assert result.minute == 0
-        assert result.second == 0
-        assert result.microsecond == 0
+        # Should be approximately 1 day ago (within a second for test tolerance)
+        diff = abs((result.replace(tzinfo=None) - one_day_ago).total_seconds())
+        assert diff < 2, f"Expected ~1 day ago for 'today', got {result}"
         assert result.tzinfo is not None
 
     def test_parse_timeframe_today_case_insensitive(self):
         """Test that parse_timeframe handles 'today' case-insensitively."""
         test_cases = ["today", "TODAY", "Today", "ToDay"]
-        expected = datetime.combine(datetime.now().date(), time.min).astimezone()
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
 
         for case in test_cases:
             result = parse_timeframe(case)
-            assert result == expected
+            # Should be approximately 1 day ago (within a second for test tolerance)
+            diff = abs((result.replace(tzinfo=None) - one_day_ago).total_seconds())
+            assert diff < 2, f"Expected ~1 day ago for '{case}', got {result}"
 
     def test_parse_timeframe_other_formats(self):
         """Test that parse_timeframe works with other dateparser formats."""
@@ -401,9 +405,9 @@ class TestTimeframeParsing:
         with pytest.raises(ValueError, match="Timeframe must be a string"):
             validate_timeframe(123)  # type: ignore
 
-        # Future timeframe
-        with pytest.raises(ValueError, match="Timeframe cannot be in the future"):
-            validate_timeframe("tomorrow")
+        # NOTE: Future timeframes no longer raise errors due to 1-day minimum enforcement
+        # "tomorrow" and "next week" now return 1 day ago for timezone safety
+        # This is intentional for remote MCP deployments
 
         # Too far in past (>365 days)
         with pytest.raises(ValueError, match="Timeframe should be <= 1 year"):
@@ -431,12 +435,12 @@ class TestTimeframeParsing:
         assert model.timeframe == "1d"
 
     def test_timeframe_integration_today_vs_1d(self):
-        """Test the specific bug fix: 'today' vs '1d' behavior."""
+        """Test that 'today' and '1d' both return 1 day ago due to timezone safety minimum."""
 
         class TestModel(BaseModel):
             timeframe: TimeFrame
 
-        # 'today' should be preserved
+        # 'today' should be preserved as special case in validation
         today_model = TestModel(timeframe="today")
         assert today_model.timeframe == "today"
 
@@ -444,19 +448,21 @@ class TestTimeframeParsing:
         oneday_model = TestModel(timeframe="1d")
         assert oneday_model.timeframe == "1d"
 
-        # When parsed by parse_timeframe, they should be different
+        # When parsed by parse_timeframe, both should return approximately 1 day ago
+        # due to the 1-day minimum enforcement for remote MCP timezone safety
         today_parsed = parse_timeframe("today")
         oneday_parsed = parse_timeframe("1d")
 
-        # 'today' should be start of today (00:00:00)
-        assert today_parsed.hour == 0
-        assert today_parsed.minute == 0
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
 
-        # '1d' should be 24 hours ago (same time yesterday)
-        now = datetime.now().astimezone()
-        expected_1d = now - timedelta(days=1)
-        diff = abs((oneday_parsed - expected_1d).total_seconds())
-        assert diff < 60  # Within 1 minute
+        # Both should be approximately 1 day ago
+        today_diff = abs((today_parsed.replace(tzinfo=None) - one_day_ago).total_seconds())
+        assert today_diff < 60, f"'today' should be ~1 day ago, got {today_parsed}"
 
-        # They should be different times
-        assert today_parsed != oneday_parsed
+        oneday_diff = abs((oneday_parsed.replace(tzinfo=None) - one_day_ago).total_seconds())
+        assert oneday_diff < 60, f"'1d' should be ~1 day ago, got {oneday_parsed}"
+
+        # They should be approximately the same time (within an hour due to parsing differences)
+        time_diff = abs((today_parsed - oneday_parsed).total_seconds())
+        assert time_diff < 3600, f"'today' and '1d' should be similar times, diff: {time_diff}s"

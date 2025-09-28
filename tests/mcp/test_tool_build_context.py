@@ -94,7 +94,7 @@ valid_timeframes = [
 
 invalid_timeframes = [
     "invalid",  # Nonsense string
-    "tomorrow",  # Future date
+    # NOTE: "tomorrow" now returns 1 day ago due to timezone safety - no longer invalid
 ]
 
 
