@@ -585,12 +585,22 @@ class SyncService:
             # update search index
             await self.search_service.index_entity(updated)
 
-    async def resolve_relations(self):
-        """Try to resolve any unresolved relations"""
+    async def resolve_relations(self, entity_id: int | None = None):
+        """Try to resolve unresolved relations.
 
-        unresolved_relations = await self.relation_repository.find_unresolved_relations()
+        Args:
+            entity_id: If provided, only resolve relations for this specific entity.
+                      Otherwise, resolve all unresolved relations in the database.
+        """
 
-        logger.info("Resolving forward references", count=len(unresolved_relations))
+        if entity_id:
+            # Only get unresolved relations for the specific entity
+            unresolved_relations = await self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+            logger.info(f"Resolving forward references for entity {entity_id}", count=len(unresolved_relations))
+        else:
+            # Get all unresolved relations (original behavior)
+            unresolved_relations = await self.relation_repository.find_unresolved_relations()
+            logger.info("Resolving all forward references", count=len(unresolved_relations))
 
         for relation in unresolved_relations:
             logger.trace(
