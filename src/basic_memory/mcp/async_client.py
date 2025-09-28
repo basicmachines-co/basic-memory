@@ -18,9 +18,9 @@ def create_client() -> AsyncClient:
     # Default httpx timeout is 5 seconds which is too short for file operations
     timeout = Timeout(
         connect=10.0,  # 10 seconds for connection
-        read=30.0,     # 30 seconds for reading response
-        write=30.0,    # 30 seconds for writing request
-        pool=30.0      # 30 seconds for connection pool
+        read=30.0,  # 30 seconds for reading response
+        write=30.0,  # 30 seconds for writing request
+        pool=30.0,  # 30 seconds for connection pool
     )
 
     if proxy_base_url:
@@ -30,7 +30,9 @@ def create_client() -> AsyncClient:
     else:
         # Default: use ASGI transport for local API (development mode)
         logger.debug("Creating ASGI client for local Basic Memory API")
-        return AsyncClient(transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout)
+        return AsyncClient(
+            transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
+        )
 
 
 # Create shared async client

@@ -29,7 +29,7 @@ def inject_auth_header(headers: HeaderTypes | None = None) -> HeaderTypes:
 
     # Log only non-sensitive header keys for debugging
     if logger.opt(lazy=True).debug:
-        safe_headers = {k for k in http_headers.keys() if k.lower() != 'authorization'}
+        safe_headers = {k for k in http_headers.keys() if k.lower() != "authorization"}
         logger.debug(f"HTTP headers present: {list(safe_headers)}")
 
     authorization = http_headers.get("Authorization") or http_headers.get("authorization")
