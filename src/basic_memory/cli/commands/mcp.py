@@ -17,6 +17,8 @@ import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
 # Import prompts to register them
 import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
 from loguru import logger
+import threading
+from basic_memory.services.initialization import initialize_file_sync
 
 
 @app.command()
@@ -49,10 +51,6 @@ def mcp(
         # Set env var with validated project name
         os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
         logger.info(f"MCP server constrained to project: {project_name}")
-
-    # Use unified thread-based sync approach for both transports
-    import threading
-    from basic_memory.services.initialization import initialize_file_sync
 
     app_config = ConfigManager().config
 
