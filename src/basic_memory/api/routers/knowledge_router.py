@@ -28,11 +28,7 @@ from basic_memory.schemas.base import Permalink, Entity
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
-async def resolve_relations_background(
-    sync_service,
-    entity_id: int,
-    entity_permalink: str
-) -> None:
+async def resolve_relations_background(sync_service, entity_id: int, entity_permalink: str) -> None:
     """Background task to resolve relations for a specific entity.
 
     This runs asynchronously after the API response is sent, preventing
@@ -41,10 +37,14 @@ async def resolve_relations_background(
     try:
         # Only resolve relations for the newly created entity
         await sync_service.resolve_relations(entity_id=entity_id)
-        logger.debug(f"Background: Resolved relations for entity {entity_permalink} (id={entity_id})")
+        logger.debug(
+            f"Background: Resolved relations for entity {entity_permalink} (id={entity_id})"
+        )
     except Exception as e:
         # Log but don't fail - this is a background task
-        logger.warning(f"Background: Failed to resolve relations for entity {entity_permalink}: {e}")
+        logger.warning(
+            f"Background: Failed to resolve relations for entity {entity_permalink}: {e}"
+        )
 
 
 ## Create endpoints
@@ -112,10 +112,7 @@ async def create_or_update_entity(
     # This prevents blocking the API response while resolving potentially many relations
     if created:
         background_tasks.add_task(
-            resolve_relations_background,
-            sync_service,
-            entity.id,
-            entity.permalink
+            resolve_relations_background, sync_service, entity.id, entity.permalink or ""
         )
 
     result = EntityResponse.model_validate(entity)

@@ -2,7 +2,7 @@
 
 import os
 import pytest
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from pydantic import ValidationError, BaseModel
 
 from basic_memory.schemas import (

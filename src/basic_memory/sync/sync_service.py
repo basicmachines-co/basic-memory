@@ -595,8 +595,13 @@ class SyncService:
 
         if entity_id:
             # Only get unresolved relations for the specific entity
-            unresolved_relations = await self.relation_repository.find_unresolved_relations_for_entity(entity_id)
-            logger.info(f"Resolving forward references for entity {entity_id}", count=len(unresolved_relations))
+            unresolved_relations = (
+                await self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+            )
+            logger.info(
+                f"Resolving forward references for entity {entity_id}",
+                count=len(unresolved_relations),
+            )
         else:
             # Get all unresolved relations (original behavior)
             unresolved_relations = await self.relation_repository.find_unresolved_relations()

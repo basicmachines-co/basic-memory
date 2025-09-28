@@ -428,8 +428,7 @@ class EntityService(BaseService[EntityModel]):
 
             # Create tasks for all relation lookups
             lookup_tasks = [
-                self.link_resolver.resolve_link(rel.target)
-                for rel in markdown.relations
+                self.link_resolver.resolve_link(rel.target) for rel in markdown.relations
             ]
 
             # Execute all lookups in parallel
@@ -437,12 +436,11 @@ class EntityService(BaseService[EntityModel]):
 
             # Process results and create relation records
             for rel, resolved in zip(markdown.relations, resolved_entities):
-                # Handle exceptions from gather
-                if isinstance(resolved, Exception):
-                    logger.warning(f"Failed to resolve relation target {rel.target}: {resolved}")
-                    target_entity = None
-                else:
-                    target_entity = resolved
+                # Handle exceptions from gather and None results
+                target_entity: Optional[Entity] = None
+                if not isinstance(resolved, Exception):
+                    # Type narrowing: resolved is Optional[Entity] here, not Exception
+                    target_entity = resolved  # type: ignore
 
                 # if the target is found, store the id
                 target_id = target_entity.id if target_entity else None

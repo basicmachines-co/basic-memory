@@ -82,10 +82,7 @@ class RelationRepository(Repository[Relation]):
         Returns:
             List of unresolved relations where this entity is the source.
         """
-        query = select(Relation).filter(
-            Relation.from_id == entity_id,
-            Relation.to_id.is_(None)
-        )
+        query = select(Relation).filter(Relation.from_id == entity_id, Relation.to_id.is_(None))
         result = await self.execute_query(query)
         return result.scalars().all()
 

@@ -52,7 +52,9 @@ class TestTimeframeMinimum:
 
         # Should be approximately 1 day ago (within 24 hours)
         diff_hours = abs((result.replace(tzinfo=None) - one_day_ago).total_seconds()) / 3600
-        assert diff_hours < 24, f"Expected ~1 day ago for '1d', got {result} (diff: {diff_hours} hours)"
+        assert diff_hours < 24, (
+            f"Expected ~1 day ago for '1d', got {result} (diff: {diff_hours} hours)"
+        )
 
     @freeze_time("2025-01-15 15:00:00")
     def test_two_days_returns_two_days(self):
@@ -63,7 +65,9 @@ class TestTimeframeMinimum:
 
         # Should be approximately 2 days ago (within 24 hours)
         diff_hours = abs((result.replace(tzinfo=None) - two_days_ago).total_seconds()) / 3600
-        assert diff_hours < 24, f"Expected ~2 days ago for '2d', got {result} (diff: {diff_hours} hours)"
+        assert diff_hours < 24, (
+            f"Expected ~2 days ago for '2d', got {result} (diff: {diff_hours} hours)"
+        )
 
     @freeze_time("2025-01-15 15:00:00")
     def test_one_week_returns_one_week(self):
@@ -74,7 +78,9 @@ class TestTimeframeMinimum:
 
         # Should be approximately 1 week ago (within 24 hours)
         diff_hours = abs((result.replace(tzinfo=None) - one_week_ago).total_seconds()) / 3600
-        assert diff_hours < 24, f"Expected ~1 week ago for '1 week', got {result} (diff: {diff_hours} hours)"
+        assert diff_hours < 24, (
+            f"Expected ~1 week ago for '1 week', got {result} (diff: {diff_hours} hours)"
+        )
 
     @freeze_time("2025-01-15 15:00:00")
     def test_zero_days_returns_one_day_minimum(self):

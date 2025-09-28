@@ -35,9 +35,9 @@ def test_create_client_configures_extended_timeouts():
         # Verify timeout configuration
         assert isinstance(client.timeout, Timeout)
         assert client.timeout.connect == 10.0  # 10 seconds for connection
-        assert client.timeout.read == 30.0     # 30 seconds for reading
-        assert client.timeout.write == 30.0    # 30 seconds for writing
-        assert client.timeout.pool == 30.0     # 30 seconds for pool
+        assert client.timeout.read == 30.0  # 30 seconds for reading
+        assert client.timeout.write == 30.0  # 30 seconds for writing
+        assert client.timeout.pool == 30.0  # 30 seconds for pool
 
     # Also test with proxy URL
     with patch.dict("os.environ", {"BASIC_MEMORY_PROXY_URL": "http://localhost:8000"}):
