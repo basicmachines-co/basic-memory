@@ -5,14 +5,14 @@ Handles project validation and context management in one place.
 """
 
 import os
-from typing import Optional
+from typing import Optional, List
 from httpx import AsyncClient
 from loguru import logger
 from fastmcp import Context
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.schemas.project_info import ProjectItem
+from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
 
@@ -51,6 +51,12 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
     return None
 
 
+async def get_project_names(client: AsyncClient) -> List[str]:
+    response = await call_get(client, "/projects/projects")
+    project_list = ProjectList.model_validate(response.json())
+    return [project.name for project in project_list.projects]
+
+
 async def get_active_project(
     client: AsyncClient, project: Optional[str] = None, context: Optional[Context] = None
 ) -> ProjectItem:
@@ -76,9 +82,11 @@ async def get_active_project(
     # Resolve project using three-tier hierarchy
     resolved_project = await resolve_project_parameter(project)
     if not resolved_project:
+        project_names = await get_project_names(client)
         raise ValueError(
-            "No project specified. Either provide project parameter, "
-            "set default_project_mode=true in config, or use --project constraint."
+            "No project specified. "
+            "Either set 'default_project_mode=true' in config, or use 'project' argument.\n"
+            f"Available projects: {project_names}"
         )
 
     project = resolved_project

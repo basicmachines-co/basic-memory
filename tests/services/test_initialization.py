@@ -124,7 +124,7 @@ async def test_reconcile_projects_with_error_handling(mock_get_db, app_config):
 
 @pytest.mark.asyncio
 @patch("basic_memory.services.initialization.db.get_or_create_db")
-@patch("basic_memory.cli.commands.sync.get_sync_service")
+@patch("basic_memory.sync.sync_service.get_sync_service")
 @patch("basic_memory.sync.WatchService")
 @patch("basic_memory.services.initialization.asyncio.create_task")
 async def test_initialize_file_sync_background_tasks(

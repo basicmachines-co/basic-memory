@@ -53,7 +53,7 @@ def test_info_stats():
         mock_func.return_value = mock_info
 
         # Run the command
-        result = runner.invoke(cli_app, ["project", "info"])
+        result = runner.invoke(cli_app, ["project", "info", "main"])
 
         # Verify exit code
         assert result.exit_code == 0
@@ -102,7 +102,7 @@ def test_info_stats_json():
         mock_func.return_value = mock_info
 
         # Run the command with --json flag
-        result = runner.invoke(cli_app, ["project", "info", "--json"])
+        result = runner.invoke(cli_app, ["project", "info", "main", "--json"])
 
         # Verify exit code
         assert result.exit_code == 0

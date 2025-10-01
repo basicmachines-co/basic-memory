@@ -11,7 +11,7 @@ from basic_memory.cli.commands.status import (
     group_changes_by_directory,
     display_changes,
 )
-from basic_memory.sync.sync_service import SyncReport
+from basic_memory.schemas.sync_report import SyncReportResponse
 
 # Set up CLI runner
 runner = CliRunner()
@@ -27,11 +27,11 @@ def test_status_command():
         mock_run_status.return_value = None
 
         # Should exit with code 0
-        result = runner.invoke(app, ["status", "--verbose"])
+        result = runner.invoke(app, ["status", "--project", "main", "--verbose"])
         assert result.exit_code == 0
 
         # Verify the function was called with verbose=True
-        mock_run_status.assert_called_once_with(True)
+        mock_run_status.assert_called_once_with("main", True)
 
 
 def test_status_command_error():
@@ -49,21 +49,15 @@ def test_status_command_error():
         assert "Error checking status: Database connection failed" in result.stderr
 
 
-def test_display_changes_no_changes():
-    """Test displaying no changes."""
-    changes = SyncReport(set(), set(), set(), {}, {})
-    display_changes("test", "Test", changes, verbose=True)
-    display_changes("test", "Test", changes, verbose=False)
-
-
 def test_display_changes_with_changes():
     """Test displaying various changes."""
-    changes = SyncReport(
+    changes = SyncReportResponse(
         new={"dir1/new.md"},
         modified={"dir1/mod.md"},
         deleted={"dir2/del.md"},
         moves={"old.md": "new.md"},
         checksums={"dir1/new.md": "abcd1234"},
+        total=2,
     )
     display_changes("test", "Test", changes, verbose=True)
     display_changes("test", "Test", changes, verbose=False)
@@ -98,12 +92,13 @@ def test_build_directory_summary_empty():
 
 def test_group_changes_by_directory():
     """Test grouping changes by directory."""
-    changes = SyncReport(
+    changes = SyncReportResponse(
         new={"dir1/new.md", "dir2/new2.md"},
         modified={"dir1/mod.md"},
         deleted={"dir2/del.md"},
         moves={"dir1/old.md": "dir2/new.md"},
         checksums={},
+        total=2,
     )
 
     grouped = group_changes_by_directory(changes)

@@ -14,7 +14,6 @@ import json
 from datetime import datetime
 
 from rich.panel import Panel
-from rich.tree import Tree
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.project_info import ProjectList
@@ -125,11 +124,6 @@ def set_default_project(
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
         raise typer.Exit(1)
 
-    # The API call above updates the config file default
-    console.print(
-        f"[green]CLI commands will now use '{name}' when no --project flag is specified[/green]"
-    )
-
 
 @project_app.command("sync-config")
 def synchronize_projects() -> None:
@@ -137,7 +131,7 @@ def synchronize_projects() -> None:
     # Call the API to synchronize projects
 
     try:
-        response = asyncio.run(call_post(client, "/projects/sync"))
+        response = asyncio.run(call_post(client, "/projects/config/sync"))
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
@@ -189,12 +183,13 @@ def move_project(
 
 @project_app.command("info")
 def display_project_info(
+    name: str = typer.Argument(..., help="Name of the project"),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
 ):
     """Display detailed information and statistics about the current project."""
     try:
         # Get project info
-        info = asyncio.run(project_info.fn())  # type: ignore  # pyright: ignore [reportAttributeAccessIssue]
+        info = asyncio.run(project_info.fn(name))  # type: ignore  # pyright: ignore [reportAttributeAccessIssue]
 
         if json_output:
             # Convert to JSON and print
@@ -206,6 +201,7 @@ def display_project_info(
             # Project configuration section
             console.print(
                 Panel(
+                    f"Basic Memory version: [bold green]{info.system.version}[/bold green]\n"
                     f"[bold]Project:[/bold] {info.project_name}\n"
                     f"[bold]Path:[/bold] {info.project_path}\n"
                     f"[bold]Default Project:[/bold] {info.default_project}\n",
@@ -274,42 +270,6 @@ def display_project_info(
                     )
 
                 console.print(recent_table)
-
-            # System status
-            system_tree = Tree("🖥️ System Status")
-            system_tree.add(f"Basic Memory version: [bold green]{info.system.version}[/bold green]")
-            system_tree.add(
-                f"Database: [cyan]{info.system.database_path}[/cyan] ([green]{info.system.database_size}[/green])"
-            )
-
-            # Watch status
-            if info.system.watch_status:  # pragma: no cover
-                watch_branch = system_tree.add("Watch Service")
-                running = info.system.watch_status.get("running", False)
-                status_color = "green" if running else "red"
-                watch_branch.add(
-                    f"Status: [bold {status_color}]{'Running' if running else 'Stopped'}[/bold {status_color}]"
-                )
-
-                if running:
-                    start_time = (
-                        datetime.fromisoformat(info.system.watch_status.get("start_time", ""))
-                        if isinstance(info.system.watch_status.get("start_time"), str)
-                        else info.system.watch_status.get("start_time")
-                    )
-                    watch_branch.add(
-                        f"Running since: [cyan]{start_time.strftime('%Y-%m-%d %H:%M')}[/cyan]"
-                    )
-                    watch_branch.add(
-                        f"Files synced: [green]{info.system.watch_status.get('synced_files', 0)}[/green]"
-                    )
-                    watch_branch.add(
-                        f"Errors: [{'red' if info.system.watch_status.get('error_count', 0) > 0 else 'green'}]{info.system.watch_status.get('error_count', 0)}[/{'red' if info.system.watch_status.get('error_count', 0) > 0 else 'green'}]"
-                    )
-            else:
-                system_tree.add("[yellow]Watch service not running[/yellow]")
-
-            console.print(system_tree)
 
             # Available projects
             projects_table = Table(title="📁 Available Projects")

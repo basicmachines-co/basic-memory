@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from rich.console import Console
 from watchfiles import awatch
 from watchfiles.main import FileChange, Change
+import time
 
 
 class WatchEvent(BaseModel):
@@ -210,11 +211,8 @@ class WatchService:
 
     async def handle_changes(self, project: Project, changes: Set[FileChange]) -> None:
         """Process a batch of file changes"""
-        import time
-        from typing import List, Set
-
-        # Lazily initialize sync service for project changes
-        from basic_memory.cli.commands.sync import get_sync_service
+        # avoid circular imports
+        from basic_memory.sync.sync_service import get_sync_service
 
         sync_service = await get_sync_service(project)
         file_service = sync_service.file_service

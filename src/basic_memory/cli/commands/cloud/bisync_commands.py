@@ -74,7 +74,7 @@ BISYNC_PROFILES = {
 }
 
 
-async def get_tenant_info() -> dict:
+async def get_mount_info() -> dict:
     """Get current tenant information from cloud API."""
     try:
         config_manager = ConfigManager()
@@ -352,9 +352,9 @@ def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
         console.print("[blue]Step 1: Installing rclone...[/blue]")
         install_rclone()
 
-        # Step 2: Get tenant info
+        # Step 2: Get mount info (for tenant_id, bucket)
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
-        tenant_info = asyncio.run(get_tenant_info())
+        tenant_info = asyncio.run(get_mount_info())
 
         tenant_id = tenant_info.get("tenant_id")
         bucket_name = tenant_info.get("bucket_name")
@@ -449,7 +449,7 @@ def run_bisync(
     try:
         # Get tenant info if not provided
         if not tenant_id or not bucket_name:
-            tenant_info = asyncio.run(get_tenant_info())
+            tenant_info = asyncio.run(get_mount_info())
             tenant_id = tenant_info.get("tenant_id")
             bucket_name = tenant_info.get("bucket_name")
 
@@ -461,6 +461,7 @@ def run_bisync(
             local_path = get_bisync_directory()
 
         # Validate bisync directory
+        # can be same dir as mount
         validate_bisync_directory(local_path)
 
         # Check if local path exists
@@ -504,7 +505,9 @@ def run_bisync(
                             asyncio.run(create_cloud_project(project_name))
                             console.print(f"[green]  ✓ Created project: {project_name}[/green]")
                         except BisyncError as e:
-                            console.print(f"[yellow]  ⚠ Could not create {project_name}: {e}[/yellow]")
+                            console.print(
+                                f"[yellow]  ⚠ Could not create {project_name}: {e}[/yellow]"
+                            )
                 else:
                     console.print("[dim]All local projects already registered on cloud[/dim]")
 
@@ -566,18 +569,32 @@ def run_bisync(
 
 
 async def notify_container_sync(tenant_id: str) -> None:
-    """Notify the cloud container to refresh its TigrisFS cache."""
+    """Sync all projects after bisync completes."""
     try:
-        config_manager = ConfigManager()
-        config = config_manager.config
-        host_url = config.cloud_host.rstrip("/")
+        from basic_memory.cli.commands.command_utils import run_sync
 
-        # Call the sync endpoint to trigger cache refresh
-        await make_api_request(method="POST", url=f"{host_url}/proxy/sync")
-        console.print("[dim]✓ Notified container to refresh cache[/dim]")
-    except Exception:
-        # Non-critical, don't fail the sync
-        pass
+        # Fetch all projects and sync each one
+        cloud_data = await fetch_cloud_projects()
+        projects = cloud_data.get("projects", [])
+
+        if not projects:
+            console.print("[dim]No projects to sync[/dim]")
+            return
+
+        console.print(f"[dim]Syncing {len(projects)} project(s)...[/dim]")
+
+        for project in projects:
+            project_name = project.get("name")
+            if project_name:
+                try:
+                    await run_sync(project=project_name)
+                except Exception as e:
+                    # Non-critical, log and continue
+                    console.print(f"[yellow]  ⚠ Sync failed for {project_name}: {e}[/yellow]")
+
+    except Exception as e:
+        # Non-critical, don't fail the bisync
+        console.print(f"[yellow]Warning: Post-sync failed: {e}[/yellow]")
 
 
 def run_bisync_watch(
@@ -625,7 +642,7 @@ def show_bisync_status() -> None:
 
     try:
         # Get tenant info
-        tenant_info = asyncio.run(get_tenant_info())
+        tenant_info = asyncio.run(get_mount_info())
         tenant_id = tenant_info.get("tenant_id")
 
         if not tenant_id:
