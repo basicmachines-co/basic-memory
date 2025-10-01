@@ -117,7 +117,20 @@ class BasicMemoryConfig(BaseSettings):
 
     cloud_host: str = Field(
         default="https://cloud.basicmemory.com",
-        description="Basic Memory Cloud proxy host URL",
+        description="Basic Memory Cloud host URL",
+    )
+
+    cloud_mode: bool = Field(
+        default=False,
+        description="Enable cloud mode - all CLI commands work against cloud instead of local",
+    )
+
+    bisync_config: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "profile": "balanced",
+            "sync_dir": str(Path.home() / "basic-memory-cloud-sync"),
+        },
+        description="Bisync configuration for cloud sync",
     )
 
     model_config = SettingsConfigDict(

@@ -71,7 +71,7 @@ Dropbox Model (✅ This):
 3. **One Cloud Space Per Machine**
    - One set of IAM credentials per tenant
    - One mount point: `~/basic-memory-cloud/`
-   - One bisync directory: `~/basic-memory-rclone/` (default)
+   - One bisync directory: `~/basic-memory-cloud-sync/` (default)
    - All projects accessible through this single entry point
 
 4. **Why This Works Better**
@@ -130,7 +130,7 @@ This spec affects:
      "auth_tokens": {...},
      "bisync_config": {
        "profile": "balanced",
-       "sync_dir": "~/basic-memory-rclone"
+       "sync_dir": "~/basic-memory-cloud-sync"
      }
    }
    ```
@@ -144,26 +144,26 @@ This spec affects:
 
 ## Implementation Tasks
 
-### Phase 1: Cloud Mode Toggle & Config (Foundation)
+### Phase 1: Cloud Mode Toggle & Config (Foundation) ✅
 
 **1.1 Update Config Schema**
-- [ ] Add `cloud_mode: bool = False` to Config model
-- [ ] Add `bisync_config: dict` with `profile` and `sync_dir` fields
-- [ ] Ensure `cloud_host` field exists
-- [ ] Add config migration for existing users
+- [x] Add `cloud_mode: bool = False` to Config model
+- [x] Add `bisync_config: dict` with `profile` and `sync_dir` fields
+- [x] Ensure `cloud_host` field exists
+- [x] Add config migration for existing users (defaults handle this)
 
 **1.2 Update async_client.py**
-- [ ] Read `cloud_mode` from config (not just environment)
-- [ ] Set `BASIC_MEMORY_PROXY_URL` from config when `cloud_mode=true`
-- [ ] Priority: env var > config.cloud_host (if cloud_mode) > None (local ASGI)
+- [x] Read `cloud_mode` from config (not just environment)
+- [x] Set `BASIC_MEMORY_PROXY_URL` from config when `cloud_mode=true`
+- [x] Priority: env var > config.cloud_host (if cloud_mode) > None (local ASGI)
 - [ ] Test both local and cloud mode routing
 
 **1.3 Update Login/Logout Commands**
-- [ ] `bm cloud login`: Set `cloud_mode=true` and save config
-- [ ] `bm cloud login`: Set `BASIC_MEMORY_PROXY_URL` environment variable
-- [ ] `bm cloud logout`: Set `cloud_mode=false` and save config
-- [ ] `bm cloud logout`: Clear `BASIC_MEMORY_PROXY_URL` environment variable
-- [ ] `bm cloud status`: Show current mode (local/cloud), connection status
+- [x] `bm cloud login`: Set `cloud_mode=true` and save config
+- [x] `bm cloud login`: Set `BASIC_MEMORY_PROXY_URL` environment variable
+- [x] `bm cloud logout`: Set `cloud_mode=false` and save config
+- [x] `bm cloud logout`: Clear `BASIC_MEMORY_PROXY_URL` environment variable
+- [x] `bm cloud status`: Show current mode (local/cloud), connection status
 
 ### Phase 2: Bisync Updates (Multi-Project)
 
@@ -188,7 +188,7 @@ This spec affects:
 **2.4 Bisync Directory Configuration**
 - [ ] Add `--dir` parameter to `bm cloud setup`
 - [ ] Store bisync directory in config
-- [ ] Default to `~/basic-memory-rclone/`
+- [ ] Default to `~/basic-memory-cloud-sync/`
 - [ ] Add `validate_bisync_directory()` safety check
 
 ### Phase 3: Sync Command Dual Mode
@@ -328,7 +328,7 @@ This spec affects:
 **Storage Hierarchy:**
 ```
 Cloud Container:                   Bucket:                      Local Sync Dir:
-/app/data/ (mounted) ←→ production-tenant-{id}/ ←→ ~/basic-memory-rclone/
+/app/data/ (mounted) ←→ production-tenant-{id}/ ←→ ~/basic-memory-cloud-sync/
 ├── basic-memory/               ├── basic-memory/               ├── basic-memory/
 │   ├── notes/                  │   ├── notes/                  │   ├── notes/
 │   └── concepts/               │   └── concepts/               │   └── concepts/
@@ -363,7 +363,7 @@ Bidirectional sync via rclone bisync
 
 3. **Scan local sync directory**
    ```python
-   sync_dir = config.bisync_config["sync_dir"]  # ~/basic-memory-rclone
+   sync_dir = config.bisync_config["sync_dir"]  # ~/basic-memory-cloud-sync
    local_dirs = [d.name for d in sync_dir.iterdir()
                  if d.is_dir() and not d.name.startswith('.')]
    ```
@@ -380,7 +380,7 @@ Bidirectional sync via rclone bisync
 5. **Run bisync on bucket root**
    ```bash
    rclone bisync \
-     ~/basic-memory-rclone \
+     ~/basic-memory-cloud-sync \
      basic-memory-{tenant}:{bucket} \
      --filters-file ~/.basic-memory/.bmignore.rclone \
      --conflict-resolve=newer \
@@ -405,7 +405,7 @@ class Config:
     cloud_host: str = "https://cloud.basicmemory.com"
     bisync_config: dict = {
         "profile": "balanced",
-        "sync_dir": "~/basic-memory-rclone"
+        "sync_dir": "~/basic-memory-cloud-sync"
     }
 ```
 
@@ -521,8 +521,8 @@ bm project list
 bm cloud login
 
 # Create new project locally in sync dir
-mkdir ~/basic-memory-rclone/my-research
-echo "# Research Notes" > ~/basic-memory-rclone/my-research/index.md
+mkdir ~/basic-memory-cloud-sync/my-research
+echo "# Research Notes" > ~/basic-memory-cloud-sync/my-research/index.md
 
 # Run sync (triggers bisync in cloud mode)
 bm sync
@@ -546,7 +546,7 @@ bm project add "work-notes"
 bm sync
 
 # Verify:
-# - Local directory ~/basic-memory-rclone/work-notes/ created
+# - Local directory ~/basic-memory-cloud-sync/work-notes/ created
 # - Files sync bidirectionally
 # - Can use `bm tool write-note` to add content remotely
 ```
@@ -579,7 +579,7 @@ bm tool write-note \
 # Verify:
 # - Note created on cloud (via async_client HTTP)
 # - Next `bm sync` pulls note to local
-# - Note appears in ~/basic-memory-rclone/work-notes/
+# - Note appears in ~/basic-memory-cloud-sync/work-notes/
 ```
 
 **Expected:** ✅ Tools work transparently in cloud mode
@@ -622,7 +622,7 @@ bm sync --profile safe
 **8. No RCLONE_TEST Files**
 ```bash
 # After setup and multiple syncs
-ls -la ~/basic-memory-rclone/
+ls -la ~/basic-memory-cloud-sync/
 
 # Verify:
 # - No RCLONE_TEST files
@@ -726,7 +726,7 @@ Both mount and bisync operate at **bucket level** (all projects), following the 
 ├── personal/
 └── research/
 
-~/basic-memory-rclone/         # Bisync: Bidirectional sync (like Dropbox sync folder)
+~/basic-memory-cloud-sync/         # Bisync: Bidirectional sync (like Dropbox sync folder)
 ├── work-notes/
 ├── personal/
 └── research/
@@ -756,7 +756,7 @@ Both mount and bisync operate at **bucket level** (all projects), following the 
 **Bisync Directory (User Configurable):**
 ```bash
 # Default location
-~/basic-memory-rclone/
+~/basic-memory-cloud-sync/
 
 # User can override
 bm cloud setup --dir ~/my-knowledge-base
@@ -785,7 +785,7 @@ def validate_bisync_directory(bisync_dir: Path):
             f"Cannot use {bisync_dir} for bisync - it's the mount directory!\n"
             f"Mount and bisync must use different directories.\n\n"
             f"Options:\n"
-            f"  1. Use default: ~/basic-memory-rclone/\n"
+            f"  1. Use default: ~/basic-memory-cloud-sync/\n"
             f"  2. Specify different directory: --dir ~/my-sync-folder"
         )
 

@@ -1,6 +1,7 @@
 """Core cloud commands for Basic Memory CLI."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,7 @@ from rich.table import Table
 
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.config import ConfigManager
 from basic_memory.cli.commands.cloud.api_client import (
     CloudAPIError,
     get_cloud_config,
@@ -39,10 +41,10 @@ console = Console()
 
 @cloud_app.command()
 def login():
-    """Authenticate with WorkOS using OAuth Device Authorization flow."""
+    """Authenticate with WorkOS using OAuth Device Authorization flow and enable cloud mode."""
 
     async def _login():
-        client_id, domain, _ = get_cloud_config()
+        client_id, domain, host_url = get_cloud_config()
         auth = CLIAuth(client_id=client_id, authkit_domain=domain)
 
         success = await auth.login()
@@ -50,7 +52,36 @@ def login():
             console.print("[red]Login failed[/red]")
             raise typer.Exit(1)
 
+        # Enable cloud mode after successful login
+        config_manager = ConfigManager()
+        config = config_manager.load_config()
+        config.cloud_mode = True
+        config_manager.save_config(config)
+
+        # Set environment variable for current session
+        os.environ["BASIC_MEMORY_PROXY_URL"] = host_url
+
+        console.print("[green]✓ Cloud mode enabled[/green]")
+        console.print(f"[dim]All CLI commands now work against {host_url}[/dim]")
+
     asyncio.run(_login())
+
+
+@cloud_app.command()
+def logout():
+    """Disable cloud mode and return to local mode."""
+
+    # Disable cloud mode
+    config_manager = ConfigManager()
+    config = config_manager.load_config()
+    config.cloud_mode = False
+    config_manager.save_config(config)
+
+    # Clear environment variable
+    os.environ.pop("BASIC_MEMORY_PROXY_URL", None)
+
+    console.print("[green]✓ Cloud mode disabled[/green]")
+    console.print("[dim]All CLI commands now work locally[/dim]")
 
 
 # Project commands
@@ -326,7 +357,22 @@ async def _upload_files_webdav(
 
 @cloud_app.command("status")
 def status() -> None:
-    """Check the status of the cloud instance."""
+    """Check cloud mode status and cloud instance health."""
+
+    # Check cloud mode
+    config_manager = ConfigManager()
+    config = config_manager.load_config()
+
+    console.print("[bold blue]Cloud Mode Status[/bold blue]")
+    if config.cloud_mode:
+        console.print("  Mode: [green]Cloud (enabled)[/green]")
+        console.print(f"  Host: {config.cloud_host}")
+        console.print("  [dim]All CLI commands work against cloud[/dim]")
+    else:
+        console.print("  Mode: [yellow]Local (disabled)[/yellow]")
+        console.print("  [dim]All CLI commands work locally[/dim]")
+        console.print("\n[dim]To enable cloud mode, run: bm cloud login[/dim]")
+        return
 
     # Get cloud configuration
     _, _, host_url = get_cloud_config()
@@ -336,7 +382,7 @@ def status() -> None:
     headers = {}
 
     try:
-        console.print(f"[blue]Checking status of {host_url}...[/blue]")
+        console.print(f"\n[blue]Checking cloud instance health...[/blue]")
 
         # Make API request to check health
         response = asyncio.run(
@@ -356,7 +402,7 @@ def status() -> None:
             console.print(f"  Timestamp: {health_data['timestamp']}")
 
     except CloudAPIError as e:
-        console.print(f"[red]Error checking status: {e}[/red]")
+        console.print(f"[red]Error checking cloud health: {e}[/red]")
         raise typer.Exit(1)
     except Exception as e:
         console.print(f"[red]Unexpected error: {e}[/red]")
