@@ -144,9 +144,204 @@ Successfully uploaded 23 file(s)!
 
 ## Local File Access
 
-Basic Memory Cloud supports mounting your cloud files locally using rclone, enabling real-time editing with your favorite text editor or IDE. Changes made locally are automatically synchronized to the cloud.
+Basic Memory Cloud provides two approaches for working with your cloud files locally:
 
-### Setup
+1. **Bidirectional Sync (bisync)** - Recommended for most users, especially Obsidian
+2. **NFS Mount** - Direct file access for advanced users
+
+### Choosing Your Approach
+
+| Use Case | Recommended Solution | Why |
+|----------|---------------------|-----|
+| **Obsidian users** | `bisync` | File watcher support for live preview |
+| **CLI/vim/emacs users** | `mount` | Direct file access, lower latency |
+| **Offline work** | `bisync` | Can work offline, sync when connected |
+| **Real-time collaboration** | `mount` | Immediate visibility of changes |
+| **Multiple machines** | `bisync` | Better conflict handling |
+| **Single machine** | `mount` | Simpler, more transparent |
+| **Development work** | Either | Both work well, user preference |
+| **Large files** | `mount` | Streaming access vs full download |
+
+## Bidirectional Sync (bisync)
+
+The bisync approach uses rclone's proven bidirectional synchronization to keep your local files in sync with the cloud. This is the **recommended approach** for most users, especially those using Obsidian or other applications that rely on file watchers.
+
+### Bisync Setup
+
+Before using bisync, you need to set up the bidirectional sync system:
+
+```bash
+bm cloud bisync-setup
+```
+
+This command will:
+1. Check if rclone is installed (and install it if needed)
+2. Retrieve your tenant information from the cloud
+3. Generate secure, scoped credentials for your tenant
+4. Configure rclone with your tenant's storage settings
+5. Create local sync directory at `~/basic-memory-{tenant-id}`
+6. Establish initial sync baseline with the cloud
+
+### Running Bisync
+
+Once set up, you can run bidirectional sync manually or in watch mode:
+
+```bash
+# Manual sync (runs once)
+bm cloud bisync
+
+# Preview what would be synced (dry-run)
+bm cloud bisync --dry-run
+
+# Continuous sync mode (runs every 60 seconds)
+bm cloud bisync --watch
+
+# Continuous sync with custom interval
+bm cloud bisync --watch --interval 30
+
+# Use a specific profile
+bm cloud bisync --profile safe     # Keep conflicts as separate files
+bm cloud bisync --profile fast     # Skip verification for speed
+```
+
+### Bisync Profiles
+
+Different profiles provide different conflict resolution and safety strategies:
+
+- **safe**: Keep both versions on conflict (creates `.conflict-*` files)
+  - Conflict resolution: `none` (keeps both)
+  - Max delete: 10 files (prevents mass deletion)
+  - Best for: Important documents, collaborative editing
+
+- **balanced**: Auto-resolve to newer file (recommended)
+  - Conflict resolution: `newer` (most recent wins)
+  - Max delete: 25 files
+  - Best for: General use, single-user editing
+
+- **fast**: Skip verification for rapid iteration
+  - Conflict resolution: `newer`
+  - Max delete: 50 files
+  - Best for: Development, frequent changes
+
+### Establishing New Baseline
+
+If you need to force a complete resync (after resolving conflicts or major changes):
+
+```bash
+bm cloud bisync --resync
+```
+
+⚠️ **Warning:** This will establish a new baseline. Make sure your local and cloud files are in the state you want before running.
+
+### Bisync Status
+
+Check the current sync status and configuration:
+
+```bash
+bm cloud bisync-status
+```
+
+Example output:
+```
+                        Cloud Bisync Status
+┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Property           ┃ Value                                     ┃
+┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Tenant ID          │ 63cd4020-2e31-5c53-bdbc-07182b129183      │
+│ Local Directory    │ ~/basic-memory-63cd4020-2e31-...          │
+│ Status             │ ✓ Initialized                             │
+│ Last Sync          │ 2025-09-28 15:30:45                       │
+└────────────────────┴───────────────────────────────────────────┘
+
+Available bisync profiles:
+  safe: Safe mode with conflict preservation (keeps both versions)
+  balanced: Balanced mode - auto-resolve to newer file (recommended)
+  fast: Fast mode for rapid iteration (skip verification)
+```
+
+### Working with Bisync
+
+Once bisync is set up and running, your local directory (`~/basic-memory-{tenant-id}`) stays in sync with the cloud:
+
+```bash
+# Navigate to your synced directory
+cd ~/basic-memory-{your-tenant-id}
+
+# Edit files with any application
+code my-notes.md
+obsidian .
+vim research/paper.md
+
+# Manual sync when you want to push/pull changes
+bm cloud bisync
+
+# Or run watch mode in a terminal
+bm cloud bisync --watch
+```
+
+**Key Benefits:**
+- ✅ Works perfectly with Obsidian and other file-watching applications
+- ✅ Can work offline, sync when connected
+- ✅ Built-in conflict detection and resolution
+- ✅ No custom code to maintain (uses proven rclone bisync)
+- ✅ Safe max-delete protection
+
+### Filter Configuration
+
+Both `upload` and `bisync` use the same ignore patterns from `~/.basic-memory/.bmignore`:
+
+```
+# Basic Memory Ignore Patterns
+# This file is used by both 'bm cloud upload' and 'bm cloud bisync'
+# Patterns use standard gitignore-style syntax
+
+# Version control
+.git
+.svn
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+env
+
+# Node.js
+node_modules
+
+# IDE
+.idea
+.vscode
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Obsidian
+.obsidian
+
+# Temporary files
+*.tmp
+*.swp
+*~
+```
+
+**Key Features:**
+- ✅ **Single source of truth** - One file controls filtering for both operations
+- ✅ **Auto-created** - File is created with sensible defaults on first use
+- ✅ **Gitignore syntax** - Uses familiar `.gitignore`-style patterns
+- ✅ **Customizable** - Edit the file to add your own patterns
+- ✅ **Per-project overrides** - Local `.gitignore` files are also respected by `upload`
+
+**For bisync:** The patterns are automatically converted to rclone filter format (saved as `~/.basic-memory/.bmignore.rclone`).
+
+## NFS Mount (Direct Access)
+
+The mount approach provides direct file access through an NFS mount. This is best for users who need real-time file access and are comfortable with network filesystem limitations.
+
+### Mount Setup
 
 Before mounting files, you need to set up the local access system:
 
@@ -159,7 +354,7 @@ This command will:
 2. Retrieve your tenant information from the cloud
 3. Generate secure, scoped credentials for your tenant
 4. Configure rclone with your tenant's storage settings
-5. Display instructions for mounting your files
+5. Mount your files with the balanced profile
 
 ### Mounting Files
 
@@ -421,11 +616,21 @@ bm cloud project add <name> [--default]
 # File operations
 bm cloud upload <project> <path>  [--no-preserve-timestamps] [--no-gitignore]
 
-# Local file access
-bm cloud setup                           # Set up local access with rclone
-bm cloud mount [--profile <profile>]     # Mount cloud files locally
-bm cloud mount-status                    # Check mount status
-bm cloud unmount                         # Unmount cloud files
+# Bidirectional Sync (Recommended)
+bm cloud bisync-setup                              # Set up bisync with rclone
+bm cloud bisync                                    # Run manual sync
+bm cloud bisync --dry-run                          # Preview changes
+bm cloud bisync --resync                           # Force new baseline
+bm cloud bisync --watch                            # Continuous sync (60s interval)
+bm cloud bisync --watch --interval 30              # Custom interval
+bm cloud bisync --profile safe|balanced|fast       # Use specific profile
+bm cloud bisync-status                             # Check sync status
+
+# NFS Mount (Advanced)
+bm cloud setup                                     # Set up mount with rclone
+bm cloud mount [--profile <profile>]               # Mount cloud files locally
+bm cloud mount-status                              # Check mount status
+bm cloud unmount                                   # Unmount cloud files
 
 # Instance management
 bm cloud status

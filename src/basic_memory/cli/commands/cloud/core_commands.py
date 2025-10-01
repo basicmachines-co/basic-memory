@@ -23,7 +23,14 @@ from basic_memory.cli.commands.cloud.mount_commands import (
     show_mount_status,
     unmount_cloud_files,
 )
+from basic_memory.cli.commands.cloud.bisync_commands import (
+    run_bisync,
+    run_bisync_watch,
+    setup_cloud_bisync,
+    show_bisync_status,
+)
 from basic_memory.cli.commands.cloud.rclone_config import MOUNT_PROFILES
+from basic_memory.cli.commands.cloud.bisync_commands import BISYNC_PROFILES
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.utils import generate_permalink
 
@@ -396,3 +403,48 @@ def unmount() -> None:
 def mount_status() -> None:
     """Show current mount status."""
     show_mount_status()
+
+
+# Bisync commands
+
+
+@cloud_app.command("bisync-setup")
+def bisync_setup() -> None:
+    """Set up bidirectional sync with automatic rclone installation and configuration."""
+    setup_cloud_bisync()
+
+
+@cloud_app.command("bisync")
+def bisync(
+    profile: str = typer.Option(
+        "balanced", help=f"Bisync profile: {', '.join(BISYNC_PROFILES.keys())}"
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
+    resync: bool = typer.Option(False, "--resync", help="Force resync to establish new baseline"),
+    watch: bool = typer.Option(False, "--watch", help="Run continuous sync in watch mode"),
+    interval: int = typer.Option(60, "--interval", help="Sync interval in seconds for watch mode"),
+) -> None:
+    """Run bidirectional sync between local files and cloud storage.
+
+    Examples:
+      basic-memory cloud bisync                    # Manual sync with balanced profile
+      basic-memory cloud bisync --dry-run          # Preview what would be synced
+      basic-memory cloud bisync --resync           # Establish new baseline
+      basic-memory cloud bisync --watch            # Continuous sync every 60s
+      basic-memory cloud bisync --watch --interval 30  # Continuous sync every 30s
+      basic-memory cloud bisync --profile safe     # Use safe profile (keep conflicts)
+    """
+    try:
+        if watch:
+            run_bisync_watch(profile_name=profile, interval_seconds=interval)
+        else:
+            run_bisync(profile_name=profile, dry_run=dry_run, resync=resync)
+    except Exception as e:
+        console.print(f"[red]Bisync failed: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@cloud_app.command("bisync-status")
+def bisync_status() -> None:
+    """Show current bisync status and configuration."""
+    show_bisync_status()
