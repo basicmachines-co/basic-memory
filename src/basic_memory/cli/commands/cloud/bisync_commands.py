@@ -103,6 +103,81 @@ async def generate_mount_credentials(tenant_id: str) -> dict:
         raise BisyncError(f"Failed to generate credentials: {e}") from e
 
 
+async def fetch_cloud_projects() -> dict:
+    """Fetch list of projects from cloud API.
+
+    Returns:
+        Dict with 'projects' list from cloud
+    """
+    try:
+        config_manager = ConfigManager()
+        config = config_manager.config
+        host_url = config.cloud_host.rstrip("/")
+
+        response = await make_api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
+
+        return response.json()
+    except Exception as e:
+        raise BisyncError(f"Failed to fetch cloud projects: {e}") from e
+
+
+def scan_local_directories(sync_dir: Path) -> list[str]:
+    """Scan local sync directory for project folders.
+
+    Args:
+        sync_dir: Path to bisync directory
+
+    Returns:
+        List of directory names (project names)
+    """
+    if not sync_dir.exists():
+        return []
+
+    directories = []
+    for item in sync_dir.iterdir():
+        if item.is_dir() and not item.name.startswith("."):
+            directories.append(item.name)
+
+    return directories
+
+
+async def create_cloud_project(project_name: str) -> dict:
+    """Create a new project on cloud.
+
+    Args:
+        project_name: Name of project to create
+
+    Returns:
+        Project details from API response
+    """
+    try:
+        config_manager = ConfigManager()
+        config = config_manager.config
+        host_url = config.cloud_host.rstrip("/")
+
+        # Use generate_permalink to ensure consistent naming
+        from basic_memory.utils import generate_permalink
+
+        project_path = generate_permalink(project_name)
+
+        project_data = {
+            "name": project_name,
+            "path": project_path,
+            "set_default": False,
+        }
+
+        response = await make_api_request(
+            method="POST",
+            url=f"{host_url}/proxy/projects/projects",
+            headers={"Content-Type": "application/json"},
+            json_data=project_data,
+        )
+
+        return response.json()
+    except Exception as e:
+        raise BisyncError(f"Failed to create cloud project '{project_name}': {e}") from e
+
+
 def get_bisync_state_path(tenant_id: str) -> Path:
     """Get path to bisync state directory."""
     return Path.home() / ".basic-memory" / "bisync-state" / tenant_id
@@ -402,6 +477,41 @@ def run_bisync(
             )
 
         profile = BISYNC_PROFILES[profile_name]
+
+        # Auto-register projects before sync (unless dry-run or resync)
+        if not dry_run and not resync:
+            try:
+                console.print("[dim]Checking for new projects...[/dim]")
+
+                # Fetch cloud projects
+                cloud_data = asyncio.run(fetch_cloud_projects())
+                cloud_project_names = {p["name"] for p in cloud_data.get("projects", [])}
+
+                # Scan local directories
+                local_dirs = scan_local_directories(local_path)
+
+                # Create missing cloud projects
+                new_projects = []
+                for dir_name in local_dirs:
+                    if dir_name not in cloud_project_names:
+                        new_projects.append(dir_name)
+
+                if new_projects:
+                    console.print(
+                        f"[blue]Found {len(new_projects)} new local project(s), creating on cloud...[/blue]"
+                    )
+                    for project_name in new_projects:
+                        try:
+                            asyncio.run(create_cloud_project(project_name))
+                            console.print(f"[green]  ✓ Created project: {project_name}[/green]")
+                        except BisyncError as e:
+                            console.print(f"[yellow]  ⚠ Could not create {project_name}: {e}[/yellow]")
+                else:
+                    console.print("[dim]All local projects already registered on cloud[/dim]")
+
+            except Exception as e:
+                console.print(f"[yellow]Warning: Project auto-registration failed: {e}[/yellow]")
+                console.print("[yellow]Continuing with sync anyway...[/yellow]")
 
         # Check if first run and require resync
         if not resync and not bisync_state_exists(tenant_id) and not dry_run:

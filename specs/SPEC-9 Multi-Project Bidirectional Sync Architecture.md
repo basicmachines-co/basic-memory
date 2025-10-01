@@ -178,12 +178,12 @@ This spec affects:
 - [x] Update `setup_cloud_bisync()` to use bucket root
 - [ ] Test with multiple projects
 
-**2.3 Project Auto-Registration (Bisync)** (Deferred to basic-memory-cloud)
-- [ ] Add `fetch_cloud_projects()` function (GET /proxy/projects/projects)
-- [ ] Add `scan_local_directories()` function
-- [ ] Add `create_cloud_project()` function (POST /proxy/projects/projects)
-- [ ] Integrate into `run_bisync()`: fetch → scan → create missing → sync
-- [ ] Wait for API 201 response before syncing
+**2.3 Project Auto-Registration (Bisync)** ✅
+- [x] Add `fetch_cloud_projects()` function (GET /proxy/projects/projects)
+- [x] Add `scan_local_directories()` function
+- [x] Add `create_cloud_project()` function (POST /proxy/projects/projects)
+- [x] Integrate into `run_bisync()`: fetch → scan → create missing → sync
+- [x] Wait for API 201 response before syncing
 
 **2.4 Bisync Directory Configuration** ✅
 - [x] Add `--dir` parameter to `bm cloud bisync-setup`
