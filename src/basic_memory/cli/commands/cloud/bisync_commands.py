@@ -14,7 +14,6 @@ from rich.table import Table
 from basic_memory.cli.commands.cloud.api_client import CloudAPIError, make_api_request
 from basic_memory.cli.commands.cloud.rclone_config import (
     add_tenant_to_rclone_config,
-    get_default_mount_path,
 )
 from basic_memory.cli.commands.cloud.rclone_installer import RcloneInstallError, install_rclone
 from basic_memory.config import ConfigManager
@@ -396,7 +395,7 @@ def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
             config = config_manager.load_config()
             config.bisync_config["sync_dir"] = sync_dir
             config_manager.save_config(config)
-            console.print(f"[green]✓ Saved custom sync directory to config[/green]")
+            console.print("[green]✓ Saved custom sync directory to config[/green]")
 
         # Get bisync directory (from config or default)
         local_path = get_bisync_directory()

@@ -382,7 +382,7 @@ def status() -> None:
     headers = {}
 
     try:
-        console.print(f"\n[blue]Checking cloud instance health...[/blue]")
+        console.print("\n[blue]Checking cloud instance health...[/blue]")
 
         # Make API request to check health
         response = asyncio.run(
