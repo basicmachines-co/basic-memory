@@ -167,29 +167,30 @@ This spec affects:
 
 ### Phase 2: Bisync Updates (Multi-Project)
 
-**2.1 Remove RCLONE_TEST Files**
-- [ ] Update all bisync profiles: `check_access=False`
-- [ ] Remove RCLONE_TEST creation from `setup_cloud_bisync()`
-- [ ] Remove RCLONE_TEST upload logic
+**2.1 Remove RCLONE_TEST Files** ✅
+- [x] Update all bisync profiles: `check_access=False`
+- [x] Remove RCLONE_TEST creation from `setup_cloud_bisync()`
+- [x] Remove RCLONE_TEST upload logic
 - [ ] Update documentation
 
-**2.2 Sync Bucket Root (All Projects)**
-- [ ] Change remote path from `bucket:/basic-memory` to `bucket:/` in `build_bisync_command()`
-- [ ] Update `setup_cloud_bisync()` to use bucket root
+**2.2 Sync Bucket Root (All Projects)** ✅
+- [x] Change remote path from `bucket:/basic-memory` to `bucket:/` in `build_bisync_command()`
+- [x] Update `setup_cloud_bisync()` to use bucket root
 - [ ] Test with multiple projects
 
-**2.3 Project Auto-Registration (Bisync)**
+**2.3 Project Auto-Registration (Bisync)** (Deferred to basic-memory-cloud)
 - [ ] Add `fetch_cloud_projects()` function (GET /proxy/projects/projects)
 - [ ] Add `scan_local_directories()` function
 - [ ] Add `create_cloud_project()` function (POST /proxy/projects/projects)
 - [ ] Integrate into `run_bisync()`: fetch → scan → create missing → sync
 - [ ] Wait for API 201 response before syncing
 
-**2.4 Bisync Directory Configuration**
-- [ ] Add `--dir` parameter to `bm cloud setup`
-- [ ] Store bisync directory in config
-- [ ] Default to `~/basic-memory-cloud-sync/`
-- [ ] Add `validate_bisync_directory()` safety check
+**2.4 Bisync Directory Configuration** ✅
+- [x] Add `--dir` parameter to `bm cloud bisync-setup`
+- [x] Store bisync directory in config
+- [x] Default to `~/basic-memory-cloud-sync/`
+- [x] Add `validate_bisync_directory()` safety check
+- [x] Update `get_default_mount_path()` to return fixed `~/basic-memory-cloud/`
 
 ### Phase 3: Sync Command Dual Mode
 

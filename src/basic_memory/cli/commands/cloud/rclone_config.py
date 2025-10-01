@@ -168,9 +168,13 @@ def remove_tenant_from_rclone_config(tenant_id: str) -> bool:
     return False
 
 
-def get_default_mount_path(tenant_id: str) -> Path:
-    """Get default mount path for a tenant."""
-    return Path.home() / f"basic-memory-{tenant_id}"
+def get_default_mount_path() -> Path:
+    """Get default mount path (fixed location per SPEC-9).
+
+    Returns:
+        Fixed mount path: ~/basic-memory-cloud/
+    """
+    return Path.home() / "basic-memory-cloud"
 
 
 def build_mount_command(

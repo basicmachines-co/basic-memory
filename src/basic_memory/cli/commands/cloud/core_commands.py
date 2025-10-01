@@ -455,9 +455,15 @@ def mount_status() -> None:
 
 
 @cloud_app.command("bisync-setup")
-def bisync_setup() -> None:
+def bisync_setup(
+    dir: Optional[str] = typer.Option(
+        None,
+        "--dir",
+        help="Custom sync directory (default: ~/basic-memory-cloud-sync)",
+    ),
+) -> None:
     """Set up bidirectional sync with automatic rclone installation and configuration."""
-    setup_cloud_bisync()
+    setup_cloud_bisync(sync_dir=dir)
 
 
 @cloud_app.command("bisync")

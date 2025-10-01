@@ -49,20 +49,20 @@ class RcloneBisyncProfile:
         self.extra_args = extra_args or []
 
 
-# Bisync profiles based on SPEC-8 Phase 4.1
+# Bisync profiles based on SPEC-9 Phase 2.1
 BISYNC_PROFILES = {
     "safe": RcloneBisyncProfile(
         name="safe",
         conflict_resolve="none",
         max_delete=10,
-        check_access=True,
+        check_access=False,
         description="Safe mode with conflict preservation (keeps both versions)",
     ),
     "balanced": RcloneBisyncProfile(
         name="balanced",
         conflict_resolve="newer",
         max_delete=25,
-        check_access=True,
+        check_access=False,
         description="Balanced mode - auto-resolve to newer file (recommended)",
     ),
     "fast": RcloneBisyncProfile(
@@ -106,6 +106,50 @@ async def generate_mount_credentials(tenant_id: str) -> dict:
 def get_bisync_state_path(tenant_id: str) -> Path:
     """Get path to bisync state directory."""
     return Path.home() / ".basic-memory" / "bisync-state" / tenant_id
+
+
+def get_bisync_directory() -> Path:
+    """Get bisync directory from config.
+
+    Returns:
+        Path to bisync directory (default: ~/basic-memory-cloud-sync)
+    """
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    sync_dir = config.bisync_config.get("sync_dir", str(Path.home() / "basic-memory-cloud-sync"))
+    return Path(sync_dir).expanduser().resolve()
+
+
+def validate_bisync_directory(bisync_dir: Path) -> None:
+    """Validate bisync directory doesn't conflict with mount.
+
+    Raises:
+        BisyncError: If bisync directory conflicts with mount directory
+    """
+    # Get fixed mount directory
+    mount_dir = (Path.home() / "basic-memory-cloud").resolve()
+
+    # Check if bisync dir is the same as mount dir
+    if bisync_dir == mount_dir:
+        raise BisyncError(
+            f"Cannot use {bisync_dir} for bisync - it's the mount directory!\n"
+            f"Mount and bisync must use different directories.\n\n"
+            f"Options:\n"
+            f"  1. Use default: ~/basic-memory-cloud-sync/\n"
+            f"  2. Specify different directory: --dir ~/my-sync-folder"
+        )
+
+    # Check if mount is active at this location
+    result = subprocess.run(["mount"], capture_output=True, text=True)
+    if str(bisync_dir) in result.stdout and "rclone" in result.stdout:
+        raise BisyncError(
+            f"{bisync_dir} is currently mounted via 'bm cloud mount'\n"
+            f"Cannot use mounted directory for bisync.\n\n"
+            f"Either:\n"
+            f"  1. Unmount first: bm cloud unmount\n"
+            f"  2. Use different directory for bisync"
+        )
 
 
 def convert_bmignore_to_rclone_filters() -> Path:
@@ -183,8 +227,8 @@ def build_bisync_command(
 ) -> list[str]:
     """Build rclone bisync command with profile settings."""
 
-    # Sync with the basic-memory subdirectory in the bucket
-    rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}/basic-memory"
+    # Sync with the entire bucket root (all projects)
+    rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}"
     filter_path = get_bisync_filter_path()
     state_path = get_bisync_state_path(tenant_id)
 
@@ -220,8 +264,12 @@ def build_bisync_command(
     return cmd
 
 
-def setup_cloud_bisync() -> None:
-    """Set up cloud bisync with rclone installation and configuration."""
+def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
+    """Set up cloud bisync with rclone installation and configuration.
+
+    Args:
+        sync_dir: Optional custom sync directory path. If not provided, uses config default.
+    """
     console.print("[bold blue]Basic Memory Cloud Bisync Setup[/bold blue]")
     console.print("Setting up bidirectional sync to your cloud tenant...\n")
 
@@ -264,32 +312,28 @@ def setup_cloud_bisync() -> None:
             secret_key=secret_key,
         )
 
-        # Step 5: Create local directory
-        local_path = get_default_mount_path(tenant_id)
+        # Step 5: Configure and create local directory
+        console.print("\n[blue]Step 5: Configuring sync directory...[/blue]")
+
+        # If custom sync_dir provided, save to config
+        if sync_dir:
+            config_manager = ConfigManager()
+            config = config_manager.load_config()
+            config.bisync_config["sync_dir"] = sync_dir
+            config_manager.save_config(config)
+            console.print(f"[green]✓ Saved custom sync directory to config[/green]")
+
+        # Get bisync directory (from config or default)
+        local_path = get_bisync_directory()
+
+        # Validate bisync directory
+        validate_bisync_directory(local_path)
+
+        # Create directory
         local_path.mkdir(parents=True, exist_ok=True)
-        console.print(f"\n[green]✓ Created local directory: {local_path}[/green]")
+        console.print(f"[green]✓ Created sync directory: {local_path}[/green]")
 
-        # Step 6: Create RCLONE_TEST marker file for --check-access
-        console.print("\n[blue]Step 5: Creating access check markers...[/blue]")
-        marker_file = local_path / "RCLONE_TEST"
-        marker_file.write_text("rclone bisync check file\n")
-        console.print("[green]✓ Created local marker file[/green]")
-
-        # Upload marker file to remote basic-memory subdirectory
-        rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}/basic-memory"
-        upload_cmd = [
-            "rclone",
-            "copy",
-            str(marker_file),
-            rclone_remote,
-        ]
-        result = subprocess.run(upload_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            console.print(f"[yellow]Warning: Could not upload marker file: {result.stderr}[/yellow]")
-        else:
-            console.print("[green]✓ Uploaded marker file to remote[/green]")
-
-        # Step 7: Perform initial resync
+        # Step 6: Perform initial resync
         console.print("\n[blue]Step 6: Performing initial sync...[/blue]")
         console.print("[yellow]This will establish the baseline for bidirectional sync.[/yellow]")
 
@@ -340,12 +384,15 @@ def run_bisync(
 
         # Set default local path if not provided
         if not local_path:
-            local_path = get_default_mount_path(tenant_id)
+            local_path = get_bisync_directory()
+
+        # Validate bisync directory
+        validate_bisync_directory(local_path)
 
         # Check if local path exists
         if not local_path.exists():
             raise BisyncError(
-                f"Local directory {local_path} does not exist. Run 'basic-memory cloud setup' first."
+                f"Local directory {local_path} does not exist. Run 'basic-memory cloud bisync-setup' first."
             )
 
         # Get bisync profile
@@ -476,7 +523,7 @@ def show_bisync_status() -> None:
             console.print("[red]Could not determine tenant ID[/red]")
             return
 
-        local_path = get_default_mount_path(tenant_id)
+        local_path = get_bisync_directory()
         state_path = get_bisync_state_path(tenant_id)
 
         # Create status table
