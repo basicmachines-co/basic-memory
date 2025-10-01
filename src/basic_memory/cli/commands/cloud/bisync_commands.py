@@ -121,7 +121,8 @@ def convert_bmignore_to_rclone_filters() -> Path:
     create_default_bmignore()
 
     bmignore_path = get_bmignore_path()
-    rclone_filter_path = bmignore_path.with_suffix(".bmignore.rclone")
+    # Create rclone filter path: ~/.basic-memory/.bmignore -> ~/.basic-memory/.bmignore.rclone
+    rclone_filter_path = bmignore_path.parent / f"{bmignore_path.name}.rclone"
 
     # Read .bmignore patterns
     patterns = []
@@ -182,8 +183,13 @@ def build_bisync_command(
 ) -> list[str]:
     """Build rclone bisync command with profile settings."""
 
-    rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}"
+    # Sync with the basic-memory subdirectory in the bucket
+    rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}/basic-memory"
     filter_path = get_bisync_filter_path()
+    state_path = get_bisync_state_path(tenant_id)
+
+    # Ensure state directory exists
+    state_path.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         "rclone",
@@ -196,6 +202,8 @@ def build_bisync_command(
         f"--max-delete={profile.max_delete}",
         "--filters-file",
         str(filter_path),
+        "--workdir",
+        str(state_path),
     ]
 
     if profile.check_access:
@@ -261,8 +269,28 @@ def setup_cloud_bisync() -> None:
         local_path.mkdir(parents=True, exist_ok=True)
         console.print(f"\n[green]✓ Created local directory: {local_path}[/green]")
 
-        # Step 6: Perform initial resync
-        console.print("\n[blue]Step 5: Performing initial sync...[/blue]")
+        # Step 6: Create RCLONE_TEST marker file for --check-access
+        console.print("\n[blue]Step 5: Creating access check markers...[/blue]")
+        marker_file = local_path / "RCLONE_TEST"
+        marker_file.write_text("rclone bisync check file\n")
+        console.print("[green]✓ Created local marker file[/green]")
+
+        # Upload marker file to remote basic-memory subdirectory
+        rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}/basic-memory"
+        upload_cmd = [
+            "rclone",
+            "copy",
+            str(marker_file),
+            rclone_remote,
+        ]
+        result = subprocess.run(upload_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            console.print(f"[yellow]Warning: Could not upload marker file: {result.stderr}[/yellow]")
+        else:
+            console.print("[green]✓ Uploaded marker file to remote[/green]")
+
+        # Step 7: Perform initial resync
+        console.print("\n[blue]Step 6: Performing initial sync...[/blue]")
         console.print("[yellow]This will establish the baseline for bidirectional sync.[/yellow]")
 
         run_bisync(
@@ -389,7 +417,7 @@ async def notify_container_sync(tenant_id: str) -> None:
         host_url = config.cloud_host.rstrip("/")
 
         # Call the sync endpoint to trigger cache refresh
-        await make_api_request(method="POST", url=f"{host_url}/sync")
+        await make_api_request(method="POST", url=f"{host_url}/proxy/sync")
         console.print("[dim]✓ Notified container to refresh cache[/dim]")
     except Exception:
         # Non-critical, don't fail the sync
