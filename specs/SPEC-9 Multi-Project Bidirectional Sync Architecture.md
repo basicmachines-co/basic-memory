@@ -863,3 +863,137 @@ def validate_bisync_directory(bisync_dir: Path):
 - Existing `bm cloud project` users: Use `bm project` instead
 - Existing `bm cloud bisync` becomes `bm sync` in cloud mode
 - Config automatically migrates on first `bm cloud login`
+
+
+## Testing
+
+
+Initial Setup (One Time)
+
+1. Login to cloud and enable cloud mode:
+bm cloud login
+# → Authenticates via OAuth
+# → Sets cloud_mode=true in config
+# → Sets BASIC_MEMORY_PROXY_URL environment variable
+# → All CLI commands now route to cloud
+
+2. Check cloud mode status:
+bm cloud status
+# → Shows: Mode: Cloud (enabled)
+# → Shows: Host: https://cloud.basicmemory.com
+# → Checks cloud health
+
+3. Set up bidirectional sync:
+bm cloud bisync-setup
+# Or with custom directory:
+bm cloud bisync-setup --dir ~/my-sync-folder
+
+# This will:
+# → Install rclone (if not already installed)
+# → Get tenant info (tenant_id, bucket_name)
+# → Generate scoped IAM credentials
+# → Configure rclone with credentials
+# → Create sync directory (default: ~/basic-memory-cloud-sync/)
+# → Validate no conflict with mount directory
+# → Run initial --resync to establish baseline
+
+Normal Usage
+
+4. Create local project and sync:
+# Create a local project directory
+mkdir ~/basic-memory-cloud-sync/my-research
+echo "# Research Notes" > ~/basic-memory-cloud-sync/my-research/readme.md
+
+# Run sync
+bm cloud bisync
+
+# Auto-magic happens:
+# → Checks for new local directories
+# → Finds "my-research" not in cloud
+# → Creates project on cloud via POST /proxy/projects/projects
+# → Runs bidirectional sync (all projects)
+# → Syncs to bucket root (all projects synced together)
+
+5. Watch mode for continuous sync:
+bm cloud bisync --watch
+# Or with custom interval:
+bm cloud bisync --watch --interval 30
+
+# → Syncs every 60 seconds (or custom interval)
+# → Auto-registers new projects on each run
+# → Press Ctrl+C to stop
+
+6. Check bisync status:
+bm cloud bisync-status
+# → Shows tenant ID
+# → Shows sync directory path
+# → Shows initialization status
+# → Shows last sync time
+# → Lists available profiles (safe/balanced/fast)
+
+7. Manual sync with different profiles:
+# Safe mode (max 10 deletes, preserves conflicts)
+bm cloud bisync --profile safe
+
+# Balanced mode (max 25 deletes, auto-resolve to newer) - default
+bm cloud bisync --profile balanced
+
+# Fast mode (max 50 deletes, skip verification)
+bm cloud bisync --profile fast
+
+8. Dry run to preview changes:
+bm cloud bisync --dry-run
+# → Shows what would be synced without making changes
+
+9. Force resync (if needed):
+bm cloud bisync --resync
+# → Establishes new baseline
+# → Use if sync state is corrupted
+
+Verify Cloud Mode Integration
+
+10. Test that all commands work in cloud mode:
+# List cloud projects (not local)
+bm project list
+
+# Create project on cloud
+bm project add "work-notes"
+
+# Use MCP tools against cloud
+bm tool write-note --title "Test" --folder "my-research" --content "Hello"
+
+# All of these work against cloud because cloud_mode=true
+
+11. Switch back to local mode:
+bm cloud logout
+# → Sets cloud_mode=false
+# → Clears BASIC_MEMORY_PROXY_URL
+# → All commands now work locally again
+
+Expected Directory Structure
+
+~/basic-memory-cloud-sync/          # Your local sync directory
+├── my-research/                    # Auto-created cloud project
+│   ├── readme.md
+│   └── notes.md
+├── work-notes/                     # Another project
+│   └── tasks.md
+└── personal/                       # Another project
+  └── journal.md
+
+# All sync bidirectionally with:
+bucket:/                            # Cloud bucket root
+├── my-research/
+├── work-notes/
+└── personal/
+
+Key Points to Test
+
+1. ✅ Cloud mode toggle works (login/logout)
+2. ✅ Bisync setup validates directory (no conflict with mount)
+3. ✅ Local directories auto-create cloud projects
+4. ✅ All projects sync together (bucket root)
+5. ✅ No RCLONE_TEST files created
+6. ✅ Changes sync bidirectionally
+7. ✅ Watch mode continuous sync works
+8. ✅ Profile safety limits work (max_delete)
