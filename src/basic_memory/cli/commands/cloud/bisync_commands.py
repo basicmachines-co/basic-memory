@@ -483,9 +483,22 @@ def run_bisync(
             try:
                 console.print("[dim]Checking for new projects...[/dim]")
 
-                # Fetch cloud projects
+                # Fetch cloud projects and extract directory names from paths
                 cloud_data = asyncio.run(fetch_cloud_projects())
-                cloud_project_names = {p["name"] for p in cloud_data.get("projects", [])}
+                cloud_projects = cloud_data.get("projects", [])
+
+                # Extract directory names from cloud project paths
+                # Compare directory names, not project names
+                # Cloud path /app/data/basic-memory -> directory name "basic-memory"
+                cloud_dir_names = set()
+                for p in cloud_projects:
+                    path = p["path"]
+                    # Strip /app/data/ prefix if present (cloud mode)
+                    if path.startswith("/app/data/"):
+                        path = path[len("/app/data/"):]
+                    # Get the last segment (directory name)
+                    dir_name = Path(path).name
+                    cloud_dir_names.add(dir_name)
 
                 # Scan local directories
                 local_dirs = scan_local_directories(local_path)
@@ -493,7 +506,7 @@ def run_bisync(
                 # Create missing cloud projects
                 new_projects = []
                 for dir_name in local_dirs:
-                    if dir_name not in cloud_project_names:
+                    if dir_name not in cloud_dir_names:
                         new_projects.append(dir_name)
 
                 if new_projects:
