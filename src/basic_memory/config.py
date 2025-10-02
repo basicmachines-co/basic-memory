@@ -98,12 +98,6 @@ class BasicMemoryConfig(BaseSettings):
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
     )
 
-    # API connection configuration
-    api_url: Optional[str] = Field(
-        default=None,
-        description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
-    )
-
     # Cloud configuration
     cloud_client_id: str = Field(
         default="client_01K4DGBWAZWP83N3H8VVEMRX6W",
@@ -116,7 +110,7 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     cloud_host: str = Field(
-        default="https://cloud.basicmemory.com",
+        default_factory=lambda: os.getenv("BASIC_MEMORY_CLOUD_HOST", "https://cloud.basicmemory.com"),
         description="Basic Memory Cloud host URL",
     )
 

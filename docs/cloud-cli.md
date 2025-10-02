@@ -511,19 +511,7 @@ By default, the CLI uses production authentication settings. For development or 
 #### Production vs Development
 
 - **Production** (default): Uses `client_01K4DGBWAZWP83N3H8VVEMRX6W` and `https://eloquent-lotus-05.authkit.app`
-- **Development**: Uses `client_01K46RED2BW9YKYE4N7Y9BDN2V` and `https://exciting-aquarium-32-staging.authkit.app`
-
-#### Environment Variables
-
-
-```bash
-# For development environment
-export BASIC_MEMORY_CLOUD_HOST="https://development.cloud.basicmemory.com"
-export BASIC_MEMORY_CLOUD_CLIENT_ID="client_01K46RED2BW9YKYE4N7Y9BDN2V"
-export BASIC_MEMORY_CLOUD_DOMAIN="https://exciting-aquarium-32-staging.authkit.app"
-
-bm cloud login
-```
+- **Development**: Uses `client_01K6JW0F9QY5DZ2834GQTXX5JN` and `https://exciting-aquarium-32-staging.authkit.app`
 
 #### Configuration File
 
@@ -532,9 +520,9 @@ You can also set the values in `~/.basic-memory/config.json`:
 development
 ```json
 {
-  "cloud_host": "http://development.cloud.basicmemory.com", 
-  "cloud_client_id": "client_01K46RED2BW9YKYE4N7Y9BDN2V",
-  "cloud_domain": "https://exciting-aquarium-32-staging.authkit.app"
+  "cloud_host": "https://development.cloud.basicmemory.com", 
+  "cloud_client_id": "client_01K6JW0F9QY5DZ2834GQTXX5JN",
+  "cloud_domain": "https://exciting-aquarium-32-staging.authkit.app",
 }
 ```
 
