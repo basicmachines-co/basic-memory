@@ -21,6 +21,9 @@ from basic_memory.config import WATCH_STATUS_JSON, ConfigManager, get_project_co
 from basic_memory.utils import generate_permalink
 
 
+config = ConfigManager().config
+
+
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
@@ -96,11 +99,16 @@ class ProjectService:
         Raises:
             ValueError: If the project already exists
         """
-        if not self.repository:  # pragma: no cover
-            raise ValueError("Repository is required for add_project")
+        # in cloud mode, don't allow arbitrary paths.
+        if config.cloud_mode:
+            basic_memory_home = os.getenv("BASIC_MEMORY_HOME")
+            assert basic_memory_home is not None
+            base_path = Path(basic_memory_home)
 
-        # Resolve to absolute path
-        resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
+            # Resolve to absolute path
+            resolved_path = Path(os.path.abspath(os.path.expanduser(base_path / path))).as_posix()
+        else:
+            resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
 
         # First add to config file (this will validate the project doesn't exist)
         project_config = self.config_manager.add_project(name, resolved_path)

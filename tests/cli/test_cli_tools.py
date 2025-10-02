@@ -467,19 +467,19 @@ def test_continue_conversation_no_results(cli_env):
 
 
 @patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_functionality(mock_initialize_database, project_config, monkeypatch):
+def test_ensure_migrations_functionality(mock_initialize_database, app_config, monkeypatch):
     """Test the database initialization functionality."""
     from basic_memory.services.initialization import ensure_initialization
 
     # Call the function
-    ensure_initialization(project_config)
+    ensure_initialization(app_config)
 
     # The underlying asyncio.run should call our mocked function
     mock_initialize_database.assert_called_once()
 
 
 @patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_handles_errors(mock_initialize_database, project_config, monkeypatch):
+def test_ensure_migrations_handles_errors(mock_initialize_database, app_config, monkeypatch):
     """Test that initialization handles errors gracefully."""
     from basic_memory.services.initialization import ensure_initialization
 
@@ -487,6 +487,6 @@ def test_ensure_migrations_handles_errors(mock_initialize_database, project_conf
     mock_initialize_database.side_effect = Exception("Test error")
 
     # Call the function - should not raise exception
-    ensure_initialization(project_config)
+    ensure_initialization(app_config)
 
     # We're just making sure it doesn't crash by calling it

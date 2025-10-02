@@ -331,8 +331,8 @@ def detect_potential_file_conflicts(file_path: str, existing_paths: List[str]) -
     return conflicts
 
 
-def validate_project_path(path: str, project_path: Path) -> bool:
-    """Ensure path stays within project boundaries."""
+def valid_project_path_value(path: str):
+    """Ensure project path is valid."""
     # Allow empty strings as they resolve to the project root
     if not path:
         return True
@@ -351,6 +351,15 @@ def validate_project_path(path: str, project_path: Path) -> bool:
 
     # Block paths with control characters (but allow whitespace that will be stripped)
     if path.strip() and any(ord(c) < 32 and c not in [" ", "\t"] for c in path):
+        return False
+
+    return True
+
+
+def validate_project_path(path: str, project_path: Path) -> bool:
+    """Ensure path is valid and stays within project boundaries."""
+
+    if not valid_project_path_value(path):
         return False
 
     try:

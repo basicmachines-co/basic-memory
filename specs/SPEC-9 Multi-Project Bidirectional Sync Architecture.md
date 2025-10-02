@@ -165,6 +165,11 @@ This spec affects:
 - [x] `bm cloud logout`: Clear `BASIC_MEMORY_PROXY_URL` environment variable
 - [x] `bm cloud status`: Show current mode (local/cloud), connection status
 
+**1.4 Skip Initialization in Cloud Mode** ✅
+- [x] Update `ensure_initialization()` to check `cloud_mode` and return early
+- [x] Document that `config.projects` is only used in local mode
+- [x] Cloud manages its own projects via API, no local reconciliation needed
+
 ### Phase 2: Bisync Updates (Multi-Project)
 
 **2.1 Remove RCLONE_TEST Files** ✅
@@ -192,6 +197,16 @@ This spec affects:
 - [x] Add `validate_bisync_directory()` safety check
 - [x] Update `get_default_mount_path()` to return fixed `~/basic-memory-cloud/`
 
+**2.5 Sync/Status API Infrastructure** ✅ (commit d48b1dc)
+- [x] Create `POST /{project}/project/sync` endpoint for background sync
+- [x] Create `POST /{project}/project/status` endpoint for scan-only status
+- [x] Create `SyncReportResponse` Pydantic schema
+- [x] Refactor CLI `sync` command to use API endpoint
+- [x] Refactor CLI `status` command to use API endpoint
+- [x] Create `command_utils.py` with shared `run_sync()` function
+- [x] Update `notify_container_sync()` to call `run_sync()` for each project
+- [x] Update all tests to match new API-based implementation
+
 ### Phase 3: Sync Command Dual Mode
 
 **3.1 Update `bm sync` Command**
@@ -207,15 +222,36 @@ This spec affects:
 - [ ] Handle errors gracefully, continue on failure
 - [ ] Show sync progress and status
 
-### Phase 4: Remove Duplicate Commands
+### Phase 4: Remove Duplicate Commands & Cloud Mode Auth ✅
 
-**4.1 Delete `bm cloud project` Commands**
-- [ ] Remove `bm cloud project list` (use `bm project list`)
-- [ ] Remove `bm cloud project add` (use `bm project add`)
-- [ ] Update `core_commands.py` to remove project_app subcommands
-- [ ] Keep only: `login`, `logout`, `status`, `setup`, `mount`, `unmount`
+**4.0 Cloud Mode Authentication** ✅
+- [x] Update `async_client.py` to support dual auth sources
+- [x] FastMCP context auth (cloud service mode) via `inject_auth_header()`
+- [x] JWT token file auth (CLI cloud mode) via `CLIAuth.get_valid_token()`
+- [x] Automatic token refresh for CLI cloud mode
+- [x] Remove `BASIC_MEMORY_PROXY_URL` environment variable dependency
+- [x] Simplify to use only `config.cloud_mode` + `config.cloud_host`
 
-**4.2 Update Documentation**
+**4.1 Delete `bm cloud project` Commands** ✅
+- [x] Remove `bm cloud project list` (use `bm project list`)
+- [x] Remove `bm cloud project add` (use `bm project add`)
+- [x] Update `core_commands.py` to remove project_app subcommands
+- [x] Keep only: `login`, `logout`, `status`, `setup`, `mount`, `unmount`, bisync commands
+- [x] Remove unused imports (Table, generate_permalink, os)
+- [x] Clean up environment variable references in login/logout
+
+**4.2 CLI Command Cloud Mode Integration** ✅
+- [x] Add runtime `cloud_mode_enabled` checks to all CLI commands
+- [x] Update `list_projects()` to conditionally authenticate based on cloud mode
+- [x] Update `remove_project()` to conditionally authenticate based on cloud mode
+- [x] Update `run_sync()` to conditionally authenticate based on cloud mode
+- [x] Update `get_project_info()` to conditionally authenticate based on cloud mode
+- [x] Update `run_status()` to conditionally authenticate based on cloud mode
+- [x] Remove auth from `set_default_project()` (local-only command, no cloud version)
+- [x] Create CLI integration tests (`test-int/cli/`) to validate both local and cloud modes
+- [x] Replace mock-heavy CLI tests with integration tests (deleted 5 mock test files)
+
+**4.3 Update Documentation**
 - [ ] Update `cloud-cli.md` with cloud mode toggle workflow
 - [ ] Document `bm cloud login` → use normal commands
 - [ ] Add examples of cloud mode usage
@@ -389,10 +425,13 @@ Bidirectional sync via rclone bisync
    # Syncs ALL project subdirectories bidirectionally
    ```
 
-6. **Notify cloud to refresh**
+6. **Notify cloud to refresh** (commit d48b1dc)
    ```python
-   # POST /proxy/sync (via async_client)
-   # Cloud sync service updates database from /app/data/
+   # After rclone bisync completes, sync each project's database
+   for project in cloud_projects:
+       # POST /{project}/project/sync (via async_client)
+       # Triggers background sync for this project
+       await run_sync(project=project_name)
    ```
 
 ### Key Changes

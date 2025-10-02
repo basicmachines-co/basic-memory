@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.tree import Tree
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.cloud import get_authenticated_headers
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas import SyncReportResponse
@@ -129,9 +130,17 @@ async def run_status(project: Optional[str] = None, verbose: bool = False):  # p
     """Check sync status of files vs database."""
 
     try:
+        from basic_memory.config import ConfigManager
+
+        config = ConfigManager().config
+        auth_headers = {}
+        if config.cloud_mode_enabled:
+            auth_headers = await get_authenticated_headers()
+
         project_item = await get_active_project(client, project, None)
-        response = await call_post(client, f"{project_item.project_url}/project/status")
-        sync_report = SyncReportResponse.model_validate(response.json())
+        response = await call_post(
+            client, f"{project_item.project_url}/project/status", headers=auth_headers
+        )
         sync_report = SyncReportResponse.model_validate(response.json())
 
         display_changes(project_item.name, "Status", sync_report, verbose)

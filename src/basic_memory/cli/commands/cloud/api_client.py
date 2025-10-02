@@ -26,7 +26,10 @@ def get_cloud_config() -> tuple[str, str, str]:
 
 
 async def get_authenticated_headers() -> dict[str, str]:
-    """Get authentication headers with JWT token."""
+    """
+    Get authentication headers with JWT token.
+    handles jwt refresh if needed.
+    """
     client_id, domain, _ = get_cloud_config()
     auth = CLIAuth(client_id=client_id, authkit_domain=domain)
     token = await auth.get_valid_token()

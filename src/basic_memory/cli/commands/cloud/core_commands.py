@@ -1,14 +1,12 @@
 """Core cloud commands for Basic Memory CLI."""
 
 import asyncio
-import os
 from pathlib import Path
 from typing import Optional
 
 import httpx
 import typer
 from rich.console import Console
-from rich.table import Table
 
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.auth import CLIAuth
@@ -34,7 +32,6 @@ from basic_memory.cli.commands.cloud.bisync_commands import (
 from basic_memory.cli.commands.cloud.rclone_config import MOUNT_PROFILES
 from basic_memory.cli.commands.cloud.bisync_commands import BISYNC_PROFILES
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
-from basic_memory.utils import generate_permalink
 
 console = Console()
 
@@ -58,9 +55,6 @@ def login():
         config.cloud_mode = True
         config_manager.save_config(config)
 
-        # Set environment variable for current session
-        os.environ["BASIC_MEMORY_PROXY_URL"] = host_url
-
         console.print("[green]✓ Cloud mode enabled[/green]")
         console.print(f"[dim]All CLI commands now work against {host_url}[/dim]")
 
@@ -77,125 +71,8 @@ def logout():
     config.cloud_mode = False
     config_manager.save_config(config)
 
-    # Clear environment variable
-    os.environ.pop("BASIC_MEMORY_PROXY_URL", None)
-
     console.print("[green]✓ Cloud mode disabled[/green]")
     console.print("[dim]All CLI commands now work locally[/dim]")
-
-
-# Project commands
-
-project_app = typer.Typer(help="Manage Basic Memory Cloud Projects")
-cloud_app.add_typer(project_app, name="project")
-
-
-@project_app.command("list")
-def list_projects() -> None:
-    """List projects on the cloud instance."""
-
-    try:
-        # Get cloud configuration
-        _, _, host_url = get_cloud_config()
-        host_url = host_url.rstrip("/")
-
-        console.print(f"[blue]Fetching projects from {host_url}...[/blue]")
-
-        # Make API request to list projects
-        response = asyncio.run(
-            make_api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
-        )
-
-        projects_data = response.json()
-
-        if not projects_data.get("projects"):
-            console.print("[yellow]No projects found on the cloud instance.[/yellow]")
-            return
-
-        # Create table for display
-        table = Table(
-            title="Cloud Projects", show_header=True, header_style="bold blue", min_width=60
-        )
-        table.add_column("Name", style="green", min_width=20)
-        table.add_column("Path", style="dim", min_width=30)
-
-        for project in projects_data["projects"]:
-            # Format the path for display
-            path = project.get("path", "")
-            if path.startswith("/"):
-                path = f"~{path}" if path.startswith(str(Path.home())) else path
-
-            table.add_row(
-                project.get("name", "unnamed"),
-                path,
-            )
-
-        console.print(table)
-        console.print(f"\n[green]Found {len(projects_data['projects'])} project(s)[/green]")
-
-    except CloudAPIError as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected error: {e}[/red]")
-        raise typer.Exit(1)
-
-
-@project_app.command("add")
-def add_project(
-    name: str = typer.Argument(..., help="Name of the project to add"),
-    set_default: bool = typer.Option(False, "--default", "-d", help="Set as default project"),
-) -> None:
-    """Create a new project on the cloud instance."""
-
-    # Get cloud configuration
-    _, _, host_url = get_cloud_config()
-    host_url = host_url.rstrip("/")
-
-    # Prepare headers
-    headers = {"Content-Type": "application/json"}
-
-    project_path = generate_permalink(name)
-    # Prepare project data
-    project_data = {
-        "name": name,
-        "path": project_path,
-        "set_default": set_default,
-    }
-
-    console.print(project_data)
-
-    try:
-        console.print(f"[blue]Creating project '{name}' on {host_url}...[/blue]")
-
-        # Make API request to create project
-        response = asyncio.run(
-            make_api_request(
-                method="POST",
-                url=f"{host_url}/proxy/projects/projects",
-                headers=headers,
-                json_data=project_data,
-            )
-        )
-
-        result = response.json()
-
-        console.print(f"[green]Project '{name}' created successfully![/green]")
-
-        # Display project details
-        if "project" in result:
-            project = result["project"]
-            console.print(f"  Name: {project.get('name', name)}")
-            console.print(f"  Path: {project.get('path', 'unknown')}")
-            if project.get("id"):
-                console.print(f"  ID: {project['id']}")
-
-    except CloudAPIError as e:
-        console.print(f"[red]Error creating project: {e}[/red]")
-        raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]Unexpected error: {e}[/red]")
-        raise typer.Exit(1)
 
 
 @cloud_app.command("upload")

@@ -31,9 +31,9 @@ async def test_initialize_database_error(mock_get_or_create_db, app_config):
 
 
 @patch("basic_memory.services.initialization.asyncio.run")
-def test_ensure_initialization(mock_run, project_config):
+def test_ensure_initialization(mock_run, app_config):
     """Test synchronous initialization wrapper."""
-    ensure_initialization(project_config)
+    ensure_initialization(app_config)
     mock_run.assert_called_once()
 
 

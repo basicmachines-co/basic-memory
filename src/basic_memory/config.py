@@ -8,7 +8,7 @@ from typing import Any, Dict, Literal, Optional, List, Tuple
 
 from loguru import logger
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 import basic_memory
 from basic_memory.utils import setup_logging, generate_permalink
@@ -122,8 +122,24 @@ class BasicMemoryConfig(BaseSettings):
 
     cloud_mode: bool = Field(
         default=False,
-        description="Enable cloud mode - all CLI commands work against cloud instead of local",
+        description="Enable cloud mode - all requests go to cloud instead of local (config file value)",
     )
+
+    @property
+    def cloud_mode_enabled(self) -> bool:
+        """Check if cloud mode is enabled.
+
+        Priority:
+        1. BASIC_MEMORY_CLOUD_MODE environment variable
+        2. Config file value (cloud_mode)
+        """
+        env_value = os.environ.get("BASIC_MEMORY_CLOUD_MODE", "").lower()
+        if env_value in ("true", "1", "yes"):
+            return True
+        elif env_value in ("false", "0", "no"):
+            return False
+        # Fall back to config file value
+        return self.cloud_mode
 
     bisync_config: Dict[str, Any] = Field(
         default_factory=lambda: {
@@ -131,13 +147,6 @@ class BasicMemoryConfig(BaseSettings):
             "sync_dir": str(Path.home() / "basic-memory-cloud-sync"),
         },
         description="Bisync configuration for cloud sync",
-    )
-
-    model_config = SettingsConfigDict(
-        env_prefix="BASIC_MEMORY_",
-        extra="ignore",
-        env_file=".env",
-        env_file_encoding="utf-8",
     )
 
     def get_project_path(self, project_name: Optional[str] = None) -> Path:  # pragma: no cover

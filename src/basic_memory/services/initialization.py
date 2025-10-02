@@ -181,9 +181,16 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
     This is a wrapper for the async initialize_app function that can be
     called from synchronous code like CLI entry points.
 
+    No-op if app_config.cloud_mode == True. Cloud basic memory manages it's own projects
+
     Args:
         app_config: The Basic Memory project configuration
     """
+    # Skip initialization in cloud mode - cloud manages its own projects
+    if app_config.cloud_mode_enabled:
+        logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
+        return
+
     try:
         result = asyncio.run(initialize_app(app_config))
         logger.info(f"Initialization completed successfully: result={result}")
