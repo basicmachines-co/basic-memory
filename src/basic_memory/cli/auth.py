@@ -1,7 +1,10 @@
 """WorkOS OAuth Device Authorization for CLI."""
 
+import base64
+import hashlib
 import json
 import os
+import secrets
 import time
 import webbrowser
 
@@ -22,12 +25,36 @@ class CLIAuth:
         app_config = ConfigManager().config
         # Store tokens in data dir
         self.token_file = app_config.data_dir_path / "basic-memory-cloud.json"
+        # PKCE parameters
+        self.code_verifier = None
+        self.code_challenge = None
+
+    def generate_pkce_pair(self) -> tuple[str, str]:
+        """Generate PKCE code verifier and challenge."""
+        # Generate code verifier (43-128 characters)
+        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("utf-8")
+        code_verifier = code_verifier.rstrip("=")
+
+        # Generate code challenge (SHA256 hash of verifier)
+        challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
+        code_challenge = base64.urlsafe_b64encode(challenge_bytes).decode("utf-8")
+        code_challenge = code_challenge.rstrip("=")
+
+        return code_verifier, code_challenge
 
     async def request_device_authorization(self) -> dict | None:
-        """Request device authorization from WorkOS."""
+        """Request device authorization from WorkOS with PKCE."""
         device_auth_url = f"{self.authkit_domain}/oauth2/device_authorization"
 
-        data = {"client_id": self.client_id, "scope": "openid profile email offline_access"}
+        # Generate PKCE pair
+        self.code_verifier, self.code_challenge = self.generate_pkce_pair()
+
+        data = {
+            "client_id": self.client_id,
+            "scope": "openid profile email offline_access",
+            "code_challenge": self.code_challenge,
+            "code_challenge_method": "S256",
+        }
 
         try:
             async with httpx.AsyncClient() as client:
@@ -76,6 +103,7 @@ class CLIAuth:
             "client_id": self.client_id,
             "device_code": device_code,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "code_verifier": self.code_verifier,
         }
 
         max_attempts = 60  # 5 minutes with 5-second intervals
