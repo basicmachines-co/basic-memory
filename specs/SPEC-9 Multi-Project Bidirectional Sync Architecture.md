@@ -11,6 +11,27 @@ tags:
 
 # SPEC-9: Multi-Project Bidirectional Sync Architecture
 
+## Status: ✅ Implementation Complete (Documentation Pending)
+
+**Completed Phases:**
+- ✅ Phase 1: Cloud Mode Toggle & Config
+- ✅ Phase 2: Bisync Updates (Multi-Project)
+- ✅ Phase 3: Sync Command Dual Mode
+- ✅ Phase 4: Remove Duplicate Commands & Cloud Mode Auth
+- ✅ Phase 5: Mount Updates
+- ✅ Phase 6: Safety & Validation
+- ⏸️ Phase 7: Cloud-Side Implementation (Cloud repo work)
+- ✅ Phase 8.1: Testing (All test scenarios validated)
+- ⏳ Phase 8.2: Documentation (Pending)
+
+**Key Achievements:**
+- Unified CLI: `bm sync`, `bm project`, `bm tool` work transparently in both local and cloud modes
+- Multi-project sync: Single `bm sync` operation handles all projects bidirectionally
+- Cloud mode toggle: `bm cloud login` / `bm cloud logout` switches modes seamlessly
+- Integrity checking: `bm cloud check` verifies file matching without data transfer
+- Directory isolation: Mount and bisync use separate directories with conflict prevention
+- Clean UX: No RCLONE_TEST files, clear error messages, transparent implementation
+
 ## Why
 
 **Current State:**
@@ -286,31 +307,35 @@ This spec affects:
 - [ ] Document mount vs bisync directory isolation
 - [ ] Add troubleshooting section
 
-### Phase 5: Mount Updates
+### Phase 5: Mount Updates ✅
 
-**5.1 Fixed Mount Directory**
-- [ ] Change mount path to `~/basic-memory-cloud/` (fixed, no tenant ID)
-- [ ] Update `get_default_mount_path()` function
-- [ ] Remove configurability (fixed location)
-- [ ] Update mount commands to use new path
+**5.1 Fixed Mount Directory** ✅
+- [x] Change mount path to `~/basic-memory-cloud/` (fixed, no tenant ID)
+- [x] Update `get_default_mount_path()` function
+- [x] Remove configurability (fixed location)
+- [x] Update mount commands to use new path
 
-**5.2 Mount at Bucket Root**
-- [ ] Ensure mount uses bucket root (not subdirectory)
-- [ ] Test with multiple projects
-- [ ] Verify all projects visible in mount
+**5.2 Mount at Bucket Root** ✅
+- [x] Ensure mount uses bucket root (not subdirectory)
+- [x] Test with multiple projects
+- [x] Verify all projects visible in mount
 
-### Phase 6: Safety & Validation
+**Implementation:** Mount uses fixed `~/basic-memory-cloud/` directory and syncs entire bucket root `basic-memory-{tenant_id}:{bucket_name}` for all projects.
 
-**6.1 Directory Conflict Prevention**
-- [ ] Implement `validate_bisync_directory()` check
-- [ ] Detect if bisync dir == mount dir
-- [ ] Detect if bisync dir is currently mounted
-- [ ] Show clear error messages with solutions
+### Phase 6: Safety & Validation ✅
 
-**6.2 State Management**
-- [ ] Use `--workdir` for bisync state (already implemented)
-- [ ] Store state in `~/.basic-memory/bisync-state/{tenant-id}/`
-- [ ] Ensure state directory created before bisync
+**6.1 Directory Conflict Prevention** ✅
+- [x] Implement `validate_bisync_directory()` check
+- [x] Detect if bisync dir == mount dir
+- [x] Detect if bisync dir is currently mounted
+- [x] Show clear error messages with solutions
+
+**6.2 State Management** ✅
+- [x] Use `--workdir` for bisync state
+- [x] Store state in `~/.basic-memory/bisync-state/{tenant-id}/`
+- [x] Ensure state directory created before bisync
+
+**Implementation:** `validate_bisync_directory()` prevents conflicts by checking directory equality and mount status. State managed in isolated `~/.basic-memory/bisync-state/{tenant-id}/` directory using `--workdir` flag.
 
 ### Phase 7: Cloud-Side Implementation
 
@@ -329,15 +354,16 @@ This spec affects:
 ### Phase 8: Testing & Documentation
 
 **8.1 Test Scenarios**
-- [ ] Test: Cloud mode toggle (login/logout)
-- [ ] Test: Local-first project creation (bisync)
-- [ ] Test: Cloud-first project creation (API)
-- [ ] Test: Multi-project bidirectional sync
-- [ ] Test: MCP tools in cloud mode
-- [ ] Test: Watch mode continuous sync
-- [ ] Test: Safety profile protection
-- [ ] Test: No RCLONE_TEST files
-- [ ] Test: Mount/bisync directory isolation
+- [x] Test: Cloud mode toggle (login/logout)
+- [x] Test: Local-first project creation (bisync)
+- [x] Test: Cloud-first project creation (API)
+- [x] Test: Multi-project bidirectional sync
+- [x] Test: MCP tools in cloud mode
+- [x] Test: Watch mode continuous sync
+- [x] Test: Safety profile protection (max_delete implemented)
+- [x] Test: No RCLONE_TEST files (check_access=False in all profiles)
+- [x] Test: Mount/bisync directory isolation (validate_bisync_directory)
+- [x] Test: Integrity check command (bm cloud check)
 
 **8.2 Documentation**
 - [ ] Update README with cloud mode instructions
