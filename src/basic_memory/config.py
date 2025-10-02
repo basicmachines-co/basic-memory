@@ -8,7 +8,7 @@ from typing import Any, Dict, Literal, Optional, List, Tuple
 
 from loguru import logger
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import basic_memory
 from basic_memory.utils import setup_logging, generate_permalink
@@ -147,6 +147,13 @@ class BasicMemoryConfig(BaseSettings):
             "sync_dir": str(Path.home() / "basic-memory-cloud-sync"),
         },
         description="Bisync configuration for cloud sync",
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="BASIC_MEMORY_",
+        extra="ignore",
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
 
     def get_project_path(self, project_name: Optional[str] = None) -> Path:  # pragma: no cover
