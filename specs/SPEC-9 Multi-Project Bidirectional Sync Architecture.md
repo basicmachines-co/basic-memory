@@ -337,19 +337,21 @@ This spec affects:
 
 **Implementation:** `validate_bisync_directory()` prevents conflicts by checking directory equality and mount status. State managed in isolated `~/.basic-memory/bisync-state/{tenant-id}/` directory using `--workdir` flag.
 
-### Phase 7: Cloud-Side Implementation
+### Phase 7: Cloud-Side Implementation (Deferred to Cloud Repo)
 
-**7.1 Project Discovery Service (Cloud)**
+**7.1 Project Discovery Service (Cloud)** - Deferred
 - [ ] Create `ProjectDiscoveryService` background job
 - [ ] Scan `/app/data/` every 2 minutes
 - [ ] Auto-register new directories as projects
 - [ ] Log discovery events
 - [ ] Handle errors gracefully
 
-**7.2 Project API Updates (Cloud)**
+**7.2 Project API Updates (Cloud)** - Deferred
 - [ ] Ensure `POST /proxy/projects/projects` creates directory synchronously
 - [ ] Return 201 with project details
 - [ ] Ensure directory ready immediately after creation
+
+**Note:** Phase 7 is cloud-side work that belongs in the basic-memory-cloud repository. The CLI-side implementation (Phase 2.3 auto-registration) is complete and working - it calls the existing cloud API endpoints.
 
 ### Phase 8: Testing & Documentation
 
