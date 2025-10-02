@@ -251,7 +251,20 @@ This spec affects:
 - [x] Create CLI integration tests (`test-int/cli/`) to validate both local and cloud modes
 - [x] Replace mock-heavy CLI tests with integration tests (deleted 5 mock test files)
 
-**4.3 Update Documentation**
+**4.3 OAuth Authentication Fixes** ✅
+- [x] Restore missing `SettingsConfigDict` in `BasicMemoryConfig`
+- [x] Fix environment variable reading with `BASIC_MEMORY_` prefix
+- [x] Fix `.env` file loading
+- [x] Fix extra field handling for config files
+- [x] Resolve `bm cloud login` OAuth failure ("Something went wrong" error)
+- [x] Implement PKCE (Proof Key for Code Exchange) for device flow
+- [x] Generate code verifier and SHA256 challenge for device authorization
+- [x] Send code_verifier with token polling requests
+- [x] Support both PKCE-required and PKCE-optional OAuth clients
+- [x] Verify authentication flow works end-to-end with staging and production
+- [x] Document WorkOS requirement: redirect URI must be configured even for device flow
+
+**4.4 Update Documentation**
 - [ ] Update `cloud-cli.md` with cloud mode toggle workflow
 - [ ] Document `bm cloud login` → use normal commands
 - [ ] Add examples of cloud mode usage
