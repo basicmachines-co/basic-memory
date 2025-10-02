@@ -26,6 +26,7 @@ from basic_memory.cli.commands.cloud.mount_commands import (
 from basic_memory.cli.commands.cloud.bisync_commands import (
     run_bisync,
     run_bisync_watch,
+    run_check,
     setup_cloud_bisync,
     show_bisync_status,
 )
@@ -379,3 +380,27 @@ def bisync(
 def bisync_status() -> None:
     """Show current bisync status and configuration."""
     show_bisync_status()
+
+
+@cloud_app.command("check")
+def check(
+    one_way: bool = typer.Option(
+        False,
+        "--one-way",
+        help="Only check for missing files on destination (faster)",
+    ),
+) -> None:
+    """Check file integrity between local and cloud storage using rclone check.
+
+    Verifies that files match between your local bisync directory and cloud storage
+    without transferring any data. This is useful for validating sync integrity.
+
+    Examples:
+      bm cloud check              # Full integrity check
+      bm cloud check --one-way    # Faster check (missing files only)
+    """
+    try:
+        run_check(one_way=one_way)
+    except Exception as e:
+        console.print(f"[red]Check failed: {e}[/red]")
+        raise typer.Exit(1)

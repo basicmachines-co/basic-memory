@@ -722,3 +722,94 @@ def show_bisync_status() -> None:
     except Exception as e:
         console.print(f"[red]Error getting bisync status: {e}[/red]")
         raise typer.Exit(1)
+
+
+def run_check(
+    tenant_id: Optional[str] = None,
+    bucket_name: Optional[str] = None,
+    local_path: Optional[Path] = None,
+    one_way: bool = False,
+) -> bool:
+    """Check file integrity between local and cloud using rclone check.
+
+    Args:
+        tenant_id: Cloud tenant ID (auto-detected if not provided)
+        bucket_name: S3 bucket name (auto-detected if not provided)
+        local_path: Local bisync directory (uses config default if not provided)
+        one_way: If True, only check for missing files on destination (faster)
+
+    Returns:
+        True if check passed (files match), False if differences found
+    """
+    try:
+        # Check if rclone is installed
+        from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
+
+        if not is_rclone_installed():
+            raise BisyncError(
+                "rclone is not installed. Run 'bm cloud bisync-setup' first to set up cloud sync."
+            )
+
+        # Get tenant info if not provided
+        if not tenant_id or not bucket_name:
+            tenant_info = asyncio.run(get_mount_info())
+            tenant_id = tenant_id or tenant_info.get("tenant_id")
+            bucket_name = bucket_name or tenant_info.get("bucket_name")
+
+        if not tenant_id or not bucket_name:
+            raise BisyncError("Could not determine tenant_id or bucket_name")
+
+        # Get local path from config
+        if not local_path:
+            local_path = get_bisync_directory()
+
+        # Check if bisync is initialized
+        if not bisync_state_exists(tenant_id):
+            raise BisyncError(
+                "Bisync not initialized. Run 'bm cloud bisync --resync' to establish baseline."
+            )
+
+        # Build rclone check command
+        rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}"
+        filter_path = get_bisync_filter_path()
+
+        cmd = [
+            "rclone",
+            "check",
+            str(local_path),
+            rclone_remote,
+            "--filter-from",
+            str(filter_path),
+        ]
+
+        if one_way:
+            cmd.append("--one-way")
+
+        console.print("[bold blue]Checking file integrity between local and cloud[/bold blue]")
+        console.print(f"[dim]Local:  {local_path}[/dim]")
+        console.print(f"[dim]Remote: {rclone_remote}[/dim]")
+        console.print(f"[dim]Command: {' '.join(cmd)}[/dim]")
+        console.print()
+
+        # Run check command
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        # rclone check returns:
+        # 0 = success (all files match)
+        # non-zero = differences found or error
+        if result.returncode == 0:
+            console.print("[green]✓ All files match between local and cloud[/green]")
+            return True
+        else:
+            console.print("[yellow]⚠ Differences found:[/yellow]")
+            if result.stderr:
+                console.print(result.stderr)
+            if result.stdout:
+                console.print(result.stdout)
+            console.print("\n[dim]To sync differences, run: bm sync[/dim]")
+            return False
+
+    except BisyncError:
+        raise
+    except Exception as e:
+        raise BisyncError(f"Check failed: {e}") from e
