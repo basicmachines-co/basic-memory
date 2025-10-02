@@ -298,6 +298,7 @@ def build_bisync_command(
     profile: RcloneBisyncProfile,
     dry_run: bool = False,
     resync: bool = False,
+    verbose: bool = False,
 ) -> list[str]:
     """Build rclone bisync command with profile settings."""
 
@@ -323,6 +324,13 @@ def build_bisync_command(
         "--workdir",
         str(state_path),
     ]
+
+    # Add verbosity flags
+    if verbose:
+        cmd.append("--verbose")  # Full details with file-by-file output
+    else:
+        # Show progress bar during transfers
+        cmd.append("--progress")
 
     if profile.check_access:
         cmd.append("--check-access")
@@ -443,6 +451,7 @@ def run_bisync(
     profile_name: str = "balanced",
     dry_run: bool = False,
     resync: bool = False,
+    verbose: bool = False,
 ) -> bool:
     """Run rclone bisync with specified profile."""
 
@@ -537,7 +546,7 @@ def run_bisync(
 
         # Build and execute bisync command
         bisync_cmd = build_bisync_command(
-            tenant_id, bucket_name, local_path, profile, dry_run=dry_run, resync=resync
+            tenant_id, bucket_name, local_path, profile, dry_run=dry_run, resync=resync, verbose=verbose
         )
 
         if dry_run:

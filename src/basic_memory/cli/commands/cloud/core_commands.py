@@ -352,6 +352,7 @@ def bisync(
     resync: bool = typer.Option(False, "--resync", help="Force resync to establish new baseline"),
     watch: bool = typer.Option(False, "--watch", help="Run continuous sync in watch mode"),
     interval: int = typer.Option(60, "--interval", help="Sync interval in seconds for watch mode"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed sync output"),
 ) -> None:
     """Run bidirectional sync between local files and cloud storage.
 
@@ -362,12 +363,13 @@ def bisync(
       basic-memory cloud bisync --watch            # Continuous sync every 60s
       basic-memory cloud bisync --watch --interval 30  # Continuous sync every 30s
       basic-memory cloud bisync --profile safe     # Use safe profile (keep conflicts)
+      basic-memory cloud bisync --verbose          # Show detailed file sync output
     """
     try:
         if watch:
             run_bisync_watch(profile_name=profile, interval_seconds=interval)
         else:
-            run_bisync(profile_name=profile, dry_run=dry_run, resync=resync)
+            run_bisync(profile_name=profile, dry_run=dry_run, resync=resync, verbose=verbose)
     except Exception as e:
         console.print(f"[red]Bisync failed: {e}[/red]")
         raise typer.Exit(1)
