@@ -207,20 +207,35 @@ This spec affects:
 - [x] Update `notify_container_sync()` to call `run_sync()` for each project
 - [x] Update all tests to match new API-based implementation
 
-### Phase 3: Sync Command Dual Mode
+### Phase 3: Sync Command Dual Mode ✅
 
-**3.1 Update `bm sync` Command**
-- [ ] Check `config.cloud_mode` at start
-- [ ] If `cloud_mode=false`: Run existing local sync
-- [ ] If `cloud_mode=true`: Run bisync
-- [ ] Add `--profile` parameter (safe/balanced/fast)
-- [ ] Add `--watch` parameter for continuous sync
+**3.1 Update `bm sync` Command** ✅
+- [x] Check `config.cloud_mode` at start
+- [x] If `cloud_mode=false`: Run existing local sync
+- [x] If `cloud_mode=true`: Run bisync
+- [x] Add `--watch` parameter for continuous sync
+- [x] Add `--interval` parameter (default 60 seconds)
+- [x] Error if `--watch` used in local mode with helpful message
 
-**3.2 Watch Mode for Bisync**
-- [ ] Implement `run_bisync_watch()` with interval loop
-- [ ] Add `--interval` parameter (default 60 seconds)
-- [ ] Handle errors gracefully, continue on failure
-- [ ] Show sync progress and status
+**3.2 Watch Mode for Bisync** ✅
+- [x] Implement `run_bisync_watch()` with interval loop
+- [x] Add `--interval` parameter (default 60 seconds)
+- [x] Handle errors gracefully, continue on failure
+- [x] Show sync progress and status
+
+**3.3 Integrity Check Command** ✅
+- [x] Implement `bm cloud check` command using `rclone check`
+- [x] Read-only operation that verifies file matching
+- [x] Error with helpful messages if rclone/bisync not set up
+- [x] Support `--one-way` flag for faster checks
+- [x] Transparent about rclone implementation
+- [x] Suggest `bm sync` to resolve differences
+
+**Implementation Notes:**
+- `bm sync` adapts to cloud mode automatically - users don't need separate commands
+- `bm cloud bisync` kept for power users with full options (--dry-run, --resync, --profile, --verbose)
+- `bm cloud check` provides integrity verification without transferring data
+- Design philosophy: Simplicity for everyday use, transparency about implementation
 
 ### Phase 4: Remove Duplicate Commands & Cloud Mode Auth ✅
 
@@ -333,17 +348,18 @@ This spec affects:
 
 ### Success Criteria Checklist
 
-- [ ] `bm cloud login` enables cloud mode for all commands
-- [ ] `bm cloud logout` reverts to local mode
-- [ ] `bm project`, `bm tool`, `bm sync` work transparently in both modes
-- [ ] `bm sync` runs bisync in cloud mode, local sync in local mode
-- [ ] Single sync operation handles all projects bidirectionally
-- [ ] Local directories auto-create cloud projects via API
-- [ ] Cloud projects auto-sync to local directories
-- [ ] No RCLONE_TEST files in user directories
-- [ ] Bisync profiles provide safety via `max_delete` limits
-- [ ] `bm sync --watch` enables continuous sync
-- [ ] No duplicate `bm cloud project` commands (removed)
+- [x] `bm cloud login` enables cloud mode for all commands
+- [x] `bm cloud logout` reverts to local mode
+- [x] `bm project`, `bm tool`, `bm sync` work transparently in both modes
+- [x] `bm sync` runs bisync in cloud mode, local sync in local mode
+- [x] Single sync operation handles all projects bidirectionally
+- [x] Local directories auto-create cloud projects via API
+- [x] Cloud projects auto-sync to local directories
+- [x] No RCLONE_TEST files in user directories
+- [x] Bisync profiles provide safety via `max_delete` limits
+- [x] `bm sync --watch` enables continuous sync
+- [x] No duplicate `bm cloud project` commands (removed)
+- [x] `bm cloud check` command for integrity verification
 - [ ] Documentation covers cloud mode toggle and workflows
 - [ ] Edge cases handled gracefully with clear errors
 
@@ -508,6 +524,8 @@ def logout():
 - `bm cloud logout` - Disable cloud mode
 - `bm cloud status` - Show current mode & connection
 - `bm cloud setup` - Initial bisync setup
+- `bm cloud bisync` - Power-user command with full options
+- `bm cloud check` - Verify file integrity between local and cloud
 
 **4. Sync Command Dual Mode**
 
@@ -687,17 +705,18 @@ ls -la ~/basic-memory-cloud-sync/
 
 ### Success Criteria
 
-- [ ] `bm cloud login` enables cloud mode for all commands
-- [ ] `bm cloud logout` reverts to local mode
-- [ ] `bm project`, `bm tool`, `bm sync` work in both modes transparently
-- [ ] `bm sync` runs bisync in cloud mode, local sync in local mode
-- [ ] Single sync operation handles all projects bidirectionally
-- [ ] Local directories auto-create cloud projects via API
-- [ ] Cloud projects auto-sync to local directories
-- [ ] No RCLONE_TEST files in user directories
-- [ ] Bisync profiles provide safety via `max_delete` limits
-- [ ] `bm sync --watch` enables continuous sync
-- [ ] No duplicate `bm cloud project` commands (removed)
+- [x] `bm cloud login` enables cloud mode for all commands
+- [x] `bm cloud logout` reverts to local mode
+- [x] `bm project`, `bm tool`, `bm sync` work in both modes transparently
+- [x] `bm sync` runs bisync in cloud mode, local sync in local mode
+- [x] Single sync operation handles all projects bidirectionally
+- [x] Local directories auto-create cloud projects via API
+- [x] Cloud projects auto-sync to local directories
+- [x] No RCLONE_TEST files in user directories
+- [x] Bisync profiles provide safety via `max_delete` limits
+- [x] `bm sync --watch` enables continuous sync
+- [x] No duplicate `bm cloud project` commands (removed)
+- [x] `bm cloud check` command for integrity verification
 - [ ] Documentation covers cloud mode toggle and workflows
 - [ ] Edge cases handled gracefully with clear errors
 
@@ -1002,9 +1021,19 @@ bm cloud bisync --resync
 # → Establishes new baseline
 # → Use if sync state is corrupted
 
+10. Check file integrity:
+bm cloud check
+# → Verifies all files match between local and cloud
+# → Read-only operation (no data transfer)
+# → Shows differences if any found
+
+# Faster one-way check
+bm cloud check --one-way
+# → Only checks for missing files on destination
+
 Verify Cloud Mode Integration
 
-10. Test that all commands work in cloud mode:
+11. Test that all commands work in cloud mode:
 # List cloud projects (not local)
 bm project list
 
@@ -1016,7 +1045,7 @@ bm tool write-note --title "Test" --folder "my-research" --content "Hello"
 
 # All of these work against cloud because cloud_mode=true
 
-11. Switch back to local mode:
+12. Switch back to local mode:
 bm cloud logout
 # → Sets cloud_mode=false
 # → Clears BASIC_MEMORY_PROXY_URL
@@ -1049,3 +1078,5 @@ Key Points to Test
 6. ✅ Changes sync bidirectionally
 7. ✅ Watch mode continuous sync works
 8. ✅ Profile safety limits work (max_delete)
+9. ✅ `bm sync` adapts to cloud mode automatically
+10. ✅ `bm cloud check` verifies file integrity without side effects
