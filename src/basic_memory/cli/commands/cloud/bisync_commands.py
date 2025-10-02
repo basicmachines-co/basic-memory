@@ -547,17 +547,15 @@ def run_bisync(
             f"[blue]Running bisync with profile '{profile_name}' ({profile.description})...[/blue]"
         )
         console.print(f"[dim]Command: {' '.join(bisync_cmd)}[/dim]")
+        console.print()  # Blank line before output
 
-        result = subprocess.run(bisync_cmd, capture_output=True, text=True)
+        # Stream output in real-time so user sees progress
+        result = subprocess.run(bisync_cmd, text=True)
 
         if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown error"
-            console.print(f"[red]Bisync output:[/red]\n{error_msg}")
             raise BisyncError(f"Bisync command failed with code {result.returncode}")
 
-        # Show output
-        if result.stdout:
-            console.print(result.stdout)
+        console.print()  # Blank line after output
 
         if dry_run:
             console.print("[green]✓ Dry run completed successfully[/green]")
@@ -594,7 +592,9 @@ async def notify_container_sync(tenant_id: str) -> None:
             console.print("[dim]No projects to sync[/dim]")
             return
 
-        console.print(f"[dim]Syncing {len(projects)} project(s)...[/dim]")
+        console.print(
+            f"[blue]Notifying cloud to index {len(projects)} project(s)...[/blue]"
+        )
 
         for project in projects:
             project_name = project.get("name")
@@ -604,6 +604,10 @@ async def notify_container_sync(tenant_id: str) -> None:
                 except Exception as e:
                     # Non-critical, log and continue
                     console.print(f"[yellow]  ⚠ Sync failed for {project_name}: {e}[/yellow]")
+
+        console.print(
+            "[dim]Note: Cloud indexing runs in background and may take a few moments[/dim]"
+        )
 
     except Exception as e:
         # Non-critical, don't fail the bisync
