@@ -1,5 +1,6 @@
 """Tests for async_client configuration."""
 
+import os
 from unittest.mock import patch
 from httpx import AsyncClient, ASGITransport, Timeout
 
@@ -9,7 +10,11 @@ from basic_memory.mcp.async_client import create_client
 
 def test_create_client_uses_asgi_when_no_remote_env():
     """Test that create_client uses ASGI transport when BASIC_MEMORY_USE_REMOTE_API is not set."""
-    with patch.dict("os.environ", {}, clear=True):
+    # Ensure env vars are not set (pop if they exist)
+    with patch.dict("os.environ", clear=False):
+        os.environ.pop("BASIC_MEMORY_USE_REMOTE_API", None)
+        os.environ.pop("BASIC_MEMORY_CLOUD_MODE", None)
+
         client = create_client()
 
         assert isinstance(client, AsyncClient)
@@ -32,7 +37,11 @@ def test_create_client_uses_http_when_cloud_mode_env_set():
 
 def test_create_client_configures_extended_timeouts():
     """Test that create_client configures 30-second timeouts for long operations."""
-    with patch.dict("os.environ", {}, clear=True):
+    # Ensure env vars are not set (pop if they exist)
+    with patch.dict("os.environ", clear=False):
+        os.environ.pop("BASIC_MEMORY_USE_REMOTE_API", None)
+        os.environ.pop("BASIC_MEMORY_CLOUD_MODE", None)
+
         client = create_client()
 
         # Verify timeout configuration
