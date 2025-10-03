@@ -616,9 +616,7 @@ async def notify_container_sync(tenant_id: str) -> None:
                     # Non-critical, log and continue
                     console.print(f"[yellow]  ⚠ Sync failed for {project_name}: {e}[/yellow]")
 
-        console.print(
-            "[dim]Note: Cloud indexing has started and may take a few moments[/dim]"
-        )
+        console.print("[dim]Note: Cloud indexing has started and may take a few moments[/dim]")
 
     except Exception as e:
         # Non-critical, don't fail the bisync

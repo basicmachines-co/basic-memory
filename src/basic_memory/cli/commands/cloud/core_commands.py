@@ -72,8 +72,6 @@ def logout():
     console.print("[dim]All CLI commands now work locally[/dim]")
 
 
-
-
 @cloud_app.command("status")
 def status(
     bisync: bool = typer.Option(
@@ -206,8 +204,6 @@ def unmount() -> None:
 # Bisync commands
 
 
-
-
 @cloud_app.command("bisync")
 def bisync(
     profile: str = typer.Option(
@@ -246,7 +242,9 @@ def bisync_status() -> None:
 
     DEPRECATED: Use 'bm cloud status' instead (bisync is now the default).
     """
-    console.print("[yellow]Note: 'bisync-status' is deprecated. Use 'bm cloud status' instead.[/yellow]")
+    console.print(
+        "[yellow]Note: 'bisync-status' is deprecated. Use 'bm cloud status' instead.[/yellow]"
+    )
     console.print("[dim]Showing bisync status...[/dim]\n")
     show_bisync_status()
 
