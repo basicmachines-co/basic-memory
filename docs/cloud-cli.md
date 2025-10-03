@@ -211,23 +211,67 @@ bm sync --watch --interval 30
 
 ### Bisync Profiles
 
-Bisync supports different conflict resolution strategies:
+Bisync supports three conflict resolution strategies with different safety levels:
 
-- **balanced** (default, recommended): Auto-resolve to newer file, max 25 deletes
-- **safe**: Keep both versions on conflict, max 10 deletes
-- **fast**: Fast iteration mode, max 50 deletes
+| Profile | Conflict Resolution | Max Deletes | Use Case |
+|---------|-------------------|-------------|----------|
+| **balanced** | newer | 25 | Default, recommended for most users |
+| **safe** | none | 10 | Keep both versions on conflict |
+| **fast** | newer | 50 | Rapid iteration, higher delete tolerance |
 
-To use a specific profile:
+**Profile Details:**
+
+- **safe**:
+  - Conflict resolution: `none` (creates `.conflict` files for both versions)
+  - Max delete: 10 files per sync
+  - Best for: Critical data where you want manual conflict resolution
+
+- **balanced** (default):
+  - Conflict resolution: `newer` (auto-resolve to most recent file)
+  - Max delete: 25 files per sync
+  - Best for: General use with automatic conflict handling
+
+- **fast**:
+  - Conflict resolution: `newer` (auto-resolve to most recent file)
+  - Max delete: 50 files per sync
+  - Best for: Rapid development iteration with less restrictive safety checks
+
+**How to Select a Profile:**
+
+The default profile (`balanced`) is used automatically with `bm sync`:
 
 ```bash
-bm cloud bisync --profile safe
+# Uses balanced profile (default)
+bm sync
 ```
 
-Check available profiles:
+For advanced control, use `bm cloud bisync` with the `--profile` flag:
+
+```bash
+# Use safe mode
+bm cloud bisync --profile safe
+
+# Use fast mode
+bm cloud bisync --profile fast
+
+# Preview changes with specific profile
+bm cloud bisync --profile safe --dry-run
+```
+
+**Check Available Profiles:**
 
 ```bash
 bm cloud status
 ```
+
+This shows all available profiles with their settings.
+
+**Current Limitations:**
+
+- Profiles are hardcoded and cannot be customized
+- No config file option to change default profile
+- Profile settings (max_delete, conflict_resolve) cannot be modified without code changes
+- Profile selection only available via `bm cloud bisync --profile` (advanced command)
 
 ### Establishing New Baseline
 

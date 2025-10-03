@@ -238,6 +238,8 @@ def convert_bmignore_to_rclone_filters() -> Path:
     Reads ~/.basic-memory/.bmignore (gitignore-style) and converts to
     ~/.basic-memory/.bmignore.rclone (rclone filter format).
 
+    Only regenerates if .bmignore has been modified since last conversion.
+
     Returns:
         Path to converted rclone filter file
     """
@@ -247,6 +249,13 @@ def convert_bmignore_to_rclone_filters() -> Path:
     bmignore_path = get_bmignore_path()
     # Create rclone filter path: ~/.basic-memory/.bmignore -> ~/.basic-memory/.bmignore.rclone
     rclone_filter_path = bmignore_path.parent / f"{bmignore_path.name}.rclone"
+
+    # Skip regeneration if rclone file is newer than bmignore
+    if rclone_filter_path.exists():
+        bmignore_mtime = bmignore_path.stat().st_mtime
+        rclone_mtime = rclone_filter_path.stat().st_mtime
+        if rclone_mtime >= bmignore_mtime:
+            return rclone_filter_path
 
     # Read .bmignore patterns
     patterns = []
