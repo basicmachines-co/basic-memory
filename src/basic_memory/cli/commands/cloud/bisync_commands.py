@@ -477,7 +477,6 @@ def run_bisync(
             local_path = get_bisync_directory()
 
         # Validate bisync directory
-        # can be same dir as mount
         validate_bisync_directory(local_path)
 
         # Check if local path exists
