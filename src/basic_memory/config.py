@@ -100,7 +100,7 @@ class BasicMemoryConfig(BaseSettings):
 
     # Cloud configuration
     cloud_client_id: str = Field(
-        default="client_01K4DGBWAZWP83N3H8VVEMRX6W",
+        default="client_01K6KWQPW6J1M8VV7R3TZP5A6M",
         description="OAuth client ID for Basic Memory Cloud",
     )
 
