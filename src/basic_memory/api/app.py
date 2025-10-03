@@ -19,7 +19,6 @@ from basic_memory.api.routers import (
     resource,
     search,
     prompt_router,
-    webdav,
 )
 from basic_memory.config import ConfigManager
 from basic_memory.services.initialization import initialize_file_sync, initialize_app
@@ -77,7 +76,6 @@ app.include_router(project.project_router, prefix="/{project}")
 app.include_router(directory_router.router, prefix="/{project}")
 app.include_router(prompt_router.router, prefix="/{project}")
 app.include_router(importer_router.router, prefix="/{project}")
-app.include_router(webdav.router, prefix="/{project}")
 
 # Project resource router works accross projects
 app.include_router(project.project_resource_router)

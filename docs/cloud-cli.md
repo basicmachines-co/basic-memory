@@ -593,7 +593,7 @@ Once mounted, your cloud files appear as a regular directory on your local syste
 # Enable cloud mode
 bm cloud login
 
-# Set up mount
+# Set up local rclone
 bm cloud setup
 
 # Mount your files (all projects)

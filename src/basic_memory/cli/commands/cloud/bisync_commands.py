@@ -431,10 +431,11 @@ def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
         console.print("\nYour local files will now sync bidirectionally with the cloud!")
         console.print(f"\nLocal directory: {local_path}")
         console.print("\nUseful commands:")
-        console.print("  basic-memory cloud bisync                 # Run manual sync")
-        console.print("  basic-memory cloud bisync --watch         # Start watch mode")
-        console.print("  basic-memory cloud bisync-status          # Check sync status")
-        console.print("  basic-memory cloud bisync --dry-run       # Preview changes")
+        console.print("  bm sync                      # Run sync (recommended)")
+        console.print("  bm sync --watch              # Start watch mode")
+        console.print("  bm cloud status              # Check sync status")
+        console.print("  bm cloud check               # Verify file integrity")
+        console.print("  bm cloud bisync --dry-run    # Preview changes (advanced)")
 
     except (RcloneInstallError, BisyncError, CloudAPIError) as e:
         console.print(f"\n[red]Setup failed: {e}[/red]")
@@ -616,7 +617,7 @@ async def notify_container_sync(tenant_id: str) -> None:
                     console.print(f"[yellow]  ⚠ Sync failed for {project_name}: {e}[/yellow]")
 
         console.print(
-            "[dim]Note: Cloud indexing runs in background and may take a few moments[/dim]"
+            "[dim]Note: Cloud indexing has started and may take a few moments[/dim]"
         )
 
     except Exception as e:
@@ -709,12 +710,14 @@ def show_bisync_status() -> None:
             console.print(f"    - Conflict resolution: {profile.conflict_resolve}")
             console.print(f"    - Max delete: {profile.max_delete} files")
 
+        console.print("\n[dim]To use a profile: bm cloud bisync --profile <name>[/dim]")
+
         # Show setup instructions if not initialized
         if not is_initialized:
             console.print("\n[yellow]To initialize bisync, run:[/yellow]")
-            console.print("  basic-memory cloud bisync-setup")
+            console.print("  bm cloud setup")
             console.print("  or")
-            console.print("  basic-memory cloud bisync --resync")
+            console.print("  bm cloud bisync --resync")
 
     except Exception as e:
         console.print(f"[red]Error getting bisync status: {e}[/red]")
