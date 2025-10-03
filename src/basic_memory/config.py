@@ -110,7 +110,9 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     cloud_host: str = Field(
-        default_factory=lambda: os.getenv("BASIC_MEMORY_CLOUD_HOST", "https://cloud.basicmemory.com"),
+        default_factory=lambda: os.getenv(
+            "BASIC_MEMORY_CLOUD_HOST", "https://cloud.basicmemory.com"
+        ),
         description="Basic Memory Cloud host URL",
     )
 

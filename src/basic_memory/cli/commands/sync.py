@@ -46,12 +46,14 @@ def sync(
                 run_bisync_watch(interval_seconds=interval)
             else:
                 run_bisync()
-        except Exception as e:
+        except Exception:
             raise typer.Exit(1)
     else:
         # Local mode: just database sync
         if watch:
-            typer.echo("Error: --watch is only available in cloud mode. Run 'bm cloud login' first.")
+            typer.echo(
+                "Error: --watch is only available in cloud mode. Run 'bm cloud login' first."
+            )
             raise typer.Exit(1)
 
         asyncio.run(run_sync(project))
