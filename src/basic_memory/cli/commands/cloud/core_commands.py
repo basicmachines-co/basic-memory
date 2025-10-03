@@ -11,6 +11,7 @@ from basic_memory.cli.auth import CLIAuth
 from basic_memory.config import ConfigManager
 from basic_memory.cli.commands.cloud.api_client import (
     CloudAPIError,
+    SubscriptionRequiredError,
     get_cloud_config,
     make_api_request,
 )
@@ -41,19 +42,33 @@ def login():
         client_id, domain, host_url = get_cloud_config()
         auth = CLIAuth(client_id=client_id, authkit_domain=domain)
 
-        success = await auth.login()
-        if not success:
-            console.print("[red]Login failed[/red]")
+        try:
+            success = await auth.login()
+            if not success:
+                console.print("[red]Login failed[/red]")
+                raise typer.Exit(1)
+
+            # Test subscription access by calling a protected endpoint
+            console.print("[dim]Verifying subscription access...[/dim]")
+            await make_api_request("GET", f"{host_url.rstrip('/')}/proxy/health")
+
+            # Enable cloud mode after successful login and subscription validation
+            config_manager = ConfigManager()
+            config = config_manager.load_config()
+            config.cloud_mode = True
+            config_manager.save_config(config)
+
+            console.print("[green]✓ Cloud mode enabled[/green]")
+            console.print(f"[dim]All CLI commands now work against {host_url}[/dim]")
+
+        except SubscriptionRequiredError as e:
+            console.print("\n[red]✗ Subscription Required[/red]\n")
+            console.print(f"[yellow]{e.args[0]}[/yellow]\n")
+            console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
+            console.print(
+                "[dim]Once you have an active subscription, run [bold]bm cloud login[/bold] again.[/dim]"
+            )
             raise typer.Exit(1)
-
-        # Enable cloud mode after successful login
-        config_manager = ConfigManager()
-        config = config_manager.load_config()
-        config.cloud_mode = True
-        config_manager.save_config(config)
-
-        console.print("[green]✓ Cloud mode enabled[/green]")
-        console.print(f"[dim]All CLI commands now work against {host_url}[/dim]")
 
     asyncio.run(_login())
 

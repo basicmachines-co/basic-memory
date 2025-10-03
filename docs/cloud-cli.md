@@ -12,6 +12,15 @@ The cloud CLI enables you to:
 - **Integrity verification** with `bm cloud check`
 - **Automatic project creation** from local directories
 
+## Prerequisites
+
+Before using Basic Memory Cloud, you need:
+
+- **Active Subscription**: An active Basic Memory Cloud subscription is required to access cloud features
+- **Subscribe**: Visit [https://basicmemory.com/subscribe](https://basicmemory.com/subscribe) to sign up
+
+If you attempt to log in without an active subscription, you'll receive a "Subscription Required" error with a link to subscribe.
+
 ## The Cloud Mode Paradigm
 
 Basic Memory Cloud follows the **Dropbox/iCloud model** - a single cloud space containing all your projects, not per-project connections.
@@ -473,6 +482,26 @@ This shows:
 bm cloud logout
 bm cloud login
 ```
+
+### Subscription Issues
+
+**Problem**: "Subscription Required" error when logging in
+
+**Solution**: You need an active Basic Memory Cloud subscription to use cloud features.
+
+1. Visit the subscribe URL shown in the error message
+2. Sign up for a subscription
+3. Once your subscription is active, run `bm cloud login` again
+
+**Problem**: "Subscription Required" error for existing user
+
+**Solution**: Your subscription may have expired or been cancelled.
+
+1. Check your subscription status at [https://basicmemory.com/account](https://basicmemory.com/account)
+2. Renew your subscription if needed
+3. Run `bm cloud login` again
+
+Note: Access is immediately restored when your subscription becomes active.
 
 ### Sync Issues
 

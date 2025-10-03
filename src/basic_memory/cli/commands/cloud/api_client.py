@@ -15,7 +15,20 @@ console = Console()
 class CloudAPIError(Exception):
     """Exception raised for cloud API errors."""
 
-    pass
+    def __init__(
+        self, message: str, status_code: Optional[int] = None, detail: Optional[dict] = None
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail or {}
+
+
+class SubscriptionRequiredError(CloudAPIError):
+    """Exception raised when user needs an active subscription."""
+
+    def __init__(self, message: str, subscribe_url: str):
+        super().__init__(message, status_code=403, detail={"error": "subscription_required"})
+        self.subscribe_url = subscribe_url
 
 
 def get_cloud_config() -> tuple[str, str, str]:
@@ -56,25 +69,41 @@ async def make_api_request(
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            console.print(f"[dim]Making {method} request to {url}[/dim]")
-            # console.print(f"[dim]Headers: {dict(headers)}[/dim]")
-
             response = await client.request(method=method, url=url, headers=headers, json=json_data)
-
-            console.print(f"[dim]Response status: {response.status_code}[/dim]")
-            # console.print(f"[dim]Response headers: {dict(response.headers)}[/dim]")
-
             response.raise_for_status()
             return response
         except httpx.HTTPError as e:
-            console.print(f"[red]HTTP Error details: {e}[/red]")
             # Check if this is a response error with response details
             if hasattr(e, "response") and e.response is not None:  # pyright: ignore [reportAttributeAccessIssue]
                 response = e.response  # type: ignore
-                console.print(f"[red]Response status: {response.status_code}[/red]")
-                console.print(f"[red]Response headers: {dict(response.headers)}[/red]")
+
+                # Try to parse error detail from response
+                error_detail = None
                 try:
-                    console.print(f"[red]Response text: {response.text}[/red]")
+                    error_detail = response.json()
                 except Exception:
-                    console.print("[red]Could not read response text[/red]")
+                    # If JSON parsing fails, we'll handle it as a generic error
+                    pass
+
+                # Check for subscription_required error (403)
+                if response.status_code == 403 and isinstance(error_detail, dict):
+                    # Handle both FastAPI HTTPException format (nested under "detail")
+                    # and direct format
+                    detail_obj = error_detail.get("detail", error_detail)
+                    if isinstance(detail_obj, dict) and detail_obj.get("error") == "subscription_required":
+                        message = detail_obj.get("message", "Active subscription required")
+                        subscribe_url = detail_obj.get(
+                            "subscribe_url", "https://basicmemory.com/subscribe"
+                        )
+                        raise SubscriptionRequiredError(
+                            message=message, subscribe_url=subscribe_url
+                        ) from e
+
+                # Raise generic CloudAPIError with status code and detail
+                raise CloudAPIError(
+                    f"API request failed: {e}",
+                    status_code=response.status_code,
+                    detail=error_detail if isinstance(error_detail, dict) else {},
+                ) from e
+
             raise CloudAPIError(f"API request failed: {e}") from e
