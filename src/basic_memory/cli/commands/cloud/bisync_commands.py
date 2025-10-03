@@ -18,6 +18,14 @@ from basic_memory.cli.commands.cloud.rclone_config import (
 from basic_memory.cli.commands.cloud.rclone_installer import RcloneInstallError, install_rclone
 from basic_memory.config import ConfigManager
 from basic_memory.ignore_utils import get_bmignore_path, create_default_bmignore
+from basic_memory.schemas.cloud import (
+    TenantMountInfo,
+    MountCredentials,
+    CloudProjectList,
+    CloudProjectCreateRequest,
+    CloudProjectCreateResponse,
+)
+from basic_memory.utils import generate_permalink
 
 console = Console()
 
@@ -74,7 +82,7 @@ BISYNC_PROFILES = {
 }
 
 
-async def get_mount_info() -> dict:
+async def get_mount_info() -> TenantMountInfo:
     """Get current tenant information from cloud API."""
     try:
         config_manager = ConfigManager()
@@ -83,12 +91,12 @@ async def get_mount_info() -> dict:
 
         response = await make_api_request(method="GET", url=f"{host_url}/tenant/mount/info")
 
-        return response.json()
+        return TenantMountInfo.model_validate(response.json())
     except Exception as e:
         raise BisyncError(f"Failed to get tenant info: {e}") from e
 
 
-async def generate_mount_credentials(tenant_id: str) -> dict:
+async def generate_mount_credentials(tenant_id: str) -> MountCredentials:
     """Generate scoped credentials for syncing."""
     try:
         config_manager = ConfigManager()
@@ -97,16 +105,16 @@ async def generate_mount_credentials(tenant_id: str) -> dict:
 
         response = await make_api_request(method="POST", url=f"{host_url}/tenant/mount/credentials")
 
-        return response.json()
+        return MountCredentials.model_validate(response.json())
     except Exception as e:
         raise BisyncError(f"Failed to generate credentials: {e}") from e
 
 
-async def fetch_cloud_projects() -> dict:
+async def fetch_cloud_projects() -> CloudProjectList:
     """Fetch list of projects from cloud API.
 
     Returns:
-        Dict with 'projects' list from cloud
+        CloudProjectList with projects from cloud
     """
     try:
         config_manager = ConfigManager()
@@ -115,7 +123,7 @@ async def fetch_cloud_projects() -> dict:
 
         response = await make_api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
 
-        return response.json()
+        return CloudProjectList.model_validate(response.json())
     except Exception as e:
         raise BisyncError(f"Failed to fetch cloud projects: {e}") from e
 
@@ -140,14 +148,14 @@ def scan_local_directories(sync_dir: Path) -> list[str]:
     return directories
 
 
-async def create_cloud_project(project_name: str) -> dict:
+async def create_cloud_project(project_name: str) -> CloudProjectCreateResponse:
     """Create a new project on cloud.
 
     Args:
         project_name: Name of project to create
 
     Returns:
-        Project details from API response
+        CloudProjectCreateResponse with project details from API
     """
     try:
         config_manager = ConfigManager()
@@ -155,24 +163,22 @@ async def create_cloud_project(project_name: str) -> dict:
         host_url = config.cloud_host.rstrip("/")
 
         # Use generate_permalink to ensure consistent naming
-        from basic_memory.utils import generate_permalink
-
         project_path = generate_permalink(project_name)
 
-        project_data = {
-            "name": project_name,
-            "path": project_path,
-            "set_default": False,
-        }
+        project_data = CloudProjectCreateRequest(
+            name=project_name,
+            path=project_path,
+            set_default=False,
+        )
 
         response = await make_api_request(
             method="POST",
             url=f"{host_url}/proxy/projects/projects",
             headers={"Content-Type": "application/json"},
-            json_data=project_data,
+            json_data=project_data.model_dump(),
         )
 
-        return response.json()
+        return CloudProjectCreateResponse.model_validate(response.json())
     except Exception as e:
         raise BisyncError(f"Failed to create cloud project '{project_name}': {e}") from e
 
@@ -364,11 +370,8 @@ def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
         tenant_info = asyncio.run(get_mount_info())
 
-        tenant_id = tenant_info.get("tenant_id")
-        bucket_name = tenant_info.get("bucket_name")
-
-        if not tenant_id or not bucket_name:
-            raise BisyncError("Invalid tenant information received from cloud API")
+        tenant_id = tenant_info.tenant_id
+        bucket_name = tenant_info.bucket_name
 
         console.print(f"[green]✓ Found tenant: {tenant_id}[/green]")
         console.print(f"[green]✓ Bucket: {bucket_name}[/green]")
@@ -377,11 +380,8 @@ def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
         console.print("\n[blue]Step 3: Generating sync credentials...[/blue]")
         creds = asyncio.run(generate_mount_credentials(tenant_id))
 
-        access_key = creds.get("access_key")
-        secret_key = creds.get("secret_key")
-
-        if not access_key or not secret_key:
-            raise BisyncError("Failed to generate credentials")
+        access_key = creds.access_key
+        secret_key = creds.secret_key
 
         console.print("[green]✓ Generated secure credentials[/green]")
 
@@ -459,11 +459,8 @@ def run_bisync(
         # Get tenant info if not provided
         if not tenant_id or not bucket_name:
             tenant_info = asyncio.run(get_mount_info())
-            tenant_id = tenant_info.get("tenant_id")
-            bucket_name = tenant_info.get("bucket_name")
-
-            if not tenant_id or not bucket_name:
-                raise BisyncError("Could not determine tenant information")
+            tenant_id = tenant_info.tenant_id
+            bucket_name = tenant_info.bucket_name
 
         # Set default local path if not provided
         if not local_path:
@@ -494,17 +491,17 @@ def run_bisync(
 
                 # Fetch cloud projects and extract directory names from paths
                 cloud_data = asyncio.run(fetch_cloud_projects())
-                cloud_projects = cloud_data.get("projects", [])
+                cloud_projects = cloud_data.projects
 
                 # Extract directory names from cloud project paths
                 # Compare directory names, not project names
                 # Cloud path /app/data/basic-memory -> directory name "basic-memory"
                 cloud_dir_names = set()
                 for p in cloud_projects:
-                    path = p["path"]
+                    path = p.path
                     # Strip /app/data/ prefix if present (cloud mode)
                     if path.startswith("/app/data/"):
-                        path = path[len("/app/data/"):]
+                        path = path[len("/app/data/") :]
                     # Get the last segment (directory name)
                     dir_name = Path(path).name
                     cloud_dir_names.add(dir_name)
@@ -546,7 +543,13 @@ def run_bisync(
 
         # Build and execute bisync command
         bisync_cmd = build_bisync_command(
-            tenant_id, bucket_name, local_path, profile, dry_run=dry_run, resync=resync, verbose=verbose
+            tenant_id,
+            bucket_name,
+            local_path,
+            profile,
+            dry_run=dry_run,
+            resync=resync,
+            verbose=verbose,
         )
 
         if dry_run:
@@ -595,18 +598,16 @@ async def notify_container_sync(tenant_id: str) -> None:
 
         # Fetch all projects and sync each one
         cloud_data = await fetch_cloud_projects()
-        projects = cloud_data.get("projects", [])
+        projects = cloud_data.projects
 
         if not projects:
             console.print("[dim]No projects to sync[/dim]")
             return
 
-        console.print(
-            f"[blue]Notifying cloud to index {len(projects)} project(s)...[/blue]"
-        )
+        console.print(f"[blue]Notifying cloud to index {len(projects)} project(s)...[/blue]")
 
         for project in projects:
-            project_name = project.get("name")
+            project_name = project.name
             if project_name:
                 try:
                     await run_sync(project=project_name)
@@ -669,11 +670,7 @@ def show_bisync_status() -> None:
     try:
         # Get tenant info
         tenant_info = asyncio.run(get_mount_info())
-        tenant_id = tenant_info.get("tenant_id")
-
-        if not tenant_id:
-            console.print("[red]Could not determine tenant ID[/red]")
-            return
+        tenant_id = tenant_info.tenant_id
 
         local_path = get_bisync_directory()
         state_path = get_bisync_state_path(tenant_id)
@@ -753,11 +750,8 @@ def run_check(
         # Get tenant info if not provided
         if not tenant_id or not bucket_name:
             tenant_info = asyncio.run(get_mount_info())
-            tenant_id = tenant_id or tenant_info.get("tenant_id")
-            bucket_name = bucket_name or tenant_info.get("bucket_name")
-
-        if not tenant_id or not bucket_name:
-            raise BisyncError("Could not determine tenant_id or bucket_name")
+            tenant_id = tenant_id or tenant_info.tenant_id
+            bucket_name = bucket_name or tenant_info.bucket_name
 
         # Get local path from config
         if not local_path:
