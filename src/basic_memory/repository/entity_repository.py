@@ -101,11 +101,10 @@ class EntityRepository(Repository[Entity]):
         return list(result.scalars().all())
 
     async def upsert_entity(self, entity: Entity) -> Entity:
-        """Insert or update entity using a hybrid approach.
+        """Insert or update entity using simple try/catch with database-level conflict resolution.
 
-        This method provides a cleaner alternative to the try/catch approach
-        for handling permalink and file_path conflicts. It first tries direct
-        insertion, then handles conflicts intelligently.
+        Handles file_path race conditions by checking for existing entity on IntegrityError.
+        For permalink conflicts, generates a unique permalink with numeric suffix.
 
         Args:
             entity: The entity to insert or update
@@ -113,50 +112,12 @@ class EntityRepository(Repository[Entity]):
         Returns:
             The inserted or updated entity
         """
-
         async with db.scoped_session(self.session_maker) as session:
             # Set project_id if applicable and not already set
             self._set_project_id_if_needed(entity)
 
-            # Check for existing entity with same file_path first
-            existing_by_path = await session.execute(
-                select(Entity).where(
-                    Entity.file_path == entity.file_path, Entity.project_id == entity.project_id
-                )
-            )
-            existing_path_entity = existing_by_path.scalar_one_or_none()
-
-            if existing_path_entity:
-                # Update existing entity with same file path
-                for key, value in {
-                    "title": entity.title,
-                    "entity_type": entity.entity_type,
-                    "entity_metadata": entity.entity_metadata,
-                    "content_type": entity.content_type,
-                    "permalink": entity.permalink,
-                    "checksum": entity.checksum,
-                    "updated_at": entity.updated_at,
-                }.items():
-                    setattr(existing_path_entity, key, value)
-
-                await session.flush()
-                # Return with relationships loaded
-                query = (
-                    self.select()
-                    .where(Entity.file_path == entity.file_path)
-                    .options(*self.get_load_options())
-                )
-                result = await session.execute(query)
-                found = result.scalar_one_or_none()
-                if not found:  # pragma: no cover
-                    raise RuntimeError(
-                        f"Failed to retrieve entity after update: {entity.file_path}"
-                    )
-                return found
-
-            # No existing entity with same file_path, try insert
+            # Try simple insert first
             try:
-                # Simple insert for new entity
                 session.add(entity)
                 await session.flush()
 
@@ -175,20 +136,20 @@ class EntityRepository(Repository[Entity]):
                 return found
 
             except IntegrityError:
-                # Could be either file_path or permalink conflict
                 await session.rollback()
 
-                # Check if it's a file_path conflict (race condition)
-                existing_by_path_check = await session.execute(
-                    select(Entity).where(
+                # Re-query after rollback to get a fresh, attached entity
+                existing_result = await session.execute(
+                    select(Entity)
+                    .where(
                         Entity.file_path == entity.file_path, Entity.project_id == entity.project_id
                     )
+                    .options(*self.get_load_options())
                 )
-                race_condition_entity = existing_by_path_check.scalar_one_or_none()
+                existing_entity = existing_result.scalar_one_or_none()
 
-                if race_condition_entity:
-                    # Race condition: file_path conflict detected after our initial check
-                    # Update the existing entity instead
+                if existing_entity:
+                    # File path conflict - update the existing entity
                     for key, value in {
                         "title": entity.title,
                         "entity_type": entity.entity_type,
@@ -198,25 +159,22 @@ class EntityRepository(Repository[Entity]):
                         "checksum": entity.checksum,
                         "updated_at": entity.updated_at,
                     }.items():
-                        setattr(race_condition_entity, key, value)
+                        setattr(existing_entity, key, value)
 
-                    await session.flush()
-                    # Return the updated entity with relationships loaded
-                    query = (
-                        self.select()
-                        .where(Entity.file_path == entity.file_path)
-                        .options(*self.get_load_options())
-                    )
-                    result = await session.execute(query)
-                    found = result.scalar_one_or_none()
-                    if not found:  # pragma: no cover
-                        raise RuntimeError(
-                            f"Failed to retrieve entity after race condition update: {entity.file_path}"
-                        )
-                    return found
+                    # Clear and re-add observations
+                    existing_entity.observations.clear()
+                    for obs in entity.observations:
+                        obs.entity_id = existing_entity.id
+                        existing_entity.observations.append(obs)
+
+                    await session.commit()
+                    return existing_entity
+
                 else:
-                    # Must be permalink conflict - generate unique permalink
-                    return await self._handle_permalink_conflict(entity, session)
+                    # No file_path conflict - must be permalink conflict
+                    # Generate unique permalink and retry
+                    entity = await self._handle_permalink_conflict(entity, session)
+                    return entity
 
     async def _handle_permalink_conflict(self, entity: Entity, session: AsyncSession) -> Entity:
         """Handle permalink conflicts by generating a unique permalink."""
@@ -237,18 +195,7 @@ class EntityRepository(Repository[Entity]):
                 break
             suffix += 1
 
-        # Insert with unique permalink (no conflict possible now)
+        # Insert with unique permalink
         session.add(entity)
         await session.flush()
-
-        # Return the inserted entity with relationships loaded
-        query = (
-            self.select()
-            .where(Entity.file_path == entity.file_path)
-            .options(*self.get_load_options())
-        )
-        result = await session.execute(query)
-        found = result.scalar_one_or_none()
-        if not found:  # pragma: no cover
-            raise RuntimeError(f"Failed to retrieve entity after insert: {entity.file_path}")
-        return found
+        return entity

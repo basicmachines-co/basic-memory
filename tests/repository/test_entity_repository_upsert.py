@@ -149,10 +149,12 @@ async def test_upsert_entity_multiple_permalink_conflicts(entity_repository: Ent
 
 @pytest.mark.asyncio
 async def test_upsert_entity_race_condition_file_path(entity_repository: EntityRepository):
-    """Test that upsert handles race condition where file_path conflict occurs after initial check."""
-    from unittest.mock import patch
-    from sqlalchemy.exc import IntegrityError
+    """Test that upsert handles file_path conflicts using ON CONFLICT DO UPDATE.
 
+    With SQLite's ON CONFLICT, race conditions are handled at the database level
+    without requiring application-level checks. This test verifies that updating
+    an existing entity by file_path works correctly.
+    """
     # Create an entity first
     entity1 = Entity(
         project_id=entity_repository.project_id,
@@ -168,42 +170,27 @@ async def test_upsert_entity_race_condition_file_path(entity_repository: EntityR
     result1 = await entity_repository.upsert_entity(entity1)
     original_id = result1.id
 
-    # Create another entity with different file_path and permalink
+    # Create another entity with same file_path but different title and permalink
+    # This simulates a concurrent update scenario
     entity2 = Entity(
         project_id=entity_repository.project_id,
         title="Race Condition Test",
         entity_type="note",
         permalink="test/race-entity",
-        file_path="test/different-file.md",  # Different initially
+        file_path="test/race-file.md",  # Same file path as entity1
         content_type="text/markdown",
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
 
-    # Now simulate race condition: change file_path to conflict after the initial check
-    original_add = entity_repository.session_maker().add
-    call_count = 0
+    # ON CONFLICT should update the existing entity
+    result2 = await entity_repository.upsert_entity(entity2)
 
-    def mock_add(obj):
-        nonlocal call_count
-        if isinstance(obj, Entity) and call_count == 0:
-            call_count += 1
-            # Simulate race condition by changing file_path to conflict
-            obj.file_path = "test/race-file.md"  # Same as entity1
-            # This should trigger IntegrityError for file_path constraint
-            raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)
-        return original_add(obj)
-
-    # Mock session.add to simulate the race condition
-    with patch.object(entity_repository.session_maker().__class__, "add", side_effect=mock_add):
-        # This should handle the race condition gracefully by updating the existing entity
-        result2 = await entity_repository.upsert_entity(entity2)
-
-        # Should return the updated original entity (same ID)
-        assert result2.id == original_id
-        assert result2.title == "Race Condition Test"  # Updated title
-        assert result2.file_path == "test/race-file.md"  # Same file path
-        assert result2.permalink == "test/race-entity"  # Updated permalink
+    # Should return the updated original entity (same ID)
+    assert result2.id == original_id
+    assert result2.title == "Race Condition Test"  # Updated title
+    assert result2.file_path == "test/race-file.md"  # Same file path
+    assert result2.permalink == "test/race-entity"  # Updated permalink
 
 
 @pytest.mark.asyncio
