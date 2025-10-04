@@ -206,6 +206,115 @@ async def test_move_note_invalid_destination_path(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_move_note_missing_file_extension(client, test_project):
+    """Test moving note without file extension in destination path."""
+    # Create initial note
+    await write_note.fn(
+        project=test_project.name,
+        title="ExtensionTest",
+        folder="source",
+        content="# Extension Test\nTesting extension validation.",
+    )
+
+    # Test path without extension
+    result = await move_note.fn(
+        project=test_project.name,
+        identifier="source/extension-test",
+        destination_path="target/renamed-note",
+    )
+
+    # Should return error about missing extension
+    assert isinstance(result, str)
+    assert "# Move Failed - File Extension Required" in result
+    assert "must include a file extension" in result
+    assert ".md" in result
+    assert "renamed-note.md" in result  # Should suggest adding .md
+
+    # Test path with empty extension (edge case)
+    result = await move_note.fn(
+        project=test_project.name,
+        identifier="source/extension-test",
+        destination_path="target/renamed-note.",
+    )
+
+    assert isinstance(result, str)
+    assert "# Move Failed - File Extension Required" in result
+    assert "must include a file extension" in result
+
+    # Test that note still exists at original location
+    content = await read_note.fn("source/extension-test", project=test_project.name)
+    assert "# Extension Test" in content
+    assert "Testing extension validation" in content
+
+
+@pytest.mark.asyncio
+async def test_move_note_file_extension_mismatch(client, test_project):
+    """Test that moving note with different extension is blocked."""
+    # Create initial note with .md extension
+    await write_note.fn(
+        project=test_project.name,
+        title="MarkdownNote",
+        folder="source",
+        content="# Markdown Note\nThis is a markdown file.",
+    )
+
+    # Try to move with .txt extension
+    result = await move_note.fn(
+        project=test_project.name,
+        identifier="source/markdown-note",
+        destination_path="target/renamed-note.txt",
+    )
+
+    # Should return error about extension mismatch
+    assert isinstance(result, str)
+    assert "# Move Failed - File Extension Mismatch" in result
+    assert "does not match the source file extension" in result
+    assert ".md" in result
+    assert ".txt" in result
+    assert "renamed-note.md" in result  # Should suggest correct extension
+
+    # Test that note still exists at original location with original extension
+    content = await read_note.fn("source/markdown-note", project=test_project.name)
+    assert "# Markdown Note" in content
+    assert "This is a markdown file" in content
+
+
+@pytest.mark.asyncio
+async def test_move_note_preserves_file_extension(client, test_project):
+    """Test that moving note with matching extension succeeds."""
+    # Create initial note with .md extension
+    await write_note.fn(
+        project=test_project.name,
+        title="PreserveExtension",
+        folder="source",
+        content="# Preserve Extension\nTesting that extension is preserved.",
+    )
+
+    # Move with same .md extension
+    result = await move_note.fn(
+        project=test_project.name,
+        identifier="source/preserve-extension",
+        destination_path="target/preserved-note.md",
+    )
+
+    # Should succeed
+    assert isinstance(result, str)
+    assert "✅ Note moved successfully" in result
+
+    # Verify note exists at new location with same extension
+    content = await read_note.fn("target/preserved-note", project=test_project.name)
+    assert "# Preserve Extension" in content
+    assert "Testing that extension is preserved" in content
+
+    # Verify old location no longer exists
+    try:
+        await read_note.fn("source/preserve-extension")
+        assert False, "Original note should not exist after move"
+    except Exception:
+        pass  # Expected
+
+
+@pytest.mark.asyncio
 async def test_move_note_destination_exists(client, test_project):
     """Test moving note to existing destination."""
     # Create source note

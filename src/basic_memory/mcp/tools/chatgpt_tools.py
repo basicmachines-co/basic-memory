@@ -27,7 +27,7 @@ def _format_search_results_for_chatgpt(results: SearchResponse) -> List[Dict[str
         formatted_result = {
             "id": result.permalink or f"doc-{len(formatted_results)}",
             "title": result.title if result.title and result.title.strip() else "Untitled",
-            "url": result.permalink or ""
+            "url": result.permalink or "",
         }
         formatted_results.append(formatted_result)
 
@@ -43,11 +43,11 @@ def _format_document_for_chatgpt(
     """
     # Extract title from markdown content if not provided
     if not title and isinstance(content, str):
-        lines = content.split('\n')
-        if lines and lines[0].startswith('# '):
+        lines = content.split("\n")
+        if lines and lines[0].startswith("# "):
             title = lines[0][2:].strip()
         else:
-            title = identifier.split('/')[-1].replace('-', ' ').title()
+            title = identifier.split("/")[-1].replace("-", " ").title()
 
     # Ensure title is never None
     if not title:
@@ -60,7 +60,7 @@ def _format_document_for_chatgpt(
             "title": title or "Document Not Found",
             "text": content,
             "url": identifier,
-            "metadata": {"error": "Document not found"}
+            "metadata": {"error": "Document not found"},
         }
 
     return {
@@ -68,13 +68,11 @@ def _format_document_for_chatgpt(
         "title": title or "Untitled Document",
         "text": content,
         "url": identifier,
-        "metadata": {"format": "markdown"}
+        "metadata": {"format": "markdown"},
     }
 
 
-@mcp.tool(
-    description="Search for content across the knowledge base"
-)
+@mcp.tool(description="Search for content across the knowledge base")
 async def search(
     query: str,
     context: Context | None = None,
@@ -99,7 +97,7 @@ async def search(
             page=1,
             page_size=10,  # Reasonable default for ChatGPT consumption
             search_type="text",  # Default to full-text search
-            context=context
+            context=context,
         )
 
         # Handle string error responses from search_notes
@@ -108,7 +106,7 @@ async def search(
             search_results = {
                 "results": [],
                 "error": "Search failed",
-                "error_details": results[:500]  # Truncate long error messages
+                "error_details": results[:500],  # Truncate long error messages
             }
         else:
             # Format successful results for ChatGPT
@@ -116,36 +114,24 @@ async def search(
             search_results = {
                 "results": formatted_results,
                 "total_count": len(results.results),  # Use actual count from results
-                "query": query
+                "query": query,
             }
             logger.info(f"Search completed: {len(formatted_results)} results returned")
 
         # Return in MCP content array format as required by OpenAI
-        return [
-            {
-                "type": "text",
-                "text": json.dumps(search_results, ensure_ascii=False)
-            }
-        ]
+        return [{"type": "text", "text": json.dumps(search_results, ensure_ascii=False)}]
 
     except Exception as e:
         logger.error(f"ChatGPT search failed for query '{query}': {e}")
         error_results = {
             "results": [],
             "error": "Internal search error",
-            "error_message": str(e)[:200]
+            "error_message": str(e)[:200],
         }
-        return [
-            {
-                "type": "text",
-                "text": json.dumps(error_results, ensure_ascii=False)
-            }
-        ]
+        return [{"type": "text", "text": json.dumps(error_results, ensure_ascii=False)}]
 
 
-@mcp.tool(
-    description="Fetch the full contents of a search result document"
-)
+@mcp.tool(description="Fetch the full contents of a search result document")
 async def fetch(
     id: str,
     context: Context | None = None,
@@ -169,7 +155,7 @@ async def fetch(
             project=None,  # Let project resolution happen automatically
             page=1,
             page_size=10,  # Default pagination
-            context=context
+            context=context,
         )
 
         # Format the document for ChatGPT
@@ -178,12 +164,7 @@ async def fetch(
         logger.info(f"Fetch completed: id='{id}', content_length={len(document.get('text', ''))}")
 
         # Return in MCP content array format as required by OpenAI
-        return [
-            {
-                "type": "text",
-                "text": json.dumps(document, ensure_ascii=False)
-            }
-        ]
+        return [{"type": "text", "text": json.dumps(document, ensure_ascii=False)}]
 
     except Exception as e:
         logger.error(f"ChatGPT fetch failed for id '{id}': {e}")
@@ -192,11 +173,6 @@ async def fetch(
             "title": "Fetch Error",
             "text": f"Failed to fetch document: {str(e)[:200]}",
             "url": id,
-            "metadata": {"error": "Fetch failed"}
+            "metadata": {"error": "Fetch failed"},
         }
-        return [
-            {
-                "type": "text",
-                "text": json.dumps(error_document, ensure_ascii=False)
-            }
-        ]
+        return [{"type": "text", "text": json.dumps(error_document, ensure_ascii=False)}]

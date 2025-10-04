@@ -116,6 +116,9 @@ def config_home(tmp_path, monkeypatch) -> Path:
 @pytest.fixture(scope="function", autouse=True)
 def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
+    # Disable cloud mode for CLI tests
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
+
     # Create a basic config with test-project like unit tests do
     projects = {"test-project": str(config_home)}
     app_config = BasicMemoryConfig(
@@ -124,6 +127,7 @@ def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
         default_project="test-project",
         default_project_mode=True,
         update_permalinks_on_move=True,
+        cloud_mode=False,  # Explicitly disable cloud mode
     )
     return app_config
 

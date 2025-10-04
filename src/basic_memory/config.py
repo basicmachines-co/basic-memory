@@ -82,20 +82,25 @@ class BasicMemoryConfig(BaseSettings):
         description="Whether to sync changes in real time. default (True)",
     )
 
+    sync_thread_pool_size: int = Field(
+        default=4,
+        description="Size of thread pool for file I/O operations in sync service",
+        gt=0,
+    )
+
     kebab_filenames: bool = Field(
         default=False,
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",
     )
 
-    # API connection configuration
-    api_url: Optional[str] = Field(
-        default=None,
-        description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
+    skip_initialization_sync: bool = Field(
+        default=False,
+        description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
     )
 
     # Cloud configuration
     cloud_client_id: str = Field(
-        default="client_01K4DGBWAZWP83N3H8VVEMRX6W",
+        default="client_01K6KWQPW6J1M8VV7R3TZP5A6M",
         description="OAuth client ID for Basic Memory Cloud",
     )
 
@@ -105,8 +110,39 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     cloud_host: str = Field(
-        default="https://cloud.basicmemory.com",
-        description="Basic Memory Cloud proxy host URL",
+        default_factory=lambda: os.getenv(
+            "BASIC_MEMORY_CLOUD_HOST", "https://cloud.basicmemory.com"
+        ),
+        description="Basic Memory Cloud host URL",
+    )
+
+    cloud_mode: bool = Field(
+        default=False,
+        description="Enable cloud mode - all requests go to cloud instead of local (config file value)",
+    )
+
+    @property
+    def cloud_mode_enabled(self) -> bool:
+        """Check if cloud mode is enabled.
+
+        Priority:
+        1. BASIC_MEMORY_CLOUD_MODE environment variable
+        2. Config file value (cloud_mode)
+        """
+        env_value = os.environ.get("BASIC_MEMORY_CLOUD_MODE", "").lower()
+        if env_value in ("true", "1", "yes"):
+            return True
+        elif env_value in ("false", "0", "no"):
+            return False
+        # Fall back to config file value
+        return self.cloud_mode
+
+    bisync_config: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "profile": "balanced",
+            "sync_dir": str(Path.home() / "basic-memory-cloud-sync"),
+        },
+        description="Bisync configuration for cloud sync",
     )
 
     model_config = SettingsConfigDict(
@@ -304,7 +340,7 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
     os_project_name = os.environ.get("BASIC_MEMORY_PROJECT", None)
     if os_project_name:  # pragma: no cover
         logger.warning(
-            f"BASIC_MEMORY_PROJECT is not supported anymore. Use the --project flag or set the default project in the config instead. Setting default project to {os_project_name}"
+            f"BASIC_MEMORY_PROJECT is not supported anymore. Set the default project in the config instead. Setting default project to {os_project_name}"
         )
         actual_project_name = project_name
     # if the project_name is passed in, use it
@@ -333,15 +369,6 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
         file_path.write_text(json.dumps(config.model_dump(), indent=2))
     except Exception as e:  # pragma: no cover
         logger.error(f"Failed to save config: {e}")
-
-
-def update_current_project(project_name: str) -> None:
-    """Update the global config to use a different project.
-
-    This is used by the CLI when --project flag is specified.
-    """
-    global config
-    config = get_project_config(project_name)  # pragma: no cover
 
 
 # setup logging to a single log file in user home directory

@@ -130,7 +130,8 @@ async def read_note(
         query=identifier, search_type="title", project=project, context=context
     )
 
-    if title_results and title_results.results:
+    # Handle both SearchResponse object and error strings
+    if title_results and hasattr(title_results, "results") and title_results.results:
         result = title_results.results[0]  # Get the first/best match
         if result.permalink:
             try:
@@ -159,7 +160,8 @@ async def read_note(
     )
 
     # We didn't find a direct match, construct a helpful error message
-    if not text_results or not text_results.results:
+    # Handle both SearchResponse object and error strings
+    if not text_results or not hasattr(text_results, "results") or not text_results.results:
         # No results at all
         return format_not_found_message(active_project.name, identifier)
     else:

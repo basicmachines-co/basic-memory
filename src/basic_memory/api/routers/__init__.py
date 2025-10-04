@@ -7,6 +7,5 @@ from . import project_router as project
 from . import resource_router as resource
 from . import search_router as search
 from . import prompt_router as prompt
-from . import webdav_router as webdav
 
-__all__ = ["knowledge", "management", "memory", "project", "resource", "search", "prompt", "webdav"]
+__all__ = ["knowledge", "management", "memory", "project", "resource", "search", "prompt"]
