@@ -121,7 +121,9 @@ class WatchService:
                         ignore_patterns = self._get_ignore_patterns(project_path)
 
                         if should_ignore_path(file_path, project_path, ignore_patterns):
-                            logger.trace(f"Ignoring watched file change: {file_path.relative_to(project_path)}")
+                            logger.trace(
+                                f"Ignoring watched file change: {file_path.relative_to(project_path)}"
+                            )
                             continue
 
                         project_changes[project].append((change, path))

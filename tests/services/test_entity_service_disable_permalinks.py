@@ -1,12 +1,10 @@
 """Tests for EntityService with disable_permalinks flag."""
 
-from pathlib import Path
 from textwrap import dedent
 import pytest
 import yaml
 
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.models import Entity as EntityModel
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService
@@ -185,9 +183,7 @@ async def test_move_entity_with_permalinks_disabled(
 ):
     """Test that moving an entity with disable_permalinks=True doesn't update permalinks."""
     # First create with permalinks enabled
-    app_config = BasicMemoryConfig(
-        disable_permalinks=False, update_permalinks_on_move=True
-    )
+    app_config = BasicMemoryConfig(disable_permalinks=False, update_permalinks_on_move=True)
     entity_service = EntityService(
         entity_parser=entity_parser,
         entity_repository=entity_repository,
@@ -210,9 +206,7 @@ async def test_move_entity_with_permalinks_disabled(
     original_permalink = entity.permalink
 
     # Now disable permalinks
-    app_config_disabled = BasicMemoryConfig(
-        disable_permalinks=True, update_permalinks_on_move=True
-    )
+    app_config_disabled = BasicMemoryConfig(disable_permalinks=True, update_permalinks_on_move=True)
 
     # Move entity
     moved = await entity_service.move_entity(

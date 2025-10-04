@@ -147,9 +147,9 @@ class EntityService(BaseService[EntityModel]):
         )
 
         # Try to find existing entity using smart resolution
-        existing = await self.link_resolver.resolve_link(
-            schema.file_path
-        ) or await self.link_resolver.resolve_link(schema.permalink)
+        existing = await self.link_resolver.resolve_link(schema.file_path)
+        if not existing and schema.permalink:
+            existing = await self.link_resolver.resolve_link(schema.permalink)
 
         if existing:
             logger.debug(f"Found existing entity: {existing.file_path}")
@@ -197,12 +197,14 @@ class EntityService(BaseService[EntityModel]):
                 )
 
         # Get unique permalink (prioritizing content frontmatter) unless disabled
-        if self.app_config and not self.app_config.disable_permalinks:
+        if self.app_config and self.app_config.disable_permalinks:
+            # Use empty string as sentinel to indicate permalinks are disabled
+            # The permalink property will return None when it sees empty string
+            schema._permalink = ""
+        else:
+            # Generate and set permalink
             permalink = await self.resolve_permalink(file_path, content_markdown)
             schema._permalink = permalink
-        else:
-            # If permalinks are disabled, set to None
-            schema._permalink = None
 
         post = await schema_to_markdown(schema)
 
@@ -754,9 +756,8 @@ class EntityService(BaseService[EntityModel]):
             updates = {"file_path": destination_path}
 
             # 7. Update permalink if configured or if entity has null permalink (unless disabled)
-            if (
-                not app_config.disable_permalinks
-                and (app_config.update_permalinks_on_move or old_permalink is None)
+            if not app_config.disable_permalinks and (
+                app_config.update_permalinks_on_move or old_permalink is None
             ):
                 # Generate new permalink from destination path
                 new_permalink = await self.resolve_permalink(destination_path)

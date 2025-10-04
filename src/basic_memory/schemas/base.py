@@ -197,6 +197,7 @@ class Entity(BaseModel):
     """
 
     # private field to override permalink
+    # Use empty string "" as sentinel to indicate permalinks are explicitly disabled
     _permalink: Optional[str] = None
 
     title: str
@@ -247,8 +248,11 @@ class Entity(BaseModel):
             return os.path.join(self.folder, safe_title) if self.folder else safe_title
 
     @property
-    def permalink(self) -> Permalink:
+    def permalink(self) -> Optional[Permalink]:
         """Get a url friendly path}."""
+        # Empty string is a sentinel value indicating permalinks are disabled
+        if self._permalink == "":
+            return None
         return self._permalink or generate_permalink(self.file_path)
 
     @model_validator(mode="after")
