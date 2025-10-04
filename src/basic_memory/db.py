@@ -83,20 +83,22 @@ def _create_engine_and_session(
     logger.debug(f"Creating engine for db_url: {db_url}")
 
     # Configure connection args with Windows-specific settings
-    connect_args = {"check_same_thread": False}
+    connect_args: dict[str, bool | float | None] = {"check_same_thread": False}
 
     # Add Windows-specific parameters to improve reliability
-    if os.name == 'nt':  # Windows
-        connect_args.update({
-            "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
-            "isolation_level": None,  # Use autocommit mode
-        })
+    if os.name == "nt":  # Windows
+        connect_args.update(
+            {
+                "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
+                "isolation_level": None,  # Use autocommit mode
+            }
+        )
         # Use NullPool for Windows to avoid connection pooling issues
         engine = create_async_engine(
             db_url,
             connect_args=connect_args,
             poolclass=NullPool,  # Disable connection pooling on Windows
-            echo=False
+            echo=False,
         )
     else:
         engine = create_async_engine(db_url, connect_args=connect_args)
@@ -115,7 +117,7 @@ def _create_engine_and_session(
         cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
         cursor.execute("PRAGMA temp_store=MEMORY")
         # Windows-specific optimizations
-        if os.name == 'nt':
+        if os.name == "nt":
             cursor.execute("PRAGMA locking_mode=NORMAL")  # Ensure normal locking on Windows
         cursor.close()
 
@@ -180,20 +182,22 @@ async def engine_session_factory(
     logger.debug(f"Creating engine for db_url: {db_url}")
 
     # Configure connection args with Windows-specific settings
-    connect_args = {"check_same_thread": False}
+    connect_args: dict[str, bool | float | None] = {"check_same_thread": False}
 
     # Add Windows-specific parameters to improve reliability
-    if os.name == 'nt':  # Windows
-        connect_args.update({
-            "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
-            "isolation_level": None,  # Use autocommit mode
-        })
+    if os.name == "nt":  # Windows
+        connect_args.update(
+            {
+                "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
+                "isolation_level": None,  # Use autocommit mode
+            }
+        )
         # Use NullPool for Windows to avoid connection pooling issues
         _engine = create_async_engine(
             db_url,
             connect_args=connect_args,
             poolclass=NullPool,  # Disable connection pooling on Windows
-            echo=False
+            echo=False,
         )
     else:
         _engine = create_async_engine(db_url, connect_args=connect_args)
@@ -212,7 +216,7 @@ async def engine_session_factory(
         cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
         cursor.execute("PRAGMA temp_store=MEMORY")
         # Windows-specific optimizations
-        if os.name == 'nt':
+        if os.name == "nt":
             cursor.execute("PRAGMA locking_mode=NORMAL")  # Ensure normal locking on Windows
         cursor.close()
 
