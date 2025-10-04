@@ -159,8 +159,6 @@ class BasicMemoryConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
-        env_file=".env",
-        env_file_encoding="utf-8",
     )
 
     def get_project_path(self, project_name: Optional[str] = None) -> Path:  # pragma: no cover
