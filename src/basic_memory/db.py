@@ -83,19 +83,24 @@ def _configure_sqlite_connection(dbapi_conn, enable_wal: bool = True) -> None:
         enable_wal: Whether to enable WAL mode (should be False for in-memory databases)
     """
     cursor = dbapi_conn.cursor()
-    # Enable WAL mode for better concurrency (not supported for in-memory databases)
-    if enable_wal:
-        cursor.execute("PRAGMA journal_mode=WAL")
-    # Set busy timeout to handle locked databases
-    cursor.execute("PRAGMA busy_timeout=10000")  # 10 seconds
-    # Optimize for performance
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
-    cursor.execute("PRAGMA temp_store=MEMORY")
-    # Windows-specific optimizations
-    if os.name == "nt":
-        cursor.execute("PRAGMA locking_mode=NORMAL")  # Ensure normal locking on Windows
-    cursor.close()
+    try:
+        # Enable WAL mode for better concurrency (not supported for in-memory databases)
+        if enable_wal:
+            cursor.execute("PRAGMA journal_mode=WAL")
+        # Set busy timeout to handle locked databases
+        cursor.execute("PRAGMA busy_timeout=10000")  # 10 seconds
+        # Optimize for performance
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        # Windows-specific optimizations
+        if os.name == "nt":
+            cursor.execute("PRAGMA locking_mode=NORMAL")  # Ensure normal locking on Windows
+    except Exception as e:
+        # Log but don't fail - some PRAGMAs may not be supported
+        logger.warning(f"Failed to configure SQLite connection: {e}")
+    finally:
+        cursor.close()
 
 
 def _create_engine_and_session(
@@ -116,13 +121,19 @@ def _create_engine_and_session(
                 "isolation_level": None,  # Use autocommit mode
             }
         )
-        # Use NullPool for Windows to avoid connection pooling issues
-        engine = create_async_engine(
-            db_url,
-            connect_args=connect_args,
-            poolclass=NullPool,  # Disable connection pooling on Windows
-            echo=False,
-        )
+        # Use NullPool for Windows filesystem databases to avoid connection pooling issues
+        # Important: Do NOT use NullPool for in-memory databases as it will destroy the database
+        # between connections
+        if db_type == DatabaseType.FILESYSTEM:
+            engine = create_async_engine(
+                db_url,
+                connect_args=connect_args,
+                poolclass=NullPool,  # Disable connection pooling on Windows
+                echo=False,
+            )
+        else:
+            # In-memory databases need connection pooling to maintain state
+            engine = create_async_engine(db_url, connect_args=connect_args)
     else:
         engine = create_async_engine(db_url, connect_args=connect_args)
 
@@ -206,13 +217,19 @@ async def engine_session_factory(
                 "isolation_level": None,  # Use autocommit mode
             }
         )
-        # Use NullPool for Windows to avoid connection pooling issues
-        _engine = create_async_engine(
-            db_url,
-            connect_args=connect_args,
-            poolclass=NullPool,  # Disable connection pooling on Windows
-            echo=False,
-        )
+        # Use NullPool for Windows filesystem databases to avoid connection pooling issues
+        # Important: Do NOT use NullPool for in-memory databases as it will destroy the database
+        # between connections
+        if db_type == DatabaseType.FILESYSTEM:
+            _engine = create_async_engine(
+                db_url,
+                connect_args=connect_args,
+                poolclass=NullPool,  # Disable connection pooling on Windows
+                echo=False,
+            )
+        else:
+            # In-memory databases need connection pooling to maintain state
+            _engine = create_async_engine(db_url, connect_args=connect_args)
     else:
         _engine = create_async_engine(db_url, connect_args=connect_args)
 

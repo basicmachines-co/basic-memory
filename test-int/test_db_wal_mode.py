@@ -123,3 +123,21 @@ async def test_regular_pool_on_non_windows(tmp_path):
         async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (engine, _):
             # Engine should NOT be using NullPool on non-Windows
             assert not isinstance(engine.pool, NullPool)
+
+
+@pytest.mark.asyncio
+async def test_memory_database_no_null_pool_on_windows(tmp_path):
+    """Test that in-memory databases do NOT use NullPool even on Windows.
+
+    NullPool closes connections immediately, which destroys in-memory databases.
+    This test ensures in-memory databases maintain connection pooling.
+    """
+    from basic_memory.db import engine_session_factory, DatabaseType
+    from sqlalchemy.pool import NullPool
+
+    db_path = tmp_path / "test_memory.db"
+
+    with patch("basic_memory.db.os.name", "nt"):
+        async with engine_session_factory(db_path, DatabaseType.MEMORY) as (engine, _):
+            # In-memory databases should NOT use NullPool on Windows
+            assert not isinstance(engine.pool, NullPool)
