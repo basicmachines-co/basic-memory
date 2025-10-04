@@ -341,8 +341,6 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
         logger.error(f"Failed to save config: {e}")
 
 
-
-
 # setup logging to a single log file in user home directory
 user_home = Path.home()
 log_dir = user_home / DATA_DIR_NAME

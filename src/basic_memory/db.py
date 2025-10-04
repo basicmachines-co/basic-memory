@@ -75,11 +75,17 @@ async def scoped_session(
         await factory.remove()
 
 
-def _configure_sqlite_connection(dbapi_conn) -> None:
-    """Configure SQLite connection with WAL mode and optimizations."""
+def _configure_sqlite_connection(dbapi_conn, enable_wal: bool = True) -> None:
+    """Configure SQLite connection with WAL mode and optimizations.
+
+    Args:
+        dbapi_conn: Database API connection object
+        enable_wal: Whether to enable WAL mode (should be False for in-memory databases)
+    """
     cursor = dbapi_conn.cursor()
-    # Enable WAL mode for better concurrency
-    cursor.execute("PRAGMA journal_mode=WAL")
+    # Enable WAL mode for better concurrency (not supported for in-memory databases)
+    if enable_wal:
+        cursor.execute("PRAGMA journal_mode=WAL")
     # Set busy timeout to handle locked databases
     cursor.execute("PRAGMA busy_timeout=10000")  # 10 seconds
     # Optimize for performance
@@ -121,10 +127,13 @@ def _create_engine_and_session(
         engine = create_async_engine(db_url, connect_args=connect_args)
 
     # Enable WAL mode for better concurrency and reliability
+    # Note: WAL mode is not supported for in-memory databases
+    enable_wal = db_type != DatabaseType.MEMORY
+
     @event.listens_for(engine.sync_engine, "connect")
     def enable_wal_mode(dbapi_conn, connection_record):
         """Enable WAL mode on each connection."""
-        _configure_sqlite_connection(dbapi_conn)
+        _configure_sqlite_connection(dbapi_conn, enable_wal=enable_wal)
 
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_maker
@@ -208,10 +217,13 @@ async def engine_session_factory(
         _engine = create_async_engine(db_url, connect_args=connect_args)
 
     # Enable WAL mode for better concurrency and reliability
+    # Note: WAL mode is not supported for in-memory databases
+    enable_wal = db_type != DatabaseType.MEMORY
+
     @event.listens_for(_engine.sync_engine, "connect")
     def enable_wal_mode(dbapi_conn, connection_record):
         """Enable WAL mode on each connection."""
-        _configure_sqlite_connection(dbapi_conn)
+        _configure_sqlite_connection(dbapi_conn, enable_wal=enable_wal)
 
     try:
         _session_maker = async_sessionmaker(_engine, expire_on_commit=False)

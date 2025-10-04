@@ -19,7 +19,7 @@ async def test_search_successful_results():
                 content="This is test content for document 1",
                 type=SearchItemType.ENTITY,
                 score=1.0,
-                file_path="/test/docs/test-doc-1.md"
+                file_path="/test/docs/test-doc-1.md",
             ),
             SearchResult(
                 title="Test Document 2",
@@ -27,21 +27,21 @@ async def test_search_successful_results():
                 content="This is test content for document 2",
                 type=SearchItemType.ENTITY,
                 score=0.9,
-                file_path="/test/docs/test-doc-2.md"
-            )
+                file_path="/test/docs/test-doc-2.md",
+            ),
         ],
         current_page=1,
-        page_size=10
+        page_size=10,
     )
 
     with patch(
-        'basic_memory.mcp.tools.chatgpt_tools.search_notes.fn',
-        new_callable=AsyncMock
+        "basic_memory.mcp.tools.chatgpt_tools.search_notes.fn", new_callable=AsyncMock
     ) as mock_search:
         mock_search.return_value = mock_results
 
         # Import and call the actual function
         from basic_memory.mcp.tools.chatgpt_tools import search
+
         result = await search.fn("test query")
 
         # Verify MCP content array format
@@ -71,12 +71,12 @@ async def test_search_with_error_response():
     error_message = "# Search Failed - Invalid Syntax\n\nThe search query contains errors..."
 
     with patch(
-        'basic_memory.mcp.tools.chatgpt_tools.search_notes.fn',
-        new_callable=AsyncMock
+        "basic_memory.mcp.tools.chatgpt_tools.search_notes.fn", new_callable=AsyncMock
     ) as mock_search:
         mock_search.return_value = error_message
 
         from basic_memory.mcp.tools.chatgpt_tools import search
+
         result = await search.fn("invalid query")
 
         # Verify MCP content array format
@@ -109,12 +109,12 @@ Some content here.
 """
 
     with patch(
-        'basic_memory.mcp.tools.chatgpt_tools.read_note.fn',
-        new_callable=AsyncMock
+        "basic_memory.mcp.tools.chatgpt_tools.read_note.fn", new_callable=AsyncMock
     ) as mock_read:
         mock_read.return_value = document_content
 
         from basic_memory.mcp.tools.chatgpt_tools import fetch
+
         result = await fetch.fn("docs/test-document")
 
         # Verify MCP content array format
@@ -143,12 +143,12 @@ I couldn't find any notes matching "nonexistent-doc". Here are some suggestions:
 """
 
     with patch(
-        'basic_memory.mcp.tools.chatgpt_tools.read_note.fn',
-        new_callable=AsyncMock
+        "basic_memory.mcp.tools.chatgpt_tools.read_note.fn", new_callable=AsyncMock
     ) as mock_read:
         mock_read.return_value = error_content
 
         from basic_memory.mcp.tools.chatgpt_tools import fetch
+
         result = await fetch.fn("nonexistent-doc")
 
         # Verify MCP content array format
@@ -175,7 +175,7 @@ def test_format_search_results_for_chatgpt():
                 content="Content for document one",
                 type=SearchItemType.ENTITY,
                 score=1.0,
-                file_path="/test/docs/doc-one.md"
+                file_path="/test/docs/doc-one.md",
             ),
             SearchResult(
                 title="",  # Test empty title handling
@@ -183,11 +183,11 @@ def test_format_search_results_for_chatgpt():
                 content="Content without title",
                 type=SearchItemType.ENTITY,
                 score=0.8,
-                file_path="/test/docs/untitled.md"
-            )
+                file_path="/test/docs/untitled.md",
+            ),
         ],
         current_page=1,
-        page_size=10
+        page_size=10,
     )
 
     formatted = _format_search_results_for_chatgpt(mock_results)
@@ -219,7 +219,7 @@ def test_format_document_error_handling():
     """Test document formatting with error content."""
     from basic_memory.mcp.tools.chatgpt_tools import _format_document_for_chatgpt
 
-    error_content = "# Note Not Found: \"missing-doc\"\n\nDocument not found."
+    error_content = '# Note Not Found: "missing-doc"\n\nDocument not found.'
     result = _format_document_for_chatgpt(error_content, "missing-doc", "Missing Doc")
 
     assert result["id"] == "missing-doc"
