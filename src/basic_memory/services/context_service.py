@@ -100,19 +100,27 @@ class ContextService:
             f"Building context for URI: '{memory_url}' depth: '{depth}' since: '{since}' limit: '{limit}' offset: '{offset}'  max_related: '{max_related}'"
         )
 
+        normalized_path: Optional[str] = None
         if memory_url:
             path = memory_url_path(memory_url)
-            # Normalize the path by converting underscores to hyphens to match stored permalinks
-            normalized_path = generate_permalink(path, split_extension=False)
-            # Pattern matching - use search
-            if "*" in normalized_path:
+            # Check for wildcards before normalization
+            has_wildcard = "*" in path
+
+            if has_wildcard:
+                # For wildcard patterns, normalize each segment separately to preserve the *
+                parts = path.split("*")
+                normalized_parts = [
+                    generate_permalink(part, split_extension=False) if part else ""
+                    for part in parts
+                ]
+                normalized_path = "*".join(normalized_parts)
                 logger.debug(f"Pattern search for '{normalized_path}'")
                 primary = await self.search_repository.search(
                     permalink_match=normalized_path, limit=limit, offset=offset
                 )
-
-            # Direct lookup for exact path
             else:
+                # For exact paths, normalize the whole thing
+                normalized_path = generate_permalink(path, split_extension=False)
                 logger.debug(f"Direct lookup for '{normalized_path}'")
                 primary = await self.search_repository.search(
                     permalink=normalized_path, limit=limit, offset=offset
