@@ -11,7 +11,10 @@ from loguru import logger
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.repository import ProjectRepository
+from basic_memory.models import Project
+from basic_memory.repository import (
+    ProjectRepository,
+)
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
@@ -101,18 +104,20 @@ async def initialize_file_sync(
     # Get active projects
     active_projects = await project_repository.get_active_projects()
 
-    # First, sync all projects sequentially
-    for project in active_projects:
+    # Start sync for all projects as background tasks (non-blocking)
+    async def sync_project_background(project: Project):
+        """Sync a single project in the background."""
         # avoid circular imports
-        from basic_memory.cli.commands.sync import get_sync_service
+        from basic_memory.sync.sync_service import get_sync_service
 
-        logger.info(f"Starting sync for project: {project.name}")
-        sync_service = await get_sync_service(project)
-        sync_dir = Path(project.path)
-
+        logger.info(f"Starting background sync for project: {project.name}")
         try:
+            # Create sync service
+            sync_service = await get_sync_service(project)
+
+            sync_dir = Path(project.path)
             await sync_service.sync(sync_dir, project_name=project.name)
-            logger.info(f"Sync completed successfully for project: {project.name}")
+            logger.info(f"Background sync completed successfully for project: {project.name}")
 
             # Mark project as watching for changes after successful sync
             from basic_memory.services.sync_status_service import sync_status_tracker
@@ -120,12 +125,19 @@ async def initialize_file_sync(
             sync_status_tracker.start_project_watch(project.name)
             logger.info(f"Project {project.name} is now watching for changes")
         except Exception as e:  # pragma: no cover
-            logger.error(f"Error syncing project {project.name}: {e}")
+            logger.error(f"Error in background sync for project {project.name}: {e}")
             # Mark sync as failed for this project
             from basic_memory.services.sync_status_service import sync_status_tracker
 
             sync_status_tracker.fail_project_sync(project.name, str(e))
-            # Continue with other projects even if one fails
+
+    # Create background tasks for all project syncs (non-blocking)
+    sync_tasks = [
+        asyncio.create_task(sync_project_background(project)) for project in active_projects
+    ]
+    logger.info(f"Created {len(sync_tasks)} background sync tasks")
+
+    # Don't await the tasks - let them run in background while we continue
 
     # Then start the watch service in the background
     logger.info("Starting watch service for all projects")
@@ -169,9 +181,16 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
     This is a wrapper for the async initialize_app function that can be
     called from synchronous code like CLI entry points.
 
+    No-op if app_config.cloud_mode == True. Cloud basic memory manages it's own projects
+
     Args:
         app_config: The Basic Memory project configuration
     """
+    # Skip initialization in cloud mode - cloud manages its own projects
+    if app_config.cloud_mode_enabled:
+        logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
+        return
+
     try:
         result = asyncio.run(initialize_app(app_config))
         logger.info(f"Initialization completed successfully: result={result}")

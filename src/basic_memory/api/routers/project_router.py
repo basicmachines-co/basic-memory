@@ -1,11 +1,17 @@
 """Router for project management."""
 
 import os
-from fastapi import APIRouter, HTTPException, Path, Body
+from fastapi import APIRouter, HTTPException, Path, Body, BackgroundTasks
 from typing import Optional
+from loguru import logger
 
-from basic_memory.deps import ProjectServiceDep, ProjectPathDep
-from basic_memory.schemas import ProjectInfoResponse
+from basic_memory.deps import (
+    ProjectConfigDep,
+    ProjectServiceDep,
+    ProjectPathDep,
+    SyncServiceDep,
+)
+from basic_memory.schemas import ProjectInfoResponse, SyncReportResponse
 from basic_memory.schemas.project_info import (
     ProjectList,
     ProjectItem,
@@ -95,6 +101,54 @@ async def update_project(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# Sync project filesystem
+@project_router.post("/sync")
+async def sync_project(
+    background_tasks: BackgroundTasks,
+    sync_service: SyncServiceDep,
+    project_config: ProjectConfigDep,
+):
+    """Force project filesystem sync to database.
+
+    Scans the project directory and updates the database with any new or modified files.
+
+    Args:
+        background_tasks: FastAPI background tasks
+        sync_service: Sync service for this project
+        project_config: Project configuration
+
+    Returns:
+        Response confirming sync was initiated
+    """
+    background_tasks.add_task(sync_service.sync, project_config.home, project_config.name)
+    logger.info(f"Filesystem sync initiated for project: {project_config.name}")
+
+    return {
+        "status": "sync_started",
+        "message": f"Filesystem sync initiated for project '{project_config.name}'",
+    }
+
+
+@project_router.post("/status", response_model=SyncReportResponse)
+async def project_sync_status(
+    sync_service: SyncServiceDep,
+    project_config: ProjectConfigDep,
+) -> SyncReportResponse:
+    """Scan directory for changes compared to database state.
+
+    Args:
+        sync_service: Sync service for this project
+        project_config: Project configuration
+
+    Returns:
+        Scan report with details on files that need syncing
+    """
+    logger.info(f"Scanning filesystem for project: {project_config.name}")
+    sync_report = await sync_service.scan(project_config.home)
+
+    return SyncReportResponse.from_sync_report(sync_report)
 
 
 # List all available projects
@@ -259,7 +313,7 @@ async def get_default_project(
 
 
 # Synchronize projects between config and database
-@project_resource_router.post("/sync", response_model=ProjectStatusResponse)
+@project_resource_router.post("/config/sync", response_model=ProjectStatusResponse)
 async def synchronize_projects(
     project_service: ProjectServiceDep,
 ) -> ProjectStatusResponse:

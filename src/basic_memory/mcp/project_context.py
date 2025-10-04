@@ -5,24 +5,30 @@ Handles project validation and context management in one place.
 """
 
 import os
-from typing import Optional
+from typing import Optional, List
 from httpx import AsyncClient
+from httpx._types import (
+    HeaderTypes,
+)
 from loguru import logger
 from fastmcp import Context
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.schemas.project_info import ProjectItem
+from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
 
 async def resolve_project_parameter(project: Optional[str] = None) -> Optional[str]:
     """Resolve project parameter using three-tier hierarchy.
 
-    Resolution order:
-    1. Single Project Mode  (--project cli arg, or BASIC_MEMORY_MCP_PROJECT env var) - highest priority
-    2. Explicit project parameter - medium priority
-    3. Default project if default_project_mode=true - lowest priority
+    if config.cloud_mode:
+        project is required
+    else:
+        Resolution order:
+        1. Single Project Mode  (--project cli arg, or BASIC_MEMORY_MCP_PROJECT env var) - highest priority
+        2. Explicit project parameter - medium priority
+        3. Default project if default_project_mode=true - lowest priority
 
     Args:
         project: Optional explicit project parameter
@@ -30,6 +36,16 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
     Returns:
         Resolved project name or None if no resolution possible
     """
+
+    config = ConfigManager().config
+    # if cloud_mode, project is required
+    if config.cloud_mode:
+        if project:
+            logger.debug(f"project: {project}, cloud_mode: {config.cloud_mode}")
+            return project
+        else:
+            raise ValueError("No project specified. Project is required for cloud mode.")
+
     # Priority 1: CLI constraint overrides everything (--project arg sets env var)
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
     if constrained_project:
@@ -42,7 +58,6 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
         return project
 
     # Priority 3: Default project mode
-    config = ConfigManager().config
     if config.default_project_mode:
         logger.debug(f"Using default project from config: {config.default_project}")
         return config.default_project
@@ -51,15 +66,19 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
     return None
 
 
+async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = None) -> List[str]:
+    response = await call_get(client, "/projects/projects", headers=headers)
+    project_list = ProjectList.model_validate(response.json())
+    return [project.name for project in project_list.projects]
+
+
 async def get_active_project(
-    client: AsyncClient, project: Optional[str] = None, context: Optional[Context] = None
+    client: AsyncClient,
+    project: Optional[str] = None,
+    context: Optional[Context] = None,
+    headers: HeaderTypes | None = None,
 ) -> ProjectItem:
     """Get and validate project, setting it in context if available.
-
-    Uses three-tier resolution:
-    1. CLI constraint (BASIC_MEMORY_MCP_PROJECT env var)
-    2. Explicit project parameter
-    3. Default project if default_project_mode=true
 
     Args:
         client: HTTP client for API calls
@@ -73,12 +92,13 @@ async def get_active_project(
         ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
-    # Resolve project using three-tier hierarchy
     resolved_project = await resolve_project_parameter(project)
     if not resolved_project:
+        project_names = await get_project_names(client, headers)
         raise ValueError(
-            "No project specified. Either provide project parameter, "
-            "set default_project_mode=true in config, or use --project constraint."
+            "No project specified. "
+            "Either set 'default_project_mode=true' in config, or use 'project' argument.\n"
+            f"Available projects: {project_names}"
         )
 
     project = resolved_project
@@ -93,7 +113,7 @@ async def get_active_project(
     # Validate project exists by calling API
     logger.debug(f"Validating project: {project}")
     permalink = generate_permalink(project)
-    response = await call_get(client, f"/{permalink}/project/item")
+    response = await call_get(client, f"/{permalink}/project/item", headers=headers)
     active_project = ProjectItem.model_validate(response.json())
 
     # Cache in context if available

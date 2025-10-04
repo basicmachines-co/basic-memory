@@ -9,12 +9,13 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.mcp.resources.project_info import project_info
+from basic_memory.cli.commands.cloud import get_authenticated_headers
+from basic_memory.cli.commands.command_utils import get_project_info
+from basic_memory.config import ConfigManager
 import json
 from datetime import datetime
 
 from rich.panel import Panel
-from rich.tree import Tree
 from basic_memory.mcp.async_client import client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.project_info import ProjectList
@@ -31,6 +32,8 @@ console = Console()
 project_app = typer.Typer(help="Manage multiple Basic Memory projects")
 app.add_typer(project_app, name="project")
 
+config = ConfigManager().config
+
 
 def format_path(path: str) -> str:
     """Format a path for display, using ~ for home directory."""
@@ -42,10 +45,14 @@ def format_path(path: str) -> str:
 
 @project_app.command("list")
 def list_projects() -> None:
-    """List all configured projects."""
+    """List all Basic Memory projects."""
     # Use API to list projects
     try:
-        response = asyncio.run(call_get(client, "/projects/projects"))
+        auth_headers = {}
+        if config.cloud_mode_enabled:
+            auth_headers = asyncio.run(get_authenticated_headers())
+
+        response = asyncio.run(call_get(client, "/projects/projects", headers=auth_headers))
         result = ProjectList.model_validate(response.json())
 
         table = Table(title="Basic Memory Projects")
@@ -63,42 +70,75 @@ def list_projects() -> None:
         raise typer.Exit(1)
 
 
-@project_app.command("add")
-def add_project(
-    name: str = typer.Argument(..., help="Name of the project"),
-    path: str = typer.Argument(..., help="Path to the project directory"),
-    set_default: bool = typer.Option(False, "--default", help="Set as default project"),
-) -> None:
-    """Add a new project."""
-    # Resolve to absolute path
-    resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
+if config.cloud_mode_enabled:
 
-    try:
-        data = {"name": name, "path": resolved_path, "set_default": set_default}
+    @project_app.command("add")
+    def add_project_cloud(
+        name: str = typer.Argument(..., help="Name of the project"),
+        set_default: bool = typer.Option(False, "--default", help="Set as default project"),
+    ) -> None:
+        """Add a new project to Basic Memory Cloud"""
 
-        response = asyncio.run(call_post(client, "/projects/projects", json=data))
-        result = ProjectStatusResponse.model_validate(response.json())
+        try:
+            auth_headers = asyncio.run(get_authenticated_headers())
 
-        console.print(f"[green]{result.message}[/green]")
-    except Exception as e:
-        console.print(f"[red]Error adding project: {str(e)}[/red]")
-        raise typer.Exit(1)
+            data = {"name": name, "path": generate_permalink(name), "set_default": set_default}
 
-    # Display usage hint
-    console.print("\nTo use this project:")
-    console.print(f"  basic-memory --project={name} <command>")
-    console.print("  # or")
-    console.print(f"  basic-memory project default {name}")
+            response = asyncio.run(
+                call_post(client, "/projects/projects", json=data, headers=auth_headers)
+            )
+            result = ProjectStatusResponse.model_validate(response.json())
+
+            console.print(f"[green]{result.message}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error adding project: {str(e)}[/red]")
+            raise typer.Exit(1)
+
+        # Display usage hint
+        console.print("\nTo use this project:")
+        console.print(f"  basic-memory --project={name} <command>")
+else:
+
+    @project_app.command("add")
+    def add_project(
+        name: str = typer.Argument(..., help="Name of the project"),
+        path: str = typer.Argument(..., help="Path to the project directory"),
+        set_default: bool = typer.Option(False, "--default", help="Set as default project"),
+    ) -> None:
+        """Add a new project."""
+        # Resolve to absolute path
+        resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
+
+        try:
+            data = {"name": name, "path": resolved_path, "set_default": set_default}
+
+            response = asyncio.run(call_post(client, "/projects/projects", json=data))
+            result = ProjectStatusResponse.model_validate(response.json())
+
+            console.print(f"[green]{result.message}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error adding project: {str(e)}[/red]")
+            raise typer.Exit(1)
+
+        # Display usage hint
+        console.print("\nTo use this project:")
+        console.print(f"  basic-memory --project={name} <command>")
 
 
 @project_app.command("remove")
 def remove_project(
     name: str = typer.Argument(..., help="Name of the project to remove"),
 ) -> None:
-    """Remove a project from configuration."""
+    """Remove a project."""
     try:
+        auth_headers = {}
+        if config.cloud_mode_enabled:
+            auth_headers = asyncio.run(get_authenticated_headers())
+
         project_permalink = generate_permalink(name)
-        response = asyncio.run(call_delete(client, f"/projects/{project_permalink}"))
+        response = asyncio.run(
+            call_delete(client, f"/projects/{project_permalink}", headers=auth_headers)
+        )
         result = ProjectStatusResponse.model_validate(response.json())
 
         console.print(f"[green]{result.message}[/green]")
@@ -110,102 +150,96 @@ def remove_project(
     console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
 
 
-@project_app.command("default")
-def set_default_project(
-    name: str = typer.Argument(..., help="Name of the project to set as CLI default"),
-) -> None:
-    """Set the default project for CLI operations (when no --project flag is specified)."""
-    try:
-        project_permalink = generate_permalink(name)
-        response = asyncio.run(call_put(client, f"/projects/{project_permalink}/default"))
-        result = ProjectStatusResponse.model_validate(response.json())
+if not config.cloud_mode_enabled:
 
-        console.print(f"[green]{result.message}[/green]")
-    except Exception as e:
-        console.print(f"[red]Error setting default project: {str(e)}[/red]")
-        raise typer.Exit(1)
+    @project_app.command("default")
+    def set_default_project(
+        name: str = typer.Argument(..., help="Name of the project to set as CLI default"),
+    ) -> None:
+        """Set the default project when 'config.default_project_mode' is set."""
+        try:
+            project_permalink = generate_permalink(name)
+            response = asyncio.run(call_put(client, f"/projects/{project_permalink}/default"))
+            result = ProjectStatusResponse.model_validate(response.json())
 
-    # The API call above updates the config file default
-    console.print(
-        f"[green]CLI commands will now use '{name}' when no --project flag is specified[/green]"
-    )
+            console.print(f"[green]{result.message}[/green]")
+        except Exception as e:
+            console.print(f"[red]Error setting default project: {str(e)}[/red]")
+            raise typer.Exit(1)
 
+    @project_app.command("sync-config")
+    def synchronize_projects() -> None:
+        """Synchronize project config between configuration file and database."""
+        # Call the API to synchronize projects
 
-@project_app.command("sync-config")
-def synchronize_projects() -> None:
-    """Synchronize project config between configuration file and database."""
-    # Call the API to synchronize projects
+        try:
+            response = asyncio.run(call_post(client, "/projects/config/sync"))
+            result = ProjectStatusResponse.model_validate(response.json())
 
-    try:
-        response = asyncio.run(call_post(client, "/projects/sync"))
-        result = ProjectStatusResponse.model_validate(response.json())
+            console.print(f"[green]{result.message}[/green]")
+        except Exception as e:  # pragma: no cover
+            console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
+            raise typer.Exit(1)
 
-        console.print(f"[green]{result.message}[/green]")
-    except Exception as e:  # pragma: no cover
-        console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
-        raise typer.Exit(1)
+    @project_app.command("move")
+    def move_project(
+        name: str = typer.Argument(..., help="Name of the project to move"),
+        new_path: str = typer.Argument(..., help="New absolute path for the project"),
+    ) -> None:
+        """Move a project to a new location."""
+        # Resolve to absolute path
+        resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
 
+        try:
+            data = {"path": resolved_path}
 
-@project_app.command("move")
-def move_project(
-    name: str = typer.Argument(..., help="Name of the project to move"),
-    new_path: str = typer.Argument(..., help="New absolute path for the project"),
-) -> None:
-    """Move a project to a new location."""
-    # Resolve to absolute path
-    resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
+            project_permalink = generate_permalink(name)
 
-    try:
-        data = {"path": resolved_path}
-
-        project_permalink = generate_permalink(name)
-
-        # TODO fix route to use ProjectPathDep
-        response = asyncio.run(
-            call_patch(client, f"/{name}/project/{project_permalink}", json=data)
-        )
-        result = ProjectStatusResponse.model_validate(response.json())
-
-        console.print(f"[green]{result.message}[/green]")
-
-        # Show important file movement reminder
-        console.print()  # Empty line for spacing
-        console.print(
-            Panel(
-                "[bold red]IMPORTANT:[/bold red] Project configuration updated successfully.\n\n"
-                "[yellow]You must manually move your project files from the old location to:[/yellow]\n"
-                f"[cyan]{resolved_path}[/cyan]\n\n"
-                "[dim]Basic Memory has only updated the configuration - your files remain in their original location.[/dim]",
-                title="⚠️  Manual File Movement Required",
-                border_style="yellow",
-                expand=False,
+            # TODO fix route to use ProjectPathDep
+            response = asyncio.run(
+                call_patch(client, f"/{name}/project/{project_permalink}", json=data)
             )
-        )
+            result = ProjectStatusResponse.model_validate(response.json())
 
-    except Exception as e:
-        console.print(f"[red]Error moving project: {str(e)}[/red]")
-        raise typer.Exit(1)
+            console.print(f"[green]{result.message}[/green]")
+
+            # Show important file movement reminder
+            console.print()  # Empty line for spacing
+            console.print(
+                Panel(
+                    "[bold red]IMPORTANT:[/bold red] Project configuration updated successfully.\n\n"
+                    "[yellow]You must manually move your project files from the old location to:[/yellow]\n"
+                    f"[cyan]{resolved_path}[/cyan]\n\n"
+                    "[dim]Basic Memory has only updated the configuration - your files remain in their original location.[/dim]",
+                    title="⚠️  Manual File Movement Required",
+                    border_style="yellow",
+                    expand=False,
+                )
+            )
+
+        except Exception as e:
+            console.print(f"[red]Error moving project: {str(e)}[/red]")
+            raise typer.Exit(1)
 
 
 @project_app.command("info")
 def display_project_info(
+    name: str = typer.Argument(..., help="Name of the project"),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
 ):
     """Display detailed information and statistics about the current project."""
     try:
         # Get project info
-        info = asyncio.run(project_info.fn())  # type: ignore  # pyright: ignore [reportAttributeAccessIssue]
+        info = asyncio.run(get_project_info(name))
 
         if json_output:
             # Convert to JSON and print
             print(json.dumps(info.model_dump(), indent=2, default=str))
         else:
-            # Create rich display
-            console = Console()
-
             # Project configuration section
             console.print(
                 Panel(
+                    f"Basic Memory version: [bold green]{info.system.version}[/bold green]\n"
                     f"[bold]Project:[/bold] {info.project_name}\n"
                     f"[bold]Path:[/bold] {info.project_path}\n"
                     f"[bold]Default Project:[/bold] {info.default_project}\n",
@@ -274,42 +308,6 @@ def display_project_info(
                     )
 
                 console.print(recent_table)
-
-            # System status
-            system_tree = Tree("🖥️ System Status")
-            system_tree.add(f"Basic Memory version: [bold green]{info.system.version}[/bold green]")
-            system_tree.add(
-                f"Database: [cyan]{info.system.database_path}[/cyan] ([green]{info.system.database_size}[/green])"
-            )
-
-            # Watch status
-            if info.system.watch_status:  # pragma: no cover
-                watch_branch = system_tree.add("Watch Service")
-                running = info.system.watch_status.get("running", False)
-                status_color = "green" if running else "red"
-                watch_branch.add(
-                    f"Status: [bold {status_color}]{'Running' if running else 'Stopped'}[/bold {status_color}]"
-                )
-
-                if running:
-                    start_time = (
-                        datetime.fromisoformat(info.system.watch_status.get("start_time", ""))
-                        if isinstance(info.system.watch_status.get("start_time"), str)
-                        else info.system.watch_status.get("start_time")
-                    )
-                    watch_branch.add(
-                        f"Running since: [cyan]{start_time.strftime('%Y-%m-%d %H:%M')}[/cyan]"
-                    )
-                    watch_branch.add(
-                        f"Files synced: [green]{info.system.watch_status.get('synced_files', 0)}[/green]"
-                    )
-                    watch_branch.add(
-                        f"Errors: [{'red' if info.system.watch_status.get('error_count', 0) > 0 else 'green'}]{info.system.watch_status.get('error_count', 0)}[/{'red' if info.system.watch_status.get('error_count', 0) > 0 else 'green'}]"
-                    )
-            else:
-                system_tree.add("[yellow]Watch service not running[/yellow]")
-
-            console.print(system_tree)
 
             # Available projects
             projects_table = Table(title="📁 Available Projects")

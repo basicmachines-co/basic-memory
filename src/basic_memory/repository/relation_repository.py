@@ -73,5 +73,18 @@ class RelationRepository(Repository[Relation]):
         result = await self.execute_query(query)
         return result.scalars().all()
 
+    async def find_unresolved_relations_for_entity(self, entity_id: int) -> Sequence[Relation]:
+        """Find unresolved relations for a specific entity.
+
+        Args:
+            entity_id: The entity whose unresolved outgoing relations to find.
+
+        Returns:
+            List of unresolved relations where this entity is the source.
+        """
+        query = select(Relation).filter(Relation.from_id == entity_id, Relation.to_id.is_(None))
+        result = await self.execute_query(query)
+        return result.scalars().all()
+
     def get_load_options(self) -> List[LoaderOption]:
         return [selectinload(Relation.from_entity), selectinload(Relation.to_entity)]

@@ -38,8 +38,7 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
                 "title": "Machine Learning Fundamentals",
                 "folder": "ai",
                 "content": (
-                    "# Machine Learning Fundamentals\n\n"
-                    "Introduction to ML concepts and algorithms."
+                    "# Machine Learning Fundamentals\n\nIntroduction to ML concepts and algorithms."
                 ),
                 "tags": "ml,ai,fundamentals",
             },
@@ -66,8 +65,7 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
                 "title": "Data Visualization Guide",
                 "folder": "data",
                 "content": (
-                    "# Data Visualization Guide\n\n"
-                    "Creating charts and graphs for data analysis."
+                    "# Data Visualization Guide\n\nCreating charts and graphs for data analysis."
                 ),
                 "tags": "visualization,data,charts",
             },
@@ -131,8 +129,7 @@ async def test_chatgpt_search_with_boolean_operators(mcp_server, app, test_proje
                 "title": "Python Web Frameworks",
                 "folder": "dev",
                 "content": (
-                    "# Python Web Frameworks\n\n"
-                    "Comparing Django and Flask for web development."
+                    "# Python Web Frameworks\n\nComparing Django and Flask for web development."
                 ),
                 "tags": "python,web,frameworks",
             },
@@ -376,7 +373,7 @@ async def test_chatgpt_tools_error_handling(mcp_server, app, test_project):
         )
 
         # Should still return MCP content array format
-        assert hasattr(search_result, 'content')
+        assert hasattr(search_result, "content")
         content_list = search_result.content
         assert isinstance(content_list, list)
         assert len(content_list) == 1
@@ -397,8 +394,7 @@ async def test_chatgpt_integration_workflow(mcp_server, app, test_project):
             {
                 "title": "API Design Best Practices",
                 "content": (
-                    "# API Design Best Practices\n\n"
-                    "RESTful API design principles and patterns."
+                    "# API Design Best Practices\n\nRESTful API design principles and patterns."
                 ),
                 "tags": "api,rest,design",
             },

@@ -27,6 +27,26 @@ from basic_memory.schemas.base import Permalink, Entity
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
+
+async def resolve_relations_background(sync_service, entity_id: int, entity_permalink: str) -> None:
+    """Background task to resolve relations for a specific entity.
+
+    This runs asynchronously after the API response is sent, preventing
+    long delays when creating entities with many relations.
+    """
+    try:
+        # Only resolve relations for the newly created entity
+        await sync_service.resolve_relations(entity_id=entity_id)
+        logger.debug(
+            f"Background: Resolved relations for entity {entity_permalink} (id={entity_id})"
+        )
+    except Exception as e:
+        # Log but don't fail - this is a background task
+        logger.warning(
+            f"Background: Failed to resolve relations for entity {entity_permalink}: {e}"
+        )
+
+
 ## Create endpoints
 
 
@@ -88,15 +108,12 @@ async def create_or_update_entity(
     # reindex
     await search_service.index_entity(entity, background_tasks=background_tasks)
 
-    # Attempt immediate relation resolution when creating new entities
-    # This helps resolve forward references when related entities are created in the same session
+    # Schedule relation resolution as a background task for new entities
+    # This prevents blocking the API response while resolving potentially many relations
     if created:
-        try:
-            await sync_service.resolve_relations()
-            logger.debug(f"Resolved relations after creating entity: {entity.permalink}")
-        except Exception as e:  # pragma: no cover
-            # Don't fail the entire request if relation resolution fails
-            logger.warning(f"Failed to resolve relations after entity creation: {e}")
+        background_tasks.add_task(
+            resolve_relations_background, sync_service, entity.id, entity.permalink or ""
+        )
 
     result = EntityResponse.model_validate(entity)
 

@@ -107,7 +107,7 @@ def setup_cloud_mount() -> None:
 
         # Step 5: Perform initial mount
         console.print("\n[blue]Step 5: Mounting cloud files...[/blue]")
-        mount_path = get_default_mount_path(tenant_id)
+        mount_path = get_default_mount_path()
         MOUNT_PROFILES["balanced"]
 
         mount_cloud_files(
@@ -154,7 +154,7 @@ def mount_cloud_files(
 
         # Set default mount path if not provided
         if not mount_path:
-            mount_path = get_default_mount_path(tenant_id)
+            mount_path = get_default_mount_path()
 
         # Get mount profile
         if profile_name not in MOUNT_PROFILES:
@@ -215,7 +215,7 @@ def unmount_cloud_files(tenant_id: Optional[str] = None) -> None:
             if not tenant_id:
                 raise MountError("Could not determine tenant ID")
 
-        mount_path = get_default_mount_path(tenant_id)
+        mount_path = get_default_mount_path()
 
         if not is_path_mounted(mount_path):
             console.print(f"[yellow]Path {mount_path} is not mounted[/yellow]")
@@ -255,7 +255,7 @@ def show_mount_status() -> None:
             console.print("[red]Could not determine tenant ID[/red]")
             return
 
-        mount_path = get_default_mount_path(tenant_id)
+        mount_path = get_default_mount_path()
 
         # Create status table
         table = Table(title="Cloud Mount Status", show_header=True, header_style="bold blue")

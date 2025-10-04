@@ -14,7 +14,7 @@ Key Concepts:
 import os
 import mimetypes
 import re
-from datetime import datetime, time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
@@ -52,21 +52,27 @@ def to_snake_case(name: str) -> str:
 def parse_timeframe(timeframe: str) -> datetime:
     """Parse timeframe with special handling for 'today' and other natural language expressions.
 
+    Enforces a minimum 1-day lookback to handle timezone differences in distributed deployments.
+
     Args:
         timeframe: Natural language timeframe like 'today', '1d', '1 week ago', etc.
 
     Returns:
         datetime: The parsed datetime for the start of the timeframe, timezone-aware in local system timezone
+                 Always returns at least 1 day ago to handle timezone differences.
 
     Examples:
-        parse_timeframe('today') -> 2025-06-05 00:00:00-07:00 (start of today with local timezone)
+        parse_timeframe('today') -> 2025-06-04 14:50:00-07:00 (1 day ago, not start of today)
+        parse_timeframe('1h') -> 2025-06-04 14:50:00-07:00 (1 day ago, not 1 hour ago)
         parse_timeframe('1d') -> 2025-06-04 14:50:00-07:00 (24 hours ago with local timezone)
         parse_timeframe('1 week ago') -> 2025-05-29 14:50:00-07:00 (1 week ago with local timezone)
     """
     if timeframe.lower() == "today":
-        # Return start of today (00:00:00) in local timezone
-        naive_dt = datetime.combine(datetime.now().date(), time.min)
-        return naive_dt.astimezone()
+        # For "today", return 1 day ago to ensure we capture recent activity across timezones
+        # This handles the case where client and server are in different timezones
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
+        return one_day_ago.astimezone()
     else:
         # Use dateparser for other formats
         parsed = parse(timeframe)
@@ -75,7 +81,18 @@ def parse_timeframe(timeframe: str) -> datetime:
 
         # If the parsed datetime is naive, make it timezone-aware in local system timezone
         if parsed.tzinfo is None:
-            return parsed.astimezone()
+            parsed = parsed.astimezone()
+        else:
+            parsed = parsed
+
+        # Enforce minimum 1-day lookback to handle timezone differences
+        # This ensures we don't miss recent activity due to client/server timezone mismatches
+        now = datetime.now().astimezone()
+        one_day_ago = now - timedelta(days=1)
+
+        # If the parsed time is more recent than 1 day ago, use 1 day ago instead
+        if parsed > one_day_ago:
+            return one_day_ago
         else:
             return parsed
 

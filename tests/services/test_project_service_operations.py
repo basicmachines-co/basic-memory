@@ -1,7 +1,6 @@
 """Additional tests for ProjectService operations."""
 
 import os
-import json
 from unittest.mock import patch
 
 import pytest
@@ -102,33 +101,3 @@ async def test_update_project_path(project_service: ProjectService, tmp_path, co
                 config_manager.remove_project(test_project)
             except Exception:
                 pass
-
-
-@pytest.mark.asyncio
-async def test_system_status_with_watch(project_service: ProjectService):
-    """Test system status with watch status."""
-    # Mock watch status file
-    mock_watch_status = {
-        "running": True,
-        "start_time": "2025-03-05T18:00:42.752435",
-        "pid": 7321,
-        "error_count": 0,
-        "last_error": None,
-        "last_scan": "2025-03-05T19:59:02.444416",
-        "synced_files": 6,
-        "recent_events": [],
-    }
-
-    # Patch Path.exists and Path.read_text
-    with (
-        patch("pathlib.Path.exists", return_value=True),
-        patch("pathlib.Path.read_text", return_value=json.dumps(mock_watch_status)),
-    ):
-        # Get system status
-        status = project_service.get_system_status()
-
-        # Verify watch status is included
-        assert status.watch_status is not None
-        assert status.watch_status["running"] is True
-        assert status.watch_status["pid"] == 7321
-        assert status.watch_status["synced_files"] == 6

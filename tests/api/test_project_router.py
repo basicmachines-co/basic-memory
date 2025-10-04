@@ -442,3 +442,30 @@ async def test_update_project_empty_path_endpoint(
             await project_service.remove_project(test_project_name)
         except Exception:
             pass
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint(test_graph, client, project_url):
+    """Test the project sync endpoint initiates background sync."""
+    # Call the sync endpoint
+    response = await client.post(f"{project_url}/project/sync")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_not_found(client):
+    """Test the project sync endpoint with nonexistent project."""
+    # Call the sync endpoint for a project that doesn't exist
+    response = await client.post("/nonexistent-project/project/sync")
+
+    # Should return 404
+    assert response.status_code == 404

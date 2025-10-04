@@ -422,34 +422,47 @@ class EntityService(BaseService[EntityModel]):
         # Clear existing relations first
         await self.relation_repository.delete_outgoing_relations_from_entity(db_entity.id)
 
-        # Process each relation
-        for rel in markdown.relations:
-            # Resolve the target permalink
-            target_entity = await self.link_resolver.resolve_link(
-                rel.target,
-            )
+        # Batch resolve all relation targets in parallel
+        if markdown.relations:
+            import asyncio
 
-            # if the target is found, store the id
-            target_id = target_entity.id if target_entity else None
-            # if the target is found, store the title, otherwise add the target for a "forward link"
-            target_name = target_entity.title if target_entity else rel.target
+            # Create tasks for all relation lookups
+            lookup_tasks = [
+                self.link_resolver.resolve_link(rel.target) for rel in markdown.relations
+            ]
 
-            # Create the relation
-            relation = Relation(
-                from_id=db_entity.id,
-                to_id=target_id,
-                to_name=target_name,
-                relation_type=rel.type,
-                context=rel.context,
-            )
-            try:
-                await self.relation_repository.add(relation)
-            except IntegrityError:
-                # Unique constraint violation - relation already exists
-                logger.debug(
-                    f"Skipping duplicate relation {rel.type} from {db_entity.permalink} target: {rel.target}"
+            # Execute all lookups in parallel
+            resolved_entities = await asyncio.gather(*lookup_tasks, return_exceptions=True)
+
+            # Process results and create relation records
+            for rel, resolved in zip(markdown.relations, resolved_entities):
+                # Handle exceptions from gather and None results
+                target_entity: Optional[Entity] = None
+                if not isinstance(resolved, Exception):
+                    # Type narrowing: resolved is Optional[Entity] here, not Exception
+                    target_entity = resolved  # type: ignore
+
+                # if the target is found, store the id
+                target_id = target_entity.id if target_entity else None
+                # if the target is found, store the title, otherwise add the target for a "forward link"
+                target_name = target_entity.title if target_entity else rel.target
+
+                # Create the relation
+                relation = Relation(
+                    from_id=db_entity.id,
+                    to_id=target_id,
+                    to_name=target_name,
+                    relation_type=rel.type,
+                    context=rel.context,
                 )
-                continue
+                try:
+                    await self.relation_repository.add(relation)
+                except IntegrityError:
+                    # Unique constraint violation - relation already exists
+                    logger.debug(
+                        f"Skipping duplicate relation {rel.type} from {db_entity.permalink} target: {rel.target}"
+                    )
+                    continue
 
         return await self.repository.get_by_file_path(path)
 

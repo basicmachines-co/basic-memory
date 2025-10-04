@@ -1,4 +1,5 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from enum import Enum, auto
 from pathlib import Path
@@ -9,7 +10,7 @@ from alembic import command
 from alembic.config import Config
 
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import text, event
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker,
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_scoped_session,
 )
+from sqlalchemy.pool import NullPool
 
 from basic_memory.repository.search_repository import SearchRepository
 
@@ -73,13 +75,77 @@ async def scoped_session(
         await factory.remove()
 
 
+def _configure_sqlite_connection(dbapi_conn, enable_wal: bool = True) -> None:
+    """Configure SQLite connection with WAL mode and optimizations.
+
+    Args:
+        dbapi_conn: Database API connection object
+        enable_wal: Whether to enable WAL mode (should be False for in-memory databases)
+    """
+    cursor = dbapi_conn.cursor()
+    try:
+        # Enable WAL mode for better concurrency (not supported for in-memory databases)
+        if enable_wal:
+            cursor.execute("PRAGMA journal_mode=WAL")
+        # Set busy timeout to handle locked databases
+        cursor.execute("PRAGMA busy_timeout=10000")  # 10 seconds
+        # Optimize for performance
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=-64000")  # 64MB cache
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        # Windows-specific optimizations
+        if os.name == "nt":
+            cursor.execute("PRAGMA locking_mode=NORMAL")  # Ensure normal locking on Windows
+    except Exception as e:
+        # Log but don't fail - some PRAGMAs may not be supported
+        logger.warning(f"Failed to configure SQLite connection: {e}")
+    finally:
+        cursor.close()
+
+
 def _create_engine_and_session(
     db_path: Path, db_type: DatabaseType = DatabaseType.FILESYSTEM
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Internal helper to create engine and session maker."""
     db_url = DatabaseType.get_db_url(db_path, db_type)
     logger.debug(f"Creating engine for db_url: {db_url}")
-    engine = create_async_engine(db_url, connect_args={"check_same_thread": False})
+
+    # Configure connection args with Windows-specific settings
+    connect_args: dict[str, bool | float | None] = {"check_same_thread": False}
+
+    # Add Windows-specific parameters to improve reliability
+    if os.name == "nt":  # Windows
+        connect_args.update(
+            {
+                "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
+                "isolation_level": None,  # Use autocommit mode
+            }
+        )
+        # Use NullPool for Windows filesystem databases to avoid connection pooling issues
+        # Important: Do NOT use NullPool for in-memory databases as it will destroy the database
+        # between connections
+        if db_type == DatabaseType.FILESYSTEM:
+            engine = create_async_engine(
+                db_url,
+                connect_args=connect_args,
+                poolclass=NullPool,  # Disable connection pooling on Windows
+                echo=False,
+            )
+        else:
+            # In-memory databases need connection pooling to maintain state
+            engine = create_async_engine(db_url, connect_args=connect_args)
+    else:
+        engine = create_async_engine(db_url, connect_args=connect_args)
+
+    # Enable WAL mode for better concurrency and reliability
+    # Note: WAL mode is not supported for in-memory databases
+    enable_wal = db_type != DatabaseType.MEMORY
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def enable_wal_mode(dbapi_conn, connection_record):
+        """Enable WAL mode on each connection."""
+        _configure_sqlite_connection(dbapi_conn, enable_wal=enable_wal)
+
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_maker
 
@@ -140,7 +206,42 @@ async def engine_session_factory(
     db_url = DatabaseType.get_db_url(db_path, db_type)
     logger.debug(f"Creating engine for db_url: {db_url}")
 
-    _engine = create_async_engine(db_url, connect_args={"check_same_thread": False})
+    # Configure connection args with Windows-specific settings
+    connect_args: dict[str, bool | float | None] = {"check_same_thread": False}
+
+    # Add Windows-specific parameters to improve reliability
+    if os.name == "nt":  # Windows
+        connect_args.update(
+            {
+                "timeout": 30.0,  # Increase timeout to 30 seconds for Windows
+                "isolation_level": None,  # Use autocommit mode
+            }
+        )
+        # Use NullPool for Windows filesystem databases to avoid connection pooling issues
+        # Important: Do NOT use NullPool for in-memory databases as it will destroy the database
+        # between connections
+        if db_type == DatabaseType.FILESYSTEM:
+            _engine = create_async_engine(
+                db_url,
+                connect_args=connect_args,
+                poolclass=NullPool,  # Disable connection pooling on Windows
+                echo=False,
+            )
+        else:
+            # In-memory databases need connection pooling to maintain state
+            _engine = create_async_engine(db_url, connect_args=connect_args)
+    else:
+        _engine = create_async_engine(db_url, connect_args=connect_args)
+
+    # Enable WAL mode for better concurrency and reliability
+    # Note: WAL mode is not supported for in-memory databases
+    enable_wal = db_type != DatabaseType.MEMORY
+
+    @event.listens_for(_engine.sync_engine, "connect")
+    def enable_wal_mode(dbapi_conn, connection_record):
+        """Enable WAL mode on each connection."""
+        _configure_sqlite_connection(dbapi_conn, enable_wal=enable_wal)
+
     try:
         _session_maker = async_sessionmaker(_engine, expire_on_commit=False)
 

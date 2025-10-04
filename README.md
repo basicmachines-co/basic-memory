@@ -371,10 +371,10 @@ canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 
 See the [Documentation](https://memory.basicmachines.co/) for more info, including:
 
-- [Complete User Guide](https://memory.basicmachines.co/docs/user-guide)
-- [CLI tools](https://memory.basicmachines.co/docs/cli-reference)
-- [Managing multiple Projects](https://memory.basicmachines.co/docs/cli-reference#project)
-- [Importing data from OpenAI/Claude Projects](https://memory.basicmachines.co/docs/cli-reference#import)
+- [Complete User Guide](https://docs.basicmemory.com/user-guide/)
+- [CLI tools](https://docs.basicmemory.com/guides/cli-reference/)
+- [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/#project)
+- [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/#import)
 
 ## License
 
