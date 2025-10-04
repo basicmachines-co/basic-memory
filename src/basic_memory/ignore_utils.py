@@ -31,7 +31,6 @@ DEFAULT_IGNORE_PATTERNS = {
     ".mypy_cache",
     ".ruff_cache",
     ".obsidian",
-    ".idea",
 }
 
 
