@@ -11,7 +11,10 @@ from loguru import logger
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.repository import ProjectRepository
+from basic_memory.models import Project
+from basic_memory.repository import (
+    ProjectRepository,
+)
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
@@ -102,14 +105,16 @@ async def initialize_file_sync(
     active_projects = await project_repository.get_active_projects()
 
     # Start sync for all projects as background tasks (non-blocking)
-    async def sync_project_background(project):
+    async def sync_project_background(project: Project):
         """Sync a single project in the background."""
         # avoid circular imports
-        from basic_memory.cli.commands.sync import get_sync_service
+        from basic_memory.sync.sync_service import get_sync_service
 
         logger.info(f"Starting background sync for project: {project.name}")
         try:
+            # Create sync service
             sync_service = await get_sync_service(project)
+
             sync_dir = Path(project.path)
             await sync_service.sync(sync_dir, project_name=project.name)
             logger.info(f"Background sync completed successfully for project: {project.name}")
@@ -176,9 +181,16 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
     This is a wrapper for the async initialize_app function that can be
     called from synchronous code like CLI entry points.
 
+    No-op if app_config.cloud_mode == True. Cloud basic memory manages it's own projects
+
     Args:
         app_config: The Basic Memory project configuration
     """
+    # Skip initialization in cloud mode - cloud manages its own projects
+    if app_config.cloud_mode_enabled:
+        logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
+        return
+
     try:
         result = asyncio.run(initialize_app(app_config))
         logger.info(f"Initialization completed successfully: result={result}")

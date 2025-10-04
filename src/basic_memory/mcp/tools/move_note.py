@@ -65,16 +65,16 @@ def _format_cross_project_error_response(
     """Format error response for detected cross-project move attempts."""
     return dedent(f"""
         # Move Failed - Cross-Project Move Not Supported
-        
+
         Cannot move '{identifier}' to '{destination_path}' because it appears to reference a different project ('{target_project}').
-        
+
         **Current project:** {current_project}
         **Target project:** {target_project}
-        
+
         ## Cross-project moves are not supported directly
-        
+
         Notes can only be moved within the same project. To move content between projects, use this workflow:
-        
+
         ### Recommended approach:
         ```
         # 1. Read the note content from current project
@@ -87,13 +87,13 @@ def _format_cross_project_error_response(
         delete_note("{identifier}", project="{current_project}")
         
         ```
-        
+
         ### Alternative: Stay in current project
         If you want to move the note within the **{current_project}** project only:
         ```
         move_note("{identifier}", "new-folder/new-name.md")
         ```
-        
+
         ## Available projects:
         Use `list_memory_projects()` to see all available projects.
         """).strip()
@@ -428,6 +428,79 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
     if cross_project_error:
         logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
         return cross_project_error
+
+    # Get the source entity information for extension validation
+    source_ext = "md"  # Default to .md if we can't determine source extension
+    try:
+        # Fetch source entity information to get the current file extension
+        url = f"{project_url}/knowledge/entities/{identifier}"
+        response = await call_get(client, url)
+        source_entity = EntityResponse.model_validate(response.json())
+        if "." in source_entity.file_path:
+            source_ext = source_entity.file_path.split(".")[-1]
+    except Exception as e:
+        # If we can't fetch the source entity, default to .md extension
+        logger.debug(f"Could not fetch source entity for extension check: {e}")
+
+    # Validate that destination path includes a file extension
+    if "." not in destination_path or not destination_path.split(".")[-1]:
+        logger.warning(f"Move failed - no file extension provided: {destination_path}")
+        return dedent(f"""
+            # Move Failed - File Extension Required
+
+            The destination path '{destination_path}' must include a file extension (e.g., '.md').
+
+            ## Valid examples:
+            - `notes/my-note.md`
+            - `projects/meeting-2025.txt`
+            - `archive/old-program.sh`
+
+            ## Try again with extension:
+            ```
+            move_note("{identifier}", "{destination_path}.{source_ext}")
+            ```
+
+            All examples in Basic Memory expect file extensions to be explicitly provided.
+            """).strip()
+
+    # Get the source entity to check its file extension
+    try:
+        # Fetch source entity information
+        url = f"{project_url}/knowledge/entities/{identifier}"
+        response = await call_get(client, url)
+        source_entity = EntityResponse.model_validate(response.json())
+
+        # Extract file extensions
+        source_ext = (
+            source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+        )
+        dest_ext = destination_path.split(".")[-1] if "." in destination_path else ""
+
+        # Check if extensions match
+        if source_ext and dest_ext and source_ext.lower() != dest_ext.lower():
+            logger.warning(
+                f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}"
+            )
+            return dedent(f"""
+                # Move Failed - File Extension Mismatch
+
+                The destination file extension '.{dest_ext}' does not match the source file extension '.{source_ext}'.
+
+                To preserve file type consistency, the destination must have the same extension as the source.
+
+                ## Source file:
+                - Path: `{source_entity.file_path}`
+                - Extension: `.{source_ext}`
+
+                ## Try again with matching extension:
+                ```
+                move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
+                ```
+                """).strip()
+    except Exception as e:
+        # If we can't fetch the source entity, log it but continue
+        # This might happen if the identifier is not yet resolved
+        logger.debug(f"Could not fetch source entity for extension check: {e}")
 
     try:
         # Prepare move request

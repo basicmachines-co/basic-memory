@@ -222,7 +222,6 @@ async def sync_status(project: Optional[str] = None, context: Context | None = N
                     [
                         "",
                         "**Note**: All configured projects will be automatically synced during startup.",
-                        "You don't need to manually switch projects - Basic Memory handles this for you.",
                     ]
                 )
 

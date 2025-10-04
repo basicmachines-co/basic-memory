@@ -3,7 +3,7 @@
 from typing import Annotated
 from loguru import logger
 
-from fastapi import Depends, HTTPException, Path, status
+from fastapi import Depends, HTTPException, Path, status, Request
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     AsyncEngine,
@@ -78,9 +78,24 @@ ProjectConfigDep = Annotated[ProjectConfig, Depends(get_project_config)]  # prag
 
 
 async def get_engine_factory(
-    app_config: AppConfigDep,
+    request: Request,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
-    """Get engine and session maker."""
+    """Get cached engine and session maker from app state.
+
+    For API requests, returns cached connections from app.state for optimal performance.
+    For non-API contexts (CLI), falls back to direct database connection.
+    """
+    # Try to get cached connections from app state (API context)
+    if (
+        hasattr(request, "app")
+        and hasattr(request.app.state, "engine")
+        and hasattr(request.app.state, "session_maker")
+    ):
+        return request.app.state.engine, request.app.state.session_maker
+
+    # Fallback for non-API contexts (CLI)
+    logger.debug("Using fallback database connection for non-API context")
+    app_config = get_app_config()
     engine, session_maker = await db.get_or_create_db(app_config.database_path)
     return engine, session_maker
 

@@ -12,12 +12,16 @@ from typing import Dict, Optional, Set, Tuple
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from basic_memory.config import BasicMemoryConfig
+from basic_memory import db
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import has_frontmatter
-from basic_memory.markdown import EntityParser
-from basic_memory.models import Entity
-from basic_memory.repository import EntityRepository, RelationRepository
+from basic_memory.ignore_utils import load_bmignore_patterns, should_ignore_path
+from basic_memory.markdown import EntityParser, MarkdownProcessor
+from basic_memory.models import Entity, Project
+from basic_memory.repository import EntityRepository, RelationRepository, ObservationRepository
+from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.services import EntityService, FileService
+from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.services.sync_status_service import sync_status_tracker, SyncStatus
 
@@ -83,6 +87,8 @@ class SyncService:
         self.search_service = search_service
         self.file_service = file_service
         self._thread_pool = ThreadPoolExecutor(max_workers=app_config.sync_thread_pool_size)
+        # Load ignore patterns once at initialization for performance
+        self._ignore_patterns = load_bmignore_patterns()
 
     async def _read_file_async(self, file_path: Path) -> str:
         """Read file content in thread pool to avoid blocking the event loop."""
@@ -587,12 +593,27 @@ class SyncService:
             # update search index
             await self.search_service.index_entity(updated)
 
-    async def resolve_relations(self):
-        """Try to resolve any unresolved relations"""
+    async def resolve_relations(self, entity_id: int | None = None):
+        """Try to resolve unresolved relations.
 
-        unresolved_relations = await self.relation_repository.find_unresolved_relations()
+        Args:
+            entity_id: If provided, only resolve relations for this specific entity.
+                      Otherwise, resolve all unresolved relations in the database.
+        """
 
-        logger.info("Resolving forward references", count=len(unresolved_relations))
+        if entity_id:
+            # Only get unresolved relations for the specific entity
+            unresolved_relations = (
+                await self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+            )
+            logger.info(
+                f"Resolving forward references for entity {entity_id}",
+                count=len(unresolved_relations),
+            )
+        else:
+            # Get all unresolved relations (original behavior)
+            unresolved_relations = await self.relation_repository.find_unresolved_relations()
+            logger.info("Resolving all forward references", count=len(unresolved_relations))
 
         for relation in unresolved_relations:
             logger.trace(
@@ -647,17 +668,33 @@ class SyncService:
 
         logger.debug(f"Scanning directory {directory}")
         result = ScanResult()
+        ignored_count = 0
 
         for root, dirnames, filenames in os.walk(str(directory)):
-            # Skip dot directories in-place
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            # Convert root to Path for easier manipulation
+            root_path = Path(root)
+
+            # Filter out ignored directories in-place
+            dirnames_to_remove = []
+            for dirname in dirnames:
+                dir_path = root_path / dirname
+                if should_ignore_path(dir_path, directory, self._ignore_patterns):
+                    dirnames_to_remove.append(dirname)
+                    ignored_count += 1
+
+            # Remove ignored directories from dirnames to prevent os.walk from descending
+            for dirname in dirnames_to_remove:
+                dirnames.remove(dirname)
 
             for filename in filenames:
-                # Skip dot files
-                if filename.startswith("."):
+                path = root_path / filename
+
+                # Check if file should be ignored
+                if should_ignore_path(path, directory, self._ignore_patterns):
+                    ignored_count += 1
+                    logger.trace(f"Ignoring file per .bmignore: {path.relative_to(directory)}")
                     continue
 
-                path = Path(root) / filename
                 rel_path = path.relative_to(directory).as_posix()
                 checksum = await self._compute_checksum_async(rel_path)
                 result.files[rel_path] = checksum
@@ -670,7 +707,55 @@ class SyncService:
             f"{directory} scan completed "
             f"directory={str(directory)} "
             f"files_found={len(result.files)} "
+            f"files_ignored={ignored_count} "
             f"duration_ms={duration_ms}"
         )
 
         return result
+
+
+async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
+    """Get sync service instance with all dependencies."""
+
+    app_config = ConfigManager().config
+    _, session_maker = await db.get_or_create_db(
+        db_path=app_config.database_path, db_type=db.DatabaseType.FILESYSTEM
+    )
+
+    project_path = Path(project.path)
+    entity_parser = EntityParser(project_path)
+    markdown_processor = MarkdownProcessor(entity_parser)
+    file_service = FileService(project_path, markdown_processor)
+
+    # Initialize repositories
+    entity_repository = EntityRepository(session_maker, project_id=project.id)
+    observation_repository = ObservationRepository(session_maker, project_id=project.id)
+    relation_repository = RelationRepository(session_maker, project_id=project.id)
+    search_repository = SearchRepository(session_maker, project_id=project.id)
+
+    # Initialize services
+    search_service = SearchService(search_repository, entity_repository, file_service)
+    link_resolver = LinkResolver(entity_repository, search_service)
+
+    # Initialize services
+    entity_service = EntityService(
+        entity_parser,
+        entity_repository,
+        observation_repository,
+        relation_repository,
+        file_service,
+        link_resolver,
+    )
+
+    # Create sync service
+    sync_service = SyncService(
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_parser=entity_parser,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_service=file_service,
+    )
+
+    return sync_service
