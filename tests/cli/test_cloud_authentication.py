@@ -70,9 +70,7 @@ class TestAPIClientErrorHandling:
         mock_response.headers = {}
 
         # Create HTTPStatusError with the mock response
-        http_error = httpx.HTTPStatusError(
-            "403 Forbidden", request=Mock(), response=mock_response
-        )
+        http_error = httpx.HTTPStatusError("403 Forbidden", request=Mock(), response=mock_response)
 
         # Mock httpx client to raise the error
         with patch("basic_memory.cli.commands.cloud.api_client.httpx.AsyncClient") as mock_client:

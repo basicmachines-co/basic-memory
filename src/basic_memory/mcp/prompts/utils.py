@@ -103,10 +103,17 @@ def format_prompt_context(context: PromptContext) -> str:
 
                 added_permalinks.add(primary_permalink)
 
-                memory_url = normalize_memory_url(primary_permalink)
+                # Use permalink if available, otherwise use file_path
+                if primary_permalink:
+                    memory_url = normalize_memory_url(primary_permalink)
+                    read_command = f'read_note("{primary_permalink}")'
+                else:
+                    memory_url = f"file://{primary.file_path}"
+                    read_command = f'read_file("{primary.file_path}")'
+
                 section = dedent(f"""
                     --- {memory_url}
-                
+
                     ## {primary.title}
                     - **Type**: {primary.type}
                     """)
@@ -121,8 +128,8 @@ def format_prompt_context(context: PromptContext) -> str:
                         section += f"\n**Excerpt**:\n{content}\n"
 
                 section += dedent(f"""
-    
-                    You can read this document with: `read_note("{primary_permalink}")`
+
+                    You can read this document with: `{read_command}`
                     """)
                 sections.append(section)
 

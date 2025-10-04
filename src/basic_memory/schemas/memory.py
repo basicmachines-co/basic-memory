@@ -26,9 +26,9 @@ def validate_memory_url_path(path: str) -> bool:
         >>> validate_memory_url_path("invalid://test")  # Contains protocol
         False
     """
-    # Allow empty path for root URL (memory://)
+    # Empty paths are not valid
     if not path or not path.strip():
-        return True
+        return False
 
     # Check for invalid protocol schemes within the path first (more specific)
     if "://" in path:
@@ -69,7 +69,13 @@ def normalize_memory_url(url: str | None) -> str:
         ValueError: Invalid memory URL path: 'memory//test' contains double slashes
     """
     if not url:
-        return "memory://"  # Return root URL for empty input
+        raise ValueError("Memory URL cannot be empty")
+
+    # Strip whitespace for consistency
+    url = url.strip()
+
+    if not url:
+        raise ValueError("Memory URL cannot be empty or whitespace")
 
     clean_path = url.removeprefix("memory://")
 
@@ -122,7 +128,9 @@ class EntitySummary(BaseModel):
     title: str
     content: Optional[str] = None
     file_path: str
-    created_at: Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
 
     @field_serializer("created_at")
     def serialize_created_at(self, dt: datetime) -> str:
@@ -139,7 +147,9 @@ class RelationSummary(BaseModel):
     relation_type: str
     from_entity: Optional[str] = None
     to_entity: Optional[str] = None
-    created_at: Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
 
     @field_serializer("created_at")
     def serialize_created_at(self, dt: datetime) -> str:
@@ -155,7 +165,9 @@ class ObservationSummary(BaseModel):
     permalink: str
     category: str
     content: str
-    created_at: Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
 
     @field_serializer("created_at")
     def serialize_created_at(self, dt: datetime) -> str:
@@ -169,7 +181,9 @@ class MemoryMetadata(BaseModel):
     types: Optional[List[SearchItemType]] = None
     depth: int
     timeframe: Optional[str] = None
-    generated_at: Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    generated_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
     primary_count: Optional[int] = None  # Changed field name
     related_count: Optional[int] = None  # Changed field name
     total_results: Optional[int] = None  # For backward compatibility
@@ -234,9 +248,9 @@ class ProjectActivity(BaseModel):
     project_path: str
     activity: GraphContext = Field(description="The actual activity data for this project")
     item_count: int = Field(description="Total items in this project's activity")
-    last_activity: Optional[Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]] = Field(
-        default=None, description="Most recent activity timestamp"
-    )
+    last_activity: Optional[
+        Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    ] = Field(default=None, description="Most recent activity timestamp")
     active_folders: List[str] = Field(default_factory=list, description="Most active folders")
 
     @field_serializer("last_activity")
@@ -252,7 +266,9 @@ class ProjectActivitySummary(BaseModel):
     )
     summary: ActivityStats
     timeframe: str = Field(description="The timeframe used for the query")
-    generated_at: Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    generated_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
     guidance: Optional[str] = Field(
         default=None, description="Assistant guidance for project selection and session management"
     )

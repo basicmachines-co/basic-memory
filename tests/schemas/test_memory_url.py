@@ -1,5 +1,7 @@
 """Tests for MemoryUrl parsing."""
 
+import pytest
+
 from basic_memory.schemas.memory import memory_url, memory_url_path, normalize_memory_url
 
 
@@ -59,5 +61,6 @@ def test_normalize_memory_url_no_prefix():
 
 
 def test_normalize_memory_url_empty():
-    """Test converting back to string."""
-    assert normalize_memory_url("") == ""
+    """Test that empty string raises ValueError."""
+    with pytest.raises(ValueError, match="cannot be empty"):
+        normalize_memory_url("")

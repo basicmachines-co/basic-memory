@@ -90,7 +90,10 @@ async def make_api_request(
                     # Handle both FastAPI HTTPException format (nested under "detail")
                     # and direct format
                     detail_obj = error_detail.get("detail", error_detail)
-                    if isinstance(detail_obj, dict) and detail_obj.get("error") == "subscription_required":
+                    if (
+                        isinstance(detail_obj, dict)
+                        and detail_obj.get("error") == "subscription_required"
+                    ):
                         message = detail_obj.get("message", "Active subscription required")
                         subscribe_url = detail_obj.get(
                             "subscribe_url", "https://basicmemory.com/subscribe"
