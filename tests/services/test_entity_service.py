@@ -14,6 +14,7 @@ from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
+from basic_memory.services.search_service import SearchService
 from basic_memory.utils import generate_permalink
 
 
@@ -1794,3 +1795,98 @@ async def test_move_entity_with_null_permalink_generates_permalink(
     new_path = project_config.home / "moved/test-entity.md"
     assert not old_path.exists()
     assert new_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_create_or_update_entity_fuzzy_search_bug(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+    search_service: SearchService,
+):
+    """Test that create_or_update_entity doesn't incorrectly match similar entities via fuzzy search.
+
+    This reproduces the critical bug where creating "Node C" overwrote "Node A.md"
+    because fuzzy search incorrectly matched the similar file paths.
+
+    Root cause: link_resolver.resolve_link() uses fuzzy search fallback which matches
+    "edge-cases/Node C.md" to existing "edge-cases/Node A.md" because they share
+    similar words ("edge-cases", "Node").
+
+    Expected: Create new entity "Node C" with its own file
+    Actual Bug: Updates existing "Node A" entity, overwriting its file
+    """
+    # Step 1: Create first entity "Node A"
+    entity_a = EntitySchema(
+        title="Node A",
+        folder="edge-cases",
+        entity_type="note",
+        content="# Node A\n\nOriginal content for Node A",
+    )
+
+    created_a, is_new_a = await entity_service.create_or_update_entity(entity_a)
+    assert is_new_a is True, "Node A should be created as new entity"
+    assert created_a.title == "Node A"
+    assert created_a.file_path == "edge-cases/Node A.md"
+
+    # CRITICAL: Index Node A in search to enable fuzzy search fallback
+    # This is what triggers the bug - without indexing, fuzzy search returns no results
+    await search_service.index_entity(created_a)
+
+    # Verify Node A file exists with correct content
+    file_a = project_config.home / "edge-cases" / "Node A.md"
+    assert file_a.exists(), "Node A.md file should exist"
+    content_a = file_a.read_text()
+    assert "Node A" in content_a
+    assert "Original content for Node A" in content_a
+
+    # Step 2: Create Node B to match live test scenario
+    entity_b = EntitySchema(
+        title="Node B",
+        folder="edge-cases",
+        entity_type="note",
+        content="# Node B\n\nContent for Node B",
+    )
+
+    created_b, is_new_b = await entity_service.create_or_update_entity(entity_b)
+    assert is_new_b is True
+    await search_service.index_entity(created_b)
+
+    # Step 3: Create Node C - this is where the bug occurs in live testing
+    # BUG: This will incorrectly match Node A via fuzzy search
+    entity_c = EntitySchema(
+        title="Node C",
+        folder="edge-cases",
+        entity_type="note",
+        content="# Node C\n\nContent for Node C",
+    )
+
+    created_c, is_new_c = await entity_service.create_or_update_entity(entity_c)
+
+    # CRITICAL ASSERTIONS: Node C should be created as NEW entity, not update Node A
+    assert is_new_c is True, "Node C should be created as NEW entity, not update existing"
+    assert created_c.title == "Node C", "Created entity should have title 'Node C'"
+    assert created_c.file_path == "edge-cases/Node C.md", "Should create Node C.md file"
+    assert created_c.id != created_a.id, "Node C should have different ID than Node A"
+
+    # Verify both files exist with correct content
+    file_c = project_config.home / "edge-cases" / "Node C.md"
+    assert file_c.exists(), "Node C.md file should exist as separate file"
+
+    # Re-read Node A file to ensure it wasn't overwritten
+    content_a_after = file_a.read_text()
+    assert "title: Node A" in content_a_after, "Node A.md should still have Node A title"
+    assert "Original content for Node A" in content_a_after, (
+        "Node A.md should NOT be overwritten with Node C content"
+    )
+    assert "Content for Node C" not in content_a_after, (
+        "Node A.md should not contain Node C content"
+    )
+
+    # Verify Node C file has correct content
+    content_c = file_c.read_text()
+    assert "title: Node C" in content_c, "Node C.md should have Node C title"
+    assert "Content for Node C" in content_c, "Node C.md should have Node C content"
+    assert "Original content for Node A" not in content_c, (
+        "Node C.md should not contain Node A content"
+    )

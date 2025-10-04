@@ -146,10 +146,11 @@ class EntityService(BaseService[EntityModel]):
             f"Creating or updating entity: {schema.file_path}, permalink: {schema.permalink}"
         )
 
-        # Try to find existing entity using smart resolution
-        existing = await self.link_resolver.resolve_link(schema.file_path)
+        # Try to find existing entity using strict resolution (no fuzzy search)
+        # This prevents incorrectly matching similar file paths like "Node A.md" and "Node C.md"
+        existing = await self.link_resolver.resolve_link(schema.file_path, strict=True)
         if not existing and schema.permalink:
-            existing = await self.link_resolver.resolve_link(schema.permalink)
+            existing = await self.link_resolver.resolve_link(schema.permalink, strict=True)
 
         if existing:
             logger.debug(f"Found existing entity: {existing.file_path}")

@@ -1,5 +1,222 @@
 # CHANGELOG
 
+## v0.15.0 (2025-10-04)
+
+### Critical Bug Fixes
+
+- **Permalink Collision Data Loss Prevention** - Fixed critical bug where creating similar entity names would overwrite existing files
+  ([`2a050ed`](https://github.com/basicmachines-co/basic-memory/commit/2a050edee42b07294f5199902a60b626bfc47be8))
+  - **Issue**: Creating "Node C" would overwrite "Node A.md" due to fuzzy search incorrectly matching similar file paths
+  - **Solution**: Added `strict=True` parameter to link resolution, disabling fuzzy search fallback during entity creation
+  - **Impact**: Prevents data loss from false positive path matching like "edge-cases/Node A.md" vs "edge-cases/Node C.md"
+  - **Testing**: Comprehensive integration tests and MCP-level permalink collision tests added
+  - **Status**: Manually verified fix prevents file overwrite in production scenarios
+
+### Bug Fixes
+
+- **#330**: Remove .env file loading from BasicMemoryConfig
+  ([`f3b1945`](https://github.com/basicmachines-co/basic-memory/commit/f3b1945e4c0070d0282eaf98c085ef188c8edd2d))
+  - Clean up configuration initialization to prevent unintended environment variable loading
+
+- **#329**: Normalize underscores in memory:// URLs for build_context
+  ([`f5a11f3`](https://github.com/basicmachines-co/basic-memory/commit/f5a11f3911edda55bee6970ed9e7c38f7fd7a059))
+  - Fix URL normalization to handle underscores consistently in memory:// protocol
+  - Improve knowledge graph navigation with standardized URL handling
+
+- **#328**: Simplify entity upsert to use database-level conflict resolution
+  ([`ee83b0e`](https://github.com/basicmachines-co/basic-memory/commit/ee83b0e5a8f00cdcc8e24a0f8c9449c6eaddf649))
+  - Leverage SQLite's native UPSERT for cleaner entity creation/update logic
+  - Reduce application-level complexity by using database conflict resolution
+
+- **#312**: Add proper datetime JSON schema format annotations for MCP validation
+  ([`a7bf42e`](https://github.com/basicmachines-co/basic-memory/commit/a7bf42ef495a3e2c66230985c3445cab5c52c408))
+  - Fix MCP schema validation errors with proper datetime format annotations
+  - Ensure compatibility with strict MCP schema validators
+
+- **#281**: Fix move_note without file extension
+  ([`3e168b9`](https://github.com/basicmachines-co/basic-memory/commit/3e168b98f3962681799f4537eb86ded47e771665))
+  - Allow moving notes by title alone without requiring .md extension
+  - Improve move operation usability and error handling
+
+- **#310**: Remove obsolete update_current_project function and --project flag reference
+  ([`17a6733`](https://github.com/basicmachines-co/basic-memory/commit/17a6733c9d280def922e37c2cd171e3ee44fce21))
+  - Clean up deprecated project management code
+  - Remove unused CLI flag references
+
+- **#309**: Make sync operations truly non-blocking with thread pool
+  ([`1091e11`](https://github.com/basicmachines-co/basic-memory/commit/1091e113227c86f10f574e56a262aff72f728113))
+  - Move sync operations to background thread pool for improved responsiveness
+  - Prevent blocking during file synchronization operations
+
+### Features
+
+- **#327**: CLI Subscription Validation (SPEC-13 Phase 2)
+  ([`ace6a0f`](https://github.com/basicmachines-co/basic-memory/commit/ace6a0f50d8d0b4ea31fb526361c2d9616271740))
+  - Implement subscription validation for CLI operations
+  - Foundation for future cloud billing integration
+
+- **#322**: Cloud CLI sync via rclone bisync
+  ([`99a35a7`](https://github.com/basicmachines-co/basic-memory/commit/99a35a7fb410ef88c50050e666e4244350e44a6e))
+  - Add bidirectional cloud synchronization using rclone
+  - Enable local-cloud file sync with conflict detection
+
+- **#315**: Implement SPEC-11 API performance optimizations
+  ([`5da97e4`](https://github.com/basicmachines-co/basic-memory/commit/5da97e482052907d68a2a3604e255c3f2c42c5ed))
+  - Comprehensive API performance improvements
+  - Optimized database queries and response times
+
+- **#314**: Integrate ignore_utils to skip .gitignored files in sync process
+  ([`33ee1e0`](https://github.com/basicmachines-co/basic-memory/commit/33ee1e0831d2060587de2c9886e74ff111b04583))
+  - Respect .gitignore patterns during file synchronization
+  - Prevent syncing build artifacts and temporary files
+
+- **#313**: Add disable_permalinks config flag
+  ([`9035913`](https://github.com/basicmachines-co/basic-memory/commit/903591384dffeba9996a18463818bdb8b28ca03e))
+  - Optional permalink generation for users who don't need them
+  - Improves flexibility for different knowledge management workflows
+
+- **#306**: Implement cloud mount CLI commands for local file access
+  ([`2c5c606`](https://github.com/basicmachines-co/basic-memory/commit/2c5c606a394ab994334c8fd307b30370037bbf39))
+  - Mount cloud files locally using rclone for real-time editing
+  - Three performance profiles: fast (5s), balanced (10-15s), safe (15s+)
+  - Cross-platform rclone installer with package manager fallbacks
+
+- **#305**: ChatGPT tools for search and fetch
+  ([`f40ab31`](https://github.com/basicmachines-co/basic-memory/commit/f40ab31685a9510a07f5d87bf24436c0df80680f))
+  - Add ChatGPT-specific search and fetch tools
+  - Expand AI assistant integration options
+
+- **#298**: Implement SPEC-6 Stateless Architecture for MCP Tools
+  ([`a1d7792`](https://github.com/basicmachines-co/basic-memory/commit/a1d7792bdb6f71c4943b861d1c237f6ac7021247))
+  - Redesign MCP tools for stateless operation
+  - Enable cloud deployment with better scalability
+
+- **#296**: Basic Memory cloud upload
+  ([`e0d8aeb`](https://github.com/basicmachines-co/basic-memory/commit/e0d8aeb14913f3471b9716d0c60c61adb1d74687))
+  - Implement file upload capabilities for cloud storage
+  - Foundation for cloud-hosted Basic Memory instances
+
+- **#291**: Merge Cloud auth
+  ([`3a6baf8`](https://github.com/basicmachines-co/basic-memory/commit/3a6baf80fc6012e9434e06b1605f9a8b198d8688))
+  - OAuth 2.1 authentication with Supabase integration
+  - JWT-based tenant isolation for multi-user cloud deployments
+
+### Platform & Infrastructure
+
+- **#331**: Add Python 3.13 to test matrix
+  ([`16d7edd`](https://github.com/basicmachines-co/basic-memory/commit/16d7eddbf704abfe53373663e80d05ecdde15aa7))
+  - Ensure compatibility with latest Python version
+  - Expand CI/CD testing coverage
+
+- **#316**: Enable WAL mode and add Windows-specific SQLite optimizations
+  ([`c83d567`](https://github.com/basicmachines-co/basic-memory/commit/c83d567917267bb3d52708f4b38d2daf36c1f135))
+  - Enable Write-Ahead Logging for better concurrency
+  - Platform-specific SQLite optimizations for Windows users
+
+- **#320**: Rework lifecycle management to optimize cloud deployment
+  ([`ea2e93d`](https://github.com/basicmachines-co/basic-memory/commit/ea2e93d9265bfa366d2d3796f99f579ab2aed48c))
+  - Optimize application lifecycle for cloud environments
+  - Improve startup time and resource management
+
+- **#319**: Resolve entity relations in background to prevent cold start blocking
+  ([`324844a`](https://github.com/basicmachines-co/basic-memory/commit/324844a670d874410c634db520a68c09149045ea))
+  - Move relation resolution to background processing
+  - Faster MCP server cold starts
+
+- **#318**: Enforce minimum 1-day timeframe for recent_activity
+  ([`f818702`](https://github.com/basicmachines-co/basic-memory/commit/f818702ab7f8d2d706178e7b0ed3467501c9c4a2))
+  - Fix timezone-related issues in recent activity queries
+  - Ensure consistent behavior across time zones
+
+- **#317**: Critical cloud deployment fixes for MCP stability
+  ([`2efd8f4`](https://github.com/basicmachines-co/basic-memory/commit/2efd8f44e2d0259079ed5105fea34308875c0e10))
+  - Multiple stability improvements for cloud-hosted MCP servers
+  - Enhanced error handling and recovery
+
+### Technical Improvements
+
+- **Comprehensive Testing** - Extensive test coverage for critical fixes
+  - New permalink collision test suite with 4 MCP-level integration tests
+  - Entity service test coverage expanded to reproduce fuzzy search bug
+  - Manual testing verification of data loss prevention
+  - All 55 entity service tests passing with new strict resolution
+
+- **Windows Support Enhancements**
+  ([`7a8b08d`](https://github.com/basicmachines-co/basic-memory/commit/7a8b08d11ee627b54af6f5ea7ab4ef9fcd8cf4ed),
+   [`9aa4024`](https://github.com/basicmachines-co/basic-memory/commit/9aa40246a8ad1c3cef82b32e1ca7ce8ea23e1e05))
+  - Fix Windows test failures and add Windows CI support
+  - Address platform-specific issues for Windows users
+  - Enhanced cross-platform compatibility
+
+- **Docker Improvements**
+  ([`105bcaa`](https://github.com/basicmachines-co/basic-memory/commit/105bcaa025576a06f889183baded6c18f3782696))
+  - Implement non-root Docker container to fix file ownership issues
+  - Improved security and compatibility in containerized deployments
+
+- **Code Quality**
+  - Enhanced filename sanitization with optional kebab case support
+  - Improved character conflict detection for sync operations
+  - Better error handling across the codebase
+  - Path traversal security vulnerability fixes
+
+### Documentation
+
+- **#321**: Corrected dead links in README
+  ([`fc38877`](https://github.com/basicmachines-co/basic-memory/commit/fc38877008cd8c762116f7ff4b2573495b4e5c0f))
+  - Fix broken documentation links
+  - Improve navigation and accessibility
+
+- **#308**: Update Claude Code GitHub Workflow
+  ([`8c7e29e`](https://github.com/basicmachines-co/basic-memory/commit/8c7e29e325f36a67bdefe8811637493bef4bbf56))
+  - Enhanced GitHub integration documentation
+  - Better Claude Code collaboration workflow
+
+### Breaking Changes
+
+**None** - This release maintains full backward compatibility with v0.14.x
+
+All changes are either:
+- Bug fixes that correct unintended behavior
+- New optional features that don't affect existing functionality
+- Internal optimizations that are transparent to users
+
+### Migration Guide
+
+No manual migration required. Upgrade with:
+
+```bash
+# Update via uv
+uv tool upgrade basic-memory
+
+# Or install fresh
+uv tool install basic-memory
+```
+
+**What's Fixed:**
+- Data loss bug from permalink collisions is completely resolved
+- Cloud deployment stability significantly improved
+- Windows platform compatibility enhanced
+- Better performance across all operations
+
+**What's New:**
+- Cloud sync capabilities via rclone
+- Subscription validation foundation
+- Python 3.13 support
+- Enhanced security and stability
+
+### Installation
+
+```bash
+# Latest stable release
+uv tool install basic-memory
+
+# Update existing installation
+uv tool upgrade basic-memory
+
+# Docker
+docker pull ghcr.io/basicmachines-co/basic-memory:v0.15.0
+```
+
 ## v0.14.2 (2025-07-03)
 
 ### Bug Fixes
