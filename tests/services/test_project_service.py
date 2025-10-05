@@ -716,48 +716,47 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
                         await project_service.repository.delete(db_project.id)
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Cloud mode only runs on POSIX systems")
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
 @pytest.mark.asyncio
-async def test_add_project_cloud_mode_sanitizes_paths(
+async def test_add_project_with_project_root_sanitizes_paths(
     project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
 ):
-    """Test that cloud mode sanitizes and validates project paths."""
-    # Set up cloud mode environment
-    cloud_home = tmp_path / "app" / "data" / "basic-memory"
-    cloud_home.mkdir(parents=True, exist_ok=True)
+    """Test that BASIC_MEMORY_PROJECT_ROOT sanitizes and validates project paths."""
+    # Set up project root environment
+    project_root_path = tmp_path / "app" / "data"
+    project_root_path.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("BASIC_MEMORY_HOME", str(cloud_home))
-    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "true")
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(project_root_path))
 
-    # Force reload config to pick up cloud mode
-    from basic_memory.services import project_service as ps_module
+    # Invalidate config cache so it picks up the new env var
+    from basic_memory import config as config_module
 
-    monkeypatch.setattr(ps_module, "config", config_manager.load_config())
+    config_module._CONFIG_CACHE = None
 
     test_cases = [
         # (input_path, expected_result_path, should_succeed)
-        ("test", str(cloud_home / "test"), True),  # Simple relative path
-        ("~/Documents/test", str(cloud_home / "Documents" / "test"), True),  # Home directory
+        ("test", str(project_root_path / "test"), True),  # Simple relative path
+        ("~/Documents/test", str(project_root_path / "Documents" / "test"), True),  # Home directory
         (
             "/tmp/test",
-            str(cloud_home / "tmp" / "test"),
+            str(project_root_path / "tmp" / "test"),
             True,
         ),  # Absolute path (sanitized to relative)
         (
             "../../../etc/passwd",
-            str(cloud_home),
+            str(project_root_path),
             True,
-        ),  # Path traversal (all ../ removed, results in cloud_home)
-        ("folder/subfolder", str(cloud_home / "folder" / "subfolder"), True),  # Nested path
+        ),  # Path traversal (all ../ removed, results in project_root)
+        ("folder/subfolder", str(project_root_path / "folder" / "subfolder"), True),  # Nested path
         (
             "~/folder/../test",
-            str(cloud_home / "test"),
+            str(project_root_path / "test"),
             True,
         ),  # Mixed patterns (sanitized to just 'test')
     ]
 
     for i, (input_path, expected_path, should_succeed) in enumerate(test_cases):
-        test_project_name = f"cloud-test-{i}"
+        test_project_name = f"project-root-test-{i}"
 
         try:
             # Add the project
@@ -768,9 +767,9 @@ async def test_add_project_cloud_mode_sanitizes_paths(
                 assert test_project_name in project_service.projects
                 actual_path = project_service.projects[test_project_name]
 
-                # The path should be under cloud_home
-                assert actual_path.startswith(str(cloud_home)), (
-                    f"Path {actual_path} should start with {cloud_home} for input {input_path}"
+                # The path should be under project_root
+                assert actual_path.startswith(str(project_root_path)), (
+                    f"Path {actual_path} should start with {project_root_path} for input {input_path}"
                 )
 
                 # Clean up
@@ -784,29 +783,28 @@ async def test_add_project_cloud_mode_sanitizes_paths(
             # Expected failure - continue to next test case
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Cloud mode only runs on POSIX systems")
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
 @pytest.mark.asyncio
-async def test_add_project_cloud_mode_rejects_escape_attempts(
+async def test_add_project_with_project_root_rejects_escape_attempts(
     project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
 ):
-    """Test that cloud mode rejects paths that try to escape cloud storage."""
-    # Set up cloud mode environment
-    cloud_home = tmp_path / "app" / "data" / "basic-memory"
-    cloud_home.mkdir(parents=True, exist_ok=True)
+    """Test that BASIC_MEMORY_PROJECT_ROOT rejects paths that try to escape the project root."""
+    # Set up project root environment
+    project_root_path = tmp_path / "app" / "data"
+    project_root_path.mkdir(parents=True, exist_ok=True)
 
-    # Create a directory outside cloud_home to verify it's not accessible
+    # Create a directory outside project_root to verify it's not accessible
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setenv("BASIC_MEMORY_HOME", str(cloud_home))
-    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "true")
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(project_root_path))
 
-    # Force reload config to pick up cloud mode
-    from basic_memory.services import project_service as ps_module
+    # Invalidate config cache so it picks up the new env var
+    from basic_memory import config as config_module
 
-    monkeypatch.setattr(ps_module, "config", config_manager.load_config())
+    config_module._CONFIG_CACHE = None
 
-    # All of these should succeed by being sanitized to paths under cloud_home
+    # All of these should succeed by being sanitized to paths under project_root
     # The sanitization removes dangerous patterns, so they don't escape
     safe_after_sanitization = [
         "../../../etc/passwd",
@@ -815,16 +813,16 @@ async def test_add_project_cloud_mode_rejects_escape_attempts(
     ]
 
     for i, attack_path in enumerate(safe_after_sanitization):
-        test_project_name = f"cloud-attack-test-{i}"
+        test_project_name = f"project-root-attack-test-{i}"
 
         try:
             # Add the project
             await project_service.add_project(test_project_name, attack_path)
 
-            # Verify it was sanitized to be under cloud_home
+            # Verify it was sanitized to be under project_root
             actual_path = project_service.projects[test_project_name]
-            assert actual_path.startswith(str(cloud_home)), (
-                f"Sanitized path {actual_path} should be under {cloud_home}"
+            assert actual_path.startswith(str(project_root_path)), (
+                f"Sanitized path {actual_path} should be under {project_root_path}"
             )
 
             # Clean up
@@ -835,16 +833,17 @@ async def test_add_project_cloud_mode_rejects_escape_attempts(
             pass
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Cloud mode only runs on POSIX systems")
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
 @pytest.mark.asyncio
-async def test_add_project_local_mode_allows_arbitrary_paths(
+async def test_add_project_without_project_root_allows_arbitrary_paths(
     project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
 ):
-    """Test that local mode (non-cloud) still allows arbitrary paths."""
-    # Ensure cloud mode is disabled
-    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
+    """Test that without BASIC_MEMORY_PROJECT_ROOT set, arbitrary paths are allowed."""
+    # Ensure project_root is not set
+    if "BASIC_MEMORY_PROJECT_ROOT" in os.environ:
+        monkeypatch.delenv("BASIC_MEMORY_PROJECT_ROOT")
 
-    # Force reload config to pick up local mode
+    # Force reload config without project_root
     from basic_memory.services import project_service as ps_module
 
     monkeypatch.setattr(ps_module, "config", config_manager.load_config())
@@ -853,10 +852,10 @@ async def test_add_project_local_mode_allows_arbitrary_paths(
     test_dir = tmp_path / "arbitrary-location"
     test_dir.mkdir(parents=True, exist_ok=True)
 
-    test_project_name = "local-mode-test"
+    test_project_name = "no-project-root-test"
 
     try:
-        # In local mode, we should be able to use arbitrary absolute paths
+        # Without project_root, we should be able to use arbitrary absolute paths
         await project_service.add_project(test_project_name, str(test_dir))
 
         # Verify the path was accepted as-is

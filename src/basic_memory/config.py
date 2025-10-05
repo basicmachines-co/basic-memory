@@ -103,6 +103,12 @@ class BasicMemoryConfig(BaseSettings):
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
     )
 
+    # Project path constraints
+    project_root: Optional[str] = Field(
+        default=None,
+        description="If set, all projects must be created underneath this directory. Paths will be sanitized and constrained to this root. If not set, projects can be created anywhere (default behavior).",
+    )
+
     # API connection configuration
     api_url: Optional[str] = Field(
         default=None,
