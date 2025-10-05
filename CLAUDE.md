@@ -24,6 +24,8 @@ See the [README.md](README.md) file for a project overview.
 - Create db migration: `make migration m="Your migration message"`
 - Run development MCP Inspector: `make run-inspector`
 
+**Note:** Project supports Python 3.13+
+
 ### Code Style Guidelines
 
 - Line length: 100 characters max
@@ -80,6 +82,7 @@ See the [README.md](README.md) file for a project overview.
 
 ### Basic Memory Commands
 
+**Local Commands:**
 - Sync knowledge: `basic-memory sync` or `basic-memory sync --watch`
 - Import from Claude: `basic-memory import claude conversations`
 - Import from ChatGPT: `basic-memory import chatgpt`
@@ -89,24 +92,41 @@ See the [README.md](README.md) file for a project overview.
     - Guide: `basic-memory tools basic-memory-guide`
     - Continue: `basic-memory tools continue-conversation --topic="search"`
 
+**Cloud Commands (requires subscription):**
+- Authenticate: `basic-memory cloud login`
+- Logout: `basic-memory cloud logout`
+- Bidirectional sync: `basic-memory cloud sync`
+- Integrity check: `basic-memory cloud check`
+- Mount cloud storage: `basic-memory cloud mount`
+- Unmount cloud storage: `basic-memory cloud unmount`
+
 ### MCP Capabilities
 
 - Basic Memory exposes these MCP tools to LLMs:
 
   **Content Management:**
     - `write_note(title, content, folder, tags)` - Create/update markdown notes with semantic observations and relations
-    - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph
-      awareness
-    - `read_file(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
+    - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph awareness
+    - `read_content(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
+    - `view_note(identifier, page, page_size)` - View notes as formatted artifacts for better readability
+    - `edit_note(identifier, operation, content)` - Edit notes incrementally (append, prepend, find/replace, replace_section)
+    - `move_note(identifier, destination_path)` - Move notes to new locations, updating database and maintaining links
+    - `delete_note(identifier)` - Delete notes from the knowledge base
 
   **Knowledge Graph Navigation:**
-    - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation
-      continuity
-    - `recent_activity(type, depth, timeframe)` - Get recently updated information with specified timeframe (e.g., "
-      1d", "1 week")
+    - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation continuity
+    - `recent_activity(type, depth, timeframe)` - Get recently updated information with specified timeframe (e.g., "1d", "1 week")
+    - `list_directory(dir_name, depth, file_name_glob)` - Browse directory contents with filtering and depth control
 
   **Search & Discovery:**
-    - `search(query, page, page_size)` - Full-text search across all content with filtering options
+    - `search_notes(query, page, page_size, search_type, types, entity_types, after_date)` - Full-text search across all content with advanced filtering options
+
+  **Project Management:**
+    - `list_memory_projects()` - List all available projects with their status
+    - `create_memory_project(project_name, project_path, set_default)` - Create new Basic Memory projects
+    - `delete_project(project_name)` - Delete a project from configuration
+    - `get_current_project()` - Get current project information and stats
+    - `sync_status()` - Check file synchronization and background operation status
 
   **Visualization:**
     - `canvas(nodes, edges, title, folder)` - Generate Obsidian canvas files for knowledge graph visualization
@@ -117,6 +137,34 @@ See the [README.md](README.md) file for a project overview.
     - `search(query, after_date)` - Search with detailed, formatted results for better context understanding
     - `recent_activity(timeframe)` - View recently changed items with formatted output
     - `json_canvas_spec()` - Full JSON Canvas specification for Obsidian visualization
+
+### Cloud Features (v0.15.0+)
+
+Basic Memory now supports cloud synchronization and storage (requires active subscription):
+
+**Authentication:**
+- JWT-based authentication with subscription validation
+- Secure session management with token refresh
+- Support for multiple cloud projects
+
+**Bidirectional Sync:**
+- rclone bisync integration for two-way synchronization
+- Conflict resolution and integrity verification
+- Real-time sync with change detection
+- Mount/unmount cloud storage for direct file access
+
+**Cloud Project Management:**
+- Create and manage projects in the cloud
+- Toggle between local and cloud modes
+- Per-project sync configuration
+- Subscription-based access control
+
+**Security & Performance:**
+- Removed .env file loading for improved security
+- .gitignore integration (respects gitignored files)
+- WAL mode for SQLite performance
+- Background relation resolution (non-blocking startup)
+- API performance optimizations (SPEC-11)
 
 ## AI-Human Collaborative Development
 

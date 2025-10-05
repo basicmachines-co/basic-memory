@@ -1,6 +1,6 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![PyPI version](https://badge.fury.io/py/basic-memory.svg)](https://badge.fury.io/py/basic-memory)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://github.com/basicmachines-co/basic-memory/workflows/Tests/badge.svg)](https://github.com/basicmachines-co/basic-memory/actions)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 ![](https://badge.mcpx.dev?type=server 'MCP Server')
@@ -100,6 +100,9 @@ With Basic Memory, you can:
 - Keep everything local and under your control
 - Use familiar tools like Obsidian to view and edit notes
 - Build a personal knowledge base that grows over time
+- Sync your knowledge to the cloud with bidirectional synchronization
+- Authenticate and manage cloud projects with subscription validation
+- Mount cloud storage for direct file access
 
 ## How It Works in Practice
 
@@ -346,14 +349,57 @@ basic-memory sync
 basic-memory sync --watch
 ```
 
-3. In Claude Desktop, the LLM can now use these tools:
+3. Cloud features (optional, requires subscription):
 
+```bash
+# Authenticate with cloud
+basic-memory cloud login
+
+# Bidirectional sync with cloud
+basic-memory cloud sync
+
+# Verify cloud integrity
+basic-memory cloud check
+
+# Mount cloud storage
+basic-memory cloud mount
+```
+
+4. In Claude Desktop, the LLM can now use these tools:
+
+**Content Management:**
 ```
 write_note(title, content, folder, tags) - Create or update notes
 read_note(identifier, page, page_size) - Read notes by title or permalink
+read_content(path) - Read raw file content (text, images, binaries)
+view_note(identifier) - View notes as formatted artifacts
+edit_note(identifier, operation, content) - Edit notes incrementally
+move_note(identifier, destination_path) - Move notes with database consistency
+delete_note(identifier) - Delete notes from knowledge base
+```
+
+**Knowledge Graph Navigation:**
+```
 build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
-search(query, page, page_size) - Search across your knowledge base
 recent_activity(type, depth, timeframe) - Find recently updated information
+list_directory(dir_name, depth) - Browse directory contents with filtering
+```
+
+**Search & Discovery:**
+```
+search(query, page, page_size) - Search across your knowledge base
+```
+
+**Project Management:**
+```
+list_memory_projects() - List all available projects
+create_memory_project(project_name, project_path) - Create new projects
+get_current_project() - Show current project stats
+sync_status() - Check synchronization status
+```
+
+**Visualization:**
+```
 canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 ```
 
@@ -373,6 +419,7 @@ See the [Documentation](https://memory.basicmachines.co/) for more info, includi
 
 - [Complete User Guide](https://docs.basicmemory.com/user-guide/)
 - [CLI tools](https://docs.basicmemory.com/guides/cli-reference/)
+- [Cloud CLI and Sync](https://docs.basicmemory.com/guides/cloud-cli/)
 - [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/#project)
 - [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/#import)
 
