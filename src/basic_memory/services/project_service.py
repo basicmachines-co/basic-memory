@@ -97,7 +97,7 @@ class ProjectService:
             set_default: Whether to set this project as the default
 
         Raises:
-            ValueError: If the project already exists
+            ValueError: If the project already exists or path collides with existing project
         """
         # If project_root is set, constrain all projects to that directory
         project_root = self.config_manager.config.project_root
@@ -108,11 +108,13 @@ class ProjectService:
             # Strip leading slashes, home directory references, and parent directory references
             clean_path = path.lstrip("/").replace("~/", "").replace("~", "")
 
-            # Remove any parent directory traversal attempts
+            # Remove any parent directory traversal attempts and normalize to lowercase
+            # to prevent case-sensitivity issues on Linux filesystems
             path_parts = []
             for part in clean_path.split("/"):
                 if part and part != "." and part != "..":
-                    path_parts.append(part)
+                    # Convert to lowercase to ensure case-insensitive consistency
+                    path_parts.append(part.lower())
             clean_path = "/".join(path_parts) if path_parts else ""
 
             # Construct path relative to project_root
@@ -124,6 +126,19 @@ class ProjectService:
                     f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
                     f"All projects must be created under this directory. Invalid path: {path}"
                 )
+
+            # Check for case-insensitive path collisions with existing projects
+            existing_projects = await self.list_projects()
+            for existing in existing_projects:
+                if (
+                    existing.path.lower() == resolved_path.lower()
+                    and existing.path != resolved_path
+                ):
+                    raise ValueError(
+                        f"Path collision detected: '{resolved_path}' conflicts with existing project "
+                        f"'{existing.name}' at '{existing.path}'. "
+                        f"In cloud mode, paths are normalized to lowercase to prevent case-sensitivity issues."
+                    )
         else:
             resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
 

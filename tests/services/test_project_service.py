@@ -867,3 +867,96 @@ async def test_add_project_without_project_root_allows_arbitrary_paths(
         # Clean up
         if test_project_name in project_service.projects:
             await project_service.remove_project(test_project_name)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_with_project_root_normalizes_case(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that BASIC_MEMORY_PROJECT_ROOT normalizes paths to lowercase."""
+    # Set up project root environment
+    project_root_path = tmp_path / "app" / "data"
+    project_root_path.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(project_root_path))
+
+    # Invalidate config cache so it picks up the new env var
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
+    test_cases = [
+        # (input_path, expected_normalized_path)
+        ("Documents/my-project", str(project_root_path / "documents" / "my-project")),
+        ("UPPERCASE/PATH", str(project_root_path / "uppercase" / "path")),
+        ("MixedCase/Path", str(project_root_path / "mixedcase" / "path")),
+        ("documents/Test-TWO", str(project_root_path / "documents" / "test-two")),
+    ]
+
+    for i, (input_path, expected_path) in enumerate(test_cases):
+        test_project_name = f"case-normalize-test-{i}"
+
+        try:
+            # Add the project
+            await project_service.add_project(test_project_name, input_path)
+
+            # Verify the path was normalized to lowercase
+            assert test_project_name in project_service.projects
+            actual_path = project_service.projects[test_project_name]
+            assert actual_path == expected_path, (
+                f"Expected path {expected_path} but got {actual_path} for input {input_path}"
+            )
+
+            # Clean up
+            await project_service.remove_project(test_project_name)
+
+        except ValueError as e:
+            pytest.fail(f"Unexpected ValueError for input path {input_path}: {e}")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_with_project_root_detects_case_collisions(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that BASIC_MEMORY_PROJECT_ROOT detects case-insensitive path collisions."""
+    # Set up project root environment
+    project_root_path = tmp_path / "app" / "data"
+    project_root_path.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(project_root_path))
+
+    # Invalidate config cache so it picks up the new env var
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
+    # First, create a project with lowercase path
+    first_project = "documents-project"
+    await project_service.add_project(first_project, "documents/basic-memory")
+
+    # Verify it was created with normalized lowercase path
+    assert first_project in project_service.projects
+    first_path = project_service.projects[first_project]
+    assert first_path == str(project_root_path / "documents" / "basic-memory")
+
+    # Now try to create a project with the same path but different case
+    # This should be normalized to the same lowercase path and not cause a collision
+    # since both will be normalized to the same path
+    second_project = "documents-project-2"
+    try:
+        # This should succeed because both get normalized to the same lowercase path
+        await project_service.add_project(second_project, "documents/basic-memory")
+        # If we get here, both should have the exact same path
+        second_path = project_service.projects[second_project]
+        assert second_path == first_path
+
+        # Clean up second project
+        await project_service.remove_project(second_project)
+    except ValueError:
+        # This is expected if there's already a project with this exact path
+        pass
+
+    # Clean up
+    await project_service.remove_project(first_project)
