@@ -24,7 +24,7 @@ See the [README.md](README.md) file for a project overview.
 - Create db migration: `make migration m="Your migration message"`
 - Run development MCP Inspector: `make run-inspector`
 
-**Note:** Project supports Python 3.13+
+**Note:** Project supports Python 3.10+
 
 ### Code Style Guidelines
 

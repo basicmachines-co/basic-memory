@@ -781,8 +781,6 @@ notes = await read_note(
 )
 ```
 
-**URL normalization (v0.15.0)**:
-
 ```python
 # Underscores automatically converted to hyphens
 note = await read_note(
