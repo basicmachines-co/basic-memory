@@ -1,12 +1,9 @@
 """Integration tests for the disable_permalinks configuration."""
 
 import pytest
-from pathlib import Path
-from textwrap import dedent
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.markdown import EntityParser, MarkdownProcessor
-from basic_memory.models import Project
 from basic_memory.repository import (
     EntityRepository,
     ObservationRepository,

@@ -714,3 +714,154 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
                     db_project = await project_service.repository.get_by_name(name)
                     if db_project:
                         await project_service.repository.delete(db_project.id)
+
+
+@pytest.mark.asyncio
+async def test_add_project_cloud_mode_sanitizes_paths(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that cloud mode sanitizes and validates project paths."""
+    # Set up cloud mode environment
+    cloud_home = tmp_path / "app" / "data" / "basic-memory"
+    cloud_home.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("BASIC_MEMORY_HOME", str(cloud_home))
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "true")
+
+    # Force reload config to pick up cloud mode
+    from basic_memory.services import project_service as ps_module
+
+    monkeypatch.setattr(ps_module, "config", config_manager.load_config())
+
+    test_cases = [
+        # (input_path, expected_result_path, should_succeed)
+        ("test", str(cloud_home / "test"), True),  # Simple relative path
+        ("~/Documents/test", str(cloud_home / "Documents" / "test"), True),  # Home directory
+        (
+            "/tmp/test",
+            str(cloud_home / "tmp" / "test"),
+            True,
+        ),  # Absolute path (sanitized to relative)
+        (
+            "../../../etc/passwd",
+            str(cloud_home),
+            True,
+        ),  # Path traversal (all ../ removed, results in cloud_home)
+        ("folder/subfolder", str(cloud_home / "folder" / "subfolder"), True),  # Nested path
+        (
+            "~/folder/../test",
+            str(cloud_home / "test"),
+            True,
+        ),  # Mixed patterns (sanitized to just 'test')
+    ]
+
+    for i, (input_path, expected_path, should_succeed) in enumerate(test_cases):
+        test_project_name = f"cloud-test-{i}"
+
+        try:
+            # Add the project
+            await project_service.add_project(test_project_name, input_path)
+
+            if should_succeed:
+                # Verify the path was sanitized correctly
+                assert test_project_name in project_service.projects
+                actual_path = project_service.projects[test_project_name]
+
+                # The path should be under cloud_home
+                assert actual_path.startswith(str(cloud_home)), (
+                    f"Path {actual_path} should start with {cloud_home} for input {input_path}"
+                )
+
+                # Clean up
+                await project_service.remove_project(test_project_name)
+            else:
+                pytest.fail(f"Expected ValueError for input path: {input_path}")
+
+        except ValueError as e:
+            if should_succeed:
+                pytest.fail(f"Unexpected ValueError for input path {input_path}: {e}")
+            # Expected failure - continue to next test case
+
+
+@pytest.mark.asyncio
+async def test_add_project_cloud_mode_rejects_escape_attempts(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that cloud mode rejects paths that try to escape cloud storage."""
+    # Set up cloud mode environment
+    cloud_home = tmp_path / "app" / "data" / "basic-memory"
+    cloud_home.mkdir(parents=True, exist_ok=True)
+
+    # Create a directory outside cloud_home to verify it's not accessible
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("BASIC_MEMORY_HOME", str(cloud_home))
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "true")
+
+    # Force reload config to pick up cloud mode
+    from basic_memory.services import project_service as ps_module
+
+    monkeypatch.setattr(ps_module, "config", config_manager.load_config())
+
+    # All of these should succeed by being sanitized to paths under cloud_home
+    # The sanitization removes dangerous patterns, so they don't escape
+    safe_after_sanitization = [
+        "../../../etc/passwd",
+        "../../.env",
+        "../../../home/user/.ssh/id_rsa",
+    ]
+
+    for i, attack_path in enumerate(safe_after_sanitization):
+        test_project_name = f"cloud-attack-test-{i}"
+
+        try:
+            # Add the project
+            await project_service.add_project(test_project_name, attack_path)
+
+            # Verify it was sanitized to be under cloud_home
+            actual_path = project_service.projects[test_project_name]
+            assert actual_path.startswith(str(cloud_home)), (
+                f"Sanitized path {actual_path} should be under {cloud_home}"
+            )
+
+            # Clean up
+            await project_service.remove_project(test_project_name)
+
+        except ValueError:
+            # If it raises ValueError, that's also acceptable for security
+            pass
+
+
+@pytest.mark.asyncio
+async def test_add_project_local_mode_allows_arbitrary_paths(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that local mode (non-cloud) still allows arbitrary paths."""
+    # Ensure cloud mode is disabled
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
+
+    # Force reload config to pick up local mode
+    from basic_memory.services import project_service as ps_module
+
+    monkeypatch.setattr(ps_module, "config", config_manager.load_config())
+
+    # Create a test directory
+    test_dir = tmp_path / "arbitrary-location"
+    test_dir.mkdir(parents=True, exist_ok=True)
+
+    test_project_name = "local-mode-test"
+
+    try:
+        # In local mode, we should be able to use arbitrary absolute paths
+        await project_service.add_project(test_project_name, str(test_dir))
+
+        # Verify the path was accepted as-is
+        assert test_project_name in project_service.projects
+        actual_path = project_service.projects[test_project_name]
+        assert actual_path == str(test_dir)
+
+    finally:
+        # Clean up
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)

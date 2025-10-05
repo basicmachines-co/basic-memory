@@ -194,6 +194,7 @@ async def add_project(
         Response confirming the project was added
     """
     try:  # pragma: no cover
+        # The service layer now handles cloud mode validation and path sanitization
         await project_service.add_project(
             project_data.name, project_data.path, set_default=project_data.set_default
         )
