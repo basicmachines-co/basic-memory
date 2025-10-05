@@ -24,11 +24,12 @@ WORKDIR /app
 RUN uv sync --locked
 
 # Create necessary directories and set ownership
-RUN mkdir -p /app/data /app/.basic-memory && \
+RUN mkdir -p /app/data/basic-memory /app/.basic-memory && \
     chown -R appuser:${GID} /app
 
 # Set default data directory and add venv to PATH
-ENV BASIC_MEMORY_HOME=/app/data \
+ENV BASIC_MEMORY_HOME=/app/data/basic-memory \
+    BASIC_MEMORY_PROJECT_ROOT=/app/data \
     PATH="/app/.venv/bin:$PATH"
 
 # Switch to the non-root user

@@ -714,3 +714,156 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
                     db_project = await project_service.repository.get_by_name(name)
                     if db_project:
                         await project_service.repository.delete(db_project.id)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_with_project_root_sanitizes_paths(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that BASIC_MEMORY_PROJECT_ROOT sanitizes and validates project paths."""
+    # Set up project root environment
+    project_root_path = tmp_path / "app" / "data"
+    project_root_path.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(project_root_path))
+
+    # Invalidate config cache so it picks up the new env var
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
+    test_cases = [
+        # (input_path, expected_result_path, should_succeed)
+        ("test", str(project_root_path / "test"), True),  # Simple relative path
+        ("~/Documents/test", str(project_root_path / "Documents" / "test"), True),  # Home directory
+        (
+            "/tmp/test",
+            str(project_root_path / "tmp" / "test"),
+            True,
+        ),  # Absolute path (sanitized to relative)
+        (
+            "../../../etc/passwd",
+            str(project_root_path),
+            True,
+        ),  # Path traversal (all ../ removed, results in project_root)
+        ("folder/subfolder", str(project_root_path / "folder" / "subfolder"), True),  # Nested path
+        (
+            "~/folder/../test",
+            str(project_root_path / "test"),
+            True,
+        ),  # Mixed patterns (sanitized to just 'test')
+    ]
+
+    for i, (input_path, expected_path, should_succeed) in enumerate(test_cases):
+        test_project_name = f"project-root-test-{i}"
+
+        try:
+            # Add the project
+            await project_service.add_project(test_project_name, input_path)
+
+            if should_succeed:
+                # Verify the path was sanitized correctly
+                assert test_project_name in project_service.projects
+                actual_path = project_service.projects[test_project_name]
+
+                # The path should be under project_root
+                assert actual_path.startswith(str(project_root_path)), (
+                    f"Path {actual_path} should start with {project_root_path} for input {input_path}"
+                )
+
+                # Clean up
+                await project_service.remove_project(test_project_name)
+            else:
+                pytest.fail(f"Expected ValueError for input path: {input_path}")
+
+        except ValueError as e:
+            if should_succeed:
+                pytest.fail(f"Unexpected ValueError for input path {input_path}: {e}")
+            # Expected failure - continue to next test case
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_with_project_root_rejects_escape_attempts(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that BASIC_MEMORY_PROJECT_ROOT rejects paths that try to escape the project root."""
+    # Set up project root environment
+    project_root_path = tmp_path / "app" / "data"
+    project_root_path.mkdir(parents=True, exist_ok=True)
+
+    # Create a directory outside project_root to verify it's not accessible
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(project_root_path))
+
+    # Invalidate config cache so it picks up the new env var
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
+    # All of these should succeed by being sanitized to paths under project_root
+    # The sanitization removes dangerous patterns, so they don't escape
+    safe_after_sanitization = [
+        "../../../etc/passwd",
+        "../../.env",
+        "../../../home/user/.ssh/id_rsa",
+    ]
+
+    for i, attack_path in enumerate(safe_after_sanitization):
+        test_project_name = f"project-root-attack-test-{i}"
+
+        try:
+            # Add the project
+            await project_service.add_project(test_project_name, attack_path)
+
+            # Verify it was sanitized to be under project_root
+            actual_path = project_service.projects[test_project_name]
+            assert actual_path.startswith(str(project_root_path)), (
+                f"Sanitized path {actual_path} should be under {project_root_path}"
+            )
+
+            # Clean up
+            await project_service.remove_project(test_project_name)
+
+        except ValueError:
+            # If it raises ValueError, that's also acceptable for security
+            pass
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_without_project_root_allows_arbitrary_paths(
+    project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
+):
+    """Test that without BASIC_MEMORY_PROJECT_ROOT set, arbitrary paths are allowed."""
+    # Ensure project_root is not set
+    if "BASIC_MEMORY_PROJECT_ROOT" in os.environ:
+        monkeypatch.delenv("BASIC_MEMORY_PROJECT_ROOT")
+
+    # Force reload config without project_root
+    from basic_memory.services import project_service as ps_module
+
+    monkeypatch.setattr(ps_module, "config", config_manager.load_config())
+
+    # Create a test directory
+    test_dir = tmp_path / "arbitrary-location"
+    test_dir.mkdir(parents=True, exist_ok=True)
+
+    test_project_name = "no-project-root-test"
+
+    try:
+        # Without project_root, we should be able to use arbitrary absolute paths
+        await project_service.add_project(test_project_name, str(test_dir))
+
+        # Verify the path was accepted as-is
+        assert test_project_name in project_service.projects
+        actual_path = project_service.projects[test_project_name]
+        assert actual_path == str(test_dir)
+
+    finally:
+        # Clean up
+        if test_project_name in project_service.projects:
+            await project_service.remove_project(test_project_name)

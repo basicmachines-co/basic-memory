@@ -103,6 +103,12 @@ class BasicMemoryConfig(BaseSettings):
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
     )
 
+    # Project path constraints
+    project_root: Optional[str] = Field(
+        default=None,
+        description="If set, all projects must be created underneath this directory. Paths will be sanitized and constrained to this root. If not set, projects can be created anywhere (default behavior).",
+    )
+
     # API connection configuration
     api_url: Optional[str] = Field(
         default=None,
@@ -232,6 +238,10 @@ class BasicMemoryConfig(BaseSettings):
         return Path.home() / DATA_DIR_NAME
 
 
+# Module-level cache for configuration
+_CONFIG_CACHE: Optional[BasicMemoryConfig] = None
+
+
 class ConfigManager:
     """Manages Basic Memory configuration."""
 
@@ -253,12 +263,45 @@ class ConfigManager:
         return self.load_config()
 
     def load_config(self) -> BasicMemoryConfig:
-        """Load configuration from file or create default."""
+        """Load configuration from file or create default.
+
+        Environment variables take precedence over file config values,
+        following Pydantic Settings best practices.
+
+        Uses module-level cache for performance across ConfigManager instances.
+        """
+        global _CONFIG_CACHE
+
+        # Return cached config if available
+        if _CONFIG_CACHE is not None:
+            return _CONFIG_CACHE
 
         if self.config_file.exists():
             try:
-                data = json.loads(self.config_file.read_text(encoding="utf-8"))
-                return BasicMemoryConfig(**data)
+                file_data = json.loads(self.config_file.read_text(encoding="utf-8"))
+
+                # First, create config from environment variables (Pydantic will read them)
+                # Then overlay with file data for fields that aren't set via env vars
+                # This ensures env vars take precedence
+
+                # Get env-based config fields that are actually set
+                env_config = BasicMemoryConfig()
+                env_dict = env_config.model_dump()
+
+                # Merge: file data as base, but only use it for fields not set by env
+                # We detect env-set fields by comparing to default values
+                merged_data = file_data.copy()
+
+                # For fields that have env var overrides, use those instead of file values
+                # The env_prefix is "BASIC_MEMORY_" so we check those
+                for field_name in BasicMemoryConfig.model_fields.keys():
+                    env_var_name = f"BASIC_MEMORY_{field_name.upper()}"
+                    if env_var_name in os.environ:
+                        # Environment variable is set, use it
+                        merged_data[field_name] = env_dict[field_name]
+
+                _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
+                return _CONFIG_CACHE
             except Exception as e:  # pragma: no cover
                 logger.exception(f"Failed to load config: {e}")
                 raise e
@@ -268,8 +311,11 @@ class ConfigManager:
             return config
 
     def save_config(self, config: BasicMemoryConfig) -> None:
-        """Save configuration to file."""
+        """Save configuration to file and invalidate cache."""
+        global _CONFIG_CACHE
         save_basic_memory_config(self.config_file, config)
+        # Invalidate cache so next load_config() reads fresh data
+        _CONFIG_CACHE = None
 
     @property
     def projects(self) -> Dict[str, str]:

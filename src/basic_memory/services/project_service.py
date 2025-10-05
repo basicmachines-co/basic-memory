@@ -99,14 +99,31 @@ class ProjectService:
         Raises:
             ValueError: If the project already exists
         """
-        # in cloud mode, don't allow arbitrary paths.
-        if config.cloud_mode:
-            basic_memory_home = os.getenv("BASIC_MEMORY_HOME")
-            assert basic_memory_home is not None
-            base_path = Path(basic_memory_home)
+        # If project_root is set, constrain all projects to that directory
+        project_root = self.config_manager.config.project_root
+        if project_root:
+            base_path = Path(project_root)
 
-            # Resolve to absolute path
-            resolved_path = Path(os.path.abspath(os.path.expanduser(base_path / path))).as_posix()
+            # Sanitize the input path
+            # Strip leading slashes, home directory references, and parent directory references
+            clean_path = path.lstrip("/").replace("~/", "").replace("~", "")
+
+            # Remove any parent directory traversal attempts
+            path_parts = []
+            for part in clean_path.split("/"):
+                if part and part != "." and part != "..":
+                    path_parts.append(part)
+            clean_path = "/".join(path_parts) if path_parts else ""
+
+            # Construct path relative to project_root
+            resolved_path = (base_path / clean_path).resolve().as_posix()
+
+            # Verify the resolved path is actually under project_root
+            if not resolved_path.startswith(base_path.resolve().as_posix()):
+                raise ValueError(
+                    f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
+                    f"All projects must be created under this directory. Invalid path: {path}"
+                )
         else:
             resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
 

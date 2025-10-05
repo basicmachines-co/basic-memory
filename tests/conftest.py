@@ -78,6 +78,11 @@ def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
 def config_manager(
     app_config: BasicMemoryConfig, project_config: ProjectConfig, config_home: Path, monkeypatch
 ) -> ConfigManager:
+    # Invalidate config cache to ensure clean state for each test
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
     # Create a new ConfigManager that uses the test home directory
     config_manager = ConfigManager()
     # Update its paths to use the test directory
