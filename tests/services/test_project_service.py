@@ -716,6 +716,7 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(
                         await project_service.repository.delete(db_project.id)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Cloud mode only runs on POSIX systems")
 @pytest.mark.asyncio
 async def test_add_project_cloud_mode_sanitizes_paths(
     project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
@@ -783,6 +784,7 @@ async def test_add_project_cloud_mode_sanitizes_paths(
             # Expected failure - continue to next test case
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Cloud mode only runs on POSIX systems")
 @pytest.mark.asyncio
 async def test_add_project_cloud_mode_rejects_escape_attempts(
     project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
@@ -833,6 +835,7 @@ async def test_add_project_cloud_mode_rejects_escape_attempts(
             pass
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Cloud mode only runs on POSIX systems")
 @pytest.mark.asyncio
 async def test_add_project_local_mode_allows_arbitrary_paths(
     project_service: ProjectService, config_manager: ConfigManager, tmp_path, monkeypatch
