@@ -1,5 +1,8 @@
 """Tests for the project router API endpoints."""
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
 from basic_memory.schemas.project_info import ProjectItem
@@ -210,58 +213,58 @@ async def test_set_default_project_endpoint(test_config, client, project_service
 
 
 @pytest.mark.asyncio
-async def test_update_project_path_endpoint(
-    test_config, client, project_service, project_url, tmp_path
-):
+async def test_update_project_path_endpoint(test_config, client, project_service, project_url):
     """Test the update project endpoint for changing project path."""
     # Create a test project to update
     test_project_name = "test-update-project"
-    old_path = (tmp_path / "old-location").as_posix()
-    new_path = (tmp_path / "new-location").as_posix()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        old_path = (test_root / "old-location").as_posix()
+        new_path = (test_root / "new-location").as_posix()
 
-    await project_service.add_project(test_project_name, old_path)
+        await project_service.add_project(test_project_name, old_path)
 
-    try:
-        # Verify initial state
-        project = await project_service.get_project(test_project_name)
-        assert project is not None
-        assert project.path == old_path
-
-        # Update the project path
-        response = await client.patch(
-            f"{project_url}/project/{test_project_name}", json={"path": new_path}
-        )
-
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-
-        # Check response structure
-        assert "message" in data
-        assert "status" in data
-        assert data["status"] == "success"
-        assert "old_project" in data
-        assert "new_project" in data
-
-        # Check old project data
-        assert data["old_project"]["name"] == test_project_name
-        assert data["old_project"]["path"] == old_path
-
-        # Check new project data
-        assert data["new_project"]["name"] == test_project_name
-        assert data["new_project"]["path"] == new_path
-
-        # Verify project was actually updated in database
-        updated_project = await project_service.get_project(test_project_name)
-        assert updated_project is not None
-        assert updated_project.path == new_path
-
-    finally:
-        # Clean up
         try:
-            await project_service.remove_project(test_project_name)
-        except Exception:
-            pass
+            # Verify initial state
+            project = await project_service.get_project(test_project_name)
+            assert project is not None
+            assert project.path == old_path
+
+            # Update the project path
+            response = await client.patch(
+                f"{project_url}/project/{test_project_name}", json={"path": new_path}
+            )
+
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+
+            # Check response structure
+            assert "message" in data
+            assert "status" in data
+            assert data["status"] == "success"
+            assert "old_project" in data
+            assert "new_project" in data
+
+            # Check old project data
+            assert data["old_project"]["name"] == test_project_name
+            assert data["old_project"]["path"] == old_path
+
+            # Check new project data
+            assert data["new_project"]["name"] == test_project_name
+            assert data["new_project"]["path"] == new_path
+
+            # Verify project was actually updated in database
+            updated_project = await project_service.get_project(test_project_name)
+            assert updated_project is not None
+            assert updated_project.path == new_path
+
+        finally:
+            # Clean up
+            try:
+                await project_service.remove_project(test_project_name)
+            except Exception:
+                pass
 
 
 @pytest.mark.asyncio
@@ -299,41 +302,43 @@ async def test_update_project_is_active_endpoint(test_config, client, project_se
 
 @pytest.mark.asyncio
 async def test_update_project_both_params_endpoint(
-    test_config, client, project_service, project_url, tmp_path
+    test_config, client, project_service, project_url
 ):
     """Test the update project endpoint with both path and is_active parameters."""
     # Create a test project to update
     test_project_name = "test-update-both-project"
-    old_path = (tmp_path / "old-location").as_posix()
-    new_path = (tmp_path / "new-location").as_posix()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        old_path = (test_root / "old-location").as_posix()
+        new_path = (test_root / "new-location").as_posix()
 
-    await project_service.add_project(test_project_name, old_path)
+        await project_service.add_project(test_project_name, old_path)
 
-    try:
-        # Update both path and is_active (path should take precedence)
-        response = await client.patch(
-            f"{project_url}/project/{test_project_name}",
-            json={"path": new_path, "is_active": False},
-        )
-
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-
-        # Check that path update was performed (takes precedence)
-        assert data["new_project"]["path"] == new_path
-
-        # Verify project was actually updated in database
-        updated_project = await project_service.get_project(test_project_name)
-        assert updated_project is not None
-        assert updated_project.path == new_path
-
-    finally:
-        # Clean up
         try:
-            await project_service.remove_project(test_project_name)
-        except Exception:
-            pass
+            # Update both path and is_active (path should take precedence)
+            response = await client.patch(
+                f"{project_url}/project/{test_project_name}",
+                json={"path": new_path, "is_active": False},
+            )
+
+            # Verify response
+            assert response.status_code == 200
+            data = response.json()
+
+            # Check that path update was performed (takes precedence)
+            assert data["new_project"]["path"] == new_path
+
+            # Verify project was actually updated in database
+            updated_project = await project_service.get_project(test_project_name)
+            assert updated_project is not None
+            assert updated_project.path == new_path
+
+        finally:
+            # Clean up
+            try:
+                await project_service.remove_project(test_project_name)
+            except Exception:
+                pass
 
 
 @pytest.mark.asyncio

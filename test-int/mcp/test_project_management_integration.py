@@ -512,3 +512,42 @@ async def test_case_preservation_in_project_list(mcp_server, app, test_project):
         # Clean up - delete test projects
         for project_name in test_projects:
             await client.call_tool("delete_project", {"project_name": project_name})
+
+
+@pytest.mark.asyncio
+async def test_nested_project_paths_rejected(mcp_server, app, test_project):
+    """Test that creating nested project paths is rejected with clear error message."""
+
+    async with Client(mcp_server) as client:
+        # Create a parent project
+        parent_name = "parent-project"
+        parent_path = "/tmp/nested-test/parent"
+
+        await client.call_tool(
+            "create_memory_project",
+            {
+                "project_name": parent_name,
+                "project_path": parent_path,
+            },
+        )
+
+        # Try to create a child project nested under the parent
+        child_name = "child-project"
+        child_path = "/tmp/nested-test/parent/child"
+
+        with pytest.raises(Exception) as exc_info:
+            await client.call_tool(
+                "create_memory_project",
+                {
+                    "project_name": child_name,
+                    "project_path": child_path,
+                },
+            )
+
+        # Verify error message mentions nested paths
+        error_message = str(exc_info.value)
+        assert "nested" in error_message.lower()
+        assert parent_name in error_message or parent_path in error_message
+
+        # Clean up parent project
+        await client.call_tool("delete_project", {"project_name": parent_name})

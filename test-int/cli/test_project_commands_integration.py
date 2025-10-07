@@ -1,5 +1,8 @@
 """Integration tests for project CLI commands."""
 
+import tempfile
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app
@@ -52,61 +55,67 @@ def test_project_info_json(app_config, test_project, config_manager):
     assert "system" in data
 
 
-def test_project_add_and_remove(app_config, tmp_path, config_manager):
+def test_project_add_and_remove(app_config, config_manager):
     """Test adding and removing a project."""
     runner = CliRunner()
-    new_project_path = tmp_path / "new-project"
-    new_project_path.mkdir()
 
-    # Add project
-    result = runner.invoke(app, ["project", "add", "new-project", str(new_project_path)])
+    # Use a separate temporary directory to avoid nested path conflicts
+    with tempfile.TemporaryDirectory() as temp_dir:
+        new_project_path = Path(temp_dir) / "new-project"
+        new_project_path.mkdir()
 
-    if result.exit_code != 0:
-        print(f"STDOUT: {result.stdout}")
-        print(f"STDERR: {result.stderr}")
-    assert result.exit_code == 0
-    assert (
-        "Project 'new-project' added successfully" in result.stdout
-        or "added" in result.stdout.lower()
-    )
+        # Add project
+        result = runner.invoke(app, ["project", "add", "new-project", str(new_project_path)])
 
-    # Verify it shows up in list
-    result = runner.invoke(app, ["project", "list"])
-    assert result.exit_code == 0
-    assert "new-project" in result.stdout
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
+        assert (
+            "Project 'new-project' added successfully" in result.stdout
+            or "added" in result.stdout.lower()
+        )
 
-    # Remove project
-    result = runner.invoke(app, ["project", "remove", "new-project"])
-    assert result.exit_code == 0
-    assert "removed" in result.stdout.lower() or "deleted" in result.stdout.lower()
+        # Verify it shows up in list
+        result = runner.invoke(app, ["project", "list"])
+        assert result.exit_code == 0
+        assert "new-project" in result.stdout
+
+        # Remove project
+        result = runner.invoke(app, ["project", "remove", "new-project"])
+        assert result.exit_code == 0
+        assert "removed" in result.stdout.lower() or "deleted" in result.stdout.lower()
 
 
-def test_project_set_default(app_config, tmp_path, config_manager):
+def test_project_set_default(app_config, config_manager):
     """Test setting default project."""
     runner = CliRunner()
-    new_project_path = tmp_path / "another-project"
-    new_project_path.mkdir()
 
-    # Add a second project
-    result = runner.invoke(app, ["project", "add", "another-project", str(new_project_path)])
-    if result.exit_code != 0:
-        print(f"STDOUT: {result.stdout}")
-        print(f"STDERR: {result.stderr}")
-    assert result.exit_code == 0
+    # Use a separate temporary directory to avoid nested path conflicts
+    with tempfile.TemporaryDirectory() as temp_dir:
+        new_project_path = Path(temp_dir) / "another-project"
+        new_project_path.mkdir()
 
-    # Set as default
-    result = runner.invoke(app, ["project", "default", "another-project"])
-    if result.exit_code != 0:
-        print(f"STDOUT: {result.stdout}")
-        print(f"STDERR: {result.stderr}")
-    assert result.exit_code == 0
-    assert "default" in result.stdout.lower()
+        # Add a second project
+        result = runner.invoke(app, ["project", "add", "another-project", str(new_project_path)])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
 
-    # Verify in list
-    result = runner.invoke(app, ["project", "list"])
-    assert result.exit_code == 0
-    # The new project should have the checkmark now
-    lines = result.stdout.split("\n")
-    for line in lines:
-        if "another-project" in line:
-            assert "✓" in line
+        # Set as default
+        result = runner.invoke(app, ["project", "default", "another-project"])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
+        assert "default" in result.stdout.lower()
+
+        # Verify in list
+        result = runner.invoke(app, ["project", "list"])
+        assert result.exit_code == 0
+        # The new project should have the checkmark now
+        lines = result.stdout.split("\n")
+        for line in lines:
+            if "another-project" in line:
+                assert "✓" in line
