@@ -97,6 +97,11 @@ class ProjectService:
 
         Returns:
             True if one path is nested within the other, False otherwise
+
+        Examples:
+            _check_nested_paths("/foo", "/foo/bar")     # True (child under parent)
+            _check_nested_paths("/foo/bar", "/foo")     # True (parent over child)
+            _check_nested_paths("/foo", "/bar")         # False (siblings)
         """
         # Normalize paths to ensure proper comparison
         p1 = Path(path1).resolve()
@@ -108,16 +113,14 @@ class ProjectService:
             p2.relative_to(p1)
             return True
         except ValueError:
-            pass
-
-        try:
-            # Check if p1 is under p2
-            p1.relative_to(p2)
-            return True
-        except ValueError:
-            pass
-
-        return False
+            # Not nested in this direction, check the other
+            try:
+                # Check if p1 is under p2
+                p1.relative_to(p2)
+                return True
+            except ValueError:
+                # Not nested in either direction
+                return False
 
     async def add_project(self, name: str, path: str, set_default: bool = False) -> None:
         """Add a new project to the configuration and database.
@@ -177,35 +180,24 @@ class ProjectService:
         existing_projects = await self.list_projects()
         for existing in existing_projects:
             if self._check_nested_paths(resolved_path, existing.path):
-                # Determine which path is nested within which
+                # Determine which path is nested within which for appropriate error message
                 p_new = Path(resolved_path).resolve()
                 p_existing = Path(existing.path).resolve()
 
-                try:
-                    p_new.relative_to(p_existing)
-                    # New path is nested under existing project
+                # Check if new path is nested under existing project
+                if p_new.is_relative_to(p_existing):
                     raise ValueError(
                         f"Cannot create project at '{resolved_path}': "
                         f"path is nested within existing project '{existing.name}' at '{existing.path}'. "
                         f"Projects cannot share directory trees."
                     )
-                except ValueError as e:
-                    # Re-raise if it's the error we just raised, otherwise try the other direction
-                    if "Cannot create project" in str(e):
-                        raise
-
-                try:
-                    p_existing.relative_to(p_new)
+                else:
                     # Existing project is nested under new path
                     raise ValueError(
                         f"Cannot create project at '{resolved_path}': "
                         f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
                         f"Projects cannot share directory trees."
                     )
-                except ValueError as e:
-                    # Re-raise if it's the error we just raised
-                    if "Cannot create project" in str(e):
-                        raise
 
         # First add to config file (this will validate the project doesn't exist)
         project_config = self.config_manager.add_project(name, resolved_path)
