@@ -469,8 +469,8 @@ async def test_write_note_project_path_validation(mcp_server, test_project):
     # Verify tilde was expanded (won't contain ~)
     assert "~" not in str(home_path)
 
-    # Verify it ends with the expected structure
-    assert str(home_path).endswith("Documents/Test BiSync")
+    # Verify it ends with the expected structure (use Path.parts for cross-platform)
+    assert home_path.parts[-2:] == ("Documents", "Test BiSync")
 
     # Also test that write_note works with regular project
     async with Client(mcp_server) as client:
