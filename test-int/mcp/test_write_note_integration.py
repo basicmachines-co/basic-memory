@@ -397,6 +397,7 @@ async def test_write_note_file_path_os_path_join(mcp_server, test_project):
             "nested/folder/another-note",
         ),
         ("", "Root Note", "root-note.md", "root-note"),
+        ("/", "Root Slash Note", "root-slash-note.md", "root-slash-note"),
         (
             "folder with spaces",
             "Note Title",
