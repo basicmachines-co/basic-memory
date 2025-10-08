@@ -63,7 +63,8 @@ async def write_note(
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
         folder: Folder path relative to project root where the file should be saved.
-                Use forward slashes (/) as separators. Examples: "notes", "projects/2025", "research/ml"
+                Use forward slashes (/) as separators. Use "/" or "" to write to project root.
+                Examples: "notes", "projects/2025", "research/ml", "/" (root)
         project: Project name to write to. Optional - server will resolve using the
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
@@ -123,6 +124,10 @@ async def write_note(
 
     # Get and validate the project (supports optional project parameter)
     active_project = await get_active_project(client, project, context)
+
+    # Normalize "/" to empty string for root folder (must happen before validation)
+    if folder == "/":
+        folder = ""
 
     # Validate folder path to prevent path traversal attacks
     project_path = active_project.home

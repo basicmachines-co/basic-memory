@@ -37,6 +37,10 @@ dependencies = [
     "aiofiles>=24.1.0",  # Async file I/O
 ]
 
+[project.optional-dependencies]
+cloud = [
+    "logfire>=4.10.0",  # Distributed tracing for cloud mode
+]
 
 [project.urls]
 Homepage = "https://github.com/basicmachines-co/basic-memory"

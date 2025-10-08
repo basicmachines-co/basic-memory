@@ -31,6 +31,17 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     app_config = ConfigManager().config
     logger.info("Starting Basic Memory API")
 
+    # Instrument httpx client for distributed tracing when in cloud mode
+    if app_config.cloud_mode_enabled:
+        try:
+            import logfire
+            from basic_memory.mcp.async_client import client as httpx_client
+
+            logger.info("Cloud mode enabled - instrumenting httpx client for distributed tracing")
+            logfire.instrument_httpx(client=httpx_client)
+        except ImportError:
+            logger.warning("logfire not available - skipping httpx instrumentation")
+
     await initialize_app(app_config)
 
     # Cache database connections in app state for performance
