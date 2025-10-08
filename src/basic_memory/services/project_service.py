@@ -138,21 +138,13 @@ class ProjectService:
         if project_root:
             base_path = Path(project_root)
 
-            # Sanitize the input path
-            # Strip leading slashes, home directory references, and parent directory references
-            clean_path = path.lstrip("/").replace("~/", "").replace("~", "")
+            # In cloud mode (when project_root is set), ignore user's path completely
+            # and use sanitized project name as the directory name
+            # This ensures flat structure: /app/data/test-bisync instead of /app/data/documents/test bisync
+            sanitized_name = generate_permalink(name)
 
-            # Remove any parent directory traversal attempts and normalize to lowercase
-            # to prevent case-sensitivity issues on Linux filesystems
-            path_parts = []
-            for part in clean_path.split("/"):
-                if part and part != "." and part != "..":
-                    # Convert to lowercase to ensure case-insensitive consistency
-                    path_parts.append(part.lower())
-            clean_path = "/".join(path_parts) if path_parts else ""
-
-            # Construct path relative to project_root
-            resolved_path = (base_path / clean_path).resolve().as_posix()
+            # Construct path using sanitized project name only
+            resolved_path = (base_path / sanitized_name).resolve().as_posix()
 
             # Verify the resolved path is actually under project_root
             if not resolved_path.startswith(base_path.resolve().as_posix()):

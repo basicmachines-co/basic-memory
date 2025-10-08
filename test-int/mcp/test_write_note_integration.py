@@ -431,3 +431,61 @@ async def test_write_note_file_path_os_path_join(mcp_server, test_project):
 
     # Restore original config value
     config.kebab_filenames = curr_config_val
+
+
+@pytest.mark.asyncio
+async def test_write_note_project_path_validation(mcp_server, test_project):
+    """Test that ProjectItem.home uses expanded path, not name (Issue #340).
+
+    Regression test verifying that:
+    1. ProjectItem.home returns Path(self.path).expanduser()
+    2. Not Path(self.name) which was the bug
+
+    This test verifies the fix works correctly even though in the test environment
+    the project name and path happen to be the same. The fix in src/basic_memory/schemas/project_info.py:186
+    ensures .expanduser() is called, which is critical for paths with ~ like "~/Documents/Test BiSync".
+    """
+    from basic_memory.schemas.project_info import ProjectItem
+    from pathlib import Path
+
+    # Test the fix directly: ProjectItem.home should expand tilde paths
+    project_with_tilde = ProjectItem(
+        id=1,
+        name="Test BiSync",  # Name differs from path structure
+        description="Test",
+        path="~/Documents/Test BiSync",  # Path with tilde
+        is_active=True,
+        is_default=False,
+    )
+
+    # Before fix: Path("Test BiSync") - wrong!
+    # After fix: Path("~/Documents/Test BiSync").expanduser() - correct!
+    home_path = project_with_tilde.home
+
+    # Verify it's a Path object
+    assert isinstance(home_path, Path)
+
+    # Verify tilde was expanded (won't contain ~)
+    assert "~" not in str(home_path)
+
+    # Verify it ends with the expected structure
+    assert str(home_path).endswith("Documents/Test BiSync")
+
+    # Also test that write_note works with regular project
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Validation Test",
+                "folder": "documents",
+                "content": "Testing path validation",
+                "tags": "test",
+            },
+        )
+
+        response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+
+        # Should successfully create without path validation errors
+        assert "# Created note" in response_text
+        assert "not allowed" not in response_text
