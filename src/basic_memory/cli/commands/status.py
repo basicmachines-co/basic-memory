@@ -129,25 +129,21 @@ def display_changes(
 async def run_status(project: Optional[str] = None, verbose: bool = False):  # pragma: no cover
     """Check sync status of files vs database."""
 
-    try:
-        from basic_memory.config import ConfigManager
+    from basic_memory.config import ConfigManager
 
-        config = ConfigManager().config
-        auth_headers = {}
-        if config.cloud_mode_enabled:
-            auth_headers = await get_authenticated_headers()
+    config = ConfigManager().config
+    auth_headers = {}
+    if config.cloud_mode_enabled:
+        auth_headers = await get_authenticated_headers()
 
-        project_item = await get_active_project(client, project, None)
-        response = await call_post(
-            client, f"{project_item.project_url}/project/status", headers=auth_headers
-        )
-        sync_report = SyncReportResponse.model_validate(response.json())
+    project_item = await get_active_project(client, project, None, auth_headers)
+    response = await call_post(
+        client, f"{project_item.project_url}/project/status", headers=auth_headers
+    )
+    sync_report = SyncReportResponse.model_validate(response.json())
 
-        display_changes(project_item.name, "Status", sync_report, verbose)
+    display_changes(project_item.name, "Status", sync_report, verbose)
 
-    except (ValueError, ToolError) as e:
-        console.print(f"[red]✗ Error: {e}[/red]")
-        raise typer.Exit(1)
 
 
 @app.command()
