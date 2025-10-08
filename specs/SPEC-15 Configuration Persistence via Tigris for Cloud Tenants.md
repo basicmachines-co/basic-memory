@@ -113,10 +113,10 @@ BASIC_MEMORY_CONFIG_DIR=/mnt/tigris/.basic-memory  # Config read/written directl
 
 ## Implementation Task List
 
-### Phase 1: Basic Memory Changes
-- [ ] Add `BASIC_MEMORY_CONFIG_DIR` environment variable support to `ConfigManager.__init__()`
-- [ ] Test config loading from custom directory
-- [ ] Update tests to verify custom config dir works
+### Phase 1: Basic Memory Changes ✅
+- [x] Add `BASIC_MEMORY_CONFIG_DIR` environment variable support to `ConfigManager.__init__()`
+- [x] Test config loading from custom directory
+- [x] Update tests to verify custom config dir works
 
 ### Phase 2: Tigris Bucket Structure
 - [ ] Ensure `.basic-memory/` directory exists in Tigris bucket on tenant creation
@@ -130,7 +130,7 @@ BASIC_MEMORY_CONFIG_DIR=/mnt/tigris/.basic-memory  # Config read/written directl
 - [ ] Test deployment workflow with config persistence
 
 ### Phase 4: Testing
-- [ ] Unit tests for config directory override
+- [x] Unit tests for config directory override
 - [ ] Integration test: deploy → write config → redeploy → verify config persists
 - [ ] Integration test: deploy → add project → redeploy → verify project in config
 - [ ] Performance test: measure db rebuild time on startup
@@ -260,4 +260,5 @@ BASIC_MEMORY_CONFIG_DIR=/mnt/tigris/.basic-memory  # Config read/written directl
 **Status Updates:**
 
 - 2025-10-08: Pivoted from Turso to Tigris-based config persistence
-- Next: Implement config directory override in basic-memory
+- 2025-10-08: Phase 1 complete - BASIC_MEMORY_CONFIG_DIR support added (PR #343)
+- Next: Implement Phases 2-3 in basic-memory-cloud repository
