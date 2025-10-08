@@ -183,7 +183,7 @@ class ProjectItem(BaseModel):
 
     @property
     def home(self) -> Path:  # pragma: no cover
-        return Path(self.name)
+        return Path(self.path)
 
     @property
     def project_url(self) -> str:  # pragma: no cover
