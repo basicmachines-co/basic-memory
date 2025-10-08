@@ -179,3 +179,28 @@ class TestConfigManager:
         """Test that disable_permalinks flag can be set to True."""
         config = BasicMemoryConfig(disable_permalinks=True)
         assert config.disable_permalinks is True
+
+    def test_config_manager_respects_custom_config_dir(self, monkeypatch):
+        """Test that ConfigManager respects BASIC_MEMORY_CONFIG_DIR environment variable."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            custom_config_dir = Path(temp_dir) / "custom" / "config"
+            monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_config_dir))
+
+            config_manager = ConfigManager()
+
+            # Verify config_dir is set to the custom path
+            assert config_manager.config_dir == custom_config_dir
+            # Verify config_file is in the custom directory
+            assert config_manager.config_file == custom_config_dir / "config.json"
+            # Verify the directory was created
+            assert config_manager.config_dir.exists()
+
+    def test_config_manager_default_without_custom_config_dir(self, config_home, monkeypatch):
+        """Test that ConfigManager uses default location when BASIC_MEMORY_CONFIG_DIR is not set."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+
+        config_manager = ConfigManager()
+
+        # Should use default location
+        assert config_manager.config_dir == config_home / ".basic-memory"
+        assert config_manager.config_file == config_home / ".basic-memory" / "config.json"

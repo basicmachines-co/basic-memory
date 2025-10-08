@@ -251,7 +251,12 @@ class ConfigManager:
         if isinstance(home, str):
             home = Path(home)
 
-        self.config_dir = home / DATA_DIR_NAME
+        # Allow override via environment variable
+        if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+            self.config_dir = Path(config_dir)
+        else:
+            self.config_dir = home / DATA_DIR_NAME
+
         self.config_file = self.config_dir / CONFIG_FILE_NAME
 
         # Ensure config directory exists
