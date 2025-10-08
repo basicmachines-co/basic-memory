@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     # Instrument httpx client for distributed tracing when in cloud mode
     if app_config.cloud_mode_enabled:
         try:
-            import logfire # pyright: ignore
+            import logfire  # pyright: ignore[reportMissingImports]
             from basic_memory.mcp.async_client import client as httpx_client
 
             logger.info("Cloud mode enabled - instrumenting httpx client for distributed tracing")
