@@ -9,14 +9,13 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.cloud import get_authenticated_headers
 from basic_memory.cli.commands.command_utils import get_project_info
 from basic_memory.config import ConfigManager
 import json
 from datetime import datetime
 
 from rich.panel import Panel
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.project_info import ProjectList
 from basic_memory.mcp.tools.utils import call_post
@@ -46,14 +45,14 @@ def format_path(path: str) -> str:
 @project_app.command("list")
 def list_projects() -> None:
     """List all Basic Memory projects."""
-    # Use API to list projects
-    try:
-        auth_headers = {}
-        if config.cloud_mode_enabled:
-            auth_headers = asyncio.run(get_authenticated_headers())
 
-        response = asyncio.run(call_get(client, "/projects/projects", headers=auth_headers))
-        result = ProjectList.model_validate(response.json())
+    async def _list_projects():
+        async with get_client() as client:
+            response = await call_get(client, "/projects/projects")
+            return ProjectList.model_validate(response.json())
+
+    try:
+        result = asyncio.run(_list_projects())
 
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
@@ -79,16 +78,14 @@ if config.cloud_mode_enabled:
     ) -> None:
         """Add a new project to Basic Memory Cloud"""
 
+        async def _add_project():
+            async with get_client() as client:
+                data = {"name": name, "path": generate_permalink(name), "set_default": set_default}
+                response = await call_post(client, "/projects/projects", json=data)
+                return ProjectStatusResponse.model_validate(response.json())
+
         try:
-            auth_headers = asyncio.run(get_authenticated_headers())
-
-            data = {"name": name, "path": generate_permalink(name), "set_default": set_default}
-
-            response = asyncio.run(
-                call_post(client, "/projects/projects", json=data, headers=auth_headers)
-            )
-            result = ProjectStatusResponse.model_validate(response.json())
-
+            result = asyncio.run(_add_project())
             console.print(f"[green]{result.message}[/green]")
         except Exception as e:
             console.print(f"[red]Error adding project: {str(e)}[/red]")
@@ -109,12 +106,14 @@ else:
         # Resolve to absolute path
         resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
 
+        async def _add_project():
+            async with get_client() as client:
+                data = {"name": name, "path": resolved_path, "set_default": set_default}
+                response = await call_post(client, "/projects/projects", json=data)
+                return ProjectStatusResponse.model_validate(response.json())
+
         try:
-            data = {"name": name, "path": resolved_path, "set_default": set_default}
-
-            response = asyncio.run(call_post(client, "/projects/projects", json=data))
-            result = ProjectStatusResponse.model_validate(response.json())
-
+            result = asyncio.run(_add_project())
             console.print(f"[green]{result.message}[/green]")
         except Exception as e:
             console.print(f"[red]Error adding project: {str(e)}[/red]")
@@ -130,17 +129,15 @@ def remove_project(
     name: str = typer.Argument(..., help="Name of the project to remove"),
 ) -> None:
     """Remove a project."""
+
+    async def _remove_project():
+        async with get_client() as client:
+            project_permalink = generate_permalink(name)
+            response = await call_delete(client, f"/projects/{project_permalink}")
+            return ProjectStatusResponse.model_validate(response.json())
+
     try:
-        auth_headers = {}
-        if config.cloud_mode_enabled:
-            auth_headers = asyncio.run(get_authenticated_headers())
-
-        project_permalink = generate_permalink(name)
-        response = asyncio.run(
-            call_delete(client, f"/projects/{project_permalink}", headers=auth_headers)
-        )
-        result = ProjectStatusResponse.model_validate(response.json())
-
+        result = asyncio.run(_remove_project())
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error removing project: {str(e)}[/red]")
@@ -157,11 +154,15 @@ if not config.cloud_mode_enabled:
         name: str = typer.Argument(..., help="Name of the project to set as CLI default"),
     ) -> None:
         """Set the default project when 'config.default_project_mode' is set."""
-        try:
-            project_permalink = generate_permalink(name)
-            response = asyncio.run(call_put(client, f"/projects/{project_permalink}/default"))
-            result = ProjectStatusResponse.model_validate(response.json())
 
+        async def _set_default():
+            async with get_client() as client:
+                project_permalink = generate_permalink(name)
+                response = await call_put(client, f"/projects/{project_permalink}/default")
+                return ProjectStatusResponse.model_validate(response.json())
+
+        try:
+            result = asyncio.run(_set_default())
             console.print(f"[green]{result.message}[/green]")
         except Exception as e:
             console.print(f"[red]Error setting default project: {str(e)}[/red]")
@@ -170,12 +171,14 @@ if not config.cloud_mode_enabled:
     @project_app.command("sync-config")
     def synchronize_projects() -> None:
         """Synchronize project config between configuration file and database."""
-        # Call the API to synchronize projects
+
+        async def _sync_config():
+            async with get_client() as client:
+                response = await call_post(client, "/projects/config/sync")
+                return ProjectStatusResponse.model_validate(response.json())
 
         try:
-            response = asyncio.run(call_post(client, "/projects/config/sync"))
-            result = ProjectStatusResponse.model_validate(response.json())
-
+            result = asyncio.run(_sync_config())
             console.print(f"[green]{result.message}[/green]")
         except Exception as e:  # pragma: no cover
             console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
@@ -190,17 +193,19 @@ if not config.cloud_mode_enabled:
         # Resolve to absolute path
         resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
 
+        async def _move_project():
+            async with get_client() as client:
+                data = {"path": resolved_path}
+                project_permalink = generate_permalink(name)
+
+                # TODO fix route to use ProjectPathDep
+                response = await call_patch(
+                    client, f"/{name}/project/{project_permalink}", json=data
+                )
+                return ProjectStatusResponse.model_validate(response.json())
+
         try:
-            data = {"path": resolved_path}
-
-            project_permalink = generate_permalink(name)
-
-            # TODO fix route to use ProjectPathDep
-            response = asyncio.run(
-                call_patch(client, f"/{name}/project/{project_permalink}", json=data)
-            )
-            result = ProjectStatusResponse.model_validate(response.json())
-
+            result = asyncio.run(_move_project())
             console.print(f"[green]{result.message}[/green]")
 
             # Show important file movement reminder

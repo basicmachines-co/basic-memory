@@ -469,9 +469,9 @@ Convert from `from async_client import client` to `async with get_client() as cl
 #### 0.4 Update CLI Commands (~3 files)
 Remove manual auth header passing, use context manager:
 
-- [ ] `cli/commands/project.py` - remove get_authenticated_headers() calls
-- [ ] `cli/commands/status.py` - use context manager
-- [ ] `cli/commands/command_utils.py` - use context manager
+- [x] `cli/commands/project.py` - removed get_authenticated_headers() calls, use context manager
+- [x] `cli/commands/status.py` - use context manager
+- [x] `cli/commands/command_utils.py` - use context manager
 
 #### 0.5 Update Config
 - [x] Remove `api_url` field from `BasicMemoryConfig` in config.py

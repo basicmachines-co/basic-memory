@@ -12,8 +12,7 @@ from rich.panel import Panel
 from rich.tree import Tree
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.cloud import get_authenticated_headers
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas import SyncReportResponse
 from basic_memory.mcp.project_context import get_active_project
@@ -129,20 +128,17 @@ def display_changes(
 async def run_status(project: Optional[str] = None, verbose: bool = False):  # pragma: no cover
     """Check sync status of files vs database."""
 
-    from basic_memory.config import ConfigManager
+    try:
+        async with get_client() as client:
+            project_item = await get_active_project(client, project, None)
+            response = await call_post(client, f"{project_item.project_url}/project/status")
+            sync_report = SyncReportResponse.model_validate(response.json())
 
-    config = ConfigManager().config
-    auth_headers = {}
-    if config.cloud_mode_enabled:
-        auth_headers = await get_authenticated_headers()
+            display_changes(project_item.name, "Status", sync_report, verbose)
 
-    project_item = await get_active_project(client, project, None, auth_headers)
-    response = await call_post(
-        client, f"{project_item.project_url}/project/status", headers=auth_headers
-    )
-    sync_report = SyncReportResponse.model_validate(response.json())
-
-    display_changes(project_item.name, "Status", sync_report, verbose)
+    except (ValueError, ToolError) as e:
+        console.print(f"[red]✗ Error: {e}[/red]")
+        raise typer.Exit(1)
 
 
 
