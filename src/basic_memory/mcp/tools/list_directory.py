@@ -97,7 +97,9 @@ async def list_directory(
         # Format the results
         output_lines = []
         if file_name_glob:
-            output_lines.append(f"Files in '{dir_name}' matching '{file_name_glob}' (depth {depth}):")
+            output_lines.append(
+                f"Files in '{dir_name}' matching '{file_name_glob}' (depth {depth}):"
+            )
         else:
             output_lines.append(f"Contents of '{dir_name}' (depth {depth}):")
         output_lines.append("")

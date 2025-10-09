@@ -1,4 +1,4 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from typing import AsyncIterator, Callable, Optional
 
 from httpx import ASGITransport, AsyncClient, Timeout
@@ -9,10 +9,10 @@ from basic_memory.config import ConfigManager
 
 
 # Optional factory override for dependency injection
-_client_factory: Optional[Callable[[], AsyncIterator[AsyncClient]]] = None
+_client_factory: Optional[Callable[[], AbstractAsyncContextManager[AsyncClient]]] = None
 
 
-def set_client_factory(factory: Callable[[], AsyncIterator[AsyncClient]]) -> None:
+def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncClient]]) -> None:
     """Override the default client factory (for cloud app, testing, etc).
 
     Args:
@@ -75,9 +75,7 @@ async def get_client() -> AsyncIterator[AsyncClient]:
             # CLI cloud mode: inject auth when creating client
             from basic_memory.cli.auth import CLIAuth
 
-            auth = CLIAuth(
-                client_id=config.cloud_client_id, authkit_domain=config.cloud_domain
-            )
+            auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
             token = await auth.get_valid_token()
 
             if not token:

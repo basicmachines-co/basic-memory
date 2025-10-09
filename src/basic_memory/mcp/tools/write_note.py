@@ -134,7 +134,9 @@ async def write_note(
         project_path = active_project.home
         if folder and not validate_project_path(folder, project_path):
             logger.warning(
-                "Attempted path traversal attack blocked", folder=folder, project=active_project.name
+                "Attempted path traversal attack blocked",
+                folder=folder,
+                project=active_project.name,
             )
             return f"# Error\n\nFolder path '{folder}' is not allowed - paths must stay within project boundaries"
 
@@ -198,7 +200,9 @@ async def write_note(
             summary.append(f"- Resolved: {resolved}")
             if unresolved:
                 summary.append(f"- Unresolved: {unresolved}")
-                summary.append("\nNote: Unresolved relations point to entities that don't exist yet.")
+                summary.append(
+                    "\nNote: Unresolved relations point to entities that don't exist yet."
+                )
                 summary.append(
                     "They will be automatically resolved when target entities are created or during sync operations."
                 )

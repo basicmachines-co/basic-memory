@@ -229,7 +229,10 @@ async def recent_activity(
                 )
 
             guidance_lines.extend(
-                ["", "Session reminder: Remember their project choice throughout this conversation."]
+                [
+                    "",
+                    "Session reminder: Remember their project choice throughout this conversation.",
+                ]
             )
 
             guidance = "\n".join(guidance_lines)

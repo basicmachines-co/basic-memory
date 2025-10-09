@@ -20,70 +20,75 @@ from loguru import logger
 import threading
 from basic_memory.services.initialization import initialize_file_sync
 
+config = ConfigManager().config
 
-@app.command()
-def mcp(
-    transport: str = typer.Option("stdio", help="Transport type: stdio, streamable-http, or sse"),
-    host: str = typer.Option(
-        "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
-    ),
-    port: int = typer.Option(8000, help="Port for HTTP transports"),
-    path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
-    project: Optional[str] = typer.Option(None, help="Restrict MCP server to single project"),
-):  # pragma: no cover
-    """Run the MCP server with configurable transport options.
+if not config.cloud_mode_enabled:
 
-    This command starts an MCP server using one of three transport options:
+    @app.command()
+    def mcp(
+        transport: str = typer.Option(
+            "stdio", help="Transport type: stdio, streamable-http, or sse"
+        ),
+        host: str = typer.Option(
+            "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
+        ),
+        port: int = typer.Option(8000, help="Port for HTTP transports"),
+        path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
+        project: Optional[str] = typer.Option(None, help="Restrict MCP server to single project"),
+    ):  # pragma: no cover
+        """Run the MCP server with configurable transport options.
 
-    - stdio: Standard I/O (good for local usage)
-    - streamable-http: Recommended for web deployments (default)
-    - sse: Server-Sent Events (for compatibility with existing clients)
-    """
+        This command starts an MCP server using one of three transport options:
 
-    # Validate and set project constraint if specified
-    if project:
-        config_manager = ConfigManager()
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
+        - stdio: Standard I/O (good for local usage)
+        - streamable-http: Recommended for web deployments (default)
+        - sse: Server-Sent Events (for compatibility with existing clients)
+        """
 
-        # Set env var with validated project name
-        os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
-        logger.info(f"MCP server constrained to project: {project_name}")
+        # Validate and set project constraint if specified
+        if project:
+            config_manager = ConfigManager()
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
 
-    app_config = ConfigManager().config
+            # Set env var with validated project name
+            os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
+            logger.info(f"MCP server constrained to project: {project_name}")
 
-    def run_file_sync():
-        """Run file sync in a separate thread with its own event loop."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(initialize_file_sync(app_config))
-        except Exception as e:
-            logger.error(f"File sync error: {e}", err=True)
-        finally:
-            loop.close()
+        app_config = ConfigManager().config
 
-    logger.info(f"Sync changes enabled: {app_config.sync_changes}")
-    if app_config.sync_changes:
-        # Start the sync thread
-        sync_thread = threading.Thread(target=run_file_sync, daemon=True)
-        sync_thread.start()
-        logger.info("Started file sync in background")
+        def run_file_sync():
+            """Run file sync in a separate thread with its own event loop."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(initialize_file_sync(app_config))
+            except Exception as e:
+                logger.error(f"File sync error: {e}", err=True)
+            finally:
+                loop.close()
 
-    # Now run the MCP server (blocks)
-    logger.info(f"Starting MCP server with {transport.upper()} transport")
+        logger.info(f"Sync changes enabled: {app_config.sync_changes}")
+        if app_config.sync_changes:
+            # Start the sync thread
+            sync_thread = threading.Thread(target=run_file_sync, daemon=True)
+            sync_thread.start()
+            logger.info("Started file sync in background")
 
-    if transport == "stdio":
-        mcp_server.run(
-            transport=transport,
-        )
-    elif transport == "streamable-http" or transport == "sse":
-        mcp_server.run(
-            transport=transport,
-            host=host,
-            port=port,
-            path=path,
-            log_level="INFO",
-        )
+        # Now run the MCP server (blocks)
+        logger.info(f"Starting MCP server with {transport.upper()} transport")
+
+        if transport == "stdio":
+            mcp_server.run(
+                transport=transport,
+            )
+        elif transport == "streamable-http" or transport == "sse":
+            mcp_server.run(
+                transport=transport,
+                host=host,
+                port=port,
+                path=path,
+                log_level="INFO",
+            )

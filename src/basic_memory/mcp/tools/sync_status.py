@@ -136,9 +136,13 @@ async def sync_status(project: Optional[str] = None, context: Context | None = N
                 all_sync_projects = sync_status_tracker.get_all_projects()
 
                 active_projects = [
-                    p for p in all_sync_projects.values() if p.status.value in ["scanning", "syncing"]
+                    p
+                    for p in all_sync_projects.values()
+                    if p.status.value in ["scanning", "syncing"]
                 ]
-                failed_projects = [p for p in all_sync_projects.values() if p.status.value == "failed"]
+                failed_projects = [
+                    p for p in all_sync_projects.values() if p.status.value == "failed"
+                ]
 
                 if active_projects:
                     status_lines.extend(
