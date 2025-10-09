@@ -67,6 +67,41 @@ See the [README.md](README.md) file for a project overview.
 - Avoid creating mocks in tests in most circumstances.
 - Each test runs in a standalone environment with in memory SQLite and tmp_file directory
 
+### Async Client Pattern (Important!)
+
+**All MCP tools and CLI commands use the context manager pattern for HTTP clients:**
+
+```python
+from basic_memory.mcp.async_client import get_client
+
+async def my_mcp_tool():
+    async with get_client() as client:
+        # Use client for API calls
+        response = await call_get(client, "/path")
+        return response
+```
+
+**Do NOT use:**
+- ❌ `from basic_memory.mcp.async_client import client` (deprecated module-level client)
+- ❌ Manual auth header management
+- ❌ `inject_auth_header()` (deleted)
+
+**Key principles:**
+- Auth happens at client creation, not per-request
+- Proper resource management via context managers
+- Supports three modes: Local (ASGI), CLI cloud (HTTP + auth), Cloud app (factory injection)
+- Factory pattern enables dependency injection for cloud consolidation
+
+**For cloud app integration:**
+```python
+from basic_memory.mcp import async_client
+
+# Set custom factory before importing tools
+async_client.set_client_factory(your_custom_factory)
+```
+
+See SPEC-16 for full context manager refactor details.
+
 ## BASIC MEMORY PRODUCT USAGE
 
 ### Knowledge Structure
