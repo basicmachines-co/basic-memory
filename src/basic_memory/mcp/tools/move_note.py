@@ -6,7 +6,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post, call_get
 from basic_memory.mcp.project_context import get_active_project
@@ -16,11 +16,12 @@ from basic_memory.utils import validate_project_path
 
 
 async def _detect_cross_project_move_attempt(
-    identifier: str, destination_path: str, current_project: str
+    client, identifier: str, destination_path: str, current_project: str
 ) -> Optional[str]:
     """Detect potential cross-project move attempts and return guidance.
 
     Args:
+        client: The AsyncClient instance
         identifier: The note identifier being moved
         destination_path: The destination path
         current_project: The current active project
@@ -394,20 +395,21 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
-    logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
+    async with get_client() as client:
+        logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    # Validate destination path to prevent path traversal attacks
-    project_path = active_project.home
-    if not validate_project_path(destination_path, project_path):
-        logger.warning(
-            "Attempted path traversal attack blocked",
-            destination_path=destination_path,
-            project=active_project.name,
-        )
-        return f"""# Move Failed - Security Validation Error
+        # Validate destination path to prevent path traversal attacks
+        project_path = active_project.home
+        if not validate_project_path(destination_path, project_path):
+            logger.warning(
+                "Attempted path traversal attack blocked",
+                destination_path=destination_path,
+                project=active_project.name,
+            )
+            return f"""# Move Failed - Security Validation Error
 
 The destination path '{destination_path}' is not allowed - paths must stay within project boundaries.
 
@@ -421,123 +423,123 @@ The destination path '{destination_path}' is not allowed - paths must stay withi
 move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
-    # Check for potential cross-project move attempts
-    cross_project_error = await _detect_cross_project_move_attempt(
-        identifier, destination_path, active_project.name
-    )
-    if cross_project_error:
-        logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
-        return cross_project_error
-
-    # Get the source entity information for extension validation
-    source_ext = "md"  # Default to .md if we can't determine source extension
-    try:
-        # Fetch source entity information to get the current file extension
-        url = f"{project_url}/knowledge/entities/{identifier}"
-        response = await call_get(client, url)
-        source_entity = EntityResponse.model_validate(response.json())
-        if "." in source_entity.file_path:
-            source_ext = source_entity.file_path.split(".")[-1]
-    except Exception as e:
-        # If we can't fetch the source entity, default to .md extension
-        logger.debug(f"Could not fetch source entity for extension check: {e}")
-
-    # Validate that destination path includes a file extension
-    if "." not in destination_path or not destination_path.split(".")[-1]:
-        logger.warning(f"Move failed - no file extension provided: {destination_path}")
-        return dedent(f"""
-            # Move Failed - File Extension Required
-
-            The destination path '{destination_path}' must include a file extension (e.g., '.md').
-
-            ## Valid examples:
-            - `notes/my-note.md`
-            - `projects/meeting-2025.txt`
-            - `archive/old-program.sh`
-
-            ## Try again with extension:
-            ```
-            move_note("{identifier}", "{destination_path}.{source_ext}")
-            ```
-
-            All examples in Basic Memory expect file extensions to be explicitly provided.
-            """).strip()
-
-    # Get the source entity to check its file extension
-    try:
-        # Fetch source entity information
-        url = f"{project_url}/knowledge/entities/{identifier}"
-        response = await call_get(client, url)
-        source_entity = EntityResponse.model_validate(response.json())
-
-        # Extract file extensions
-        source_ext = (
-            source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+        # Check for potential cross-project move attempts
+        cross_project_error = await _detect_cross_project_move_attempt(
+            client, identifier, destination_path, active_project.name
         )
-        dest_ext = destination_path.split(".")[-1] if "." in destination_path else ""
+        if cross_project_error:
+            logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
+            return cross_project_error
 
-        # Check if extensions match
-        if source_ext and dest_ext and source_ext.lower() != dest_ext.lower():
-            logger.warning(
-                f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}"
-            )
+        # Get the source entity information for extension validation
+        source_ext = "md"  # Default to .md if we can't determine source extension
+        try:
+            # Fetch source entity information to get the current file extension
+            url = f"{project_url}/knowledge/entities/{identifier}"
+            response = await call_get(client, url)
+            source_entity = EntityResponse.model_validate(response.json())
+            if "." in source_entity.file_path:
+                source_ext = source_entity.file_path.split(".")[-1]
+        except Exception as e:
+            # If we can't fetch the source entity, default to .md extension
+            logger.debug(f"Could not fetch source entity for extension check: {e}")
+
+        # Validate that destination path includes a file extension
+        if "." not in destination_path or not destination_path.split(".")[-1]:
+            logger.warning(f"Move failed - no file extension provided: {destination_path}")
             return dedent(f"""
-                # Move Failed - File Extension Mismatch
+                # Move Failed - File Extension Required
 
-                The destination file extension '.{dest_ext}' does not match the source file extension '.{source_ext}'.
+                The destination path '{destination_path}' must include a file extension (e.g., '.md').
 
-                To preserve file type consistency, the destination must have the same extension as the source.
+                ## Valid examples:
+                - `notes/my-note.md`
+                - `projects/meeting-2025.txt`
+                - `archive/old-program.sh`
 
-                ## Source file:
-                - Path: `{source_entity.file_path}`
-                - Extension: `.{source_ext}`
-
-                ## Try again with matching extension:
+                ## Try again with extension:
                 ```
-                move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
+                move_note("{identifier}", "{destination_path}.{source_ext}")
                 ```
+
+                All examples in Basic Memory expect file extensions to be explicitly provided.
                 """).strip()
-    except Exception as e:
-        # If we can't fetch the source entity, log it but continue
-        # This might happen if the identifier is not yet resolved
-        logger.debug(f"Could not fetch source entity for extension check: {e}")
 
-    try:
-        # Prepare move request
-        move_data = {
-            "identifier": identifier,
-            "destination_path": destination_path,
-            "project": active_project.name,
-        }
+        # Get the source entity to check its file extension
+        try:
+            # Fetch source entity information
+            url = f"{project_url}/knowledge/entities/{identifier}"
+            response = await call_get(client, url)
+            source_entity = EntityResponse.model_validate(response.json())
 
-        # Call the move API endpoint
-        url = f"{project_url}/knowledge/move"
-        response = await call_post(client, url, json=move_data)
-        result = EntityResponse.model_validate(response.json())
+            # Extract file extensions
+            source_ext = (
+                source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+            )
+            dest_ext = destination_path.split(".")[-1] if "." in destination_path else ""
 
-        # Build success message
-        result_lines = [
-            "✅ Note moved successfully",
-            "",
-            f"📁 **{identifier}** → **{result.file_path}**",
-            f"🔗 Permalink: {result.permalink}",
-            "📊 Database and search index updated",
-            "",
-            f"<!-- Project: {active_project.name} -->",
-        ]
+            # Check if extensions match
+            if source_ext and dest_ext and source_ext.lower() != dest_ext.lower():
+                logger.warning(
+                    f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}"
+                )
+                return dedent(f"""
+                    # Move Failed - File Extension Mismatch
 
-        # Log the operation
-        logger.info(
-            "Move note completed",
-            identifier=identifier,
-            destination_path=destination_path,
-            project=active_project.name,
-            status_code=response.status_code,
-        )
+                    The destination file extension '.{dest_ext}' does not match the source file extension '.{source_ext}'.
 
-        return "\n".join(result_lines)
+                    To preserve file type consistency, the destination must have the same extension as the source.
 
-    except Exception as e:
-        logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
-        # Return formatted error message for better user experience
-        return _format_move_error_response(str(e), identifier, destination_path)
+                    ## Source file:
+                    - Path: `{source_entity.file_path}`
+                    - Extension: `.{source_ext}`
+
+                    ## Try again with matching extension:
+                    ```
+                    move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
+                    ```
+                    """).strip()
+        except Exception as e:
+            # If we can't fetch the source entity, log it but continue
+            # This might happen if the identifier is not yet resolved
+            logger.debug(f"Could not fetch source entity for extension check: {e}")
+
+        try:
+            # Prepare move request
+            move_data = {
+                "identifier": identifier,
+                "destination_path": destination_path,
+                "project": active_project.name,
+            }
+
+            # Call the move API endpoint
+            url = f"{project_url}/knowledge/move"
+            response = await call_post(client, url, json=move_data)
+            result = EntityResponse.model_validate(response.json())
+
+            # Build success message
+            result_lines = [
+                "✅ Note moved successfully",
+                "",
+                f"📁 **{identifier}** → **{result.file_path}**",
+                f"🔗 Permalink: {result.permalink}",
+                "📊 Database and search index updated",
+                "",
+                f"<!-- Project: {active_project.name} -->",
+            ]
+
+            # Log the operation
+            logger.info(
+                "Move note completed",
+                identifier=identifier,
+                destination_path=destination_path,
+                project=active_project.name,
+                status_code=response.status_code,
+            )
+
+            return "\n".join(result_lines)
+
+        except Exception as e:
+            logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
+            # Return formatted error message for better user experience
+            return _format_move_error_response(str(e), identifier, destination_path)
