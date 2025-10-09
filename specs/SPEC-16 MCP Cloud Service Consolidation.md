@@ -479,9 +479,9 @@ Remove manual auth header passing, use context manager:
 
 #### 0.6 Testing
 - [ ] Update test fixtures to use factory pattern
-- [ ] Run full test suite in basic-memory
+- [x] Run full test suite in basic-memory
 - [ ] Verify cloud_mode_enabled works with CLIAuth injection
-- [ ] Run typecheck and linting
+- [x] Run typecheck and linting
 
 #### 0.7 Cloud Integration Prep
 - [ ] Update basic-memory-cloud pyproject.toml to use branch
@@ -491,9 +491,9 @@ Remove manual auth header passing, use context manager:
 
 **Before merging async-client-context-manager branch:**
 
-- [ ] All tests pass locally
-- [ ] Typecheck passes (pyright/mypy)
-- [ ] Linting passes (ruff)
+- [x] All tests pass locally
+- [x] Typecheck passes (pyright/mypy)
+- [x] Linting passes (ruff)
 - [ ] Manual test: local mode works (ASGI transport)
 - [ ] Manual test: cloud login → cloud mode works (HTTP transport with auth)
 - [ ] No import of `inject_auth_header` anywhere
