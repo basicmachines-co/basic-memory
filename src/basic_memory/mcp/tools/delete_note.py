@@ -7,7 +7,7 @@ from fastmcp import Context
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.tools.utils import call_delete
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.schemas import DeleteEntitiesResponse
 
 
@@ -202,23 +202,24 @@ async def delete_note(
         with suggestions for finding the correct identifier, including search
         commands and alternative formats to try.
     """
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    try:
-        response = await call_delete(client, f"{project_url}/knowledge/entities/{identifier}")
-        result = DeleteEntitiesResponse.model_validate(response.json())
+        try:
+            response = await call_delete(client, f"{project_url}/knowledge/entities/{identifier}")
+            result = DeleteEntitiesResponse.model_validate(response.json())
 
-        if result.deleted:
-            logger.info(
-                f"Successfully deleted note: {identifier} in project: {active_project.name}"
-            )
-            return True
-        else:
-            logger.warning(f"Delete operation completed but note was not deleted: {identifier}")
-            return False
+            if result.deleted:
+                logger.info(
+                    f"Successfully deleted note: {identifier} in project: {active_project.name}"
+                )
+                return True
+            else:
+                logger.warning(f"Delete operation completed but note was not deleted: {identifier}")
+                return False
 
-    except Exception as e:  # pragma: no cover
-        logger.error(f"Delete failed for '{identifier}': {e}, project: {active_project.name}")
-        # Return formatted error message for better user experience
-        return _format_delete_error_response(active_project.name, str(e), identifier)
+        except Exception as e:  # pragma: no cover
+            logger.error(f"Delete failed for '{identifier}': {e}, project: {active_project.name}")
+            # Return formatted error message for better user experience
+            return _format_delete_error_response(active_project.name, str(e), identifier)
