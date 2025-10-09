@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put
@@ -94,29 +94,30 @@ async def canvas(
     Raises:
         ToolError: If project doesn't exist or folder path is invalid
     """
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    # Ensure path has .canvas extension
-    file_title = title if title.endswith(".canvas") else f"{title}.canvas"
-    file_path = f"{folder}/{file_title}"
+        # Ensure path has .canvas extension
+        file_title = title if title.endswith(".canvas") else f"{title}.canvas"
+        file_path = f"{folder}/{file_title}"
 
-    # Create canvas data structure
-    canvas_data = {"nodes": nodes, "edges": edges}
+        # Create canvas data structure
+        canvas_data = {"nodes": nodes, "edges": edges}
 
-    # Convert to JSON
-    canvas_json = json.dumps(canvas_data, indent=2)
+        # Convert to JSON
+        canvas_json = json.dumps(canvas_data, indent=2)
 
-    # Write the file using the resource API
-    logger.info(f"Creating canvas file: {file_path} in project {project}")
-    response = await call_put(client, f"{project_url}/resource/{file_path}", json=canvas_json)
+        # Write the file using the resource API
+        logger.info(f"Creating canvas file: {file_path} in project {project}")
+        response = await call_put(client, f"{project_url}/resource/{file_path}", json=canvas_json)
 
-    # Parse response
-    result = response.json()
-    logger.debug(result)
+        # Parse response
+        result = response.json()
+        logger.debug(result)
 
-    # Build summary
-    action = "Created" if response.status_code == 201 else "Updated"
-    summary = [f"# {action}: {file_path}", "\nThe canvas is ready to open in Obsidian."]
+        # Build summary
+        action = "Created" if response.status_code == 201 else "Updated"
+        summary = [f"# {action}: {file_path}", "\nThe canvas is ready to open in Obsidian."]
 
-    return "\n".join(summary)
+        return "\n".join(summary)

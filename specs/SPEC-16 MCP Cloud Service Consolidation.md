@@ -450,14 +450,15 @@ Convert from `from async_client import client` to `async with get_client() as cl
 
 - [x] `tools/write_note.py` (34/34 tests passing)
 - [x] `tools/read_note.py` (21/21 tests passing)
+- [x] `tools/view_note.py` (12/12 tests passing - no changes needed, delegates to read_note)
+- [x] `tools/delete_note.py` (2/2 tests passing)
+- [x] `tools/read_content.py` (20/20 tests passing)
+- [x] `tools/list_directory.py` (11/11 tests passing)
 - [ ] `tools/move_note.py`
 - [ ] `tools/search.py`
 - [ ] `tools/recent_activity.py`
-- [ ] `tools/read_content.py`
 - [ ] `tools/project_management.py`
-- [ ] `tools/list_directory.py`
 - [ ] `tools/edit_note.py`
-- [ ] `tools/delete_note.py`
 - [ ] `tools/canvas.py`
 - [ ] `tools/build_context.py`
 - [ ] `tools/sync_status.py`
