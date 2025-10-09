@@ -5,7 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
@@ -63,102 +63,103 @@ async def list_directory(
     Raises:
         ToolError: If project doesn't exist or directory path is invalid
     """
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    # Prepare query parameters
-    params = {
-        "dir_name": dir_name,
-        "depth": str(depth),
-    }
-    if file_name_glob:
-        params["file_name_glob"] = file_name_glob
-
-    logger.debug(
-        f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
-    )
-
-    # Call the API endpoint
-    response = await call_get(
-        client,
-        f"{project_url}/directory/list",
-        params=params,
-    )
-
-    nodes = response.json()
-
-    if not nodes:
-        filter_desc = ""
+        # Prepare query parameters
+        params = {
+            "dir_name": dir_name,
+            "depth": str(depth),
+        }
         if file_name_glob:
-            filter_desc = f" matching '{file_name_glob}'"
-        return f"No files found in directory '{dir_name}'{filter_desc}"
+            params["file_name_glob"] = file_name_glob
 
-    # Format the results
-    output_lines = []
-    if file_name_glob:
-        output_lines.append(f"Files in '{dir_name}' matching '{file_name_glob}' (depth {depth}):")
-    else:
-        output_lines.append(f"Contents of '{dir_name}' (depth {depth}):")
-    output_lines.append("")
+        logger.debug(
+            f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
+        )
 
-    # Group by type and sort
-    directories = [n for n in nodes if n["type"] == "directory"]
-    files = [n for n in nodes if n["type"] == "file"]
+        # Call the API endpoint
+        response = await call_get(
+            client,
+            f"{project_url}/directory/list",
+            params=params,
+        )
 
-    # Sort by name
-    directories.sort(key=lambda x: x["name"])
-    files.sort(key=lambda x: x["name"])
+        nodes = response.json()
 
-    # Display directories first
-    for node in directories:
-        path_display = node["directory_path"]
-        output_lines.append(f"📁 {node['name']:<30} {path_display}")
+        if not nodes:
+            filter_desc = ""
+            if file_name_glob:
+                filter_desc = f" matching '{file_name_glob}'"
+            return f"No files found in directory '{dir_name}'{filter_desc}"
 
-    # Add separator if we have both directories and files
-    if directories and files:
+        # Format the results
+        output_lines = []
+        if file_name_glob:
+            output_lines.append(f"Files in '{dir_name}' matching '{file_name_glob}' (depth {depth}):")
+        else:
+            output_lines.append(f"Contents of '{dir_name}' (depth {depth}):")
         output_lines.append("")
 
-    # Display files with metadata
-    for node in files:
-        path_display = node["directory_path"]
-        title = node.get("title", "")
-        updated = node.get("updated_at", "")
+        # Group by type and sort
+        directories = [n for n in nodes if n["type"] == "directory"]
+        files = [n for n in nodes if n["type"] == "file"]
 
-        # Remove leading slash if present, requesting the file via read_note does not use the beginning slash'
-        if path_display.startswith("/"):
-            path_display = path_display[1:]
+        # Sort by name
+        directories.sort(key=lambda x: x["name"])
+        files.sort(key=lambda x: x["name"])
 
-        # Format date if available
-        date_str = ""
-        if updated:
-            try:
-                from datetime import datetime
+        # Display directories first
+        for node in directories:
+            path_display = node["directory_path"]
+            output_lines.append(f"📁 {node['name']:<30} {path_display}")
 
-                dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-                date_str = dt.strftime("%Y-%m-%d")
-            except Exception:  # pragma: no cover
-                date_str = updated[:10] if len(updated) >= 10 else ""
+        # Add separator if we have both directories and files
+        if directories and files:
+            output_lines.append("")
 
-        # Create formatted line
-        file_line = f"📄 {node['name']:<30} {path_display}"
-        if title and title != node["name"]:
-            file_line += f" | {title}"
-        if date_str:
-            file_line += f" | {date_str}"
+        # Display files with metadata
+        for node in files:
+            path_display = node["directory_path"]
+            title = node.get("title", "")
+            updated = node.get("updated_at", "")
 
-        output_lines.append(file_line)
+            # Remove leading slash if present, requesting the file via read_note does not use the beginning slash'
+            if path_display.startswith("/"):
+                path_display = path_display[1:]
 
-    # Add summary
-    output_lines.append("")
-    total_count = len(directories) + len(files)
-    summary_parts = []
-    if directories:
-        summary_parts.append(
-            f"{len(directories)} director{'y' if len(directories) == 1 else 'ies'}"
-        )
-    if files:
-        summary_parts.append(f"{len(files)} file{'s' if len(files) != 1 else ''}")
+            # Format date if available
+            date_str = ""
+            if updated:
+                try:
+                    from datetime import datetime
 
-    output_lines.append(f"Total: {total_count} items ({', '.join(summary_parts)})")
+                    dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+                    date_str = dt.strftime("%Y-%m-%d")
+                except Exception:  # pragma: no cover
+                    date_str = updated[:10] if len(updated) >= 10 else ""
 
-    return "\n".join(output_lines)
+            # Create formatted line
+            file_line = f"📄 {node['name']:<30} {path_display}"
+            if title and title != node["name"]:
+                file_line += f" | {title}"
+            if date_str:
+                file_line += f" | {date_str}"
+
+            output_lines.append(file_line)
+
+        # Add summary
+        output_lines.append("")
+        total_count = len(directories) + len(files)
+        summary_parts = []
+        if directories:
+            summary_parts.append(
+                f"{len(directories)} director{'y' if len(directories) == 1 else 'ies'}"
+            )
+        if files:
+            summary_parts.append(f"{len(files)} file{'s' if len(files) != 1 else ''}")
+
+        output_lines.append(f"Total: {total_count} items ({', '.join(summary_parts)})")
+
+        return "\n".join(output_lines)
