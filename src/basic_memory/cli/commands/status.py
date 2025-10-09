@@ -141,7 +141,6 @@ async def run_status(project: Optional[str] = None, verbose: bool = False):  # p
         raise typer.Exit(1)
 
 
-
 @app.command()
 def status(
     project: Annotated[

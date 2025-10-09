@@ -136,7 +136,3 @@ def create_client() -> AsyncClient:
         return AsyncClient(
             transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
         )
-
-
-# Create shared async client (DEPRECATED - use get_client() context manager instead)
-client = create_client()

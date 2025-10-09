@@ -244,7 +244,7 @@ class CLIAuth:
 
     async def login(self) -> bool:
         """Perform OAuth Device Authorization login flow."""
-        console.print("[blue]Initiating WorkOS authentication...[/blue]")
+        console.print("[blue]Initiating authentication...[/blue]")
 
         # Step 1: Request device authorization
         device_response = await self.request_device_authorization()
@@ -265,7 +265,7 @@ class CLIAuth:
         # Step 4: Save tokens
         self.save_tokens(tokens)
 
-        console.print("\n[green]✅ Successfully authenticated with WorkOS![/green]")
+        console.print("\n[green]✅ Successfully authenticated with Basic Memory Cloud![/green]")
         return True
 
     def logout(self) -> None:
