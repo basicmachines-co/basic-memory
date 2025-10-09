@@ -16,7 +16,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
@@ -201,70 +201,71 @@ async def read_content(
     """
     logger.info("Reading file", path=path, project=project)
 
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    url = memory_url_path(path)
+        url = memory_url_path(path)
 
-    # Validate path to prevent path traversal attacks
-    project_path = active_project.home
-    if not validate_project_path(url, project_path):
-        logger.warning(
-            "Attempted path traversal attack blocked",
-            path=path,
-            url=url,
-            project=active_project.name,
-        )
-        return {
-            "type": "error",
-            "error": f"Path '{path}' is not allowed - paths must stay within project boundaries",
-        }
-
-    response = await call_get(client, f"{project_url}/resource/{url}")
-    content_type = response.headers.get("content-type", "application/octet-stream")
-    content_length = int(response.headers.get("content-length", 0))
-
-    logger.debug("Resource metadata", content_type=content_type, size=content_length, path=path)
-
-    # Handle text or json
-    if content_type.startswith("text/") or content_type == "application/json":
-        logger.debug("Processing text resource")
-        return {
-            "type": "text",
-            "text": response.text,
-            "content_type": content_type,
-            "encoding": "utf-8",
-        }
-
-    # Handle images
-    elif content_type.startswith("image/"):
-        logger.debug("Processing image")
-        img = PILImage.open(io.BytesIO(response.content))
-        img_bytes = optimize_image(img, content_length)
-
-        return {
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/jpeg",
-                "data": base64.b64encode(img_bytes).decode("utf-8"),
-            },
-        }
-
-    # Handle other file types
-    else:
-        logger.debug(f"Processing binary resource content_type {content_type}")
-        if content_length > 350000:  # pragma: no cover
-            logger.warning("Document too large for response", size=content_length)
+        # Validate path to prevent path traversal attacks
+        project_path = active_project.home
+        if not validate_project_path(url, project_path):
+            logger.warning(
+                "Attempted path traversal attack blocked",
+                path=path,
+                url=url,
+                project=active_project.name,
+            )
             return {
                 "type": "error",
-                "error": f"Document size {content_length} bytes exceeds maximum allowed size",
+                "error": f"Path '{path}' is not allowed - paths must stay within project boundaries",
             }
-        return {
-            "type": "document",
-            "source": {
-                "type": "base64",
-                "media_type": content_type,
-                "data": base64.b64encode(response.content).decode("utf-8"),
-            },
-        }
+
+        response = await call_get(client, f"{project_url}/resource/{url}")
+        content_type = response.headers.get("content-type", "application/octet-stream")
+        content_length = int(response.headers.get("content-length", 0))
+
+        logger.debug("Resource metadata", content_type=content_type, size=content_length, path=path)
+
+        # Handle text or json
+        if content_type.startswith("text/") or content_type == "application/json":
+            logger.debug("Processing text resource")
+            return {
+                "type": "text",
+                "text": response.text,
+                "content_type": content_type,
+                "encoding": "utf-8",
+            }
+
+        # Handle images
+        elif content_type.startswith("image/"):
+            logger.debug("Processing image")
+            img = PILImage.open(io.BytesIO(response.content))
+            img_bytes = optimize_image(img, content_length)
+
+            return {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": base64.b64encode(img_bytes).decode("utf-8"),
+                },
+            }
+
+        # Handle other file types
+        else:
+            logger.debug(f"Processing binary resource content_type {content_type}")
+            if content_length > 350000:  # pragma: no cover
+                logger.warning("Document too large for response", size=content_length)
+                return {
+                    "type": "error",
+                    "error": f"Document size {content_length} bytes exceeds maximum allowed size",
+                }
+            return {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": content_type,
+                    "data": base64.b64encode(response.content).decode("utf-8"),
+                },
+            }
