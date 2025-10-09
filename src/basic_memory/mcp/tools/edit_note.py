@@ -5,7 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_patch
@@ -214,106 +214,107 @@ async def edit_note(
         search_notes() first to find the correct identifier. The tool provides detailed
         error messages with suggestions if operations fail.
     """
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
+        logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
-    # Validate operation
-    valid_operations = ["append", "prepend", "find_replace", "replace_section"]
-    if operation not in valid_operations:
-        raise ValueError(
-            f"Invalid operation '{operation}'. Must be one of: {', '.join(valid_operations)}"
-        )
+        # Validate operation
+        valid_operations = ["append", "prepend", "find_replace", "replace_section"]
+        if operation not in valid_operations:
+            raise ValueError(
+                f"Invalid operation '{operation}'. Must be one of: {', '.join(valid_operations)}"
+            )
 
-    # Validate required parameters for specific operations
-    if operation == "find_replace" and not find_text:
-        raise ValueError("find_text parameter is required for find_replace operation")
-    if operation == "replace_section" and not section:
-        raise ValueError("section parameter is required for replace_section operation")
+        # Validate required parameters for specific operations
+        if operation == "find_replace" and not find_text:
+            raise ValueError("find_text parameter is required for find_replace operation")
+        if operation == "replace_section" and not section:
+            raise ValueError("section parameter is required for replace_section operation")
 
-    # Use the PATCH endpoint to edit the entity
-    try:
-        # Prepare the edit request data
-        edit_data = {
-            "operation": operation,
-            "content": content,
-        }
+        # Use the PATCH endpoint to edit the entity
+        try:
+            # Prepare the edit request data
+            edit_data = {
+                "operation": operation,
+                "content": content,
+            }
 
-        # Add optional parameters
-        if section:
-            edit_data["section"] = section
-        if find_text:
-            edit_data["find_text"] = find_text
-        if expected_replacements != 1:  # Only send if different from default
-            edit_data["expected_replacements"] = str(expected_replacements)
+            # Add optional parameters
+            if section:
+                edit_data["section"] = section
+            if find_text:
+                edit_data["find_text"] = find_text
+            if expected_replacements != 1:  # Only send if different from default
+                edit_data["expected_replacements"] = str(expected_replacements)
 
-        # Call the PATCH endpoint
-        url = f"{project_url}/knowledge/entities/{identifier}"
-        response = await call_patch(client, url, json=edit_data)
-        result = EntityResponse.model_validate(response.json())
+            # Call the PATCH endpoint
+            url = f"{project_url}/knowledge/entities/{identifier}"
+            response = await call_patch(client, url, json=edit_data)
+            result = EntityResponse.model_validate(response.json())
 
-        # Format summary
-        summary = [
-            f"# Edited note ({operation})",
-            f"project: {active_project.name}",
-            f"file_path: {result.file_path}",
-            f"permalink: {result.permalink}",
-            f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
-        ]
+            # Format summary
+            summary = [
+                f"# Edited note ({operation})",
+                f"project: {active_project.name}",
+                f"file_path: {result.file_path}",
+                f"permalink: {result.permalink}",
+                f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+            ]
 
-        # Add operation-specific details
-        if operation == "append":
-            lines_added = len(content.split("\n"))
-            summary.append(f"operation: Added {lines_added} lines to end of note")
-        elif operation == "prepend":
-            lines_added = len(content.split("\n"))
-            summary.append(f"operation: Added {lines_added} lines to beginning of note")
-        elif operation == "find_replace":
-            # For find_replace, we can't easily count replacements from here
-            # since we don't have the original content, but the server handled it
-            summary.append("operation: Find and replace operation completed")
-        elif operation == "replace_section":
-            summary.append(f"operation: Replaced content under section '{section}'")
+            # Add operation-specific details
+            if operation == "append":
+                lines_added = len(content.split("\n"))
+                summary.append(f"operation: Added {lines_added} lines to end of note")
+            elif operation == "prepend":
+                lines_added = len(content.split("\n"))
+                summary.append(f"operation: Added {lines_added} lines to beginning of note")
+            elif operation == "find_replace":
+                # For find_replace, we can't easily count replacements from here
+                # since we don't have the original content, but the server handled it
+                summary.append("operation: Find and replace operation completed")
+            elif operation == "replace_section":
+                summary.append(f"operation: Replaced content under section '{section}'")
 
-        # Count observations by category (reuse logic from write_note)
-        categories = {}
-        if result.observations:
-            for obs in result.observations:
-                categories[obs.category] = categories.get(obs.category, 0) + 1
+            # Count observations by category (reuse logic from write_note)
+            categories = {}
+            if result.observations:
+                for obs in result.observations:
+                    categories[obs.category] = categories.get(obs.category, 0) + 1
 
-            summary.append("\\n## Observations")
-            for category, count in sorted(categories.items()):
-                summary.append(f"- {category}: {count}")
+                summary.append("\\n## Observations")
+                for category, count in sorted(categories.items()):
+                    summary.append(f"- {category}: {count}")
 
-        # Count resolved/unresolved relations
-        unresolved = 0
-        resolved = 0
-        if result.relations:
-            unresolved = sum(1 for r in result.relations if not r.to_id)
-            resolved = len(result.relations) - unresolved
+            # Count resolved/unresolved relations
+            unresolved = 0
+            resolved = 0
+            if result.relations:
+                unresolved = sum(1 for r in result.relations if not r.to_id)
+                resolved = len(result.relations) - unresolved
 
-            summary.append("\\n## Relations")
-            summary.append(f"- Resolved: {resolved}")
-            if unresolved:
-                summary.append(f"- Unresolved: {unresolved}")
+                summary.append("\\n## Relations")
+                summary.append(f"- Resolved: {resolved}")
+                if unresolved:
+                    summary.append(f"- Unresolved: {unresolved}")
 
-        logger.info(
-            "MCP tool response",
-            tool="edit_note",
-            operation=operation,
-            project=active_project.name,
-            permalink=result.permalink,
-            observations_count=len(result.observations),
-            relations_count=len(result.relations),
-            status_code=response.status_code,
-        )
+            logger.info(
+                "MCP tool response",
+                tool="edit_note",
+                operation=operation,
+                project=active_project.name,
+                permalink=result.permalink,
+                observations_count=len(result.observations),
+                relations_count=len(result.relations),
+                status_code=response.status_code,
+            )
 
-        result = "\n".join(summary)
-        return add_project_metadata(result, active_project.name)
+            result = "\n".join(summary)
+            return add_project_metadata(result, active_project.name)
 
-    except Exception as e:
-        logger.error(f"Error editing note: {e}")
-        return _format_error_response(
-            str(e), operation, identifier, find_text, expected_replacements, active_project.name
-        )
+        except Exception as e:
+            logger.error(f"Error editing note: {e}")
+            return _format_error_response(
+                str(e), operation, identifier, find_text, expected_replacements, active_project.name
+            )
