@@ -109,12 +109,6 @@ class BasicMemoryConfig(BaseSettings):
         description="If set, all projects must be created underneath this directory. Paths will be sanitized and constrained to this root. If not set, projects can be created anywhere (default behavior).",
     )
 
-    # API connection configuration
-    api_url: Optional[str] = Field(
-        default=None,
-        description="URL of remote Basic Memory API. If set, MCP will connect to this API instead of using local ASGI transport.",
-    )
-
     # Cloud configuration
     cloud_client_id: str = Field(
         default="client_01K6KWQPW6J1M8VV7R3TZP5A6M",

@@ -6,7 +6,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
@@ -77,96 +77,96 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
+    async with get_client() as client:
+        # Get and validate the project
+        active_project = await get_active_project(client, project, context)
 
-    # Get and validate the project
-    active_project = await get_active_project(client, project, context)
+        # Validate identifier to prevent path traversal attacks
+        # We need to check both the raw identifier and the processed path
+        processed_path = memory_url_path(identifier)
+        project_path = active_project.home
 
-    # Validate identifier to prevent path traversal attacks
-    # We need to check both the raw identifier and the processed path
-    processed_path = memory_url_path(identifier)
-    project_path = active_project.home
+        if not validate_project_path(identifier, project_path) or not validate_project_path(
+            processed_path, project_path
+        ):
+            logger.warning(
+                "Attempted path traversal attack blocked",
+                identifier=identifier,
+                processed_path=processed_path,
+                project=active_project.name,
+            )
+            return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
 
-    if not validate_project_path(identifier, project_path) or not validate_project_path(
-        processed_path, project_path
-    ):
-        logger.warning(
-            "Attempted path traversal attack blocked",
-            identifier=identifier,
-            processed_path=processed_path,
-            project=active_project.name,
+        # Check migration status and wait briefly if needed
+        from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
+
+        migration_status = await wait_for_migration_or_return_status(
+            timeout=5.0, project_name=active_project.name
         )
-        return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
+        if migration_status:  # pragma: no cover
+            return f"# System Status\n\n{migration_status}\n\nPlease wait for migration to complete before reading notes."
+        project_url = active_project.project_url
 
-    # Check migration status and wait briefly if needed
-    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
+        # Get the file via REST API - first try direct permalink lookup
+        entity_path = memory_url_path(identifier)
+        path = f"{project_url}/resource/{entity_path}"
+        logger.info(f"Attempting to read note from Project: {active_project.name} URL: {path}")
 
-    migration_status = await wait_for_migration_or_return_status(
-        timeout=5.0, project_name=active_project.name
-    )
-    if migration_status:  # pragma: no cover
-        return f"# System Status\n\n{migration_status}\n\nPlease wait for migration to complete before reading notes."
-    project_url = active_project.project_url
+        try:
+            # Try direct lookup first
+            response = await call_get(client, path, params={"page": page, "page_size": page_size})
 
-    # Get the file via REST API - first try direct permalink lookup
-    entity_path = memory_url_path(identifier)
-    path = f"{project_url}/resource/{entity_path}"
-    logger.info(f"Attempting to read note from Project: {active_project.name} URL: {path}")
+            # If successful, return the content
+            if response.status_code == 200:
+                logger.info("Returning read_note result from resource: {path}", path=entity_path)
+                return response.text
+        except Exception as e:  # pragma: no cover
+            logger.info(f"Direct lookup failed for '{path}': {e}")
+            # Continue to fallback methods
 
-    try:
-        # Try direct lookup first
-        response = await call_get(client, path, params={"page": page, "page_size": page_size})
-
-        # If successful, return the content
-        if response.status_code == 200:
-            logger.info("Returning read_note result from resource: {path}", path=entity_path)
-            return response.text
-    except Exception as e:  # pragma: no cover
-        logger.info(f"Direct lookup failed for '{path}': {e}")
-        # Continue to fallback methods
-
-    # Fallback 1: Try title search via API
-    logger.info(f"Search title for: {identifier}")
-    title_results = await search_notes.fn(
-        query=identifier, search_type="title", project=project, context=context
-    )
-
-    # Handle both SearchResponse object and error strings
-    if title_results and hasattr(title_results, "results") and title_results.results:
-        result = title_results.results[0]  # Get the first/best match
-        if result.permalink:
-            try:
-                # Try to fetch the content using the found permalink
-                path = f"{project_url}/resource/{result.permalink}"
-                response = await call_get(
-                    client, path, params={"page": page, "page_size": page_size}
-                )
-
-                if response.status_code == 200:
-                    logger.info(f"Found note by title search: {result.permalink}")
-                    return response.text
-            except Exception as e:  # pragma: no cover
-                logger.info(
-                    f"Failed to fetch content for found title match {result.permalink}: {e}"
-                )
-    else:
-        logger.info(
-            f"No results in title search for: {identifier} in project {active_project.name}"
+        # Fallback 1: Try title search via API
+        logger.info(f"Search title for: {identifier}")
+        title_results = await search_notes.fn(
+            query=identifier, search_type="title", project=project, context=context
         )
 
-    # Fallback 2: Text search as a last resort
-    logger.info(f"Title search failed, trying text search for: {identifier}")
-    text_results = await search_notes.fn(
-        query=identifier, search_type="text", project=project, context=context
-    )
+        # Handle both SearchResponse object and error strings
+        if title_results and hasattr(title_results, "results") and title_results.results:
+            result = title_results.results[0]  # Get the first/best match
+            if result.permalink:
+                try:
+                    # Try to fetch the content using the found permalink
+                    path = f"{project_url}/resource/{result.permalink}"
+                    response = await call_get(
+                        client, path, params={"page": page, "page_size": page_size}
+                    )
 
-    # We didn't find a direct match, construct a helpful error message
-    # Handle both SearchResponse object and error strings
-    if not text_results or not hasattr(text_results, "results") or not text_results.results:
-        # No results at all
-        return format_not_found_message(active_project.name, identifier)
-    else:
-        # We found some related results
-        return format_related_results(active_project.name, identifier, text_results.results[:5])
+                    if response.status_code == 200:
+                        logger.info(f"Found note by title search: {result.permalink}")
+                        return response.text
+                except Exception as e:  # pragma: no cover
+                    logger.info(
+                        f"Failed to fetch content for found title match {result.permalink}: {e}"
+                    )
+        else:
+            logger.info(
+                f"No results in title search for: {identifier} in project {active_project.name}"
+            )
+
+        # Fallback 2: Text search as a last resort
+        logger.info(f"Title search failed, trying text search for: {identifier}")
+        text_results = await search_notes.fn(
+            query=identifier, search_type="text", project=project, context=context
+        )
+
+        # We didn't find a direct match, construct a helpful error message
+        # Handle both SearchResponse object and error strings
+        if not text_results or not hasattr(text_results, "results") or not text_results.results:
+            # No results at all
+            return format_not_found_message(active_project.name, identifier)
+        else:
+            # We found some related results
+            return format_related_results(active_project.name, identifier, text_results.results[:5])
 
 
 def format_not_found_message(project: str | None, identifier: str) -> str:
