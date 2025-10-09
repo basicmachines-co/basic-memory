@@ -455,7 +455,7 @@ Convert from `from async_client import client` to `async with get_client() as cl
 - [x] `tools/read_content.py` (20/20 tests passing)
 - [x] `tools/list_directory.py` (11/11 tests passing)
 - [x] `tools/move_note.py` (34/34 tests passing, 90% coverage)
-- [ ] `tools/search.py`
+- [x] `tools/search.py` (16/16 tests passing, 96% coverage)
 - [ ] `tools/recent_activity.py`
 - [ ] `tools/project_management.py`
 - [x] `tools/edit_note.py` (17/17 tests passing)

@@ -6,7 +6,7 @@ from typing import List, Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
@@ -353,31 +353,32 @@ async def search_notes(
     if after_date:
         search_query.after_date = after_date
 
-    active_project = await get_active_project(client, project, context)
-    project_url = active_project.project_url
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        project_url = active_project.project_url
 
-    logger.info(f"Searching for {search_query} in project {active_project.name}")
+        logger.info(f"Searching for {search_query} in project {active_project.name}")
 
-    try:
-        response = await call_post(
-            client,
-            f"{project_url}/search/",
-            json=search_query.model_dump(),
-            params={"page": page, "page_size": page_size},
-        )
-        result = SearchResponse.model_validate(response.json())
-
-        # Check if we got no results and provide helpful guidance
-        if not result.results:
-            logger.info(
-                f"Search returned no results for query: {query} in project {active_project.name}"
+        try:
+            response = await call_post(
+                client,
+                f"{project_url}/search/",
+                json=search_query.model_dump(),
+                params={"page": page, "page_size": page_size},
             )
-            # Don't treat this as an error, but the user might want guidance
-            # We return the empty result as normal - the user can decide if they need help
+            result = SearchResponse.model_validate(response.json())
 
-        return result
+            # Check if we got no results and provide helpful guidance
+            if not result.results:
+                logger.info(
+                    f"Search returned no results for query: {query} in project {active_project.name}"
+                )
+                # Don't treat this as an error, but the user might want guidance
+                # We return the empty result as normal - the user can decide if they need help
 
-    except Exception as e:
-        logger.error(f"Search failed for query '{query}': {e}, project: {active_project.name}")
-        # Return formatted error message as string for better user experience
-        return _format_search_error_response(active_project.name, str(e), query, search_type)
+            return result
+
+        except Exception as e:
+            logger.error(f"Search failed for query '{query}': {e}, project: {active_project.name}")
+            # Return formatted error message as string for better user experience
+            return _format_search_error_response(active_project.name, str(e), query, search_type)
