@@ -478,14 +478,14 @@ Remove manual auth header passing, use context manager:
 - [x] Update any lingering references/docs (added deprecation notice to v15-docs/cloud-mode-usage.md)
 
 #### 0.6 Testing
-- [ ] Update test fixtures to use factory pattern
+- [x] ~~Update test fixtures to use factory pattern~~ (Not needed - tests work fine as-is)
 - [x] Run full test suite in basic-memory
-- [ ] Verify cloud_mode_enabled works with CLIAuth injection
+- [x] Verify cloud_mode_enabled works with CLIAuth injection (tested in preview env)
 - [x] Run typecheck and linting
 
 #### 0.7 Cloud Integration Prep
-- [ ] Update basic-memory-cloud pyproject.toml to use branch
-- [ ] Document factory usage pattern for cloud app
+- [x] Update basic-memory-cloud pyproject.toml to use branch
+- [x] Document factory usage pattern for cloud app
 
 #### 0.8 Phase 0 Validation
 
@@ -494,18 +494,20 @@ Remove manual auth header passing, use context manager:
 - [x] All tests pass locally
 - [x] Typecheck passes (pyright/mypy)
 - [x] Linting passes (ruff)
-- [ ] Manual test: local mode works (ASGI transport)
-- [ ] Manual test: cloud login → cloud mode works (HTTP transport with auth)
-- [ ] No import of `inject_auth_header` anywhere
-- [ ] `headers.py` file deleted
-- [ ] `api_url` config removed
-- [ ] Tool functions properly scoped (client inside async with)
-- [ ] CLI commands properly scoped (client inside async with)
+- [x] Manual test: local mode works (ASGI transport)
+- [x] Manual test: cloud login → cloud mode works (HTTP transport with auth)
+- [x] No import of `inject_auth_header` anywhere ✅
+- [x] `headers.py` file deleted ✅
+- [x] `api_url` config removed ✅
+- [x] no use of `async_client.client` ✅
+- [x] Tool functions properly scoped (client inside async with) - 15 tools ✅
+- [x] CLI commands properly scoped (client inside async with) - 10 commands ✅
+- [x] Prompts/resources properly scoped - 3 files ✅
 
 **Integration validation:**
-- [ ] basic-memory-cloud can import and use factory pattern
-- [ ] TenantDirectTransport works without touching header injection
-- [ ] No circular imports or lazy import issues
+- [x] basic-memory-cloud can import and use factory pattern ✅
+- [x] TenantDirectTransport works without touching header injection ✅
+- [x] No circular imports or lazy import issues ✅
 
 ### Phase 1: Code Consolidation
 - [x] Create feature branch `consolidate-mcp-cloud`
