@@ -5,7 +5,7 @@ from typing import List, Union, Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, resolve_project_parameter
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
@@ -98,162 +98,163 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
-    # Build common parameters for API calls
-    params = {
-        "page": 1,
-        "page_size": 10,
-        "max_related": 10,
-    }
-    if depth:
-        params["depth"] = depth
-    if timeframe:
-        params["timeframe"] = timeframe  # pyright: ignore
+    async with get_client() as client:
+        # Build common parameters for API calls
+        params = {
+            "page": 1,
+            "page_size": 10,
+            "max_related": 10,
+        }
+        if depth:
+            params["depth"] = depth
+        if timeframe:
+            params["timeframe"] = timeframe  # pyright: ignore
 
-    # Validate and convert type parameter
-    if type:
-        # Convert single string to list
-        if isinstance(type, str):
-            type_list = [type]
-        else:
-            type_list = type
-
-        # Validate each type against SearchItemType enum
-        validated_types = []
-        for t in type_list:
-            try:
-                # Try to convert string to enum
-                if isinstance(t, str):
-                    validated_types.append(SearchItemType(t.lower()))
-            except ValueError:
-                valid_types = [t.value for t in SearchItemType]
-                raise ValueError(f"Invalid type: {t}. Valid types are: {valid_types}")
-
-        # Add validated types to params
-        params["type"] = [t.value for t in validated_types]  # pyright: ignore
-
-    # Resolve project parameter using the three-tier hierarchy
-    resolved_project = await resolve_project_parameter(project)
-
-    if resolved_project is None:
-        # Discovery Mode: Get activity across all projects
-        logger.info(
-            f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
-        )
-
-        # Get list of all projects
-        response = await call_get(client, "/projects/projects")
-        project_list = ProjectList.model_validate(response.json())
-
-        projects_activity = {}
-        total_items = 0
-        total_entities = 0
-        total_relations = 0
-        total_observations = 0
-        most_active_project = None
-        most_active_count = 0
-        active_projects = 0
-
-        # Query each project's activity
-        for project_info in project_list.projects:
-            project_activity = await _get_project_activity(client, project_info, params, depth)
-            projects_activity[project_info.name] = project_activity
-
-            # Aggregate stats
-            item_count = project_activity.item_count
-            if item_count > 0:
-                active_projects += 1
-                total_items += item_count
-
-                # Count by type
-                for result in project_activity.activity.results:
-                    if result.primary_result.type == "entity":
-                        total_entities += 1
-                    elif result.primary_result.type == "relation":
-                        total_relations += 1
-                    elif result.primary_result.type == "observation":
-                        total_observations += 1
-
-                # Track most active project
-                if item_count > most_active_count:
-                    most_active_count = item_count
-                    most_active_project = project_info.name
-
-        # Build summary stats
-        summary = ActivityStats(
-            total_projects=len(project_list.projects),
-            active_projects=active_projects,
-            most_active_project=most_active_project,
-            total_items=total_items,
-            total_entities=total_entities,
-            total_relations=total_relations,
-            total_observations=total_observations,
-        )
-
-        # Generate guidance for the assistant
-        guidance_lines = ["\n" + "─" * 40]
-
-        if most_active_project and most_active_count > 0:
-            guidance_lines.extend(
-                [
-                    f"Suggested project: '{most_active_project}' (most active with {most_active_count} items)",
-                    f"Ask user: 'Should I use {most_active_project} for this task, or would you prefer a different project?'",
-                ]
-            )
-        elif active_projects > 0:
-            # Has activity but no clear most active project
-            active_project_names = [
-                name for name, activity in projects_activity.items() if activity.item_count > 0
-            ]
-            if len(active_project_names) == 1:
-                guidance_lines.extend(
-                    [
-                        f"Suggested project: '{active_project_names[0]}' (only active project)",
-                        f"Ask user: 'Should I use {active_project_names[0]} for this task?'",
-                    ]
-                )
+        # Validate and convert type parameter
+        if type:
+            # Convert single string to list
+            if isinstance(type, str):
+                type_list = [type]
             else:
-                guidance_lines.extend(
-                    [
-                        f"Multiple active projects found: {', '.join(active_project_names)}",
-                        "Ask user: 'Which project should I use for this task?'",
-                    ]
-                )
-        else:
-            # No recent activity
-            guidance_lines.extend(
-                [
-                    "No recent activity found in any project.",
-                    "Consider: Ask which project to use or if they want to create a new one.",
-                ]
+                type_list = type
+
+            # Validate each type against SearchItemType enum
+            validated_types = []
+            for t in type_list:
+                try:
+                    # Try to convert string to enum
+                    if isinstance(t, str):
+                        validated_types.append(SearchItemType(t.lower()))
+                except ValueError:
+                    valid_types = [t.value for t in SearchItemType]
+                    raise ValueError(f"Invalid type: {t}. Valid types are: {valid_types}")
+
+            # Add validated types to params
+            params["type"] = [t.value for t in validated_types]  # pyright: ignore
+
+        # Resolve project parameter using the three-tier hierarchy
+        resolved_project = await resolve_project_parameter(project)
+
+        if resolved_project is None:
+            # Discovery Mode: Get activity across all projects
+            logger.info(
+                f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
             )
 
-        guidance_lines.extend(
-            ["", "Session reminder: Remember their project choice throughout this conversation."]
-        )
+            # Get list of all projects
+            response = await call_get(client, "/projects/projects")
+            project_list = ProjectList.model_validate(response.json())
 
-        guidance = "\n".join(guidance_lines)
+            projects_activity = {}
+            total_items = 0
+            total_entities = 0
+            total_relations = 0
+            total_observations = 0
+            most_active_project = None
+            most_active_count = 0
+            active_projects = 0
 
-        # Format discovery mode output
-        return _format_discovery_output(projects_activity, summary, timeframe, guidance)
+            # Query each project's activity
+            for project_info in project_list.projects:
+                project_activity = await _get_project_activity(client, project_info, params, depth)
+                projects_activity[project_info.name] = project_activity
 
-    else:
-        # Project-Specific Mode: Get activity for specific project
-        logger.info(
-            f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
-        )
+                # Aggregate stats
+                item_count = project_activity.item_count
+                if item_count > 0:
+                    active_projects += 1
+                    total_items += item_count
 
-        active_project = await get_active_project(client, resolved_project, context)
-        project_url = active_project.project_url
+                    # Count by type
+                    for result in project_activity.activity.results:
+                        if result.primary_result.type == "entity":
+                            total_entities += 1
+                        elif result.primary_result.type == "relation":
+                            total_relations += 1
+                        elif result.primary_result.type == "observation":
+                            total_observations += 1
 
-        response = await call_get(
-            client,
-            f"{project_url}/memory/recent",
-            params=params,
-        )
-        activity_data = GraphContext.model_validate(response.json())
+                    # Track most active project
+                    if item_count > most_active_count:
+                        most_active_count = item_count
+                        most_active_project = project_info.name
 
-        # Format project-specific mode output
-        return _format_project_output(resolved_project, activity_data, timeframe, type)
+            # Build summary stats
+            summary = ActivityStats(
+                total_projects=len(project_list.projects),
+                active_projects=active_projects,
+                most_active_project=most_active_project,
+                total_items=total_items,
+                total_entities=total_entities,
+                total_relations=total_relations,
+                total_observations=total_observations,
+            )
+
+            # Generate guidance for the assistant
+            guidance_lines = ["\n" + "─" * 40]
+
+            if most_active_project and most_active_count > 0:
+                guidance_lines.extend(
+                    [
+                        f"Suggested project: '{most_active_project}' (most active with {most_active_count} items)",
+                        f"Ask user: 'Should I use {most_active_project} for this task, or would you prefer a different project?'",
+                    ]
+                )
+            elif active_projects > 0:
+                # Has activity but no clear most active project
+                active_project_names = [
+                    name for name, activity in projects_activity.items() if activity.item_count > 0
+                ]
+                if len(active_project_names) == 1:
+                    guidance_lines.extend(
+                        [
+                            f"Suggested project: '{active_project_names[0]}' (only active project)",
+                            f"Ask user: 'Should I use {active_project_names[0]} for this task?'",
+                        ]
+                    )
+                else:
+                    guidance_lines.extend(
+                        [
+                            f"Multiple active projects found: {', '.join(active_project_names)}",
+                            "Ask user: 'Which project should I use for this task?'",
+                        ]
+                    )
+            else:
+                # No recent activity
+                guidance_lines.extend(
+                    [
+                        "No recent activity found in any project.",
+                        "Consider: Ask which project to use or if they want to create a new one.",
+                    ]
+                )
+
+            guidance_lines.extend(
+                ["", "Session reminder: Remember their project choice throughout this conversation."]
+            )
+
+            guidance = "\n".join(guidance_lines)
+
+            # Format discovery mode output
+            return _format_discovery_output(projects_activity, summary, timeframe, guidance)
+
+        else:
+            # Project-Specific Mode: Get activity for specific project
+            logger.info(
+                f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
+            )
+
+            active_project = await get_active_project(client, resolved_project, context)
+            project_url = active_project.project_url
+
+            response = await call_get(
+                client,
+                f"{project_url}/memory/recent",
+                params=params,
+            )
+            activity_data = GraphContext.model_validate(response.json())
+
+            # Format project-specific mode output
+            return _format_project_output(resolved_project, activity_data, timeframe, type)
 
 
 async def _get_project_activity(
