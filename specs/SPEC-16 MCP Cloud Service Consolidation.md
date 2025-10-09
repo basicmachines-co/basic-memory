@@ -457,7 +457,7 @@ Convert from `from async_client import client` to `async with get_client() as cl
 - [x] `tools/move_note.py` (34/34 tests passing, 90% coverage)
 - [x] `tools/search.py` (16/16 tests passing, 96% coverage)
 - [x] `tools/recent_activity.py` (4/4 tests passing, 82% coverage)
-- [ ] `tools/project_management.py`
+- [x] `tools/project_management.py` (3 functions: list_memory_projects, create_memory_project, delete_project - typecheck passed)
 - [x] `tools/edit_note.py` (17/17 tests passing)
 - [x] `tools/canvas.py` (5/5 tests passing)
 - [x] `tools/build_context.py` (6/6 tests passing)
