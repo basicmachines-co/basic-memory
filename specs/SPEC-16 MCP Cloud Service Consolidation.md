@@ -463,7 +463,7 @@ Convert from `from async_client import client` to `async with get_client() as cl
 - [x] `tools/build_context.py` (6/6 tests passing)
 - [x] `tools/sync_status.py` (typecheck passed)
 - [x] `prompts/continue_conversation.py` (typecheck passed)
-- [ ] `prompts/search.py`
+- [x] `prompts/search.py` (typecheck passed)
 - [ ] `resources/project_info.py`
 
 #### 0.4 Update CLI Commands (~3 files)
