@@ -5,7 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
@@ -59,11 +59,13 @@ async def project_info(
         print(f"Basic Memory version: {info.system.version}")
     """
     logger.info("Getting project info")
-    project_config = await get_active_project(client, project, context)
-    project_url = project_config.permalink
 
-    # Call the API endpoint
-    response = await call_get(client, f"{project_url}/project/info")
+    async with get_client() as client:
+        project_config = await get_active_project(client, project, context)
+        project_url = project_config.permalink
 
-    # Convert response to ProjectInfoResponse
-    return ProjectInfoResponse.model_validate(response.json())
+        # Call the API endpoint
+        response = await call_get(client, f"{project_url}/project/info")
+
+        # Convert response to ProjectInfoResponse
+        return ProjectInfoResponse.model_validate(response.json())

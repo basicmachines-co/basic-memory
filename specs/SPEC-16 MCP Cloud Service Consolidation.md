@@ -464,7 +464,7 @@ Convert from `from async_client import client` to `async with get_client() as cl
 - [x] `tools/sync_status.py` (typecheck passed)
 - [x] `prompts/continue_conversation.py` (typecheck passed)
 - [x] `prompts/search.py` (typecheck passed)
-- [ ] `resources/project_info.py`
+- [x] `resources/project_info.py` (typecheck passed)
 
 #### 0.4 Update CLI Commands (~3 files)
 Remove manual auth header passing, use context manager:
