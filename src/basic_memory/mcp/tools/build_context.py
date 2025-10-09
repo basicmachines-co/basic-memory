@@ -5,7 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
@@ -102,42 +102,43 @@ async def build_context(
 
     # URL is already validated and normalized by MemoryUrl type annotation
 
-    # Get the active project using the new stateless approach
-    active_project = await get_active_project(client, project, context)
+    async with get_client() as client:
+        # Get the active project using the new stateless approach
+        active_project = await get_active_project(client, project, context)
 
-    # Check migration status and wait briefly if needed
-    from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
+        # Check migration status and wait briefly if needed
+        from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
 
-    migration_status = await wait_for_migration_or_return_status(
-        timeout=5.0, project_name=active_project.name
-    )
-    if migration_status:  # pragma: no cover
-        # Return a proper GraphContext with status message
-        from basic_memory.schemas.memory import MemoryMetadata
-        from datetime import datetime
-
-        return GraphContext(
-            results=[],
-            metadata=MemoryMetadata(
-                depth=depth or 1,
-                timeframe=timeframe,
-                generated_at=datetime.now().astimezone(),
-                primary_count=0,
-                related_count=0,
-                uri=migration_status,  # Include status in metadata
-            ),
+        migration_status = await wait_for_migration_or_return_status(
+            timeout=5.0, project_name=active_project.name
         )
-    project_url = active_project.project_url
+        if migration_status:  # pragma: no cover
+            # Return a proper GraphContext with status message
+            from basic_memory.schemas.memory import MemoryMetadata
+            from datetime import datetime
 
-    response = await call_get(
-        client,
-        f"{project_url}/memory/{memory_url_path(url)}",
-        params={
-            "depth": depth,
-            "timeframe": timeframe,
-            "page": page,
-            "page_size": page_size,
-            "max_related": max_related,
-        },
-    )
-    return GraphContext.model_validate(response.json())
+            return GraphContext(
+                results=[],
+                metadata=MemoryMetadata(
+                    depth=depth or 1,
+                    timeframe=timeframe,
+                    generated_at=datetime.now().astimezone(),
+                    primary_count=0,
+                    related_count=0,
+                    uri=migration_status,  # Include status in metadata
+                ),
+            )
+        project_url = active_project.project_url
+
+        response = await call_get(
+            client,
+            f"{project_url}/memory/{memory_url_path(url)}",
+            params={
+                "depth": depth,
+                "timeframe": timeframe,
+                "page": page,
+                "page_size": page_size,
+                "max_related": max_related,
+            },
+        )
+        return GraphContext.model_validate(response.json())

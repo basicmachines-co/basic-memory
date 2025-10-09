@@ -459,8 +459,8 @@ Convert from `from async_client import client` to `async with get_client() as cl
 - [ ] `tools/recent_activity.py`
 - [ ] `tools/project_management.py`
 - [ ] `tools/edit_note.py`
-- [ ] `tools/canvas.py`
-- [ ] `tools/build_context.py`
+- [x] `tools/canvas.py` (5/5 tests passing)
+- [x] `tools/build_context.py` (6/6 tests passing)
 - [ ] `tools/sync_status.py`
 - [ ] `prompts/search.py`
 - [ ] `prompts/continue_conversation.py`
