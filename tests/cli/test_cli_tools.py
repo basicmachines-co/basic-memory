@@ -12,6 +12,7 @@ from textwrap import dedent
 from typing import AsyncGenerator
 from unittest.mock import patch
 
+import pytest
 import pytest_asyncio
 from typer.testing import CliRunner
 
@@ -490,3 +491,68 @@ def test_ensure_migrations_handles_errors(mock_initialize_database, app_config, 
     ensure_initialization(app_config)
 
     # We're just making sure it doesn't crash by calling it
+
+
+# Tests for tool_utils
+
+
+def test_resolve_project_with_explicit_project(project_config, test_project):
+    """Test resolve_project with an explicit project parameter."""
+    from basic_memory.cli.commands.tool_utils import resolve_project
+
+    result = resolve_project(test_project.name)
+    assert result == test_project.name
+
+
+def test_resolve_project_with_default(project_config, test_project):
+    """Test resolve_project using default project."""
+    from basic_memory.cli.commands.tool_utils import resolve_project
+
+    # Should return the default project when None is passed
+    result = resolve_project(None)
+    assert result == test_project.name
+
+
+def test_resolve_project_invalid_project(project_config):
+    """Test resolve_project with invalid project name."""
+    from basic_memory.cli.commands.tool_utils import resolve_project
+
+    # Should raise typer.Exit when project not found
+    with pytest.raises(SystemExit) as exc_info:
+        resolve_project("nonexistent-project")
+    assert exc_info.value.code == 1
+
+
+def test_run_async_tool_success(project_config):
+    """Test run_async_tool with successful execution."""
+    from basic_memory.cli.commands.tool_utils import run_async_tool
+
+    async def sample_tool(x: int, y: int) -> int:
+        return x + y
+
+    result = run_async_tool(sample_tool, 2, 3)
+    assert result == 5
+
+
+def test_run_async_tool_with_kwargs(project_config):
+    """Test run_async_tool with keyword arguments."""
+    from basic_memory.cli.commands.tool_utils import run_async_tool
+
+    async def sample_tool(x: int, y: int = 10) -> int:
+        return x + y
+
+    result = run_async_tool(sample_tool, 5, y=15)
+    assert result == 20
+
+
+def test_run_async_tool_error_handling(project_config):
+    """Test run_async_tool handles exceptions properly."""
+    from basic_memory.cli.commands.tool_utils import run_async_tool
+
+    async def failing_tool() -> None:
+        raise ValueError("Test error")
+
+    # Should raise typer.Exit on error
+    with pytest.raises(SystemExit) as exc_info:
+        run_async_tool(failing_tool)
+    assert exc_info.value.code == 1
