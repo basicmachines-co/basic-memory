@@ -33,6 +33,7 @@ from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
+from basic_memory.utils import generate_permalink
 
 
 def get_app_config() -> BasicMemoryConfig:  # pragma: no cover
@@ -62,7 +63,8 @@ async def get_project_config(
         HTTPException: If project is not found
     """
 
-    project_obj = await project_repository.get_by_permalink(str(project))
+    project_permalink = generate_permalink(str(project))
+    project_obj = await project_repository.get_by_permalink(project_permalink)
     if project_obj:
         return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
 
@@ -149,7 +151,8 @@ async def get_project_id(
     """
 
     # Try by permalink first (most common case with URL paths)
-    project_obj = await project_repository.get_by_permalink(str(project))
+    project_permalink = generate_permalink(str(project))
+    project_obj = await project_repository.get_by_permalink(project_permalink)
     if project_obj:
         return project_obj.id
 
