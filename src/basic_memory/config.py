@@ -354,7 +354,8 @@ class ConfigManager:
         if project_name == config.default_project:  # pragma: no cover
             raise ValueError(f"Cannot remove the default project '{name}'")
 
-        del config.projects[name]
+        # Use the found project_name (which may differ from input name due to permalink matching)
+        del config.projects[project_name]
         self.save_config(config)
 
     def set_default_project(self, name: str) -> None:

@@ -204,3 +204,67 @@ class TestConfigManager:
         # Should use default location
         assert config_manager.config_dir == config_home / ".basic-memory"
         assert config_manager.config_file == config_home / ".basic-memory" / "config.json"
+
+    def test_remove_project_with_exact_name_match(self, temp_config_manager):
+        """Test remove_project when project name matches config key exactly."""
+        config_manager = temp_config_manager
+
+        # Verify project exists
+        config = config_manager.load_config()
+        assert "test-project" in config.projects
+
+        # Remove the project with exact name match
+        config_manager.remove_project("test-project")
+
+        # Verify the project was removed
+        config = config_manager.load_config()
+        assert "test-project" not in config.projects
+
+    def test_remove_project_with_permalink_lookup(self, temp_config_manager):
+        """Test remove_project when input needs permalink normalization."""
+        config_manager = temp_config_manager
+
+        # Add a project with normalized key
+        config = config_manager.load_config()
+        config.projects["special-chars-project"] = str(Path("/tmp/special"))
+        config_manager.save_config(config)
+
+        # Remove using a name that will normalize to the config key
+        config_manager.remove_project(
+            "Special Chars Project"
+        )  # This should normalize to "special-chars-project"
+
+        # Verify the project was removed using the correct config key
+        updated_config = config_manager.load_config()
+        assert "special-chars-project" not in updated_config.projects
+
+    def test_remove_project_uses_canonical_name(self, temp_config_manager):
+        """Test that remove_project uses the canonical config key, not user input."""
+        config_manager = temp_config_manager
+
+        # Add a project with a config key that differs from user input
+        config = config_manager.load_config()
+        config.projects["my-test-project"] = str(Path("/tmp/mytest"))
+        config_manager.save_config(config)
+
+        # Remove using input that will match but is different from config key
+        config_manager.remove_project("My Test Project")  # Should find "my-test-project"
+
+        # Verify that the canonical config key was removed
+        updated_config = config_manager.load_config()
+        assert "my-test-project" not in updated_config.projects
+
+    def test_remove_project_nonexistent_project(self, temp_config_manager):
+        """Test remove_project raises ValueError for nonexistent project."""
+        config_manager = temp_config_manager
+
+        with pytest.raises(ValueError, match="Project 'nonexistent' not found"):
+            config_manager.remove_project("nonexistent")
+
+    def test_remove_project_cannot_remove_default(self, temp_config_manager):
+        """Test remove_project raises ValueError when trying to remove default project."""
+        config_manager = temp_config_manager
+
+        # Try to remove the default project
+        with pytest.raises(ValueError, match="Cannot remove the default project"):
+            config_manager.remove_project("main")
