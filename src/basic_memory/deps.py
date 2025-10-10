@@ -61,8 +61,11 @@ async def get_project_config(
     Raises:
         HTTPException: If project is not found
     """
+    from basic_memory.utils import generate_permalink
 
-    project_obj = await project_repository.get_by_permalink(str(project))
+    # Convert project name to permalink for lookup
+    project_permalink = generate_permalink(str(project))
+    project_obj = await project_repository.get_by_permalink(project_permalink)
     if project_obj:
         return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
 
@@ -147,9 +150,11 @@ async def get_project_id(
     Raises:
         HTTPException: If project is not found
     """
+    from basic_memory.utils import generate_permalink
 
-    # Try by permalink first (most common case with URL paths)
-    project_obj = await project_repository.get_by_permalink(str(project))
+    # Convert project name to permalink for lookup
+    project_permalink = generate_permalink(str(project))
+    project_obj = await project_repository.get_by_permalink(project_permalink)
     if project_obj:
         return project_obj.id
 
