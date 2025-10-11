@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 from loguru import logger
 from sqlalchemy import text
 
+from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
@@ -30,10 +31,12 @@ class SearchService:
         search_repository: SearchRepository,
         entity_repository: EntityRepository,
         file_service: FileService,
+        app_config: Optional[BasicMemoryConfig] = None,
     ):
         self.repository = search_repository
         self.entity_repository = entity_repository
         self.file_service = file_service
+        self.app_config = app_config or ConfigManager().config
 
     async def init_search_index(self):
         """Create FTS5 virtual table if it doesn't exist."""
@@ -95,7 +98,7 @@ class SearchService:
         return results
 
     @staticmethod
-    def _generate_variants(text: str) -> Set[str]:
+    def _generate_variants(text: str, enable_trigrams: bool = False) -> Set[str]:
         """Generate text variants for better fuzzy matching.
 
         Creates variations of the text to improve match chances:
@@ -103,6 +106,12 @@ class SearchService:
         - Lowercase form
         - Path segments (for permalinks)
         - Common word boundaries
+        - Trigrams (optional, disabled by default for performance)
+
+        Args:
+            text: The text to generate variants from
+            enable_trigrams: Whether to generate trigrams for fuzzy matching.
+                           Disabled by default as it significantly increases database size.
         """
         variants = {text, text.lower()}
 
@@ -113,8 +122,9 @@ class SearchService:
         # Add word boundaries
         variants.update(w.strip() for w in text.lower().split() if w.strip())
 
-        # Add trigrams for fuzzy matching
-        variants.update(text[i : i + 3].lower() for i in range(len(text) - 2))
+        # Add trigrams for fuzzy matching (optional - can cause significant bloat)
+        if enable_trigrams:
+            variants.update(text[i : i + 3].lower() for i in range(len(text) - 2))
 
         return variants
 
@@ -172,6 +182,167 @@ class SearchService:
             entity
         ) if entity.is_markdown else await self.index_entity_file(entity)
 
+    async def index_entities_batch(
+        self,
+        entities: List[Entity],
+    ) -> None:
+        """Index multiple entities in a single batch operation.
+
+        This method collects all search index rows before inserting them in bulk,
+        significantly improving performance for large numbers of entities.
+
+        Args:
+            entities: List of entities to index
+        """
+        if not entities:
+            return
+
+        logger.debug(f"Batch indexing {len(entities)} entities")
+
+        # Collect all search index rows before inserting
+        search_rows: List[SearchIndexRow] = []
+
+        for entity in entities:
+            # Delete existing index data for this entity first
+            await self.repository.delete_by_entity_id(entity_id=entity.id)
+
+            # Collect search rows for this entity
+            if entity.is_markdown:
+                rows = await self._collect_entity_markdown_rows(entity)
+            else:
+                rows = await self._collect_entity_file_rows(entity)
+
+            search_rows.extend(rows)
+
+        # Batch insert all rows at once
+        if search_rows:
+            logger.debug(f"Inserting {len(search_rows)} search index rows")
+            for row in search_rows:
+                await self.repository.index_item(row)
+
+        logger.debug(f"Batch indexing complete for {len(entities)} entities")
+
+    async def _collect_entity_file_rows(self, entity: Entity) -> List[SearchIndexRow]:
+        """Collect search index rows for a non-markdown entity."""
+        return [
+            SearchIndexRow(
+                id=entity.id,
+                entity_id=entity.id,
+                type=SearchItemType.ENTITY.value,
+                title=entity.title,
+                file_path=entity.file_path,
+                metadata={
+                    "entity_type": entity.entity_type,
+                },
+                created_at=entity.created_at,
+                updated_at=entity.updated_at,
+                project_id=entity.project_id,
+            )
+        ]
+
+    async def _collect_entity_markdown_rows(self, entity: Entity) -> List[SearchIndexRow]:
+        """Collect search index rows for a markdown entity and its observations/relations."""
+        rows: List[SearchIndexRow] = []
+        enable_trigrams = self.app_config.enable_search_trigrams
+
+        # Collect entity row
+        content_stems = []
+        content_snippet = ""
+        title_variants = self._generate_variants(entity.title, enable_trigrams)
+        content_stems.extend(title_variants)
+
+        content = await self.file_service.read_entity_content(entity)
+        if content:
+            content_stems.append(content)
+            content_snippet = f"{content[:250]}"
+
+        if entity.permalink:
+            content_stems.extend(self._generate_variants(entity.permalink, enable_trigrams))
+
+        content_stems.extend(self._generate_variants(entity.file_path, enable_trigrams))
+
+        # Add entity tags from frontmatter to search content
+        entity_tags = self._extract_entity_tags(entity)
+        if entity_tags:
+            content_stems.extend(entity_tags)
+
+        entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
+
+        rows.append(
+            SearchIndexRow(
+                id=entity.id,
+                type=SearchItemType.ENTITY.value,
+                title=entity.title,
+                content_stems=entity_content_stems,
+                content_snippet=content_snippet,
+                permalink=entity.permalink,
+                file_path=entity.file_path,
+                entity_id=entity.id,
+                metadata={
+                    "entity_type": entity.entity_type,
+                },
+                created_at=entity.created_at,
+                updated_at=entity.updated_at,
+                project_id=entity.project_id,
+            )
+        )
+
+        # Collect observation rows
+        for obs in entity.observations:
+            obs_content_stems = "\n".join(
+                p for p in self._generate_variants(obs.content, enable_trigrams) if p and p.strip()
+            )
+            rows.append(
+                SearchIndexRow(
+                    id=obs.id,
+                    type=SearchItemType.OBSERVATION.value,
+                    title=f"{obs.category}: {obs.content[:100]}...",
+                    content_stems=obs_content_stems,
+                    content_snippet=obs.content,
+                    permalink=obs.permalink,
+                    file_path=entity.file_path,
+                    category=obs.category,
+                    entity_id=entity.id,
+                    metadata={
+                        "tags": obs.tags,
+                    },
+                    created_at=entity.created_at,
+                    updated_at=entity.updated_at,
+                    project_id=entity.project_id,
+                )
+            )
+
+        # Collect relation rows
+        for rel in entity.outgoing_relations:
+            relation_title = (
+                f"{rel.from_entity.title} → {rel.to_entity.title}"
+                if rel.to_entity
+                else f"{rel.from_entity.title}"
+            )
+
+            rel_content_stems = "\n".join(
+                p for p in self._generate_variants(relation_title, enable_trigrams) if p and p.strip()
+            )
+            rows.append(
+                SearchIndexRow(
+                    id=rel.id,
+                    title=relation_title,
+                    permalink=rel.permalink,
+                    content_stems=rel_content_stems,
+                    file_path=entity.file_path,
+                    type=SearchItemType.RELATION.value,
+                    entity_id=entity.id,
+                    from_id=rel.from_id,
+                    to_id=rel.to_id,
+                    relation_type=rel.relation_type,
+                    created_at=entity.created_at,
+                    updated_at=entity.updated_at,
+                    project_id=entity.project_id,
+                )
+            )
+
+        return rows
+
     async def index_entity_file(
         self,
         entity: Entity,
@@ -221,7 +392,8 @@ class SearchService:
 
         content_stems = []
         content_snippet = ""
-        title_variants = self._generate_variants(entity.title)
+        enable_trigrams = self.app_config.enable_search_trigrams
+        title_variants = self._generate_variants(entity.title, enable_trigrams)
         content_stems.extend(title_variants)
 
         content = await self.file_service.read_entity_content(entity)
@@ -230,9 +402,9 @@ class SearchService:
             content_snippet = f"{content[:250]}"
 
         if entity.permalink:
-            content_stems.extend(self._generate_variants(entity.permalink))
+            content_stems.extend(self._generate_variants(entity.permalink, enable_trigrams))
 
-        content_stems.extend(self._generate_variants(entity.file_path))
+        content_stems.extend(self._generate_variants(entity.file_path, enable_trigrams))
 
         # Add entity tags from frontmatter to search content
         entity_tags = self._extract_entity_tags(entity)
@@ -265,7 +437,7 @@ class SearchService:
         for obs in entity.observations:
             # Index with parent entity's file path since that's where it's defined
             obs_content_stems = "\n".join(
-                p for p in self._generate_variants(obs.content) if p and p.strip()
+                p for p in self._generate_variants(obs.content, enable_trigrams) if p and p.strip()
             )
             await self.repository.index_item(
                 SearchIndexRow(
@@ -297,7 +469,7 @@ class SearchService:
             )
 
             rel_content_stems = "\n".join(
-                p for p in self._generate_variants(relation_title) if p and p.strip()
+                p for p in self._generate_variants(relation_title, enable_trigrams) if p and p.strip()
             )
             await self.repository.index_item(
                 SearchIndexRow(

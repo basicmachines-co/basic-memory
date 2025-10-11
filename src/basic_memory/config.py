@@ -98,6 +98,22 @@ class BasicMemoryConfig(BaseSettings):
         description="Disable automatic permalink generation in frontmatter. When enabled, new notes won't have permalinks added and sync won't update permalinks. Existing permalinks will still work for reading.",
     )
 
+    sync_batch_size: int = Field(
+        default=250,
+        description="Number of entities to process in a single database batch during sync. Higher values improve performance for large repos at the cost of memory. Set to 1 to disable batching.",
+        gt=0,
+    )
+
+    enable_search_trigrams: bool = Field(
+        default=False,
+        description="Enable trigram generation for fuzzy search. Improves search flexibility but significantly increases database size and indexing time. Recommended for small projects only.",
+    )
+
+    defer_search_indexing: bool = Field(
+        default=False,
+        description="Skip search indexing during sync. Useful for initial imports or when search is not immediately needed. Search index can be rebuilt manually later.",
+    )
+
     skip_initialization_sync: bool = Field(
         default=False,
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
