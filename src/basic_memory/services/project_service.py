@@ -80,7 +80,13 @@ class ProjectService:
         return os.environ.get("BASIC_MEMORY_PROJECT", self.config_manager.default_project)
 
     async def list_projects(self) -> Sequence[Project]:
-        return await self.repository.find_all()
+        """List all projects without loading entity relationships.
+
+        Returns only basic project fields (name, path, etc.) without
+        eager loading the entities relationship which could load thousands
+        of entities for large knowledge bases.
+        """
+        return await self.repository.find_all(use_load_options=False)
 
     async def get_project(self, name: str) -> Optional[Project]:
         """Get the file path for a project by name or permalink."""

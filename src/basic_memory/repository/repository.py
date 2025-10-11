@@ -152,12 +152,25 @@ class Repository[T: Base]:
         # Add project filter if applicable
         return self._add_project_filter(query)
 
-    async def find_all(self, skip: int = 0, limit: Optional[int] = None) -> Sequence[T]:
-        """Fetch records from the database with pagination."""
+    async def find_all(
+        self, skip: int = 0, limit: Optional[int] = None, use_load_options: bool = True
+    ) -> Sequence[T]:
+        """Fetch records from the database with pagination.
+
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            use_load_options: Whether to apply eager loading options (default: True)
+        """
         logger.debug(f"Finding all {self.Model.__name__} (skip={skip}, limit={limit})")
 
         async with db.scoped_session(self.session_maker) as session:
-            query = select(self.Model).offset(skip).options(*self.get_load_options())
+            query = select(self.Model).offset(skip)
+
+            # Only apply load options if requested
+            if use_load_options:
+                query = query.options(*self.get_load_options())
+
             # Add project filter if applicable
             query = self._add_project_filter(query)
 
