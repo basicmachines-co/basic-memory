@@ -57,6 +57,10 @@ addopts = "--cov=basic_memory --cov-report term-missing"
 testpaths = ["tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "benchmark: Performance benchmark tests (deselect with '-m \"not benchmark\"')",
+    "slow: Slow-running tests (deselect with '-m \"not slow\"')",
+]
 
 [tool.ruff]
 line-length = 100
