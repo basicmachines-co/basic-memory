@@ -3,8 +3,9 @@
 import fnmatch
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
+from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas.directory import DirectoryNode
 
@@ -161,8 +162,13 @@ class DirectoryService:
         if dir_name != "/" and dir_name.endswith("/"):
             dir_name = dir_name.rstrip("/")
 
-        # Get the full directory tree
-        root_tree = await self.get_directory_tree()
+        # Optimize: Query only entities in the target directory
+        # instead of loading the entire tree
+        dir_prefix = dir_name.lstrip("/")
+        entity_rows = await self.entity_repository.find_by_directory_prefix(dir_prefix)
+
+        # Build a partial tree from only the relevant entities
+        root_tree = self._build_directory_tree_from_entities(entity_rows, dir_name)
 
         # Find the target directory node
         target_node = self._find_directory_node(root_tree, dir_name)
@@ -174,6 +180,78 @@ class DirectoryService:
         self._collect_nodes_recursive(target_node, result, depth, file_name_glob, 0)
 
         return result
+
+    def _build_directory_tree_from_entities(
+        self, entity_rows: Sequence[Entity], root_path: str
+    ) -> DirectoryNode:
+        """Build a directory tree from a subset of entities.
+
+        Args:
+            entity_rows: Sequence of entity objects to build tree from
+            root_path: Root directory path for the tree
+
+        Returns:
+            DirectoryNode representing the tree root
+        """
+        # Create a root directory node
+        root_node = DirectoryNode(name="Root", directory_path=root_path, type="directory")
+
+        # Map to store directory nodes by path for easy lookup
+        dir_map: Dict[str, DirectoryNode] = {root_path: root_node}
+
+        # First pass: create all directory nodes
+        for file in entity_rows:
+            # Process directory path components
+            parts = [p for p in file.file_path.split("/") if p]
+
+            # Create directory structure
+            current_path = "/"
+            for i, part in enumerate(parts[:-1]):  # Skip the filename
+                parent_path = current_path
+                # Build the directory path
+                current_path = (
+                    f"{current_path}{part}" if current_path == "/" else f"{current_path}/{part}"
+                )
+
+                # Create directory node if it doesn't exist
+                if current_path not in dir_map:
+                    dir_node = DirectoryNode(
+                        name=part, directory_path=current_path, type="directory"
+                    )
+                    dir_map[current_path] = dir_node
+
+                    # Add to parent's children
+                    if parent_path in dir_map:
+                        dir_map[parent_path].children.append(dir_node)
+
+        # Second pass: add file nodes to their parent directories
+        for file in entity_rows:
+            file_name = os.path.basename(file.file_path)
+            parent_dir = os.path.dirname(file.file_path)
+            directory_path = "/" if parent_dir == "" else f"/{parent_dir}"
+
+            # Create file node
+            file_node = DirectoryNode(
+                name=file_name,
+                file_path=file.file_path,
+                directory_path=f"/{file.file_path}",
+                type="file",
+                title=file.title,
+                permalink=file.permalink,
+                entity_id=file.id,
+                entity_type=file.entity_type,
+                content_type=file.content_type,
+                updated_at=file.updated_at,
+            )
+
+            # Add to parent directory's children
+            if directory_path in dir_map:
+                dir_map[directory_path].children.append(file_node)
+            elif root_path in dir_map:
+                # Fallback to root if parent not found
+                dir_map[root_path].children.append(file_node)
+
+        return root_node
 
     def _find_directory_node(
         self, root: DirectoryNode, target_path: str

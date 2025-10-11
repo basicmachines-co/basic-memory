@@ -526,3 +526,121 @@ async def test_get_distinct_directories_empty_db(entity_repository: EntityReposi
     """Test getting distinct directories when database is empty."""
     directories = await entity_repository.get_distinct_directories()
     assert directories == []
+
+
+@pytest.mark.asyncio
+async def test_find_by_directory_prefix(entity_repository: EntityRepository, session_maker):
+    """Test finding entities by directory prefix."""
+    # Create test entities in various directories
+    async with db.scoped_session(session_maker) as session:
+        entities = [
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 1",
+                entity_type="test",
+                permalink="docs/file1",
+                file_path="docs/file1.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 2",
+                entity_type="test",
+                permalink="docs/guides/file2",
+                file_path="docs/guides/file2.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 3",
+                entity_type="test",
+                permalink="docs/api/file3",
+                file_path="docs/api/file3.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 4",
+                entity_type="test",
+                permalink="specs/file4",
+                file_path="specs/file4.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        ]
+        session.add_all(entities)
+        await session.flush()
+
+    # Test finding all entities in "docs" directory and subdirectories
+    docs_entities = await entity_repository.find_by_directory_prefix("docs")
+    assert len(docs_entities) == 3
+    file_paths = {e.file_path for e in docs_entities}
+    assert file_paths == {"docs/file1.md", "docs/guides/file2.md", "docs/api/file3.md"}
+
+    # Test finding entities in "docs/guides" subdirectory
+    guides_entities = await entity_repository.find_by_directory_prefix("docs/guides")
+    assert len(guides_entities) == 1
+    assert guides_entities[0].file_path == "docs/guides/file2.md"
+
+    # Test finding entities in "specs" directory
+    specs_entities = await entity_repository.find_by_directory_prefix("specs")
+    assert len(specs_entities) == 1
+    assert specs_entities[0].file_path == "specs/file4.md"
+
+    # Test with root directory (empty string)
+    all_entities = await entity_repository.find_by_directory_prefix("")
+    assert len(all_entities) == 4
+
+    # Test with root directory (slash)
+    all_entities = await entity_repository.find_by_directory_prefix("/")
+    assert len(all_entities) == 4
+
+    # Test with non-existent directory
+    nonexistent = await entity_repository.find_by_directory_prefix("nonexistent")
+    assert len(nonexistent) == 0
+
+
+@pytest.mark.asyncio
+async def test_find_by_directory_prefix_basic_fields_only(
+    entity_repository: EntityRepository, session_maker
+):
+    """Test that find_by_directory_prefix returns basic entity fields.
+
+    Note: This method uses use_query_options=False for performance,
+    so it doesn't eager load relationships. Directory trees only need
+    basic entity fields.
+    """
+    # Create test entity
+    async with db.scoped_session(session_maker) as session:
+        entity = Entity(
+            project_id=entity_repository.project_id,
+            title="Test Entity",
+            entity_type="test",
+            permalink="docs/test",
+            file_path="docs/test.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity)
+        await session.flush()
+
+    # Query entity by directory prefix
+    entities = await entity_repository.find_by_directory_prefix("docs")
+    assert len(entities) == 1
+
+    # Verify basic fields are present (all we need for directory trees)
+    entity = entities[0]
+    assert entity.title == "Test Entity"
+    assert entity.file_path == "docs/test.md"
+    assert entity.permalink == "docs/test"
+    assert entity.entity_type == "test"
+    assert entity.content_type == "text/markdown"
+    assert entity.updated_at is not None

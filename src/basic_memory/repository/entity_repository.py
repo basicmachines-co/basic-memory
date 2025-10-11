@@ -204,6 +204,38 @@ class EntityRepository(Repository[Entity]):
 
         return sorted(directories)
 
+    async def find_by_directory_prefix(self, directory_prefix: str) -> Sequence[Entity]:
+        """Find entities whose file_path starts with the given directory prefix.
+
+        Optimized method for listing directory contents without loading all entities.
+        Uses SQL LIKE pattern matching to filter entities by directory path.
+
+        Args:
+            directory_prefix: Directory path prefix (e.g., "docs", "docs/guides")
+                             Empty string returns all entities (root directory)
+
+        Returns:
+            Sequence of entities in the specified directory and subdirectories
+        """
+        # Build SQL LIKE pattern
+        if directory_prefix == "" or directory_prefix == "/":
+            # Root directory - return all entities
+            return await self.find_all()
+
+        # Remove leading/trailing slashes for consistency
+        directory_prefix = directory_prefix.strip("/")
+
+        # Query entities with file_path starting with prefix
+        # Pattern matches "prefix/" to ensure we get files IN the directory,
+        # not just files whose names start with the prefix
+        pattern = f"{directory_prefix}/%"
+
+        query = self.select().where(Entity.file_path.like(pattern))
+
+        # Skip eager loading - we only need basic entity fields for directory trees
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
+
     async def _handle_permalink_conflict(self, entity: Entity, session: AsyncSession) -> Entity:
         """Handle permalink conflicts by generating a unique permalink."""
         base_permalink = entity.permalink
