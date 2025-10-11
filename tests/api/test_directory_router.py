@@ -277,3 +277,136 @@ async def test_list_directory_endpoint_mocked(client, project_url):
         assert file_item["file_path"] == "file1.md"
         assert file_item["title"] == "File 1"
         assert file_item["permalink"] == "file-1"
+
+
+@pytest.mark.asyncio
+async def test_get_directory_structure_endpoint(test_graph, client, project_url):
+    """Test the get_directory_structure endpoint returns folders only."""
+    # Call the endpoint
+    response = await client.get(f"{project_url}/directory/structure")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that the response is a valid directory tree
+    assert "name" in data
+    assert "directory_path" in data
+    assert "children" in data
+    assert "type" in data
+    assert data["type"] == "directory"
+
+    # Root should be present
+    assert data["name"] == "Root"
+    assert data["directory_path"] == "/"
+
+    # Should have the test directory
+    assert len(data["children"]) == 1
+    test_dir = data["children"][0]
+    assert test_dir["name"] == "test"
+    assert test_dir["type"] == "directory"
+    assert test_dir["directory_path"] == "/test"
+
+    # Should NOT have any files (test_graph has files but no subdirectories)
+    assert len(test_dir["children"]) == 0
+
+    # Verify no file metadata is present in directory nodes
+    assert test_dir.get("entity_id") is None
+    assert test_dir.get("content_type") is None
+    assert test_dir.get("title") is None
+    assert test_dir.get("permalink") is None
+
+
+@pytest.mark.asyncio
+async def test_get_directory_structure_empty(client, project_url):
+    """Test the get_directory_structure endpoint with empty database."""
+    # Call the endpoint
+    response = await client.get(f"{project_url}/directory/structure")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Should return root with no children
+    assert data["name"] == "Root"
+    assert data["directory_path"] == "/"
+    assert data["type"] == "directory"
+    assert len(data["children"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_directory_structure_mocked(client, project_url):
+    """Test the get_directory_structure endpoint with mocked service."""
+    # Create a mock directory structure (folders only, no files)
+    mock_structure = DirectoryNode(
+        name="Root",
+        directory_path="/",
+        type="directory",
+        children=[
+            DirectoryNode(
+                name="docs",
+                directory_path="/docs",
+                type="directory",
+                children=[
+                    DirectoryNode(
+                        name="guides",
+                        directory_path="/docs/guides",
+                        type="directory",
+                        children=[],
+                    ),
+                    DirectoryNode(
+                        name="api",
+                        directory_path="/docs/api",
+                        type="directory",
+                        children=[],
+                    ),
+                ],
+            ),
+            DirectoryNode(name="specs", directory_path="/specs", type="directory", children=[]),
+        ],
+    )
+
+    # Patch the directory service
+    with patch(
+        "basic_memory.services.directory_service.DirectoryService.get_directory_structure",
+        return_value=mock_structure,
+    ):
+        # Call the endpoint
+        response = await client.get(f"{project_url}/directory/structure")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check structure matches our mock (folders only)
+        assert data["name"] == "Root"
+        assert data["directory_path"] == "/"
+        assert data["type"] == "directory"
+        assert len(data["children"]) == 2
+
+        # Check docs directory
+        docs = data["children"][0]
+        assert docs["name"] == "docs"
+        assert docs["directory_path"] == "/docs"
+        assert docs["type"] == "directory"
+        assert len(docs["children"]) == 2
+
+        # Check subdirectories
+        guides = docs["children"][0]
+        assert guides["name"] == "guides"
+        assert guides["directory_path"] == "/docs/guides"
+        assert guides["type"] == "directory"
+        assert guides["children"] == []
+
+        api = docs["children"][1]
+        assert api["name"] == "api"
+        assert api["directory_path"] == "/docs/api"
+        assert api["type"] == "directory"
+        assert api["children"] == []
+
+        # Check specs directory
+        specs = data["children"][1]
+        assert specs["name"] == "specs"
+        assert specs["directory_path"] == "/specs"
+        assert specs["type"] == "directory"
+        assert specs["children"] == []

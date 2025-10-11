@@ -176,6 +176,34 @@ class EntityRepository(Repository[Entity]):
                     entity = await self._handle_permalink_conflict(entity, session)
                     return entity
 
+    async def get_distinct_directories(self) -> List[str]:
+        """Extract unique directory paths from file_path column.
+
+        Optimized method for getting directory structure without loading full entities
+        or relationships. Returns a sorted list of unique directory paths.
+
+        Returns:
+            List of unique directory paths (e.g., ["notes", "notes/meetings", "specs"])
+        """
+        # Query only file_path column, no entity objects or relationships
+        query = select(Entity.file_path).distinct()
+        query = self._add_project_filter(query)
+
+        # Execute with use_query_options=False to skip eager loading
+        result = await self.execute_query(query, use_query_options=False)
+        file_paths = [row for row in result.scalars().all()]
+
+        # Parse file paths to extract unique directories
+        directories = set()
+        for file_path in file_paths:
+            parts = [p for p in file_path.split("/") if p]
+            # Add all parent directories (exclude filename which is the last part)
+            for i in range(len(parts) - 1):
+                dir_path = "/".join(parts[: i + 1])
+                directories.add(dir_path)
+
+        return sorted(directories)
+
     async def _handle_permalink_conflict(self, entity: Entity, session: AsyncSession) -> Entity:
         """Handle permalink conflicts by generating a unique permalink."""
         base_permalink = entity.permalink

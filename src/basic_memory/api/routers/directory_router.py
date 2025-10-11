@@ -31,6 +31,27 @@ async def get_directory_tree(
     return tree
 
 
+@router.get("/structure", response_model=DirectoryNode)
+async def get_directory_structure(
+    directory_service: DirectoryServiceDep,
+    project_id: ProjectIdDep,
+):
+    """Get folder structure for navigation (no files).
+
+    Optimized endpoint for folder tree navigation. Returns only directory nodes
+    without file metadata. For full tree with files, use /directory/tree.
+
+    Args:
+        directory_service: Service for directory operations
+        project_id: ID of the current project
+
+    Returns:
+        DirectoryNode tree containing only folders (type="directory")
+    """
+    structure = await directory_service.get_directory_structure()
+    return structure
+
+
 @router.get("/list", response_model=List[DirectoryNode])
 async def list_directory(
     directory_service: DirectoryServiceDep,

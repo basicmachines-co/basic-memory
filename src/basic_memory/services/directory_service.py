@@ -89,6 +89,49 @@ class DirectoryService:
         # Return the root node with its children
         return root_node
 
+    async def get_directory_structure(self) -> DirectoryNode:
+        """Build a hierarchical directory structure without file details.
+
+        Optimized method for folder navigation that only returns directory nodes,
+        no file metadata. Much faster than get_directory_tree() for large knowledge bases.
+
+        Returns:
+            DirectoryNode tree containing only folders (type="directory")
+        """
+        # Get unique directories without loading entities
+        directories = await self.entity_repository.get_distinct_directories()
+
+        # Create a root directory node
+        root_node = DirectoryNode(name="Root", directory_path="/", type="directory")
+
+        # Map to store directory nodes by path for easy lookup
+        dir_map: Dict[str, DirectoryNode] = {"/": root_node}
+
+        # Build tree with just folders
+        for dir_path in directories:
+            parts = [p for p in dir_path.split("/") if p]
+            current_path = "/"
+
+            for i, part in enumerate(parts):
+                parent_path = current_path
+                # Build the directory path
+                current_path = (
+                    f"{current_path}{part}" if current_path == "/" else f"{current_path}/{part}"
+                )
+
+                # Create directory node if it doesn't exist
+                if current_path not in dir_map:
+                    dir_node = DirectoryNode(
+                        name=part, directory_path=current_path, type="directory"
+                    )
+                    dir_map[current_path] = dir_node
+
+                    # Add to parent's children
+                    if parent_path in dir_map:
+                        dir_map[parent_path].children.append(dir_node)
+
+        return root_node
+
     async def list_directory(
         self,
         dir_name: str = "/",

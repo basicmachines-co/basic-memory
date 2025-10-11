@@ -208,3 +208,51 @@ async def test_list_directory_default_parameters(directory_service: DirectorySer
     assert len(result) == 1
     assert result[0].name == "test"
     assert result[0].type == "directory"
+
+
+@pytest.mark.asyncio
+async def test_directory_structure_empty(directory_service: DirectoryService):
+    """Test getting empty directory structure."""
+    # When no entities exist, result should just be the root
+    result = await directory_service.get_directory_structure()
+    assert result is not None
+    assert len(result.children) == 0
+
+    assert result.name == "Root"
+    assert result.directory_path == "/"
+    assert result.type == "directory"
+    assert result.has_children is False
+
+
+@pytest.mark.asyncio
+async def test_directory_structure(directory_service: DirectoryService, test_graph):
+    """Test getting directory structure with folders only (no files)."""
+    # test_graph files:
+    # /
+    # ├── test
+    # │   ├── Connected Entity 1.md
+    # │   ├── Connected Entity 2.md
+    # │   ├── Deep Entity.md
+    # │   ├── Deeper Entity.md
+    # │   └── Root.md
+
+    result = await directory_service.get_directory_structure()
+    assert result is not None
+    assert len(result.children) == 1
+
+    # Should only have the "test" directory, not the files
+    node_0 = result.children[0]
+    assert node_0.name == "test"
+    assert node_0.type == "directory"
+    assert node_0.directory_path == "/test"
+    assert node_0.has_children is False  # No subdirectories, only files
+
+    # Verify no file metadata is present
+    assert node_0.content_type is None
+    assert node_0.entity_id is None
+    assert node_0.entity_type is None
+    assert node_0.title is None
+    assert node_0.permalink is None
+
+    # No file nodes should be present
+    assert len(node_0.children) == 0

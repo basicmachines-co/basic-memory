@@ -432,3 +432,97 @@ async def test_get_by_file_path(entity_repository: EntityRepository, session_mak
     # Test non-existent file_path
     found = await entity_repository.get_by_file_path("not/a/real/file.md")
     assert found is None
+
+
+@pytest.mark.asyncio
+async def test_get_distinct_directories(entity_repository: EntityRepository, session_maker):
+    """Test getting distinct directory paths from entity file paths."""
+    # Create test entities with various directory structures
+    async with db.scoped_session(session_maker) as session:
+        entities = [
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 1",
+                entity_type="test",
+                permalink="docs/guides/file1",
+                file_path="docs/guides/file1.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 2",
+                entity_type="test",
+                permalink="docs/guides/file2",
+                file_path="docs/guides/file2.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 3",
+                entity_type="test",
+                permalink="docs/api/file3",
+                file_path="docs/api/file3.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 4",
+                entity_type="test",
+                permalink="specs/file4",
+                file_path="specs/file4.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 5",
+                entity_type="test",
+                permalink="notes/2024/q1/file5",
+                file_path="notes/2024/q1/file5.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        ]
+        session.add_all(entities)
+        await session.flush()
+
+    # Get distinct directories
+    directories = await entity_repository.get_distinct_directories()
+
+    # Verify directories are extracted correctly
+    assert isinstance(directories, list)
+    assert len(directories) > 0
+
+    # Should include all parent directories but not filenames
+    expected_dirs = {
+        "docs",
+        "docs/guides",
+        "docs/api",
+        "notes",
+        "notes/2024",
+        "notes/2024/q1",
+        "specs",
+    }
+    assert set(directories) == expected_dirs
+
+    # Verify results are sorted
+    assert directories == sorted(directories)
+
+    # Verify no file paths are included
+    for dir_path in directories:
+        assert not dir_path.endswith(".md")
+
+
+@pytest.mark.asyncio
+async def test_get_distinct_directories_empty_db(entity_repository: EntityRepository):
+    """Test getting distinct directories when database is empty."""
+    directories = await entity_repository.get_distinct_directories()
+    assert directories == []
