@@ -7,7 +7,6 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 
-from basic_memory.config import ProjectConfig
 from basic_memory.deps import get_project_config, get_project_id
 from basic_memory.models.project import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -175,9 +174,7 @@ async def test_get_project_id_fallback_to_name(
     # The test_project fixture has name "test-project" and permalink "test-project"
     # Since both are the same, we can't easily test the fallback with existing fixtures
     # So this test just verifies the normal path works with test_project
-    project_id = await get_project_id(
-        project_repository=project_repository, project="test-project"
-    )
+    project_id = await get_project_id(project_repository=project_repository, project="test-project")
 
     assert project_id == test_project.id
 

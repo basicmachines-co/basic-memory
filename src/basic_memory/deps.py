@@ -33,6 +33,7 @@ from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
+from basic_memory.utils import generate_permalink
 
 
 def get_app_config() -> BasicMemoryConfig:  # pragma: no cover
@@ -61,8 +62,6 @@ async def get_project_config(
     Raises:
         HTTPException: If project is not found
     """
-    from basic_memory.utils import generate_permalink
-
     # Convert project name to permalink for lookup
     project_permalink = generate_permalink(str(project))
     project_obj = await project_repository.get_by_permalink(project_permalink)
@@ -150,8 +149,6 @@ async def get_project_id(
     Raises:
         HTTPException: If project is not found
     """
-    from basic_memory.utils import generate_permalink
-
     # Convert project name to permalink for lookup
     project_permalink = generate_permalink(str(project))
     project_obj = await project_repository.get_by_permalink(project_permalink)
