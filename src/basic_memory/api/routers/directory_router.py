@@ -10,6 +10,31 @@ from basic_memory.schemas.directory import DirectoryNode
 router = APIRouter(prefix="/directory", tags=["directory"])
 
 
+@router.get("/structure", response_model=DirectoryNode)
+async def get_directory_structure(
+    directory_service: DirectoryServiceDep,
+    project_id: ProjectIdDep,
+):
+    """Get optimized directory structure with folders only (no file metadata).
+
+    This endpoint is optimized for folder navigation and tree UI rendering.
+    It only returns the folder structure without loading full file metadata,
+    resulting in significant performance improvements for large knowledge bases.
+
+    Args:
+        directory_service: Service for directory operations
+        project_id: ID of the current project
+
+    Returns:
+        DirectoryNode representing the root with only folder nodes (no file nodes)
+    """
+    # Get optimized directory structure for folder navigation
+    structure = await directory_service.get_directory_structure()
+
+    # Return the folder structure
+    return structure
+
+
 @router.get("/tree", response_model=DirectoryNode)
 async def get_directory_tree(
     directory_service: DirectoryServiceDep,

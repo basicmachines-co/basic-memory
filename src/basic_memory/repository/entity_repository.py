@@ -199,3 +199,19 @@ class EntityRepository(Repository[Entity]):
         session.add(entity)
         await session.flush()
         return entity
+
+    async def get_all_file_paths(self) -> List[str]:
+        """Get all file paths from entities without loading full entities.
+
+        This is optimized for directory structure building where we only need
+        the file paths and not the full entity objects or relationships.
+
+        Returns:
+            List of file path strings
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            # Only select the file_path column for better performance
+            query = self.select().with_only_columns(Entity.file_path)
+            result = await session.execute(query)
+            # Return list of file path strings
+            return list(result.scalars().all())

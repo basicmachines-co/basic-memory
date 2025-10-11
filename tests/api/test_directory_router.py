@@ -8,6 +8,51 @@ from basic_memory.schemas.directory import DirectoryNode
 
 
 @pytest.mark.asyncio
+async def test_get_directory_structure_endpoint(test_graph, client, project_url):
+    """Test the get_directory_structure endpoint returns folders only (optimized)."""
+    # Call the endpoint
+    response = await client.get(f"{project_url}/directory/structure")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that the response is a valid directory structure
+    assert "name" in data
+    assert "directory_path" in data
+    assert "children" in data
+    assert "type" in data
+
+    # Should have the test directory
+    assert isinstance(data["children"], list)
+    assert len(data["children"]) == 1
+
+    test_dir = data["children"][0]
+    assert test_dir["name"] == "test"
+    assert test_dir["type"] == "directory"
+
+    # Should have NO file nodes (folders only)
+    assert len(test_dir["children"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_directory_structure_empty(client, project_url):
+    """Test the get_directory_structure endpoint with no entities."""
+    # Call the endpoint
+    response = await client.get(f"{project_url}/directory/structure")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Should return root with no children
+    assert data["name"] == "Root"
+    assert data["directory_path"] == "/"
+    assert data["type"] == "directory"
+    assert len(data["children"]) == 0
+
+
+@pytest.mark.asyncio
 async def test_get_directory_tree_endpoint(test_graph, client, project_url):
     """Test the get_directory_tree endpoint returns correctly structured data."""
     # Call the endpoint
