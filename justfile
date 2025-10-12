@@ -7,23 +7,29 @@ install:
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
 
-# Run unit tests in parallel
+# Run unit tests only (fast, no coverage)
 test-unit:
-    uv run pytest -p pytest_mock -v -n auto
+    uv run pytest -p pytest_mock -v --no-cov -n auto tests
 
-# Run integration tests in parallel
+# Run integration tests only (fast, no coverage)
 test-int:
     uv run pytest -p pytest_mock -v --no-cov -n auto test-int
 
-# Run all tests
-test: test-unit test-int
+# Run all tests with unified coverage report
+test:
+    uv run pytest -p pytest_mock -v -n auto tests test-int
+
+# Generate HTML coverage report
+coverage:
+    uv run pytest -p pytest_mock -v -n auto tests test-int --cov-report=html
+    @echo "Coverage report generated in htmlcov/index.html"
 
 # Lint and fix code (calls fix)
 lint: fix
 
 # Lint and fix code
 fix:
-    uv run ruff check --fix --unsafe-fixes src tests
+    uv run ruff check --fix --unsafe-fixes src tests test-int
 
 # Type check code
 typecheck:

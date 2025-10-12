@@ -3,7 +3,7 @@ name = "basic-memory"
 dynamic = ["version"]
 description = "Local-first knowledge management combining Zettelkasten with knowledge graphs"
 readme = "README.md"
-requires-python = ">=3.12.1"
+requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }
 authors = [
     { name = "Basic Machines", email = "hello@basic-machines.co" }
@@ -54,7 +54,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 addopts = "--cov=basic_memory --cov-report term-missing"
-testpaths = ["tests"]
+testpaths = ["tests", "test-int"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
@@ -66,8 +66,8 @@ markers = [
 line-length = 100
 target-version = "py312"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "gevent>=24.11.1",
     "icecream>=2.1.3",
     "pytest>=8.3.4",

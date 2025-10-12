@@ -14,7 +14,6 @@ Usage:
 """
 
 import asyncio
-import os
 import time
 from pathlib import Path
 from textwrap import dedent
@@ -154,7 +153,6 @@ async def run_sync_benchmark(
     print(f"\nInitial database size: {initial_db_formatted}")
 
     # Create sync service
-    from basic_memory.models import Project
     from basic_memory.repository import ProjectRepository
     from basic_memory import db
 
@@ -202,18 +200,18 @@ async def run_sync_benchmark(
 
     # Print results
     print(f"\n{'-' * 70}")
-    print(f"RESULTS:")
+    print("RESULTS:")
     print(f"{'-' * 70}")
     print(f"Files processed:      {num_files}")
     print(f"  New:                {len(report.new)}")
     print(f"  Modified:           {len(report.modified)}")
     print(f"  Deleted:            {len(report.deleted)}")
     print(f"  Moved:              {len(report.moves)}")
-    print(f"\nPerformance:")
+    print("\nPerformance:")
     print(f"  Total time:         {sync_duration:.2f}s")
     print(f"  Files/sec:          {files_per_sec:.1f}")
     print(f"  ms/file:            {ms_per_file:.1f}")
-    print(f"\nDatabase:")
+    print("\nDatabase:")
     print(f"  Initial size:       {initial_db_formatted}")
     print(f"  Final size:         {final_db_formatted}")
     print(f"  Growth:             {db_growth_formatted}")
@@ -302,7 +300,6 @@ async def test_benchmark_resync_no_changes(app_config, project_config, config_ma
     print(f"\nFirst sync of {num_files} files...")
     await generate_benchmark_files(project_dir, num_files)
 
-    from basic_memory.models import Project
     from basic_memory.repository import ProjectRepository
     from basic_memory import db
 
@@ -332,13 +329,13 @@ async def test_benchmark_resync_no_changes(app_config, project_config, config_ma
     await sync_service.sync(project_dir, project_name=project.name)
 
     # Second sync (no changes)
-    print(f"\nRe-sync with no changes...")
+    print("\nRe-sync with no changes...")
     resync_start = time.time()
     report = await sync_service.sync(project_dir, project_name=project.name)
     resync_duration = time.time() - resync_start
 
     print(f"\n{'-' * 70}")
-    print(f"RE-SYNC RESULTS (no changes):")
+    print("RE-SYNC RESULTS (no changes):")
     print(f"{'-' * 70}")
     print(f"Files scanned:        {num_files}")
     print(f"Changes detected:     {report.total}")
@@ -351,7 +348,7 @@ async def test_benchmark_resync_no_changes(app_config, project_config, config_ma
 
     # Debug: Show what changed
     if report.total > 0:
-        print(f"\n⚠️  UNEXPECTED CHANGES DETECTED:")
+        print("\n⚠️  UNEXPECTED CHANGES DETECTED:")
         if report.new:
             print(f"  New files ({len(report.new)}): {list(report.new)[:5]}")
         if report.modified:

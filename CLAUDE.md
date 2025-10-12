@@ -14,22 +14,34 @@ See the [README.md](README.md) file for a project overview.
 
 ### Build and Test Commands
 
-- Install: `make install` or `pip install -e ".[dev]"`
-- Run tests: `uv run pytest -p pytest_mock -v` or `make test`
+- Install: `just install` or `pip install -e ".[dev]"`
+- Run all tests (with coverage): `just test` - Runs both unit and integration tests with unified coverage
+- Run unit tests only: `just test-unit` - Fast, no coverage
+- Run integration tests only: `just test-int` - Fast, no coverage
+- Generate HTML coverage: `just coverage` - Opens in browser
 - Single test: `pytest tests/path/to/test_file.py::test_function_name`
-- Lint: `make lint` or `ruff check . --fix`
-- Type check: `make type-check` or `uv run pyright`
-- Format: `make format` or `uv run ruff format .`
-- Run all code checks: `make check` (runs lint, format, type-check, test)
-- Create db migration: `make migration m="Your migration message"`
-- Run development MCP Inspector: `make run-inspector`
+- Run benchmarks: `pytest test-int/test_sync_performance_benchmark.py -v -m "benchmark and not slow"`
+- Lint: `just lint` or `ruff check . --fix`
+- Type check: `just typecheck` or `uv run pyright`
+- Format: `just format` or `uv run ruff format .`
+- Run all code checks: `just check` (runs lint, format, typecheck, test)
+- Create db migration: `just migration "Your migration message"`
+- Run development MCP Inspector: `just run-inspector`
 
-**Note:** Project supports Python 3.10+
+**Note:** Project requires Python 3.12+ (uses type parameter syntax and `type` aliases introduced in 3.12)
+
+### Test Structure
+
+- `tests/` - Unit tests for individual components (mocked, fast)
+- `test-int/` - Integration tests for real-world scenarios (no mocks, realistic)
+- Both directories are covered by unified coverage reporting
+- Benchmark tests in `test-int/` are marked with `@pytest.mark.benchmark`
+- Slow tests are marked with `@pytest.mark.slow`
 
 ### Code Style Guidelines
 
 - Line length: 100 characters max
-- Python 3.12+ with full type annotations
+- Python 3.12+ with full type annotations (uses type parameters and type aliases)
 - Format with ruff (consistent styling)
 - Import order: standard lib, third-party, local imports
 - Naming: snake_case for functions/variables, PascalCase for classes
@@ -63,9 +75,11 @@ See the [README.md](README.md) file for a project overview.
 - Schema changes require Alembic migrations
 - SQLite is used for indexing and full text search, files are source of truth
 - Testing uses pytest with asyncio support (strict mode)
+- Unit tests (`tests/`) use mocks when necessary; integration tests (`test-int/`) use real implementations
 - Test database uses in-memory SQLite
-- Avoid creating mocks in tests in most circumstances.
-- Each test runs in a standalone environment with in memory SQLite and tmp_file directory
+- Each test runs in a standalone environment with in-memory SQLite and tmp_file directory
+- Performance benchmarks are in `test-int/test_sync_performance_benchmark.py`
+- Use pytest markers: `@pytest.mark.benchmark` for benchmarks, `@pytest.mark.slow` for slow tests
 
 ### Async Client Pattern (Important!)
 
