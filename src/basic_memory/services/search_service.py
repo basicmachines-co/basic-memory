@@ -113,8 +113,10 @@ class SearchService:
         # Add word boundaries
         variants.update(w.strip() for w in text.lower().split() if w.strip())
 
-        # Add trigrams for fuzzy matching
-        variants.update(text[i : i + 3].lower() for i in range(len(text) - 2))
+        # Trigrams disabled: They create massive search index bloat, increasing DB size significantly
+        # and slowing down indexing performance. FTS5 search works well without them.
+        # See: https://github.com/basicmachines-co/basic-memory/issues/351
+        # variants.update(text[i : i + 3].lower() for i in range(len(text) - 2))
 
         return variants
 
@@ -219,6 +221,9 @@ class SearchService:
         The project_id is automatically added by the repository when indexing.
         """
 
+        # Collect all search index rows to batch insert at the end
+        rows_to_index = []
+
         content_stems = []
         content_snippet = ""
         title_variants = self._generate_variants(entity.title)
@@ -241,8 +246,8 @@ class SearchService:
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
-        # Index entity
-        await self.repository.index_item(
+        # Add entity row
+        rows_to_index.append(
             SearchIndexRow(
                 id=entity.id,
                 type=SearchItemType.ENTITY.value,
@@ -261,13 +266,13 @@ class SearchService:
             )
         )
 
-        # Index each observation with permalink
+        # Add observation rows
         for obs in entity.observations:
             # Index with parent entity's file path since that's where it's defined
             obs_content_stems = "\n".join(
                 p for p in self._generate_variants(obs.content) if p and p.strip()
             )
-            await self.repository.index_item(
+            rows_to_index.append(
                 SearchIndexRow(
                     id=obs.id,
                     type=SearchItemType.OBSERVATION.value,
@@ -287,7 +292,7 @@ class SearchService:
                 )
             )
 
-        # Only index outgoing relations (ones defined in this file)
+        # Add relation rows (only outgoing relations defined in this file)
         for rel in entity.outgoing_relations:
             # Create descriptive title showing the relationship
             relation_title = (
@@ -299,7 +304,7 @@ class SearchService:
             rel_content_stems = "\n".join(
                 p for p in self._generate_variants(relation_title) if p and p.strip()
             )
-            await self.repository.index_item(
+            rows_to_index.append(
                 SearchIndexRow(
                     id=rel.id,
                     title=relation_title,
@@ -316,6 +321,9 @@ class SearchService:
                     project_id=entity.project_id,
                 )
             )
+
+        # Batch insert all rows at once
+        await self.repository.bulk_index_items(rows_to_index)
 
     async def delete_by_permalink(self, permalink: str):
         """Delete an item from the search index."""

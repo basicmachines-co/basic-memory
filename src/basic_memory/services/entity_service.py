@@ -52,7 +52,9 @@ class EntityService(BaseService[EntityModel]):
         self.link_resolver = link_resolver
         self.app_config = app_config
 
-    async def detect_file_path_conflicts(self, file_path: str) -> List[Entity]:
+    async def detect_file_path_conflicts(
+        self, file_path: str, skip_check: bool = False
+    ) -> List[Entity]:
         """Detect potential file path conflicts for a given file path.
 
         This checks for entities with similar file paths that might cause conflicts:
@@ -63,10 +65,14 @@ class EntityService(BaseService[EntityModel]):
 
         Args:
             file_path: The file path to check for conflicts
+            skip_check: If True, skip the check and return empty list (optimization for bulk operations)
 
         Returns:
             List of entities that might conflict with the given file path
         """
+        if skip_check:
+            return []
+
         from basic_memory.utils import detect_potential_file_conflicts
 
         conflicts = []
@@ -86,7 +92,10 @@ class EntityService(BaseService[EntityModel]):
         return conflicts
 
     async def resolve_permalink(
-        self, file_path: Permalink | Path, markdown: Optional[EntityMarkdown] = None
+        self,
+        file_path: Permalink | Path,
+        markdown: Optional[EntityMarkdown] = None,
+        skip_conflict_check: bool = False,
     ) -> str:
         """Get or generate unique permalink for an entity.
 
@@ -101,7 +110,9 @@ class EntityService(BaseService[EntityModel]):
         file_path_str = Path(file_path).as_posix()
 
         # Check for potential file path conflicts before resolving permalink
-        conflicts = await self.detect_file_path_conflicts(file_path_str)
+        conflicts = await self.detect_file_path_conflicts(
+            file_path_str, skip_check=skip_conflict_check
+        )
         if conflicts:
             logger.warning(
                 f"Detected potential file path conflicts for '{file_path_str}': "
@@ -445,6 +456,7 @@ class EntityService(BaseService[EntityModel]):
             resolved_entities = await asyncio.gather(*lookup_tasks, return_exceptions=True)
 
             # Process results and create relation records
+            relations_to_add = []
             for rel, resolved in zip(markdown.relations, resolved_entities):
                 # Handle exceptions from gather and None results
                 target_entity: Optional[Entity] = None
@@ -465,14 +477,24 @@ class EntityService(BaseService[EntityModel]):
                     relation_type=rel.type,
                     context=rel.context,
                 )
+                relations_to_add.append(relation)
+
+            # Batch insert all relations
+            if relations_to_add:
                 try:
-                    await self.relation_repository.add(relation)
+                    await self.relation_repository.add_all(relations_to_add)
                 except IntegrityError:
-                    # Unique constraint violation - relation already exists
-                    logger.debug(
-                        f"Skipping duplicate relation {rel.type} from {db_entity.permalink} target: {rel.target}"
-                    )
-                    continue
+                    # Some relations might be duplicates - fall back to individual inserts
+                    logger.debug("Batch relation insert failed, trying individual inserts")
+                    for relation in relations_to_add:
+                        try:
+                            await self.relation_repository.add(relation)
+                        except IntegrityError:
+                            # Unique constraint violation - relation already exists
+                            logger.debug(
+                                f"Skipping duplicate relation {relation.relation_type} from {db_entity.permalink}"
+                            )
+                            continue
 
         return await self.repository.get_by_file_path(path)
 

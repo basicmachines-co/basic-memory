@@ -94,9 +94,7 @@ async def generate_benchmark_files(project_dir: Path, num_files: int) -> None:
         batch_end = min(batch_start + batch_size, num_files)
         tasks = [
             create_benchmark_file(
-                project_dir / f"category-{i % 10}" / f"test-file-{i:04d}.md",
-                i,
-                num_files
+                project_dir / f"category-{i % 10}" / f"test-file-{i:04d}.md", i, num_files
             )
             for i in range(batch_start, batch_end)
         ]
@@ -104,7 +102,7 @@ async def generate_benchmark_files(project_dir: Path, num_files: int) -> None:
         print(f"  Created files {batch_start}-{batch_end} ({batch_end}/{num_files})")
 
     duration = time.time() - start
-    print(f"  File generation completed in {duration:.2f}s ({num_files/duration:.1f} files/sec)")
+    print(f"  File generation completed in {duration:.2f}s ({num_files / duration:.1f} files/sec)")
 
 
 def get_db_size(db_path: Path) -> tuple[int, str]:
@@ -119,7 +117,7 @@ def get_db_size(db_path: Path) -> tuple[int, str]:
     size_bytes = db_path.stat().st_size
 
     # Format size
-    for unit in ['B', 'KB', 'MB', 'GB']:
+    for unit in ["B", "KB", "MB", "GB"]:
         if size_bytes < 1024.0:
             return size_bytes, f"{size_bytes:.2f} {unit}"
         size_bytes /= 1024.0
@@ -128,10 +126,7 @@ def get_db_size(db_path: Path) -> tuple[int, str]:
 
 
 async def run_sync_benchmark(
-    project_config: ProjectConfig,
-    app_config: BasicMemoryConfig,
-    num_files: int,
-    test_name: str
+    project_config: ProjectConfig, app_config: BasicMemoryConfig, num_files: int, test_name: str
 ) -> dict:
     """Run a sync benchmark and collect metrics.
 
@@ -147,9 +142,9 @@ async def run_sync_benchmark(
     project_dir = project_config.home
     db_path = app_config.database_path
 
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"BENCHMARK: {test_name}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Generate test files
     await generate_benchmark_files(project_dir, num_files)
@@ -174,12 +169,14 @@ async def run_sync_benchmark(
     if projects:
         project = projects[0]
     else:
-        project = await project_repository.create({
-            "name": project_config.name,
-            "path": str(project_config.home),
-            "is_active": True,
-            "is_default": True,
-        })
+        project = await project_repository.create(
+            {
+                "name": project_config.name,
+                "path": str(project_config.home),
+                "is_active": True,
+                "is_default": True,
+            }
+        )
 
     sync_service = await get_sync_service(project)
 
@@ -204,9 +201,9 @@ async def run_sync_benchmark(
     ms_per_file = (sync_duration * 1000) / num_files if num_files > 0 else 0
 
     # Print results
-    print(f"\n{'-'*70}")
+    print(f"\n{'-' * 70}")
     print(f"RESULTS:")
-    print(f"{'-'*70}")
+    print(f"{'-' * 70}")
     print(f"Files processed:      {num_files}")
     print(f"  New:                {len(report.new)}")
     print(f"  Modified:           {len(report.modified)}")
@@ -221,7 +218,7 @@ async def run_sync_benchmark(
     print(f"  Final size:         {final_db_formatted}")
     print(f"  Growth:             {db_growth_formatted}")
     print(f"  Growth per file:    {(db_growth / num_files / 1024):.2f} KB")
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
     return {
         "test_name": test_name,
@@ -245,10 +242,7 @@ async def run_sync_benchmark(
 async def test_benchmark_sync_100_files(app_config, project_config, config_manager):
     """Benchmark: Sync 100 files (small repository)."""
     results = await run_sync_benchmark(
-        project_config,
-        app_config,
-        num_files=100,
-        test_name="Sync 100 files (small repository)"
+        project_config, app_config, num_files=100, test_name="Sync 100 files (small repository)"
     )
 
     # Basic assertions to ensure sync worked
@@ -263,10 +257,7 @@ async def test_benchmark_sync_100_files(app_config, project_config, config_manag
 async def test_benchmark_sync_500_files(app_config, project_config, config_manager):
     """Benchmark: Sync 500 files (medium repository)."""
     results = await run_sync_benchmark(
-        project_config,
-        app_config,
-        num_files=500,
-        test_name="Sync 500 files (medium repository)"
+        project_config, app_config, num_files=500, test_name="Sync 500 files (medium repository)"
     )
 
     # Basic assertions
@@ -286,10 +277,7 @@ async def test_benchmark_sync_1000_files(app_config, project_config, config_mana
         pytest -m "not slow"
     """
     results = await run_sync_benchmark(
-        project_config,
-        app_config,
-        num_files=1000,
-        test_name="Sync 1000 files (large repository)"
+        project_config, app_config, num_files=1000, test_name="Sync 1000 files (large repository)"
     )
 
     # Basic assertions
@@ -327,12 +315,14 @@ async def test_benchmark_resync_no_changes(app_config, project_config, config_ma
     if projects:
         project = projects[0]
     else:
-        project = await project_repository.create({
-            "name": project_config.name,
-            "path": str(project_config.home),
-            "is_active": True,
-            "is_default": True,
-        })
+        project = await project_repository.create(
+            {
+                "name": project_config.name,
+                "path": str(project_config.home),
+                "is_active": True,
+                "is_default": True,
+            }
+        )
 
     sync_service = await get_sync_service(project)
 
@@ -347,17 +337,36 @@ async def test_benchmark_resync_no_changes(app_config, project_config, config_ma
     report = await sync_service.sync(project_dir, project_name=project.name)
     resync_duration = time.time() - resync_start
 
-    print(f"\n{'-'*70}")
+    print(f"\n{'-' * 70}")
     print(f"RE-SYNC RESULTS (no changes):")
-    print(f"{'-'*70}")
+    print(f"{'-' * 70}")
     print(f"Files scanned:        {num_files}")
     print(f"Changes detected:     {report.total}")
+    print(f"  New:                {len(report.new)}")
+    print(f"  Modified:           {len(report.modified)}")
+    print(f"  Deleted:            {len(report.deleted)}")
+    print(f"  Moved:              {len(report.moves)}")
     print(f"Duration:             {resync_duration:.2f}s")
-    print(f"Files/sec:            {num_files/resync_duration:.1f}")
-    print(f"{'='*70}\n")
+    print(f"Files/sec:            {num_files / resync_duration:.1f}")
+
+    # Debug: Show what changed
+    if report.total > 0:
+        print(f"\n⚠️  UNEXPECTED CHANGES DETECTED:")
+        if report.new:
+            print(f"  New files ({len(report.new)}): {list(report.new)[:5]}")
+        if report.modified:
+            print(f"  Modified files ({len(report.modified)}): {list(report.modified)[:5]}")
+        if report.deleted:
+            print(f"  Deleted files ({len(report.deleted)}): {list(report.deleted)[:5]}")
+        if report.moves:
+            print(f"  Moved files ({len(report.moves)}): {dict(list(report.moves.items())[:5])}")
+
+    print(f"{'=' * 70}\n")
 
     # Should be no changes
-    assert report.total == 0
+    assert report.total == 0, (
+        f"Expected no changes but got {report.total}: new={len(report.new)}, modified={len(report.modified)}, deleted={len(report.deleted)}, moves={len(report.moves)}"
+    )
     assert len(report.new) == 0
     assert len(report.modified) == 0
     assert len(report.deleted) == 0

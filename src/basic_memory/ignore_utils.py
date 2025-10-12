@@ -11,9 +11,9 @@ DEFAULT_IGNORE_PATTERNS = {
     # Hidden files (files starting with dot)
     ".*",
     # Basic Memory internal files
-    "memory.db",
-    "memory.db-shm",
-    "memory.db-wal",
+    "*.db",
+    "*.db-shm",
+    "*.db-wal",
     "config.json",
     # Version control
     ".git",
@@ -84,10 +84,10 @@ def create_default_bmignore() -> None:
 # Hidden files (files starting with dot)
 .*
 
-# Basic Memory internal files
-memory.db
-memory.db-shm
-memory.db-wal
+# Basic Memory internal files (includes test databases)
+*.db
+*.db-shm
+*.db-wal
 config.json
 
 # Version control

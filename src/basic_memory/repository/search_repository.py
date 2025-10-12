@@ -559,6 +559,48 @@ class SearchRepository:
             logger.debug(f"indexed row {search_index_row}")
             await session.commit()
 
+    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]):
+        """Index multiple items in a single batch operation.
+
+        Note: This method assumes that any existing records for the entity_id
+        have already been deleted (typically via delete_by_entity_id).
+
+        Args:
+            search_index_rows: List of SearchIndexRow objects to index
+        """
+        if not search_index_rows:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            # Prepare all insert data with project_id
+            insert_data_list = []
+            for row in search_index_rows:
+                insert_data = row.to_insert()
+                insert_data["project_id"] = self.project_id
+                insert_data_list.append(insert_data)
+
+            # Batch insert all records using executemany
+            await session.execute(
+                text("""
+                    INSERT INTO search_index (
+                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        from_id, to_id, relation_type,
+                        entity_id, category,
+                        created_at, updated_at,
+                        project_id
+                    ) VALUES (
+                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :from_id, :to_id, :relation_type,
+                        :entity_id, :category,
+                        :created_at, :updated_at,
+                        :project_id
+                    )
+                """),
+                insert_data_list,
+            )
+            logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
+            await session.commit()
+
     async def delete_by_entity_id(self, entity_id: int):
         """Delete an item from the search index by entity_id."""
         async with db.scoped_session(self.session_maker) as session:
