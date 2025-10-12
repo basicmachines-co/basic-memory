@@ -16,8 +16,7 @@ test-int:
     uv run pytest -p pytest_mock -v --no-cov -n auto test-int
 
 # Run all tests with unified coverage report
-test:
-    uv run pytest -p pytest_mock -v -n auto tests test-int
+test: test-unit test-int
 
 # Generate HTML coverage report
 coverage:
