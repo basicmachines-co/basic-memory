@@ -125,7 +125,7 @@ def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
         env="test",
         projects=projects,
         default_project="test-project",
-        default_project_mode=True,
+        default_project_mode=False,  # Match real-world usage - tools must pass explicit project
         update_permalinks_on_move=True,
         cloud_mode=False,  # Explicitly disable cloud mode
     )

@@ -14,6 +14,7 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.schemas.search import SearchResponse
+from basic_memory.config import ConfigManager
 
 
 def _format_search_results_for_chatgpt(results: SearchResponse) -> List[Dict[str, Any]]:
@@ -90,10 +91,14 @@ async def search(
     logger.info(f"ChatGPT search request: query='{query}'")
 
     try:
+        # ChatGPT tools don't expose project parameter, so use default project
+        config = ConfigManager().config
+        default_project = config.default_project
+
         # Call underlying search_notes with sensible defaults for ChatGPT
         results = await search_notes.fn(
             query=query,
-            project=None,  # Let project resolution happen automatically
+            project=default_project,  # Use default project for ChatGPT
             page=1,
             page_size=10,  # Reasonable default for ChatGPT consumption
             search_type="text",  # Default to full-text search
@@ -149,10 +154,14 @@ async def fetch(
     logger.info(f"ChatGPT fetch request: id='{id}'")
 
     try:
+        # ChatGPT tools don't expose project parameter, so use default project
+        config = ConfigManager().config
+        default_project = config.default_project
+
         # Call underlying read_note function
         content = await read_note.fn(
             identifier=id,
-            project=None,  # Let project resolution happen automatically
+            project=default_project,  # Use default project for ChatGPT
             page=1,
             page_size=10,  # Default pagination
             context=context,

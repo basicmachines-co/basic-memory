@@ -44,18 +44,15 @@ async def test_view_note_basic_functionality(app, test_project):
     # View the note
     result = await view_note.fn("Test View Note", project=test_project.name)
 
-    # Should contain artifact XML
-    assert '<artifact identifier="note-' in result
-    assert 'type="text/markdown"' in result
-    assert 'title="Test View Note"' in result
-    assert "</artifact>" in result
+    # Should contain note retrieval message
+    assert 'Note retrieved: "Test View Note"' in result
+    assert "Display this note as a markdown artifact for the user" in result
+    assert "Content:" in result
+    assert "---" in result
 
-    # Should contain the note content within the artifact
+    # Should contain the note content
     assert "# Test View Note" in result
     assert "This is test content for viewing." in result
-
-    # Should have confirmation message
-    assert "✅ Note displayed as artifact" in result
 
 
 @pytest.mark.asyncio
@@ -80,9 +77,9 @@ async def test_view_note_with_frontmatter_title(app, test_project):
     # View the note
     result = await view_note.fn("Frontmatter Title", project=test_project.name)
 
-    # Should extract title from frontmatter
-    assert 'title="Frontmatter Title"' in result
-    assert "✅ Note displayed as artifact: **Frontmatter Title**" in result
+    # Should show title in retrieval message
+    assert 'Note retrieved: "Frontmatter Title"' in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
@@ -98,9 +95,9 @@ async def test_view_note_with_heading_title(app, test_project):
     # View the note
     result = await view_note.fn("Heading Title", project=test_project.name)
 
-    # Should extract title from heading
-    assert 'title="Heading Title"' in result
-    assert "✅ Note displayed as artifact: **Heading Title**" in result
+    # Should show title in retrieval message
+    assert 'Note retrieved: "Heading Title"' in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
@@ -119,7 +116,7 @@ async def test_view_note_unicode_content(app, test_project):
     assert "🚀" in result
     assert "🎉" in result
     assert "♠♣♥♦" in result
-    assert '<artifact identifier="note-' in result
+    assert 'Note retrieved: "Unicode Test 🚀"' in result
 
 
 @pytest.mark.asyncio
@@ -136,9 +133,9 @@ async def test_view_note_by_permalink(app, test_project):
     result = await view_note.fn("test/permalink-test", project=test_project.name)
 
     # Should work with permalink
-    assert '<artifact identifier="note-' in result
+    assert 'Note retrieved: "test/permalink-test"' in result
     assert "Content for permalink test." in result
-    assert "✅ Note displayed as artifact" in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
@@ -155,9 +152,9 @@ async def test_view_note_with_memory_url(app, test_project):
     result = await view_note.fn("memory://test/memory-url-test", project=test_project.name)
 
     # Should work with memory:// URL
-    assert '<artifact identifier="note-' in result
+    assert 'Note retrieved: "memory://test/memory-url-test"' in result
     assert "Testing memory:// URL handling in view_note" in result
-    assert "✅ Note displayed as artifact" in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
@@ -166,10 +163,10 @@ async def test_view_note_not_found(app, test_project):
     # Try to view non-existent note
     result = await view_note.fn("NonExistent Note", project=test_project.name)
 
-    # Should return error message without artifact
+    # Should return error message without artifact instructions
     assert "# Note Not Found" in result
     assert "NonExistent Note" in result
-    assert "<artifact" not in result  # No artifact for errors
+    assert "Display this note as a markdown artifact" not in result  # No artifact for errors
     assert "Check Identifier Type" in result
     assert "Search Instead" in result
 
@@ -188,9 +185,9 @@ async def test_view_note_pagination(app, test_project):
     result = await view_note.fn("Pagination Test", page=1, page_size=5, project=test_project.name)
 
     # Should work with pagination
-    assert '<artifact identifier="note-' in result
+    assert 'Note retrieved: "Pagination Test"' in result
     assert "Content for pagination test." in result
-    assert "✅ Note displayed as artifact" in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
@@ -207,14 +204,14 @@ async def test_view_note_project_parameter(app, test_project):
     result = await view_note.fn("Project Test", project=test_project.name)
 
     # Should work with project parameter
-    assert '<artifact identifier="note-' in result
+    assert 'Note retrieved: "Project Test"' in result
     assert "Content for project test." in result
-    assert "✅ Note displayed as artifact" in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
 async def test_view_note_artifact_identifier_unique(app, test_project):
-    """Test that different notes get different artifact identifiers."""
+    """Test that different notes are retrieved correctly with unique identifiers."""
     # Create two notes
     await write_note.fn(
         project=test_project.name, title="Note One", folder="test", content="Content one"
@@ -227,15 +224,11 @@ async def test_view_note_artifact_identifier_unique(app, test_project):
     result1 = await view_note.fn("Note One", project=test_project.name)
     result2 = await view_note.fn("Note Two", project=test_project.name)
 
-    # Should have different artifact identifiers
-    import re
-
-    id1_match = re.search(r'identifier="(note-\d+)"', result1)
-    id2_match = re.search(r'identifier="(note-\d+)"', result2)
-
-    assert id1_match is not None
-    assert id2_match is not None
-    assert id1_match.group(1) != id2_match.group(1)
+    # Should have different note identifiers in retrieval messages
+    assert 'Note retrieved: "Note One"' in result1
+    assert 'Note retrieved: "Note Two"' in result2
+    assert "Content one" in result1
+    assert "Content two" in result2
 
 
 @pytest.mark.asyncio
@@ -252,9 +245,9 @@ async def test_view_note_fallback_identifier_as_title(app, test_project):
     # View the note
     result = await view_note.fn("Simple Note", project=test_project.name)
 
-    # Should use identifier as fallback title
-    assert 'title="Simple Note"' in result
-    assert "✅ Note displayed as artifact: **Simple Note**" in result
+    # Should use identifier as title in retrieval message
+    assert 'Note retrieved: "Simple Note"' in result
+    assert "Display this note as a markdown artifact for the user" in result
 
 
 @pytest.mark.asyncio
@@ -282,8 +275,7 @@ async def test_view_note_direct_success(app, test_project, mock_call_get):
     mock_call_get.assert_called_once()
     assert "test/test-note" in mock_call_get.call_args[0][1]
 
-    # Verify result contains artifact
-    assert '<artifact identifier="note-' in result
-    assert 'title="Test Note"' in result
+    # Verify result contains note content
+    assert 'Note retrieved: "test/test-note"' in result
+    assert "Display this note as a markdown artifact for the user" in result
     assert "This is a test note." in result
-    assert "✅ Note displayed as artifact: **Test Note**" in result
