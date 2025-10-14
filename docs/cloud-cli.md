@@ -7,6 +7,7 @@ The Basic Memory Cloud CLI provides seamless integration between local and cloud
 The cloud CLI enables you to:
 - **Toggle cloud mode** with `bm cloud login` / `bm cloud logout`
 - **Use regular commands in cloud mode**: `bm project`, `bm sync`, `bm tool` all work with cloud
+- **Upload local files** directly to cloud projects via `bm cloud upload`
 - **Bidirectional sync** with rclone bisync (recommended for most users)
 - **Direct file access** via rclone mount (alternative workflow)
 - **Integrity verification** with `bm cloud check`
@@ -159,6 +160,69 @@ bm project list
 ```
 
 This Dropbox-like workflow means you don't need to manually coordinate projects between local and cloud.
+
+### Uploading Local Files
+
+You can directly upload local files or directories to cloud projects using `bm cloud upload`. This is useful for:
+- Migrating existing local projects to the cloud
+- Quickly uploading specific files or directories
+- One-time bulk uploads without setting up sync
+
+**Basic Usage:**
+
+```bash
+# Upload a directory to existing project
+bm cloud upload ~/my-notes --project research
+
+# Upload a single file
+bm cloud upload important-doc.md --project research
+```
+
+**Create Project On-the-Fly:**
+
+If the target project doesn't exist yet, use `--create-project`:
+
+```bash
+# Upload and create project in one step
+bm cloud upload ~/local-project --project new-research --create-project
+```
+
+**Skip Automatic Sync:**
+
+By default, the command syncs the project after upload to index the files. To skip this:
+
+```bash
+# Upload without triggering sync
+bm cloud upload ~/bulk-data --project archives --no-sync
+```
+
+**File Filtering:**
+
+The upload command respects `.bmignore` and `.gitignore` patterns, automatically excluding:
+- Hidden files (`.git`, `.DS_Store`)
+- Build artifacts (`node_modules`, `__pycache__`)
+- Database files (`*.db`, `*.db-wal`)
+- Environment files (`.env`)
+
+To customize what gets uploaded, edit `~/.basic-memory/.bmignore`.
+
+**Complete Example:**
+
+```bash
+# 1. Login to cloud
+bm cloud login
+
+# 2. Upload local project (creates project if needed)
+bm cloud upload ~/Documents/research-notes --project research --create-project
+
+# 3. Verify upload
+bm project list
+```
+
+**Notes:**
+- Files are uploaded directly via WebDAV (no sync setup required)
+- Uploads are immediate and don't require bisync or mount
+- Use this for migration or one-time uploads; use `bm sync` for ongoing synchronization
 
 ## File Synchronization
 
@@ -626,6 +690,15 @@ bm cloud bisync --verbose        # Show detailed output
 # Integrity verification
 bm cloud check                   # Full integrity check
 bm cloud check --one-way         # Faster one-way check
+```
+
+### File Upload
+
+```bash
+# Upload files/directories to cloud projects
+bm cloud upload <path> --project <name>              # Upload to existing project
+bm cloud upload <path> -p <name> --create-project    # Upload and create project
+bm cloud upload <path> -p <name> --no-sync           # Upload without syncing
 ```
 
 ### Direct File Access (Mount)

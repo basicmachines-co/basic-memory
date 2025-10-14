@@ -87,6 +87,7 @@ async def get_client() -> AsyncIterator[AsyncClient]:
             # Auth header set ONCE at client creation
             proxy_base_url = f"{config.cloud_host}/proxy"
             logger.info(f"Creating HTTP client for cloud proxy at: {proxy_base_url}")
+            print(f"proxy_base_url:  {proxy_base_url}")
             async with AsyncClient(
                 base_url=proxy_base_url,
                 headers={"Authorization": f"Bearer {token}"},

@@ -404,11 +404,9 @@ class TestCloudProjectAutoRegistration:
     @pytest.mark.asyncio
     async def test_extracts_directory_names_from_cloud_paths(self):
         """Test extraction of directory names from cloud project paths."""
-        from basic_memory.cli.commands.cloud.bisync_commands import fetch_cloud_projects
+        from basic_memory.cli.commands.cloud.cloud_utils import fetch_cloud_projects
 
-        with patch(
-            "basic_memory.cli.commands.cloud.bisync_commands.make_api_request"
-        ) as mock_request:
+        with patch("basic_memory.cli.commands.cloud.cloud_utils.make_api_request") as mock_request:
             mock_response = Mock()
             mock_response.json.return_value = {
                 "projects": [
@@ -435,13 +433,11 @@ class TestCloudProjectAutoRegistration:
     @pytest.mark.asyncio
     async def test_create_cloud_project_generates_permalink(self):
         """Test that create_cloud_project generates correct permalink."""
-        from basic_memory.cli.commands.cloud.bisync_commands import create_cloud_project
+        from basic_memory.cli.commands.cloud.cloud_utils import create_cloud_project
 
-        with patch(
-            "basic_memory.cli.commands.cloud.bisync_commands.make_api_request"
-        ) as mock_request:
+        with patch("basic_memory.cli.commands.cloud.cloud_utils.make_api_request") as mock_request:
             with patch(
-                "basic_memory.cli.commands.cloud.bisync_commands.generate_permalink"
+                "basic_memory.cli.commands.cloud.cloud_utils.generate_permalink"
             ) as mock_permalink:
                 mock_permalink.return_value = "my-new-project"
                 mock_response = Mock()

@@ -34,7 +34,7 @@ dependencies = [
     "pyjwt>=2.10.1",
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
-    "aiofiles>=24.1.0",  # Async file I/O
+    "aiofiles>=24.1.0", # Async file I/O
 ]
 
 

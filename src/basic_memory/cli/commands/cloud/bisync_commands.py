@@ -12,6 +12,10 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.commands.cloud.api_client import CloudAPIError, make_api_request
+from basic_memory.cli.commands.cloud.cloud_utils import (
+    create_cloud_project,
+    fetch_cloud_projects,
+)
 from basic_memory.cli.commands.cloud.rclone_config import (
     add_tenant_to_rclone_config,
 )
@@ -21,11 +25,7 @@ from basic_memory.ignore_utils import get_bmignore_path, create_default_bmignore
 from basic_memory.schemas.cloud import (
     TenantMountInfo,
     MountCredentials,
-    CloudProjectList,
-    CloudProjectCreateRequest,
-    CloudProjectCreateResponse,
 )
-from basic_memory.utils import generate_permalink
 
 console = Console()
 
@@ -110,24 +110,6 @@ async def generate_mount_credentials(tenant_id: str) -> MountCredentials:
         raise BisyncError(f"Failed to generate credentials: {e}") from e
 
 
-async def fetch_cloud_projects() -> CloudProjectList:
-    """Fetch list of projects from cloud API.
-
-    Returns:
-        CloudProjectList with projects from cloud
-    """
-    try:
-        config_manager = ConfigManager()
-        config = config_manager.config
-        host_url = config.cloud_host.rstrip("/")
-
-        response = await make_api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
-
-        return CloudProjectList.model_validate(response.json())
-    except Exception as e:
-        raise BisyncError(f"Failed to fetch cloud projects: {e}") from e
-
-
 def scan_local_directories(sync_dir: Path) -> list[str]:
     """Scan local sync directory for project folders.
 
@@ -146,41 +128,6 @@ def scan_local_directories(sync_dir: Path) -> list[str]:
             directories.append(item.name)
 
     return directories
-
-
-async def create_cloud_project(project_name: str) -> CloudProjectCreateResponse:
-    """Create a new project on cloud.
-
-    Args:
-        project_name: Name of project to create
-
-    Returns:
-        CloudProjectCreateResponse with project details from API
-    """
-    try:
-        config_manager = ConfigManager()
-        config = config_manager.config
-        host_url = config.cloud_host.rstrip("/")
-
-        # Use generate_permalink to ensure consistent naming
-        project_path = generate_permalink(project_name)
-
-        project_data = CloudProjectCreateRequest(
-            name=project_name,
-            path=project_path,
-            set_default=False,
-        )
-
-        response = await make_api_request(
-            method="POST",
-            url=f"{host_url}/proxy/projects/projects",
-            headers={"Content-Type": "application/json"},
-            json_data=project_data.model_dump(),
-        )
-
-        return CloudProjectCreateResponse.model_validate(response.json())
-    except Exception as e:
-        raise BisyncError(f"Failed to create cloud project '{project_name}': {e}") from e
 
 
 def get_bisync_state_path(tenant_id: str) -> Path:
