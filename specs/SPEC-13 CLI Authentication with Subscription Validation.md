@@ -340,398 +340,6 @@ This architecture makes the fix comprehensive and maintainable.
 - Want to reduce database dependency
 - Scale requires fewer database queries
 
-## Post-Deployment Test Plan
-
-This test plan should be executed after deploying the cloud service to verify subscription validation works end-to-end.
-
-### Prerequisites
-
-Before testing, ensure you have:
-- [ ] Cloud service deployed with Phase 1 changes
-- [ ] CLI installed with Phase 2 changes (`basic-memory` from local dev)
-- [ ] Access to database to check/modify subscription status
-- [ ] Two test user accounts:
-  - User A: No subscription (fresh WorkOS signup)
-  - User B: Active subscription (via Polar or manual DB insert)
-
-### Test Execution
-
-#### Test 1: User Without Subscription (Blocked Access) ❌
-
-**Setup:**
-1. Create fresh WorkOS account (User A) via AuthKit
-2. Verify in database: No subscription record exists for User A's `workos_user_id`
-
-**Test Steps:**
-```bash
-# Step 1: Attempt login
-bm cloud login
-```
-
-**Expected Results:**
-- ✅ OAuth flow completes successfully
-- ✅ JWT token obtained and stored in `~/.basic-memory/auth/token`
-- ❌ Login fails with "Subscription Required" error
-- ✅ Error message displays:
-  - "✗ Subscription Required"
-  - "Active subscription required for CLI access"
-  - Subscribe URL: "https://basicmemory.com/subscribe"
-  - Instructions to run `bm cloud login` after subscribing
-- ❌ Cloud mode NOT enabled (check with `bm cloud status`)
-
-**Test Steps (continued):**
-```bash
-# Step 2: Attempt to access cloud features
-bm cloud status
-
-# Step 3: Try direct API call
-curl -H "Authorization: Bearer <token>" https://<cloud-host>/proxy/health
-```
-
-**Expected Results:**
-- ✅ `bm cloud status` shows "Mode: Local (disabled)"
-- ✅ Direct API call returns 403 with subscription_required error
-
-**Database Verification:**
-```sql
--- Verify no subscription exists
-SELECT * FROM subscriptions
-WHERE workos_user_id = '<user-a-workos-id>';
--- Should return 0 rows
-```
-
----
-
-#### Test 2: User With Active Subscription (Full Access) ✅
-
-**Setup:**
-1. Use User B with active subscription
-2. Verify in database: Subscription exists with `status = 'active'` and `current_period_end > NOW()`
-
-**Database Verification:**
-```sql
--- Verify active subscription exists
-SELECT workos_user_id, status, current_period_end
-FROM subscriptions
-WHERE workos_user_id = '<user-b-workos-id>';
--- Should show: status='active', current_period_end in future
-```
-
-**Test Steps:**
-```bash
-# Step 1: Login
-bm cloud login
-
-# Step 2: Check cloud mode
-bm cloud status
-
-# Step 3: Setup bisync
-bm cloud setup
-
-# Step 4: Test MCP tools via proxy
-curl -H "Authorization: Bearer <token>" \
-  https://<cloud-host>/proxy/<project-name>/health
-
-# Step 5: List projects
-bm project list
-
-# Step 6: Create a test note
-bm tool write-note \
-  --title "Test Note" \
-  --folder "test-project" \
-  --content "Testing subscription validation"
-```
-
-**Expected Results:**
-- ✅ Login succeeds without errors
-- ✅ Cloud mode enabled: "Mode: Cloud (enabled)"
-- ✅ Cloud instance health check succeeds
-- ✅ Bisync setup completes successfully
-- ✅ Direct API calls succeed (200 OK)
-- ✅ Projects list successfully
-- ✅ Note creation succeeds
-
----
-
-#### Test 3: Subscription Expiration (Access Revoked) 🔄
-
-**Setup:**
-1. Use User B (currently has active subscription and cloud mode enabled)
-2. User should be able to access cloud features initially
-
-**Test Steps:**
-```bash
-# Step 1: Verify current access works
-bm cloud status
-# Should show "Cloud (enabled)" and healthy instance
-
-# Step 2: Expire subscription in database
-# (See SQL below)
-
-# Step 3: Attempt to access cloud features
-bm cloud status
-
-# Step 4: Try to login again
-bm cloud logout
-bm cloud login
-```
-
-**Database Operations:**
-```sql
--- Expire the subscription
-UPDATE subscriptions
-SET status = 'cancelled',
-    current_period_end = NOW() - INTERVAL '1 day'
-WHERE workos_user_id = '<user-b-workos-id>';
-
--- Verify expiration
-SELECT workos_user_id, status, current_period_end
-FROM subscriptions
-WHERE workos_user_id = '<user-b-workos-id>';
--- Should show: status='cancelled', current_period_end in past
-```
-
-**Expected Results:**
-- ❌ `bm cloud status` fails with 403 subscription_required error
-- ❌ Re-login fails with "Subscription Required" error
-- ✅ Error includes subscribe URL
-
----
-
-#### Test 4: Subscription Renewal (Access Restored) ✅
-
-**Setup:**
-1. Continue from Test 3 (User B with expired subscription)
-
-**Test Steps:**
-```bash
-# Step 1: Renew subscription in database
-# (See SQL below)
-
-# Step 2: Login again
-bm cloud login
-
-# Step 3: Verify access restored
-bm cloud status
-
-# Step 4: Test project access
-bm project list
-```
-
-**Database Operations:**
-```sql
--- Renew the subscription
-UPDATE subscriptions
-SET status = 'active',
-    current_period_end = NOW() + INTERVAL '30 days'
-WHERE workos_user_id = '<user-b-workos-id>';
-
--- Verify renewal
-SELECT workos_user_id, status, current_period_end
-FROM subscriptions
-WHERE workos_user_id = '<user-b-workos-id>';
--- Should show: status='active', current_period_end 30 days in future
-```
-
-**Expected Results:**
-- ✅ Login succeeds
-- ✅ Cloud mode enabled
-- ✅ Cloud status shows healthy
-- ✅ Projects list successfully
-- ✅ **Access immediately restored** (no delay)
-
----
-
-#### Test 5: Endpoint Coverage (All Protected Endpoints) 🔐
-
-**Setup:**
-1. Use User A (no subscription) to test blocked access
-2. Use User B (active subscription) to test allowed access
-
-**Test Matrix:**
-
-| Endpoint | Method | User A (No Sub) | User B (Active Sub) |
-|----------|--------|----------------|---------------------|
-| `/proxy/health` | GET | 403 ❌ | 200 ✅ |
-| `/proxy/<project>/health` | GET | 403 ❌ | 200 ✅ |
-| `/proxy/<project>/search` | POST | 403 ❌ | 200 ✅ |
-| `/tenant/mount/info` | GET | 403 ❌ | 200 ✅ |
-| `/tenant/mount/credentials` | POST | 403 ❌ | 200 ✅ |
-
-**Test Commands:**
-```bash
-# Get tokens for both users
-TOKEN_A="<user-a-token>"
-TOKEN_B="<user-b-token>"
-
-# Test /proxy/health
-curl -H "Authorization: Bearer $TOKEN_A" \
-  https://<cloud-host>/proxy/health
-# Expected: 403 with subscription_required
-
-curl -H "Authorization: Bearer $TOKEN_B" \
-  https://<cloud-host>/proxy/health
-# Expected: 200 OK
-
-# Test /tenant/mount/info
-curl -H "Authorization: Bearer $TOKEN_A" \
-  https://<cloud-host>/tenant/mount/info
-# Expected: 403 with subscription_required
-
-curl -H "Authorization: Bearer $TOKEN_B" \
-  https://<cloud-host>/tenant/mount/info
-# Expected: 200 OK with mount info
-
-# Test /proxy/<project>/health
-curl -H "Authorization: Bearer $TOKEN_B" \
-  https://<cloud-host>/proxy/<project-name>/health
-# Expected: 200 OK
-```
-
----
-
-#### Test 6: Error Response Format Validation 📋
-
-**Test Steps:**
-```bash
-# Get 403 response for user without subscription
-curl -i -H "Authorization: Bearer $TOKEN_A" \
-  https://<cloud-host>/proxy/health
-```
-
-**Expected Response Format:**
-```http
-HTTP/1.1 403 Forbidden
-Content-Type: application/json
-
-{
-  "error": "subscription_required",
-  "message": "Active subscription required for CLI access",
-  "subscribe_url": "https://basicmemory.com/subscribe"
-}
-```
-
-**Validation Checklist:**
-- ✅ Status code is exactly 403
-- ✅ Response is valid JSON
-- ✅ `error` field equals "subscription_required"
-- ✅ `message` field is present and informative
-- ✅ `subscribe_url` field is present and valid URL
-
----
-
-#### Test 7: Admin Access Bypass 👑
-
-**Purpose:** Verify admin users can still access admin endpoints without subscription
-
-**Setup:**
-1. Use admin user account (member of admin organization in WorkOS)
-
-**Test Steps:**
-```bash
-# Login as admin
-python -m basic_memory_cloud.cli.tenant_cli login
-
-# List tenants (admin-only endpoint)
-python -m basic_memory_cloud.cli.tenant_cli list-tenants
-
-# Create tenant (admin-only endpoint)
-python -m basic_memory_cloud.cli.tenant_cli create-tenant \
-  --workos-user-id <test-user-id>
-```
-
-**Expected Results:**
-- ✅ Admin login succeeds
-- ✅ Admin can access `/tenants/*` endpoints
-- ✅ Admin operations work regardless of subscription status
-- ✅ Admin endpoints use `AdminUserHybridDep` (not affected by subscription check)
-
----
-
-### Test Results Template
-
-Copy this template to track your test execution:
-
-```markdown
-## SPEC-13 Test Execution - [Date]
-
-### Environment
-- Cloud Service: [URL]
-- Cloud Service Version: [commit/tag]
-- CLI Version: [commit/tag]
-- Database: [production/staging]
-
-### Test Results
-
-#### Test 1: User Without Subscription ❌
-- [ ] OAuth flow succeeds
-- [ ] Subscription error displayed
-- [ ] Subscribe URL shown
-- [ ] Cloud mode NOT enabled
-- [ ] Direct API call blocked
-
-**Issues:** [None / List issues]
-
-#### Test 2: User With Active Subscription ✅
-- [ ] Login succeeds
-- [ ] Cloud mode enabled
-- [ ] Health check passes
-- [ ] Bisync setup works
-- [ ] MCP tools work
-- [ ] Projects accessible
-
-**Issues:** [None / List issues]
-
-#### Test 3: Subscription Expiration 🔄
-- [ ] Active user can access initially
-- [ ] After expiration, access blocked
-- [ ] Error message clear
-- [ ] Cloud status fails appropriately
-
-**Issues:** [None / List issues]
-
-#### Test 4: Subscription Renewal ✅
-- [ ] Renewed subscription in DB
-- [ ] Login succeeds immediately
-- [ ] Access fully restored
-- [ ] No caching delays
-
-**Issues:** [None / List issues]
-
-#### Test 5: Endpoint Coverage 🔐
-- [ ] All proxy endpoints protected
-- [ ] All mount endpoints protected
-- [ ] Subscription check consistent
-- [ ] Error responses correct
-
-**Issues:** [None / List issues]
-
-#### Test 6: Error Response Format 📋
-- [ ] 403 status code
-- [ ] Valid JSON response
-- [ ] All required fields present
-- [ ] Subscribe URL valid
-
-**Issues:** [None / List issues]
-
-#### Test 7: Admin Access Bypass 👑
-- [ ] Admin login works
-- [ ] Admin endpoints accessible
-- [ ] No subscription requirement
-
-**Issues:** [None / List issues]
-
-### Overall Result
-- [ ] All tests passed
-- [ ] Ready for production
-
-**Summary:** [Brief summary of test execution]
-
-**Sign-off:** [Your name/date]
-```
-
----
-
 ## How to Evaluate
 
 ### Success Criteria
@@ -1065,35 +673,35 @@ The extra HTTP hop is minimal (< 10ms) and worth it for architectural benefits.
   - [ ] Call `/tenant/mount/info` with valid JWT and active subscription → expect 200
   - [ ] Verify error response structure matches spec
 
-### Phase 2: CLI (basic-memory) ✅
+### Phase 2: CLI (basic-memory)
 
-#### Task 2.1: Review and understand CLI authentication flow ✅
+#### Task 2.1: Review and understand CLI authentication flow
 **Files**: `src/basic_memory/cli/commands/cloud/`
 
-- [x] Read `core_commands.py` to understand current login flow
-- [x] Read `api_client.py` to understand current error handling
-- [x] Identify where 403 errors should be caught
-- [x] Identify what error messages should be displayed
-- [x] Document current behavior in spec if needed
+- [ ] Read `core_commands.py` to understand current login flow
+- [ ] Read `api_client.py` to understand current error handling
+- [ ] Identify where 403 errors should be caught
+- [ ] Identify what error messages should be displayed
+- [ ] Document current behavior in spec if needed
 
-#### Task 2.2: Update API client error handling ✅
+#### Task 2.2: Update API client error handling
 **File**: `src/basic_memory/cli/commands/cloud/api_client.py`
 
-- [x] Add custom exception class `SubscriptionRequiredError` (or similar)
-- [x] Update HTTP error handling to parse 403 responses
-- [x] Extract `error`, `message`, and `subscribe_url` from error detail
-- [x] Raise specific exception for subscription_required errors
-- [x] Run `just typecheck` in basic-memory repo to verify types
+- [ ] Add custom exception class `SubscriptionRequiredError` (or similar)
+- [ ] Update HTTP error handling to parse 403 responses
+- [ ] Extract `error`, `message`, and `subscribe_url` from error detail
+- [ ] Raise specific exception for subscription_required errors
+- [ ] Run `just typecheck` in basic-memory repo to verify types
 
-#### Task 2.3: Update CLI login command error handling ✅
+#### Task 2.3: Update CLI login command error handling
 **File**: `src/basic_memory/cli/commands/cloud/core_commands.py`
 
-- [x] Import the subscription error exception
-- [x] Wrap login flow with try/except for subscription errors
-- [x] Display user-friendly error message with rich console
-- [x] Show subscribe URL prominently
-- [x] Provide actionable next steps
-- [x] Run `just typecheck` to verify types
+- [ ] Import the subscription error exception
+- [ ] Wrap login flow with try/except for subscription errors
+- [ ] Display user-friendly error message with rich console
+- [ ] Show subscribe URL prominently
+- [ ] Provide actionable next steps
+- [ ] Run `just typecheck` to verify types
 
 **Expected error handling**:
 ```python
@@ -1111,33 +719,30 @@ except SubscriptionRequiredError as e:
     raise typer.Exit(1)
 ```
 
-#### Task 2.4: Update CLI tests ✅
-**File**: `tests/cli/test_cloud_authentication.py` (created)
+#### Task 2.4: Update CLI tests
+**File**: `tests/cli/test_cloud_commands.py`
 
-- [x] Add test: `test_login_without_subscription_shows_error()`
+- [ ] Add test: `test_login_without_subscription_shows_error()`
   - Mock 403 subscription_required response
   - Call login command
   - Assert error message displayed
   - Assert subscribe URL shown
-- [x] Add test: `test_login_with_subscription_succeeds()`
+- [ ] Add test: `test_login_with_subscription_succeeds()`
   - Mock successful authentication + subscription check
   - Call login command
   - Assert success message
-- [x] Add test: `test_parse_subscription_required_error()` (API client error parsing)
-- [x] Add test: `test_parse_generic_403_error()` (generic 403 handling)
-- [x] Add test: `test_login_authentication_failure()` (auth failure handling)
-- [x] Run `uv run pytest` to verify tests pass (5/5 passed)
+- [ ] Run `just test` to verify tests pass
 
-#### Task 2.5: Update CLI documentation ✅
-**File**: `docs/cloud-cli.md`
+#### Task 2.5: Update CLI documentation
+**File**: `docs/cloud-cli.md` (in basic-memory-docs repo)
 
-- [x] Add "Prerequisites" section if not present
-- [x] Document subscription requirement
-- [x] Add "Troubleshooting" section
-- [x] Document "Subscription Required" error
-- [x] Provide subscribe URL
-- [x] Add FAQ entry about subscription errors
-- [x] Build docs locally to verify formatting
+- [ ] Add "Prerequisites" section if not present
+- [ ] Document subscription requirement
+- [ ] Add "Troubleshooting" section
+- [ ] Document "Subscription Required" error
+- [ ] Provide subscribe URL
+- [ ] Add FAQ entry about subscription errors
+- [ ] Build docs locally to verify formatting
 
 ### Phase 3: End-to-End Testing
 
@@ -1227,12 +832,12 @@ Use this high-level checklist to track overall progress:
 - [ ] Add integration tests for dependency
 - [ ] Deploy and verify cloud service
 
-### Phase 2: CLI Updates ✅
-- [x] Review CLI authentication flow
-- [x] Update API client error handling
-- [x] Update CLI login command error handling
-- [x] Add CLI tests
-- [x] Update CLI documentation
+### Phase 2: CLI Updates 🔄
+- [ ] Review CLI authentication flow
+- [ ] Update API client error handling
+- [ ] Update CLI login command error handling
+- [ ] Add CLI tests
+- [ ] Update CLI documentation
 
 ### Phase 3: End-to-End Testing 🧪
 - [ ] Create test user accounts
@@ -1310,118 +915,3 @@ Use this high-level checklist to track overall progress:
 - This spec prioritizes security over convenience - better to block unauthorized access than risk revenue loss
 - Clear error messages are critical - users should understand why they're blocked and how to resolve it
 - Consider adding telemetry to track subscription_required errors for monitoring signup conversion
-
-## Implementation Log
-
-### Phase 2 Completion - 2025-10-03
-
-Phase 2 (CLI Updates) completed successfully with the following implementation:
-
-**Files Modified:**
-- `src/basic_memory/cli/commands/cloud/api_client.py` - Added `SubscriptionRequiredError` exception and enhanced error handling
-- `src/basic_memory/cli/commands/cloud/core_commands.py` - Updated login command to verify subscription access
-- `docs/cloud-cli.md` - Added Prerequisites and Subscription Issues sections
-
-**Files Created:**
-- `tests/cli/test_cloud_authentication.py` - Comprehensive test coverage (6 tests, all passing)
-
-**Key Implementation Details:**
-- `SubscriptionRequiredError` exception with `subscribe_url` field for user guidance
-- Enhanced `CloudAPIError` to include `status_code` and `detail` fields
-- Login flow now calls `/proxy/health` to verify subscription before enabling cloud mode
-- User-friendly error messages with direct subscribe link
-- 100% test coverage of new error handling paths
-
-**Test Results:**
-- All 6 tests passing
-- Type checking: 0 errors, 0 warnings
-- Linting: All checks passed
-
-**Next Steps:**
-- Phase 3: End-to-End Testing (manual testing with real users, subscription state transitions)
-- Phase 1: Complete remaining cloud service tests (unit tests, integration tests, deployment verification)
-
----
-
-### End-to-End Test Execution - 2025-10-03
-
-**Environment:**
-- Cloud Service: https://cloud.basicmemory.com
-- Cloud Service Version: Phase 1 deployed (with subscription validation)
-- CLI Version: Phase 2 implementation (local dev build)
-- Database: Production
-
-**Test Results:**
-
-#### Test 1: User Without Subscription ✅ PASSED
-- [x] OAuth flow succeeds
-- [x] Subscription error displayed
-- [x] Subscribe URL shown
-- [x] Cloud mode NOT enabled
-- [x] Clean error output (no traceback)
-
-**Output:**
-```
-✅ Successfully authenticated with WorkOS!
-Verifying subscription access...
-
-✗ Subscription Required
-
-Active subscription required
-
-Subscribe at: https://basicmemory.com/subscribe
-
-Once you have an active subscription, run bm cloud login again.
-```
-
-**Issues:** None
-
----
-
-#### Test 2: User With Active Subscription ✅ PASSED
-- [x] Login succeeds
-- [x] Cloud mode enabled
-- [x] Clean success message
-- [x] Ready for cloud operations
-
-**Output:**
-```
-✅ Successfully authenticated with WorkOS!
-Verifying subscription access...
-✓ Cloud mode enabled
-All CLI commands now work against https://cloud.basicmemory.com
-```
-
-**Issues:** None
-
----
-
-**Additional Implementation Notes:**
-
-**API Response Format Compatibility:**
-- Cloud service returns errors in FastAPI HTTPException format (nested under `"detail"` key)
-- CLI correctly handles both nested and flat response formats
-- Error parsing logic:
-  ```python
-  detail_obj = error_detail.get("detail", error_detail)
-  if isinstance(detail_obj, dict) and detail_obj.get("error") == "subscription_required":
-      # Handle subscription error
-  ```
-
-**Updated Test Coverage:**
-- Added `test_parse_subscription_required_error_flat_format()` for backward compatibility
-- Total: 6 tests, all passing
-- Files updated:
-  - `src/basic_memory/cli/commands/cloud/api_client.py` - Support both response formats
-  - `tests/cli/test_cloud_authentication.py` - Added flat format test
-
-**Overall Result:**
-- [x] Core authentication flows validated
-- [x] Error handling working as designed
-- [x] User experience is clean and helpful
-- [x] Ready for production use
-
-**Summary:**
-SPEC-13 Phase 2 successfully validated in production environment. Both unauthorized and authorized user flows work correctly. The subscription validation is functioning end-to-end with clear, user-friendly error messages and seamless success path. No issues discovered during testing.
-
-**Sign-off:** Phase 2 Complete - 2025-10-03

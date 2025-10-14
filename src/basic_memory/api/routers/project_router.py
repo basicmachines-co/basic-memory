@@ -208,6 +208,21 @@ async def add_project(
             ),
         )
     except ValueError as e:  # pragma: no cover
+        # If project already exists, return 200 OK with existing project info
+        error_msg = str(e)
+        if "already exists" in error_msg.lower():
+            existing_project = await project_service.get_project(project_data.name)
+            if existing_project:
+                return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
+                    message=f"Project '{project_data.name}' already exists",
+                    status="success",
+                    default=existing_project.is_default or False,
+                    new_project=ProjectItem(
+                        name=existing_project.name,
+                        path=existing_project.path,
+                        is_default=existing_project.is_default or False,
+                    ),
+                )
         raise HTTPException(status_code=400, detail=str(e))
 
 
