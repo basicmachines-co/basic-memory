@@ -44,7 +44,6 @@ async def upload_path(local_path: Path, project_name: str) -> bool:
         print(f"Found {len(files_to_upload)} file(s) to upload")
 
         # Upload files using httpx
-        print("Uploading files... {client}")
         total_bytes = 0
 
         async with get_client() as client:
