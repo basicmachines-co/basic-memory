@@ -562,40 +562,42 @@ async def test_set_nonexistent_project_as_default_fails(test_config, client, pro
 @pytest.mark.asyncio
 async def test_create_project_idempotent_same_path(test_config, client, project_service):
     """Test that creating a project with same name and same path is idempotent."""
-    # Create a project
+    # Create a project with platform-independent path
     test_project_name = "test-idempotent"
-    test_project_path = "/tmp/test-idempotent"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_project_path = (Path(temp_dir) / "test-idempotent").as_posix()
 
-    response1 = await client.post(
-        "/projects/projects",
-        json={"name": test_project_name, "path": test_project_path, "set_default": False},
-    )
+        response1 = await client.post(
+            "/projects/projects",
+            json={"name": test_project_name, "path": test_project_path, "set_default": False},
+        )
 
-    # Should succeed with 201 Created
-    assert response1.status_code == 201
-    data1 = response1.json()
-    assert data1["status"] == "success"
-    assert data1["new_project"]["name"] == test_project_name
+        # Should succeed with 201 Created
+        assert response1.status_code == 201
+        data1 = response1.json()
+        assert data1["status"] == "success"
+        assert data1["new_project"]["name"] == test_project_name
 
-    # Try to create the same project again with same name and path
-    response2 = await client.post(
-        "/projects/projects",
-        json={"name": test_project_name, "path": test_project_path, "set_default": False},
-    )
+        # Try to create the same project again with same name and path
+        response2 = await client.post(
+            "/projects/projects",
+            json={"name": test_project_name, "path": test_project_path, "set_default": False},
+        )
 
-    # Should also succeed (idempotent)
-    assert response2.status_code == 200
-    data2 = response2.json()
-    assert data2["status"] == "success"
-    assert "already exists" in data2["message"]
-    assert data2["new_project"]["name"] == test_project_name
-    assert data2["new_project"]["path"] == test_project_path
+        # Should also succeed (idempotent)
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert data2["status"] == "success"
+        assert "already exists" in data2["message"]
+        assert data2["new_project"]["name"] == test_project_name
+        # Normalize paths for cross-platform comparison
+        assert Path(data2["new_project"]["path"]).resolve() == Path(test_project_path).resolve()
 
-    # Clean up
-    try:
-        await project_service.remove_project(test_project_name)
-    except Exception:
-        pass
+        # Clean up
+        try:
+            await project_service.remove_project(test_project_name)
+        except Exception:
+            pass
 
 
 @pytest.mark.asyncio
