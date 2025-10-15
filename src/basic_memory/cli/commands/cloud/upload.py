@@ -115,8 +115,8 @@ def _get_files_to_upload(
     ignore_patterns = load_gitignore_patterns(directory, use_gitignore=use_gitignore)
 
     if verbose:
-        bmignore_path = directory / ".gitignore"
-        gitignore_exists = bmignore_path.exists() and use_gitignore
+        gitignore_path = directory / ".gitignore"
+        gitignore_exists = gitignore_path.exists() and use_gitignore
         print(f"\nScanning directory: {directory}")
         print(f"Using .bmignore: Yes")
         print(f"Using .gitignore: {'Yes' if gitignore_exists else 'No'}")
