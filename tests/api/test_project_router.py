@@ -474,3 +474,162 @@ async def test_sync_project_endpoint_not_found(client):
 
     # Should return 404
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_remove_default_project_fails(test_config, client, project_service):
+    """Test that removing the default project returns an error."""
+    # Get the current default project
+    default_project_name = project_service.default_project
+
+    # Try to remove the default project
+    response = await client.delete(f"/projects/{default_project_name}")
+
+    # Should return 400 with helpful error message
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "Cannot delete default project" in data["detail"]
+    assert default_project_name in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_remove_default_project_with_alternatives(test_config, client, project_service):
+    """Test that error message includes alternative projects when trying to delete default."""
+    # Get the current default project
+    default_project_name = project_service.default_project
+
+    # Create another project so there are alternatives
+    test_project_name = "test-alternative-project"
+    await project_service.add_project(test_project_name, "/tmp/test-alternative")
+
+    try:
+        # Try to remove the default project
+        response = await client.delete(f"/projects/{default_project_name}")
+
+        # Should return 400 with helpful error message including alternatives
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "Cannot delete default project" in data["detail"]
+        assert "Set another project as default first" in data["detail"]
+        assert test_project_name in data["detail"]
+
+    finally:
+        # Clean up
+        try:
+            await project_service.remove_project(test_project_name)
+        except Exception:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_remove_non_default_project_succeeds(test_config, client, project_service):
+    """Test that removing a non-default project succeeds."""
+    # Create a test project to remove
+    test_project_name = "test-remove-non-default"
+    await project_service.add_project(test_project_name, "/tmp/test-remove-non-default")
+
+    # Verify it's not the default
+    assert project_service.default_project != test_project_name
+
+    # Remove the project
+    response = await client.delete(f"/projects/{test_project_name}")
+
+    # Should succeed
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+
+    # Verify project is removed
+    removed_project = await project_service.get_project(test_project_name)
+    assert removed_project is None
+
+
+@pytest.mark.asyncio
+async def test_set_nonexistent_project_as_default_fails(test_config, client, project_service):
+    """Test that setting a non-existent project as default returns 404."""
+    # Try to set a project that doesn't exist as default
+    response = await client.put("/projects/nonexistent-project/default")
+
+    # Should return 404
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert "does not exist" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_project_idempotent_same_path(test_config, client, project_service):
+    """Test that creating a project with same name and same path is idempotent."""
+    # Create a project
+    test_project_name = "test-idempotent"
+    test_project_path = "/tmp/test-idempotent"
+
+    response1 = await client.post(
+        "/projects/projects",
+        json={"name": test_project_name, "path": test_project_path, "set_default": False},
+    )
+
+    # Should succeed
+    assert response1.status_code == 200
+    data1 = response1.json()
+    assert data1["status"] == "success"
+    assert data1["new_project"]["name"] == test_project_name
+
+    # Try to create the same project again with same name and path
+    response2 = await client.post(
+        "/projects/projects",
+        json={"name": test_project_name, "path": test_project_path, "set_default": False},
+    )
+
+    # Should also succeed (idempotent)
+    assert response2.status_code == 200
+    data2 = response2.json()
+    assert data2["status"] == "success"
+    assert "already exists" in data2["message"]
+    assert data2["new_project"]["name"] == test_project_name
+    assert data2["new_project"]["path"] == test_project_path
+
+    # Clean up
+    try:
+        await project_service.remove_project(test_project_name)
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_create_project_fails_different_path(test_config, client, project_service):
+    """Test that creating a project with same name but different path fails."""
+    # Create a project
+    test_project_name = "test-path-conflict"
+    test_project_path1 = "/tmp/test-path-conflict-1"
+
+    response1 = await client.post(
+        "/projects/projects",
+        json={"name": test_project_name, "path": test_project_path1, "set_default": False},
+    )
+
+    # Should succeed
+    assert response1.status_code == 200
+
+    # Try to create the same project with different path
+    test_project_path2 = "/tmp/test-path-conflict-2"
+    response2 = await client.post(
+        "/projects/projects",
+        json={"name": test_project_name, "path": test_project_path2, "set_default": False},
+    )
+
+    # Should fail with 400
+    assert response2.status_code == 400
+    data2 = response2.json()
+    assert "detail" in data2
+    assert "already exists with different path" in data2["detail"]
+    assert test_project_path1 in data2["detail"]
+    assert test_project_path2 in data2["detail"]
+
+    # Clean up
+    try:
+        await project_service.remove_project(test_project_name)
+    except Exception:
+        pass

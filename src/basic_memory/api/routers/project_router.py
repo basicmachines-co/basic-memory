@@ -193,6 +193,35 @@ async def add_project(
     Returns:
         Response confirming the project was added
     """
+    # Check if project already exists before attempting to add
+    existing_project = await project_service.get_project(project_data.name)
+    if existing_project:
+        # Project exists - check if paths match for true idempotency
+        # Normalize paths for comparison (resolve symlinks, etc.)
+        from pathlib import Path
+
+        requested_path = Path(project_data.path).resolve()
+        existing_path = Path(existing_project.path).resolve()
+
+        if requested_path == existing_path:
+            # Same name, same path - return 200 OK (idempotent)
+            return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
+                message=f"Project '{project_data.name}' already exists",
+                status="success",
+                default=existing_project.is_default or False,
+                new_project=ProjectItem(
+                    name=existing_project.name,
+                    path=existing_project.path,
+                    is_default=existing_project.is_default or False,
+                ),
+            )
+        else:
+            # Same name, different path - this is an error
+            raise HTTPException(
+                status_code=400,
+                detail=f"Project '{project_data.name}' already exists with different path. Existing: {existing_project.path}, Requested: {project_data.path}",
+            )
+
     try:  # pragma: no cover
         # The service layer now handles cloud mode validation and path sanitization
         await project_service.add_project(
@@ -208,21 +237,6 @@ async def add_project(
             ),
         )
     except ValueError as e:  # pragma: no cover
-        # If project already exists, return 200 OK with existing project info
-        error_msg = str(e)
-        if "already exists" in error_msg.lower():
-            existing_project = await project_service.get_project(project_data.name)
-            if existing_project:
-                return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
-                    message=f"Project '{project_data.name}' already exists",
-                    status="success",
-                    default=existing_project.is_default or False,
-                    new_project=ProjectItem(
-                        name=existing_project.name,
-                        path=existing_project.path,
-                        is_default=existing_project.is_default or False,
-                    ),
-                )
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -246,6 +260,19 @@ async def remove_project(
             raise HTTPException(
                 status_code=404, detail=f"Project: '{name}' does not exist"
             )  # pragma: no cover
+
+        # Check if trying to delete the default project
+        if name == project_service.default_project:
+            available_projects = await project_service.list_projects()
+            other_projects = [p.name for p in available_projects if p.name != name]
+            detail = f"Cannot delete default project '{name}'. "
+            if other_projects:
+                detail += (
+                    f"Set another project as default first. Available: {', '.join(other_projects)}"
+                )
+            else:
+                detail += "This is the only project in your configuration."
+            raise HTTPException(status_code=400, detail=detail)
 
         await project_service.remove_project(name)
 
