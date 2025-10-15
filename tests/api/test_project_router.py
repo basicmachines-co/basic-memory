@@ -571,8 +571,8 @@ async def test_create_project_idempotent_same_path(test_config, client, project_
         json={"name": test_project_name, "path": test_project_path, "set_default": False},
     )
 
-    # Should succeed
-    assert response1.status_code == 200
+    # Should succeed with 201 Created
+    assert response1.status_code == 201
     data1 = response1.json()
     assert data1["status"] == "success"
     assert data1["new_project"]["name"] == test_project_name
@@ -610,8 +610,8 @@ async def test_create_project_fails_different_path(test_config, client, project_
         json={"name": test_project_name, "path": test_project_path1, "set_default": False},
     )
 
-    # Should succeed
-    assert response1.status_code == 200
+    # Should succeed with 201 Created
+    assert response1.status_code == 201
 
     # Try to create the same project with different path
     test_project_path2 = "/tmp/test-path-conflict-2"

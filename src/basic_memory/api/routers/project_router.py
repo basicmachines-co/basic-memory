@@ -1,7 +1,7 @@
 """Router for project management."""
 
 import os
-from fastapi import APIRouter, HTTPException, Path, Body, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Path, Body, BackgroundTasks, Response
 from typing import Optional
 from loguru import logger
 
@@ -180,8 +180,9 @@ async def list_projects(
 
 
 # Add a new project
-@project_resource_router.post("/projects", response_model=ProjectStatusResponse)
+@project_resource_router.post("/projects", response_model=ProjectStatusResponse, status_code=201)
 async def add_project(
+    response: Response,
     project_data: ProjectInfoRequest,
     project_service: ProjectServiceDep,
 ) -> ProjectStatusResponse:
@@ -205,6 +206,7 @@ async def add_project(
 
         if requested_path == existing_path:
             # Same name, same path - return 200 OK (idempotent)
+            response.status_code = 200
             return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
                 message=f"Project '{project_data.name}' already exists",
                 status="success",
