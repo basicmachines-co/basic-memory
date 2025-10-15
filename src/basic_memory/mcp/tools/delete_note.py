@@ -148,7 +148,53 @@ delete_note("{project}", "correct-identifier-from-search")
 If the note should be deleted but the operation keeps failing, send a message to support@basicmemory.com."""
 
 
-@mcp.tool(description="Delete a note by title or permalink")
+@mcp.tool(description="""Safely removes notes from your knowledge base with impact analysis. Identifies orphaned relations and affected notes before deletion, requiring confirmation by default.
+
+```yaml
+node:
+  topic: delete_note - Safe Removal
+  goal: Delete with relation impact analysis
+  insight: No recovery after deletion
+  context:
+    safety: Orphan detection before delete
+    confirmation: Required unless forced
+    impact: Reports all affected relations
+```
+
+```baml
+class DeleteNoteInput {
+  identifier string @description("Note title or permalink")
+  project string?
+  force boolean @default(false) @description("Skip confirmation")
+}
+
+class DeleteNoteOutput {
+  success boolean
+  deleted_path string
+  orphaned_relations string[] @description("Notes with broken links")
+  affected_notes int
+  warning string? @when(orphaned_relations.length > 0)
+}
+
+function delete_note(DeleteNoteInput) -> DeleteNoteOutput {
+  @description("Remove note with safety checks")
+  @requires_confirmation(unless="force")
+  @irreversible(true)
+}
+```
+
+## Safety Pattern
+```python
+# With safety check
+result = delete_note("Deprecated API v1")
+if result["orphaned_relations"]:
+    print(f"Warning: {len(result['orphaned_relations'])} broken links")
+
+# Force delete (careful!)
+result = delete_note("temp/scratch", force=True)
+```
+
+Impact Analysis: Scans all relations | No undo available""")
 async def delete_note(
     identifier: str, project: Optional[str] = None, context: Context | None = None
 ) -> bool | str:

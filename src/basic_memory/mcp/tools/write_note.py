@@ -21,7 +21,88 @@ TagType = Union[List[str], str, None]
 
 
 @mcp.tool(
-    description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
+    description="""Creates or updates markdown notes with automatic semantic enrichment, building your knowledge graph through observations (categorized facts) and relations (WikiLink connections). Supports idempotent operations with full project context awareness.
+
+```yaml
+node:
+  topic: write_note - Knowledge Creation
+  goal: Create/update notes with semantic enrichment
+  insight: Primary knowledge ingestion point with graph building
+  context:
+    observations: [fact, idea, decision, question, task, problem, solution, tech, design, requirement]
+    relations: [relates_to, depends_on, implements, extends, part_of, follows, precedes, inspired_by, contradicts, example_of]
+    pattern: Markdown-based semantic extraction with WikiLink relations
+```
+
+```baml
+class WriteNoteInput {
+  title string @description("Note title - becomes entity identity")
+  content string @description("Markdown with semantic observations and relations")
+  folder string @description("Folder path for organization")
+  project string? @description("Optional project name")
+  tags (string | string[])? @description("Categorization tags")
+  entity_type string @default("note") @description("Entity type: note, guide, report, etc.")
+}
+
+class WriteNoteOutput {
+  action ("Created" | "Updated")
+  project string
+  file_path string
+  permalink string
+  checksum string
+  observations ObservationCount?
+  relations RelationCount?
+  tags string[]?
+}
+
+class ObservationCount {
+  [category: string]: int @description("Count by observation category")
+}
+
+class RelationCount {
+  resolved int
+  unresolved int
+}
+
+function write_note(WriteNoteInput) -> WriteNoteOutput {
+  @description("Creates or updates a note with semantic knowledge graph integration")
+  @async(true)
+  @idempotent(true)
+  @retry_policy(max_attempts: 3, backoff: exponential)
+}
+```
+
+## Semantic Patterns
+
+**Observations**: `- [category] Text #tag (context)`
+```markdown
+- [decision] Use REST over GraphQL #api (Better caching)
+- [requirement] Response time < 100ms #performance
+- [task] Implement error handling #todo
+```
+
+**Relations**: `- relation_type [[Target]] (reason)`
+```markdown
+- implements [[API Spec v2]]
+- depends_on [[Auth Service]] (For token validation)
+```
+
+**Inline**: `Text with [[Entity]] reference` creates automatic `relates_to`
+
+## Example Usage
+```python
+write_note(
+    title="API Design",
+    folder="specs",
+    content='''# API Design
+- [decision] REST architecture #api
+- implements [[API Spec v2]]
+See [[Guidelines]] for standards.''',
+    tags="api,rest"
+)
+```
+
+Performance: 50-200ms | Errors: Project not found, Path traversal, Migration active""",
 )
 async def write_note(
     title: str,

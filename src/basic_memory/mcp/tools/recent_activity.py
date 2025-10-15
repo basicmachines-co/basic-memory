@@ -20,16 +20,77 @@ from basic_memory.schemas.search import SearchItemType
 
 
 @mcp.tool(
-    description="""Get recent activity for a project or across all projects.
+    description="""Tracks recent changes across your knowledge base with flexible timeframe specifications. Essential for staying updated on evolving knowledge and monitoring project activity.
 
-    Timeframe supports natural language formats like:
-    - "2 days ago"
-    - "last week"
-    - "yesterday"
-    - "today"
-    - "3 weeks ago"
-    Or standard formats like "7d"
-    """,
+```yaml
+node:
+  topic: recent_activity - Change Tracking
+  goal: Monitor knowledge base evolution
+  insight: Temporal index for efficient change detection
+  context:
+    formats: [duration, natural, relative]
+    index: Optimized temporal lookup
+    depth: Follow relations in changes
+    use_case: Daily reviews, project monitoring
+```
+
+```baml
+class RecentActivityInput {
+  project string?
+  timeframe string @default("7d") @description("Period: '24h', 'last week', 'yesterday'")
+  types (string | string[])? @description("Filter by types")
+  depth int @default(1) @description("Follow relations")
+}
+
+class ActivityItem {
+  id string
+  title string
+  type string
+  permalink string
+  action ("created" | "modified" | "deleted")
+  timestamp datetime
+  changes Change[]?
+}
+
+class RecentActivityOutput {
+  results ActivityItem[]
+  timeframe string
+  project string
+  total_changes int
+}
+
+function recent_activity(RecentActivityInput) -> RecentActivityOutput {
+  @description("Track changes with temporal filtering")
+  @index("temporal")
+  @async(true)
+}
+```
+
+## Timeframe Formats
+
+**Duration**: `"7d"`, `"24h"`, `"30d"`
+**Natural**: `"2 days ago"`, `"last week"`
+**Relative**: `"today"`, `"yesterday"`, `"this month"`
+
+## Usage Patterns
+```python
+# Today's changes
+activity = recent_activity(timeframe="today")
+
+# Filtered by type
+activity = recent_activity(
+    timeframe="3 days",
+    types=["entity", "observation"]
+)
+
+# Follow relations
+activity = recent_activity(
+    timeframe="1 week",
+    depth=2
+)
+```
+
+Performance: 7d: 30-150ms, Month: 100-300ms | Index: Temporal optimization""",
 )
 async def recent_activity(
     type: Union[str, List[str]] = "",
