@@ -10,6 +10,9 @@ from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_pat
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_put
 
+# Archive file extensions that should be skipped during upload
+ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
+
 
 async def upload_path(local_path: Path, project_name: str) -> bool:
     """
@@ -45,9 +48,16 @@ async def upload_path(local_path: Path, project_name: str) -> bool:
 
         # Upload files using httpx
         total_bytes = 0
+        skipped_count = 0
 
         async with get_client() as client:
             for i, (file_path, relative_path) in enumerate(files_to_upload, 1):
+                # Skip archive files (zip, tar, gz, etc.)
+                if _is_archive_file(file_path):
+                    print(f"Skipping archive file: {relative_path} ({i}/{len(files_to_upload)})")
+                    skipped_count += 1
+                    continue
+
                 # Build remote path: /webdav/{project_name}/{relative_path}
                 remote_path = f"/webdav/{project_name}/{relative_path}"
                 print(f"Uploading {relative_path} ({i}/{len(files_to_upload)})")
@@ -70,7 +80,10 @@ async def upload_path(local_path: Path, project_name: str) -> bool:
         else:
             size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
 
-        print(f"✓ Upload complete: {len(files_to_upload)} file(s) ({size_str})")
+        uploaded_count = len(files_to_upload) - skipped_count
+        print(f"✓ Upload complete: {uploaded_count} file(s) ({size_str})")
+        if skipped_count > 0:
+            print(f"  Skipped {skipped_count} archive file(s)")
         return True
 
     except httpx.HTTPStatusError as e:
@@ -79,6 +92,19 @@ async def upload_path(local_path: Path, project_name: str) -> bool:
     except Exception as e:
         print(f"Upload failed: {e}")
         return False
+
+
+def _is_archive_file(file_path: Path) -> bool:
+    """
+    Check if a file is an archive file based on its extension.
+
+    Args:
+        file_path: Path to the file to check
+
+    Returns:
+        True if file is an archive, False otherwise
+    """
+    return file_path.suffix.lower() in ARCHIVE_EXTENSIONS
 
 
 def _get_files_to_upload(directory: Path) -> list[tuple[Path, str]]:

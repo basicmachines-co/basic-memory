@@ -326,3 +326,52 @@ class TestUploadPath:
         mock_put.assert_called_once()
         call_args = mock_put.call_args
         assert call_args[0][1] == "/webdav/my-project/subdir/file.txt"
+
+    @pytest.mark.asyncio
+    async def test_skips_archive_files(self, tmp_path, capsys):
+        """Test that archive files are skipped during upload."""
+        # Create test files including archives
+        (tmp_path / "notes.md").write_text("content")
+        (tmp_path / "backup.zip").write_text("fake zip")
+        (tmp_path / "data.tar.gz").write_text("fake tar")
+
+        mock_client = AsyncMock()
+        mock_response = Mock()
+        mock_response.raise_for_status = Mock()
+
+        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
+            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
+                with patch(
+                    "basic_memory.cli.commands.cloud.upload._get_files_to_upload"
+                ) as mock_get_files:
+                    with patch("aiofiles.open", create=True) as mock_aiofiles_open:
+                        mock_get_client.return_value.__aenter__.return_value = mock_client
+                        mock_get_client.return_value.__aexit__.return_value = None
+                        mock_put.return_value = mock_response
+
+                        # Mock file listing with all files
+                        mock_get_files.return_value = [
+                            (tmp_path / "notes.md", "notes.md"),
+                            (tmp_path / "backup.zip", "backup.zip"),
+                            (tmp_path / "data.tar.gz", "data.tar.gz"),
+                        ]
+
+                        mock_file = AsyncMock()
+                        mock_file.read.return_value = b"content"
+                        mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
+
+                        result = await upload_path(tmp_path, "test-project")
+
+        # Should succeed
+        assert result is True
+
+        # Should only upload the .md file (not the archives)
+        assert mock_put.call_count == 1
+        call_args = mock_put.call_args
+        assert "notes.md" in call_args[0][1]
+
+        # Check output mentions skipping
+        captured = capsys.readouterr()
+        assert "Skipping archive file" in captured.out
+        assert "backup.zip" in captured.out
+        assert "Skipped 2 archive file(s)" in captured.out
