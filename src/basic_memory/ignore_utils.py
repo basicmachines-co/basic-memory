@@ -172,6 +172,18 @@ def load_bmignore_patterns() -> Set[str]:
     return patterns
 
 
+def load_bmignore_only_patterns() -> Set[str]:
+    """Load patterns only from .bmignore file, excluding .gitignore.
+
+    This is useful when users want to respect Basic Memory's global ignore patterns
+    but not project-specific .gitignore patterns (e.g., when uploading normally-gitignored files).
+
+    Returns:
+        Set of patterns from .bmignore only
+    """
+    return load_bmignore_patterns()
+
+
 def load_gitignore_patterns(base_path: Path) -> Set[str]:
     """Load gitignore patterns from .gitignore file and .bmignore.
 
