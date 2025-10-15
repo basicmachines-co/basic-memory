@@ -172,15 +172,16 @@ def load_bmignore_patterns() -> Set[str]:
     return patterns
 
 
-def load_gitignore_patterns(base_path: Path) -> Set[str]:
+def load_gitignore_patterns(base_path: Path, use_gitignore: bool = True) -> Set[str]:
     """Load gitignore patterns from .gitignore file and .bmignore.
 
     Combines patterns from:
     1. ~/.basic-memory/.bmignore (user's global ignore patterns)
-    2. {base_path}/.gitignore (project-specific patterns)
+    2. {base_path}/.gitignore (project-specific patterns, if use_gitignore=True)
 
     Args:
         base_path: The base directory to search for .gitignore file
+        use_gitignore: If False, only load patterns from .bmignore (default: True)
 
     Returns:
         Set of patterns to ignore
@@ -188,18 +189,19 @@ def load_gitignore_patterns(base_path: Path) -> Set[str]:
     # Start with patterns from .bmignore
     patterns = load_bmignore_patterns()
 
-    gitignore_file = base_path / ".gitignore"
-    if gitignore_file.exists():
-        try:
-            with gitignore_file.open("r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    # Skip empty lines and comments
-                    if line and not line.startswith("#"):
-                        patterns.add(line)
-        except Exception:
-            # If we can't read .gitignore, just use default patterns
-            pass
+    if use_gitignore:
+        gitignore_file = base_path / ".gitignore"
+        if gitignore_file.exists():
+            try:
+                with gitignore_file.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip empty lines and comments
+                        if line and not line.startswith("#"):
+                            patterns.add(line)
+            except Exception:
+                # If we can't read .gitignore, just use default patterns
+                pass
 
     return patterns
 

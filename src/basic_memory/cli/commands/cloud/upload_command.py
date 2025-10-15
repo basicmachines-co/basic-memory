@@ -43,6 +43,17 @@ def upload(
         "--sync/--no-sync",
         help="Sync project after upload (default: true)",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show detailed information about file filtering and upload",
+    ),
+    no_gitignore: bool = typer.Option(
+        False,
+        "--no-gitignore",
+        help="Skip .gitignore patterns (still respects .bmignore)",
+    ),
 ) -> None:
     """Upload local files or directories to cloud project via WebDAV.
 
@@ -50,6 +61,8 @@ def upload(
       bm cloud upload ~/my-notes --project research
       bm cloud upload notes.md --project research --create-project
       bm cloud upload ~/docs --project work --no-sync
+      bm cloud upload ./history --project proto --verbose
+      bm cloud upload ./notes --project work --no-gitignore
     """
 
     async def _upload():
@@ -74,7 +87,9 @@ def upload(
 
         # Perform upload
         console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
-        success = await upload_path(path, project)
+        success = await upload_path(
+            path, project, verbose=verbose, use_gitignore=not no_gitignore
+        )
         if not success:
             console.print("[red]Upload failed[/red]")
             raise typer.Exit(1)

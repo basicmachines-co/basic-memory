@@ -11,13 +11,17 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_put
 
 
-async def upload_path(local_path: Path, project_name: str) -> bool:
+async def upload_path(
+    local_path: Path, project_name: str, verbose: bool = False, use_gitignore: bool = True
+) -> bool:
     """
     Upload a file or directory to cloud project via WebDAV.
 
     Args:
         local_path: Path to local file or directory
         project_name: Name of cloud project (destination)
+        verbose: Show detailed information about filtering and upload
+        use_gitignore: If False, skip .gitignore patterns (still use .bmignore)
 
     Returns:
         True if upload succeeded, False otherwise
@@ -34,11 +38,18 @@ async def upload_path(local_path: Path, project_name: str) -> bool:
         # Get files to upload
         if local_path.is_file():
             files_to_upload = [(local_path, local_path.name)]
+            if verbose:
+                print(f"Uploading single file: {local_path.name}")
         else:
-            files_to_upload = _get_files_to_upload(local_path)
+            files_to_upload = _get_files_to_upload(local_path, verbose, use_gitignore)
 
         if not files_to_upload:
             print("No files found to upload")
+            if verbose:
+                print(
+                    "\nTip: Use --verbose to see which files are being filtered, "
+                    "or --no-gitignore to skip .gitignore patterns"
+                )
             return True
 
         print(f"Found {len(files_to_upload)} file(s) to upload")
@@ -81,22 +92,38 @@ async def upload_path(local_path: Path, project_name: str) -> bool:
         return False
 
 
-def _get_files_to_upload(directory: Path) -> list[tuple[Path, str]]:
+def _get_files_to_upload(
+    directory: Path, verbose: bool = False, use_gitignore: bool = True
+) -> list[tuple[Path, str]]:
     """
     Get list of files to upload from directory.
 
-    Uses .bmignore and .gitignore patterns for filtering.
+    Uses .bmignore and optionally .gitignore patterns for filtering.
 
     Args:
         directory: Directory to scan
+        verbose: Show detailed filtering information
+        use_gitignore: If False, skip .gitignore patterns (still use .bmignore)
 
     Returns:
         List of (absolute_path, relative_path) tuples
     """
     files = []
+    ignored_files = []
 
-    # Load ignore patterns from .bmignore and .gitignore
-    ignore_patterns = load_gitignore_patterns(directory)
+    # Load ignore patterns from .bmignore and optionally .gitignore
+    ignore_patterns = load_gitignore_patterns(directory, use_gitignore=use_gitignore)
+
+    if verbose:
+        bmignore_path = directory / ".gitignore"
+        gitignore_exists = bmignore_path.exists() and use_gitignore
+        print(f"\nScanning directory: {directory}")
+        print(f"Using .bmignore: Yes")
+        print(f"Using .gitignore: {'Yes' if gitignore_exists else 'No'}")
+        print(f"Ignore patterns loaded: {len(ignore_patterns)}")
+        if ignore_patterns and len(ignore_patterns) <= 20:
+            print(f"Patterns: {', '.join(sorted(ignore_patterns))}")
+        print()
 
     # Walk through directory
     for root, dirs, filenames in os.walk(directory):
@@ -106,7 +133,11 @@ def _get_files_to_upload(directory: Path) -> list[tuple[Path, str]]:
         filtered_dirs = []
         for d in dirs:
             dir_path = root_path / d
-            if not should_ignore_path(dir_path, directory, ignore_patterns):
+            if should_ignore_path(dir_path, directory, ignore_patterns):
+                if verbose:
+                    rel_path = dir_path.relative_to(directory)
+                    print(f"  [IGNORED DIR] {rel_path}/")
+            else:
                 filtered_dirs.append(d)
         dirs[:] = filtered_dirs
 
@@ -114,15 +145,25 @@ def _get_files_to_upload(directory: Path) -> list[tuple[Path, str]]:
         for filename in filenames:
             file_path = root_path / filename
 
-            # Check if file should be ignored
-            if should_ignore_path(file_path, directory, ignore_patterns):
-                continue
-
-            # Calculate relative path for remote
+            # Calculate relative path for display/remote
             rel_path = file_path.relative_to(directory)
-            # Use forward slashes for WebDAV paths
             remote_path = str(rel_path).replace("\\", "/")
 
+            # Check if file should be ignored
+            if should_ignore_path(file_path, directory, ignore_patterns):
+                ignored_files.append(remote_path)
+                if verbose:
+                    print(f"  [IGNORED] {remote_path}")
+                continue
+
+            if verbose:
+                print(f"  [INCLUDE] {remote_path}")
+
             files.append((file_path, remote_path))
+
+    if verbose:
+        print(f"\nSummary:")
+        print(f"  Files to upload: {len(files)}")
+        print(f"  Files ignored: {len(ignored_files)}")
 
     return files
