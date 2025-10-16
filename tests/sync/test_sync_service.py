@@ -1565,3 +1565,79 @@ async def test_circuit_breaker_handles_checksum_computation_failure(
         failure_info = sync_service._file_failures["checksum_fail.md"]
         assert failure_info.count == 1
         assert failure_info.last_checksum == ""  # Empty when checksum fails
+
+
+@pytest.mark.asyncio
+async def test_sync_fatal_error_terminates_sync_immediately(
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
+):
+    """Test that SyncFatalError terminates sync immediately without circuit breaker retry.
+
+    This tests the fix for issue #188 where project deletion during sync should
+    terminate immediately rather than retrying each file 3 times.
+    """
+    from unittest.mock import patch
+    from basic_memory.services.exceptions import SyncFatalError
+
+    project_dir = project_config.home
+
+    # Create multiple test files
+    await create_test_file(
+        project_dir / "file1.md",
+        dedent(
+            """
+            ---
+            type: knowledge
+            ---
+            # File 1
+            Content 1
+            """
+        ),
+    )
+    await create_test_file(
+        project_dir / "file2.md",
+        dedent(
+            """
+            ---
+            type: knowledge
+            ---
+            # File 2
+            Content 2
+            """
+        ),
+    )
+    await create_test_file(
+        project_dir / "file3.md",
+        dedent(
+            """
+            ---
+            type: knowledge
+            ---
+            # File 3
+            Content 3
+            """
+        ),
+    )
+
+    # Mock entity_service.create_entity_from_markdown to raise SyncFatalError on first file
+    # This simulates project being deleted during sync
+    async def mock_create_entity_from_markdown(*args, **kwargs):
+        raise SyncFatalError(
+            "Cannot sync file 'file1.md': project_id=99999 does not exist in database. "
+            "The project may have been deleted. This sync will be terminated."
+        )
+
+    with patch.object(
+        entity_service, "create_entity_from_markdown", side_effect=mock_create_entity_from_markdown
+    ):
+        # Sync should raise SyncFatalError and terminate immediately
+        with pytest.raises(SyncFatalError, match="project_id=99999 does not exist"):
+            await sync_service.sync(project_dir)
+
+    # Verify that circuit breaker did NOT record this as a file-level failure
+    # (SyncFatalError should bypass circuit breaker and re-raise immediately)
+    assert "file1.md" not in sync_service._file_failures
+
+    # Verify that no other files were attempted (sync terminated on first error)
+    # If circuit breaker was used, we'd see file1 in failures
+    # If sync continued, we'd see attempts for file2 and file3

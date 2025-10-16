@@ -22,6 +22,7 @@ from basic_memory.models import Entity, Project
 from basic_memory.repository import EntityRepository, RelationRepository, ObservationRepository
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.services import EntityService, FileService
+from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.services.sync_status_service import sync_status_tracker, SyncStatus
@@ -514,6 +515,13 @@ class SyncService:
             return entity, checksum
 
         except Exception as e:
+            # Check if this is a fatal error (or caused by one)
+            # Fatal errors like project deletion should terminate sync immediately
+            if isinstance(e, SyncFatalError) or isinstance(e.__cause__, SyncFatalError):
+                logger.error(f"Fatal sync error encountered, terminating sync: path={path}")
+                raise
+
+            # Otherwise treat as recoverable file-level error
             error_msg = str(e)
             logger.error(f"Failed to sync file: path={path}, error={error_msg}")
 

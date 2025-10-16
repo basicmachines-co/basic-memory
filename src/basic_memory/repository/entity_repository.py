@@ -135,7 +135,20 @@ class EntityRepository(Repository[Entity]):
                     )
                 return found
 
-            except IntegrityError:
+            except IntegrityError as e:
+                # Check if this is a FOREIGN KEY constraint failure
+                error_str = str(e)
+                if "FOREIGN KEY constraint failed" in error_str:
+                    # Import locally to avoid circular dependency (repository -> services -> repository)
+                    from basic_memory.services.exceptions import SyncFatalError
+
+                    # Project doesn't exist in database - this is a fatal sync error
+                    raise SyncFatalError(
+                        f"Cannot sync file '{entity.file_path}': "
+                        f"project_id={entity.project_id} does not exist in database. "
+                        f"The project may have been deleted. This sync will be terminated."
+                    ) from e
+
                 await session.rollback()
 
                 # Re-query after rollback to get a fresh, attached entity
