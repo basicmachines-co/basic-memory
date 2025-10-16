@@ -167,7 +167,7 @@ async def write_resource(
         checksum = await file_service.write_file(full_path, content_str)
 
         # Get file info
-        file_stats = file_service.file_stats(full_path)
+        file_stats = await file_service.file_stats(full_path)
 
         # Determine file details
         file_name = Path(file_path).name

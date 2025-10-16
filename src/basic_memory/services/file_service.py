@@ -5,6 +5,9 @@ from os import stat_result
 from pathlib import Path
 from typing import Any, Dict, Tuple, Union
 
+import aiofiles
+import aiofiles.os
+import aiofiles.ospath
 from basic_memory import file_utils
 from basic_memory.file_utils import FileError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -97,9 +100,9 @@ class FileService:
             path_obj = self.base_path / path if isinstance(path, str) else path
             logger.debug(f"Checking file existence: path={path_obj}")
             if path_obj.is_absolute():
-                return path_obj.exists()
+                return await aiofiles.ospath.exists(path_obj)
             else:
-                return (self.base_path / path_obj).exists()
+                return await aiofiles.ospath.exists(self.base_path / path_obj)
         except Exception as e:
             logger.error("Failed to check file existence", path=str(path), error=str(e))
             raise FileOperationError(f"Failed to check file existence: {e}")
@@ -169,7 +172,8 @@ class FileService:
 
         try:
             logger.debug("Reading file", operation="read_file", path=str(full_path))
-            content = full_path.read_text(encoding="utf-8")
+            async with aiofiles.open(full_path, "r", encoding="utf-8") as f:
+                content = await f.read()
             checksum = await file_utils.compute_checksum(content)
 
             logger.debug(
@@ -196,7 +200,10 @@ class FileService:
         # Convert string to Path if needed
         path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
-        full_path.unlink(missing_ok=True)
+        try:
+            await aiofiles.os.remove(full_path)
+        except FileNotFoundError:
+            pass  # missing_ok=True behavior
 
     async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
         """
@@ -233,17 +240,19 @@ class FileService:
         try:
             if self.is_markdown(path):
                 # read str
-                content = full_path.read_text(encoding="utf-8")
+                async with aiofiles.open(full_path, "r", encoding="utf-8") as f:
+                    content = await f.read()
             else:
                 # read bytes
-                content = full_path.read_bytes()
+                async with aiofiles.open(full_path, "rb") as f:
+                    content = await f.read()
             return await file_utils.compute_checksum(content)
 
         except Exception as e:  # pragma: no cover
             logger.error("Failed to compute checksum", path=str(full_path), error=str(e))
             raise FileError(f"Failed to compute checksum for {path}: {e}")
 
-    def file_stats(self, path: FilePath) -> stat_result:
+    async def file_stats(self, path: FilePath) -> stat_result:
         """Return file stats for a given path.
 
         Args:
@@ -256,7 +265,7 @@ class FileService:
         path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         # get file timestamps
-        return full_path.stat()
+        return await aiofiles.os.stat(full_path)
 
     def content_type(self, path: FilePath) -> str:
         """Return content_type for a given path.

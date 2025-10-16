@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Union
 
+import aiofiles
+import aiofiles.os
 import yaml
 import frontmatter
 from loguru import logger
@@ -87,11 +89,15 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     temp_path = path_obj.with_suffix(".tmp")
 
     try:
-        temp_path.write_text(content, encoding="utf-8")
-        temp_path.replace(path_obj)
+        async with aiofiles.open(temp_path, "w", encoding="utf-8") as f:
+            await f.write(content)
+        await aiofiles.os.replace(temp_path, path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
-        temp_path.unlink(missing_ok=True)
+        try:
+            await aiofiles.os.remove(temp_path)
+        except FileNotFoundError:
+            pass
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
@@ -208,7 +214,8 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         path_obj = Path(path) if isinstance(path, str) else path
 
         # Read current content
-        content = path_obj.read_text(encoding="utf-8")
+        async with aiofiles.open(path_obj, "r", encoding="utf-8") as f:
+            content = await f.read()
 
         # Parse current frontmatter
         current_fm = {}

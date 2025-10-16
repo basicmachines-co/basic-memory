@@ -548,7 +548,7 @@ class SyncService:
         file_contains_frontmatter = has_frontmatter(file_content)
 
         # Get file timestamps for tracking modification times
-        file_stats = self.file_service.file_stats(path)
+        file_stats = await self.file_service.file_stats(path)
         created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
         modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
@@ -621,7 +621,7 @@ class SyncService:
             await self.entity_service.resolve_permalink(path, skip_conflict_check=True)
 
             # get file timestamps
-            file_stats = self.file_service.file_stats(path)
+            file_stats = await self.file_service.file_stats(path)
             created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
             modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
@@ -668,7 +668,7 @@ class SyncService:
                     raise
         else:
             # Get file timestamps for updating modification time
-            file_stats = self.file_service.file_stats(path)
+            file_stats = await self.file_service.file_stats(path)
             modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
             entity = await self.entity_repository.get_by_file_path(path)
