@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -163,6 +164,10 @@ class EntityRepository(Repository[Entity]):
 
                 if existing_entity:
                     # File path conflict - update the existing entity
+                    logger.debug(
+                        f"Resolving file_path conflict for {entity.file_path}, "
+                        f"entity_id={existing_entity.id}, observations={len(entity.observations)}"
+                    )
                     # Use merge to avoid session state conflicts
                     # Set the ID to update existing entity
                     entity.id = existing_entity.id
