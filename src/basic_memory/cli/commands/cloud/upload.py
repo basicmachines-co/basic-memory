@@ -82,12 +82,19 @@ async def upload_path(
                     remote_path = f"/webdav/{project_name}/{relative_path}"
                     print(f"Uploading {relative_path} ({i}/{len(files_to_upload)})")
 
+                    # Get file modification time
+                    file_stat = file_path.stat()
+                    mtime = int(file_stat.st_mtime)
+
                     # Read file content asynchronously
                     async with aiofiles.open(file_path, "rb") as f:
                         content = await f.read()
 
-                    # Upload via HTTP PUT to WebDAV endpoint
-                    response = await call_put(client, remote_path, content=content)
+                    # Upload via HTTP PUT to WebDAV endpoint with mtime header
+                    # Using X-OC-Mtime (ownCloud/Nextcloud standard)
+                    response = await call_put(
+                        client, remote_path, content=content, headers={"X-OC-Mtime": str(mtime)}
+                    )
                     response.raise_for_status()
 
         # Format total size based on magnitude
