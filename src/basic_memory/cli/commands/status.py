@@ -94,7 +94,7 @@ def display_changes(
     """Display changes using Rich for better visualization."""
     tree = Tree(f"{project_name}: {title}")
 
-    if changes.total == 0:
+    if changes.total == 0 and not changes.skipped_files:
         tree.add("No changes")
         console.print(Panel(tree, expand=False))
         return
@@ -114,6 +114,13 @@ def display_changes(
         if changes.deleted:
             del_branch = tree.add("[red]Deleted[/red]")
             add_files_to_tree(del_branch, changes.deleted, "red")
+        if changes.skipped_files:
+            skip_branch = tree.add("[red]⚠️  Skipped (Circuit Breaker)[/red]")
+            for skipped in sorted(changes.skipped_files, key=lambda x: x.path):
+                skip_branch.add(
+                    f"[red]{skipped.path}[/red] "
+                    f"(failures: {skipped.failure_count}, reason: {skipped.reason})"
+                )
     else:
         # Show directory summaries
         by_dir = group_changes_by_directory(changes)
@@ -121,6 +128,14 @@ def display_changes(
             summary = build_directory_summary(counts)
             if summary:  # Only show directories with changes
                 tree.add(f"[bold]{dir_name}/[/bold] {summary}")
+
+        # Show skipped files summary in non-verbose mode
+        if changes.skipped_files:
+            skip_count = len(changes.skipped_files)
+            tree.add(
+                f"[red]⚠️  {skip_count} file{'s' if skip_count != 1 else ''} "
+                f"skipped due to repeated failures[/red]"
+            )
 
     console.print(Panel(tree, expand=False))
 

@@ -1,12 +1,24 @@
 """Pydantic schemas for sync report responses."""
 
-from typing import TYPE_CHECKING, Dict, Set
+from datetime import datetime
+from typing import TYPE_CHECKING, Dict, List, Set
 
 from pydantic import BaseModel, Field
 
 # avoid cirular imports
 if TYPE_CHECKING:
     from basic_memory.sync.sync_service import SyncReport
+
+
+class SkippedFileResponse(BaseModel):
+    """Information about a file that was skipped due to repeated failures."""
+
+    path: str = Field(description="File path relative to project root")
+    reason: str = Field(description="Error message from last failure")
+    failure_count: int = Field(description="Number of consecutive failures")
+    first_failed: datetime = Field(description="Timestamp of first failure")
+
+    model_config = {"from_attributes": True}
 
 
 class SyncReportResponse(BaseModel):
@@ -23,6 +35,9 @@ class SyncReportResponse(BaseModel):
     )
     checksums: Dict[str, str] = Field(
         default_factory=dict, description="Current file checksums (path -> checksum)"
+    )
+    skipped_files: List[SkippedFileResponse] = Field(
+        default_factory=list, description="Files skipped due to repeated failures"
     )
     total: int = Field(description="Total number of changes")
 
@@ -42,6 +57,15 @@ class SyncReportResponse(BaseModel):
             deleted=report.deleted,
             moves=report.moves,
             checksums=report.checksums,
+            skipped_files=[
+                SkippedFileResponse(
+                    path=skipped.path,
+                    reason=skipped.reason,
+                    failure_count=skipped.failure_count,
+                    first_failed=skipped.first_failed,
+                )
+                for skipped in report.skipped_files
+            ],
             total=report.total,
         )
 

@@ -155,7 +155,8 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             if msg.get("content"):
                 # Filter out None values before joining
                 content = " ".join(
-                    str(c.get("text", "")) for c in msg["content"]
+                    str(c.get("text", ""))
+                    for c in msg["content"]
                     if c and c.get("text") is not None
                 )
             lines.append(content)

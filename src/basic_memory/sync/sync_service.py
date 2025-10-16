@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 from sqlalchemy import select
@@ -26,6 +26,45 @@ from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.services.sync_status_service import sync_status_tracker, SyncStatus
 
+# Circuit breaker configuration
+MAX_CONSECUTIVE_FAILURES = 3
+
+
+@dataclass
+class FileFailureInfo:
+    """Track failure information for a file that repeatedly fails to sync.
+
+    Attributes:
+        count: Number of consecutive failures
+        first_failure: Timestamp of first failure in current sequence
+        last_failure: Timestamp of most recent failure
+        last_error: Error message from most recent failure
+        last_checksum: Checksum of file when it last failed (for detecting file changes)
+    """
+
+    count: int
+    first_failure: datetime
+    last_failure: datetime
+    last_error: str
+    last_checksum: str
+
+
+@dataclass
+class SkippedFile:
+    """Information about a file that was skipped due to repeated failures.
+
+    Attributes:
+        path: File path relative to project root
+        reason: Error message from last failure
+        failure_count: Number of consecutive failures
+        first_failed: Timestamp of first failure
+    """
+
+    path: str
+    reason: str
+    failure_count: int
+    first_failed: datetime
+
 
 @dataclass
 class SyncReport:
@@ -38,6 +77,7 @@ class SyncReport:
         deleted: Files that exist in database but not on disk
         moves: Files that have been moved from one location to another
         checksums: Current checksums for files on disk
+        skipped_files: Files that were skipped due to repeated failures
     """
 
     # We keep paths as strings in sets/dicts for easier serialization
@@ -46,6 +86,7 @@ class SyncReport:
     deleted: Set[str] = field(default_factory=set)
     moves: Dict[str, str] = field(default_factory=dict)  # old_path -> new_path
     checksums: Dict[str, str] = field(default_factory=dict)  # path -> checksum
+    skipped_files: List[SkippedFile] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -90,6 +131,8 @@ class SyncService:
         self._thread_pool = ThreadPoolExecutor(max_workers=app_config.sync_thread_pool_size)
         # Load ignore patterns once at initialization for performance
         self._ignore_patterns = load_bmignore_patterns()
+        # Circuit breaker: track file failures to prevent infinite retry loops
+        self._file_failures: Dict[str, FileFailureInfo] = {}
 
     async def _read_file_async(self, file_path: Path) -> str:
         """Read file content in thread pool to avoid blocking the event loop."""
@@ -124,6 +167,102 @@ class SyncService:
         """Cleanup thread pool when service is destroyed."""
         if hasattr(self, "_thread_pool"):
             self._thread_pool.shutdown(wait=False)
+
+    async def _should_skip_file(self, path: str) -> bool:
+        """Check if file should be skipped due to repeated failures.
+
+        Computes current file checksum and compares with last failed checksum.
+        If checksums differ, file has changed and we should retry.
+
+        Args:
+            path: File path to check
+
+        Returns:
+            True if file should be skipped, False otherwise
+        """
+        if path not in self._file_failures:
+            return False
+
+        failure_info = self._file_failures[path]
+
+        # Check if failure count exceeds threshold
+        if failure_info.count < MAX_CONSECUTIVE_FAILURES:
+            return False
+
+        # Compute current checksum to see if file changed
+        try:
+            current_checksum = await self._compute_checksum_async(path)
+
+            # If checksum changed, file was modified - reset and retry
+            if current_checksum != failure_info.last_checksum:
+                logger.info(
+                    f"File {path} changed since last failure (checksum differs), "
+                    f"resetting failure count and retrying"
+                )
+                del self._file_failures[path]
+                return False
+        except Exception as e:
+            # If we can't compute checksum, log but still skip to avoid infinite loops
+            logger.warning(f"Failed to compute checksum for {path}: {e}")
+
+        # File unchanged and exceeded threshold - skip it
+        return True
+
+    async def _record_failure(self, path: str, error: str) -> None:
+        """Record a file sync failure for circuit breaker tracking.
+
+        Args:
+            path: File path that failed
+            error: Error message from the failure
+        """
+        now = datetime.now()
+
+        # Compute checksum for failure tracking
+        try:
+            checksum = await self._compute_checksum_async(path)
+        except Exception:
+            # If checksum fails, use empty string (better than crashing)
+            checksum = ""
+
+        if path in self._file_failures:
+            # Update existing failure record
+            failure_info = self._file_failures[path]
+            failure_info.count += 1
+            failure_info.last_failure = now
+            failure_info.last_error = error
+            failure_info.last_checksum = checksum
+
+            logger.warning(
+                f"File sync failed (attempt {failure_info.count}/{MAX_CONSECUTIVE_FAILURES}): "
+                f"path={path}, error={error}"
+            )
+
+            # Log when threshold is reached
+            if failure_info.count >= MAX_CONSECUTIVE_FAILURES:
+                logger.error(
+                    f"File {path} has failed {MAX_CONSECUTIVE_FAILURES} times and will be skipped. "
+                    f"First failure: {failure_info.first_failure}, Last error: {error}"
+                )
+        else:
+            # Create new failure record
+            self._file_failures[path] = FileFailureInfo(
+                count=1,
+                first_failure=now,
+                last_failure=now,
+                last_error=error,
+                last_checksum=checksum,
+            )
+            logger.debug(f"Recording first failure for {path}: {error}")
+
+    def _clear_failure(self, path: str) -> None:
+        """Clear failure tracking for a file after successful sync.
+
+        Args:
+            path: File path that successfully synced
+        """
+        if path in self._file_failures:
+            logger.info(f"Clearing failure history for {path} after successful sync")
+            del self._file_failures[path]
 
     async def sync(self, directory: Path, project_name: Optional[str] = None) -> SyncReport:
         """Sync all files with database."""
@@ -192,7 +331,20 @@ class SyncService:
 
         # then new and modified
         for path in report.new:
-            await self.sync_file(path, new=True)
+            entity, _ = await self.sync_file(path, new=True)
+
+            # Track if file was skipped
+            if entity is None and await self._should_skip_file(path):
+                failure_info = self._file_failures[path]
+                report.skipped_files.append(
+                    SkippedFile(
+                        path=path,
+                        reason=failure_info.last_error,
+                        failure_count=failure_info.count,
+                        first_failed=failure_info.first_failure,
+                    )
+                )
+
             files_processed += 1
             if project_name:
                 sync_status_tracker.update_project_progress(
@@ -203,7 +355,20 @@ class SyncService:
                 )
 
         for path in report.modified:
-            await self.sync_file(path, new=False)
+            entity, _ = await self.sync_file(path, new=False)
+
+            # Track if file was skipped
+            if entity is None and await self._should_skip_file(path):
+                failure_info = self._file_failures[path]
+                report.skipped_files.append(
+                    SkippedFile(
+                        path=path,
+                        reason=failure_info.last_error,
+                        failure_count=failure_info.count,
+                        first_failed=failure_info.first_failure,
+                    )
+                )
+
             files_processed += 1
             if project_name:
                 sync_status_tracker.update_project_progress(  # pragma: no cover
@@ -220,9 +385,24 @@ class SyncService:
             sync_status_tracker.complete_project_sync(project_name)
 
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.info(
-            f"Sync operation completed: directory={directory}, total_changes={report.total}, duration_ms={duration_ms}"
-        )
+
+        # Log summary with skipped files if any
+        if report.skipped_files:
+            logger.warning(
+                f"Sync completed with {len(report.skipped_files)} skipped files: "
+                f"directory={directory}, total_changes={report.total}, "
+                f"skipped={len(report.skipped_files)}, duration_ms={duration_ms}"
+            )
+            for skipped in report.skipped_files:
+                logger.warning(
+                    f"Skipped file: path={skipped.path}, "
+                    f"failures={skipped.failure_count}, reason={skipped.reason}"
+                )
+        else:
+            logger.info(
+                f"Sync operation completed: directory={directory}, "
+                f"total_changes={report.total}, duration_ms={duration_ms}"
+            )
 
         return report
 
@@ -298,15 +478,20 @@ class SyncService:
     async def sync_file(
         self, path: str, new: bool = True
     ) -> Tuple[Optional[Entity], Optional[str]]:
-        """Sync a single file.
+        """Sync a single file with circuit breaker protection.
 
         Args:
             path: Path to file to sync
             new: Whether this is a new file
 
         Returns:
-            Tuple of (entity, checksum) or (None, None) if sync fails
+            Tuple of (entity, checksum) or (None, None) if sync fails or file is skipped
         """
+        # Check if file should be skipped due to repeated failures
+        if await self._should_skip_file(path):
+            logger.warning(f"Skipping file due to repeated failures: {path}")
+            return None, None
+
         try:
             logger.debug(
                 f"Syncing file path={path} is_new={new} is_markdown={self.file_service.is_markdown(path)}"
@@ -320,13 +505,21 @@ class SyncService:
             if entity is not None:
                 await self.search_service.index_entity(entity)
 
+                # Clear failure tracking on successful sync
+                self._clear_failure(path)
+
                 logger.debug(
                     f"File sync completed, path={path}, entity_id={entity.id}, checksum={checksum[:8]}"
                 )
             return entity, checksum
 
-        except Exception as e:  # pragma: no cover
-            logger.error(f"Failed to sync file: path={path}, error={str(e)}")
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Failed to sync file: path={path}, error={error_msg}")
+
+            # Record failure for circuit breaker
+            await self._record_failure(path, error_msg)
+
             return None, None
 
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:

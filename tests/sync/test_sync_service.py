@@ -1316,3 +1316,252 @@ This is a test file for update failure after constraint violation.
             await sync_service.sync_regular_file(
                 str(test_file.relative_to(project_config.home)), new=True
             )
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_skips_after_three_failures(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that circuit breaker skips file after 3 consecutive failures."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+    test_file = project_dir / "failing_file.md"
+
+    # Create a file with malformed content that will fail to parse
+    await create_test_file(test_file, "invalid markdown content")
+
+    # Mock sync_markdown_file to always fail
+    async def mock_sync_markdown_file(*args, **kwargs):
+        raise ValueError("Simulated sync failure")
+
+    with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
+        # First sync - should fail and record (1/3)
+        report1 = await sync_service.sync(project_dir)
+        assert len(report1.skipped_files) == 0  # Not skipped yet
+
+        # Second sync - should fail and record (2/3)
+        report2 = await sync_service.sync(project_dir)
+        assert len(report2.skipped_files) == 0  # Still not skipped
+
+        # Third sync - should fail, record (3/3), and be added to skipped list
+        report3 = await sync_service.sync(project_dir)
+        assert len(report3.skipped_files) == 1
+        assert report3.skipped_files[0].path == "failing_file.md"
+        assert report3.skipped_files[0].failure_count == 3
+        assert "Simulated sync failure" in report3.skipped_files[0].reason
+
+        # Fourth sync - should be skipped immediately without attempting
+        report4 = await sync_service.sync(project_dir)
+        assert len(report4.skipped_files) == 1  # Still skipped
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_resets_on_file_change(
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
+):
+    """Test that circuit breaker resets when file content changes."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+    test_file = project_dir / "changing_file.md"
+
+    # Create initial failing content
+    await create_test_file(test_file, "initial bad content")
+
+    # Mock sync_markdown_file to fail
+    call_count = 0
+
+    async def mock_sync_markdown_file(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise ValueError("Simulated sync failure")
+
+    with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
+        # Fail 3 times to hit circuit breaker threshold
+        await sync_service.sync(project_dir)  # Fail 1
+        await sync_service.sync(project_dir)  # Fail 2
+        report3 = await sync_service.sync(project_dir)  # Fail 3 - now skipped
+        assert len(report3.skipped_files) == 1
+
+    # Now change the file content
+    valid_content = dedent(
+        """
+        ---
+        title: Fixed Content
+        type: knowledge
+        ---
+        # Fixed Content
+        This should work now.
+        """
+    ).strip()
+    await create_test_file(test_file, valid_content)
+
+    # Circuit breaker should reset and allow retry
+    report = await sync_service.sync(project_dir)
+    assert len(report.skipped_files) == 0  # Should not be skipped anymore
+
+    # Verify entity was created successfully
+    entity = await entity_service.get_by_permalink("changing-file")
+    assert entity is not None
+    assert entity.title == "Fixed Content"
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_clears_on_success(
+    sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
+):
+    """Test that circuit breaker clears failure history after successful sync."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+    test_file = project_dir / "sometimes_failing.md"
+
+    valid_content = dedent(
+        """
+        ---
+        title: Test File
+        type: knowledge
+        ---
+        # Test File
+        Test content
+        """
+    ).strip()
+    await create_test_file(test_file, valid_content)
+
+    # Mock to fail twice, then succeed
+    call_count = 0
+    original_sync_markdown_file = sync_service.sync_markdown_file
+
+    async def mock_sync_markdown_file(path, new):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise ValueError("Temporary failure")
+        # On third call, use the real implementation
+        return await original_sync_markdown_file(path, new)
+
+    # Patch and fail twice
+    with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
+        await sync_service.sync(project_dir)  # Fail 1
+        await sync_service.sync(project_dir)  # Fail 2
+        await sync_service.sync(project_dir)  # Succeed
+
+    # Verify failure history was cleared
+    assert "sometimes_failing.md" not in sync_service._file_failures
+
+    # Verify entity was created
+    entity = await entity_service.get_by_permalink("sometimes-failing")
+    assert entity is not None
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_tracks_multiple_files(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that circuit breaker tracks multiple failing files independently."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+
+    # Create multiple files with valid markdown
+    await create_test_file(
+        project_dir / "file1.md",
+        """
+---
+type: knowledge
+---
+# File 1
+Content 1
+""",
+    )
+    await create_test_file(
+        project_dir / "file2.md",
+        """
+---
+type: knowledge
+---
+# File 2
+Content 2
+""",
+    )
+    await create_test_file(
+        project_dir / "file3.md",
+        """
+---
+type: knowledge
+---
+# File 3
+Content 3
+""",
+    )
+
+    # Mock to make file1 and file2 fail, but file3 succeed
+    original_sync_markdown_file = sync_service.sync_markdown_file
+
+    async def mock_sync_markdown_file(path, new):
+        if "file1.md" in path or "file2.md" in path:
+            raise ValueError(f"Failure for {path}")
+        # file3 succeeds - use real implementation
+        return await original_sync_markdown_file(path, new)
+
+    with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
+        # Fail 3 times for file1 and file2 (file3 succeeds each time)
+        await sync_service.sync(project_dir)  # Fail count: file1=1, file2=1
+        await sync_service.sync(project_dir)  # Fail count: file1=2, file2=2
+        report3 = await sync_service.sync(project_dir)  # Fail count: file1=3, file2=3, now skipped
+
+        # Both files should be skipped on third sync
+        assert len(report3.skipped_files) == 2
+        skipped_paths = {f.path for f in report3.skipped_files}
+        assert "file1.md" in skipped_paths
+        assert "file2.md" in skipped_paths
+
+        # Verify file3 is not in failures dict
+        assert "file3.md" not in sync_service._file_failures
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_handles_checksum_computation_failure(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test circuit breaker behavior when checksum computation fails."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+    test_file = project_dir / "checksum_fail.md"
+    await create_test_file(test_file, "content")
+
+    # Mock sync_markdown_file to fail
+    async def mock_sync_markdown_file(*args, **kwargs):
+        raise ValueError("Sync failure")
+
+    # Mock checksum computation to fail only during _record_failure (not during scan)
+    original_compute_checksum = sync_service._compute_checksum_async
+    call_count = 0
+
+    async def mock_compute_checksum(path):
+        nonlocal call_count
+        call_count += 1
+        # First call is during scan - let it succeed
+        if call_count == 1:
+            return await original_compute_checksum(path)
+        # Second call is during _record_failure - make it fail
+        raise IOError("Cannot read file")
+
+    with (
+        patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file),
+        patch.object(
+            sync_service,
+            "_compute_checksum_async",
+            side_effect=mock_compute_checksum,
+        ),
+    ):
+        # Should still record failure even if checksum fails
+        await sync_service.sync(project_dir)
+
+        # Check that failure was recorded with empty checksum
+        assert "checksum_fail.md" in sync_service._file_failures
+        failure_info = sync_service._file_failures["checksum_fail.md"]
+        assert failure_info.count == 1
+        assert failure_info.last_checksum == ""  # Empty when checksum fails
