@@ -106,28 +106,6 @@ async def build_context(
         # Get the active project using the new stateless approach
         active_project = await get_active_project(client, project, context)
 
-        # Check migration status and wait briefly if needed
-        from basic_memory.mcp.tools.utils import wait_for_migration_or_return_status
-
-        migration_status = await wait_for_migration_or_return_status(
-            timeout=5.0, project_name=active_project.name
-        )
-        if migration_status:  # pragma: no cover
-            # Return a proper GraphContext with status message
-            from basic_memory.schemas.memory import MemoryMetadata
-            from datetime import datetime
-
-            return GraphContext(
-                results=[],
-                metadata=MemoryMetadata(
-                    depth=depth or 1,
-                    timeframe=timeframe,
-                    generated_at=datetime.now().astimezone(),
-                    primary_count=0,
-                    related_count=0,
-                    uri=migration_status,  # Include status in metadata
-                ),
-            )
         project_url = active_project.project_url
 
         response = await call_get(
