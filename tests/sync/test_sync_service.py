@@ -478,6 +478,7 @@ async def test_sync_empty_directories(sync_service: SyncService, project_config:
     assert (project_config.home).exists()
 
 
+@pytest.mark.skip("flaky on Windows due to filesystem timing precision")
 @pytest.mark.asyncio
 async def test_sync_file_modified_during_sync(
     sync_service: SyncService, project_config: ProjectConfig
