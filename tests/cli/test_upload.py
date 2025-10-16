@@ -351,7 +351,9 @@ class TestUploadPath:
         """Test that --no-gitignore still respects .bmignore patterns."""
         # Create test files
         (tmp_path / "keep.txt").write_text("keep")
-        (tmp_path / ".hidden").write_text("hidden")  # Should be ignored by .bmignore default pattern
+        (tmp_path / ".hidden").write_text(
+            "hidden"
+        )  # Should be ignored by .bmignore default pattern
 
         # Create .gitignore that would allow .hidden
         gitignore_file = tmp_path / ".gitignore"
@@ -378,7 +380,7 @@ class TestUploadPath:
         gitignore_file.write_text("*.pyc\n")
 
         # Run with verbose=True
-        result = _get_files_to_upload(tmp_path, verbose=True, use_gitignore=True)
+        _get_files_to_upload(tmp_path, verbose=True, use_gitignore=True)
 
         # Capture output
         captured = capsys.readouterr()

@@ -139,7 +139,7 @@ def _get_files_to_upload(
         gitignore_path = directory / ".gitignore"
         gitignore_exists = gitignore_path.exists() and use_gitignore
         print(f"\nScanning directory: {directory}")
-        print(f"Using .bmignore: Yes")
+        print("Using .bmignore: Yes")
         print(f"Using .gitignore: {'Yes' if gitignore_exists else 'No'}")
         print(f"Ignore patterns loaded: {len(ignore_patterns)}")
         if ignore_patterns and len(ignore_patterns) <= 20:
@@ -183,7 +183,7 @@ def _get_files_to_upload(
             files.append((file_path, remote_path))
 
     if verbose:
-        print(f"\nSummary:")
+        print("\nSummary:")
         print(f"  Files to upload: {len(files)}")
         print(f"  Files ignored: {len(ignored_files)}")
 

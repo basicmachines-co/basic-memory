@@ -93,7 +93,9 @@ def upload(
 
         # Perform upload (or dry run)
         if dry_run:
-            console.print(f"[yellow]DRY RUN: Showing what would be uploaded to '{project}'[/yellow]")
+            console.print(
+                f"[yellow]DRY RUN: Showing what would be uploaded to '{project}'[/yellow]"
+            )
         else:
             console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
 
@@ -105,7 +107,7 @@ def upload(
             raise typer.Exit(1)
 
         if dry_run:
-            console.print(f"[yellow]DRY RUN complete - no files were uploaded[/yellow]")
+            console.print("[yellow]DRY RUN complete - no files were uploaded[/yellow]")
         else:
             console.print(f"[green]✅ Successfully uploaded to '{project}'[/green]")
 
