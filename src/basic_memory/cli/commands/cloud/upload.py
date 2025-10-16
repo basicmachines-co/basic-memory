@@ -12,7 +12,11 @@ from basic_memory.mcp.tools.utils import call_put
 
 
 async def upload_path(
-    local_path: Path, project_name: str, verbose: bool = False, use_gitignore: bool = True
+    local_path: Path,
+    project_name: str,
+    verbose: bool = False,
+    use_gitignore: bool = True,
+    dry_run: bool = False,
 ) -> bool:
     """
     Upload a file or directory to cloud project via WebDAV.
@@ -22,6 +26,7 @@ async def upload_path(
         project_name: Name of cloud project (destination)
         verbose: Show detailed information about filtering and upload
         use_gitignore: If False, skip .gitignore patterns (still use .bmignore)
+        dry_run: If True, show what would be uploaded without uploading
 
     Returns:
         True if upload succeeded, False otherwise
@@ -54,26 +59,38 @@ async def upload_path(
 
         print(f"Found {len(files_to_upload)} file(s) to upload")
 
-        # Upload files using httpx
-        total_bytes = 0
+        # Calculate total size
+        total_bytes = sum(file_path.stat().st_size for file_path, _ in files_to_upload)
 
-        async with get_client() as client:
-            for i, (file_path, relative_path) in enumerate(files_to_upload, 1):
-                # Build remote path: /webdav/{project_name}/{relative_path}
-                remote_path = f"/webdav/{project_name}/{relative_path}"
-                print(f"Uploading {relative_path} ({i}/{len(files_to_upload)})")
+        # If dry run, just show what would be uploaded
+        if dry_run:
+            print("\nFiles that would be uploaded:")
+            for file_path, relative_path in files_to_upload:
+                size = file_path.stat().st_size
+                if size < 1024:
+                    size_str = f"{size} bytes"
+                elif size < 1024 * 1024:
+                    size_str = f"{size / 1024:.1f} KB"
+                else:
+                    size_str = f"{size / (1024 * 1024):.1f} MB"
+                print(f"  {relative_path} ({size_str})")
+        else:
+            # Upload files using httpx
+            async with get_client() as client:
+                for i, (file_path, relative_path) in enumerate(files_to_upload, 1):
+                    # Build remote path: /webdav/{project_name}/{relative_path}
+                    remote_path = f"/webdav/{project_name}/{relative_path}"
+                    print(f"Uploading {relative_path} ({i}/{len(files_to_upload)})")
 
-                # Read file content asynchronously
-                async with aiofiles.open(file_path, "rb") as f:
-                    content = await f.read()
+                    # Read file content asynchronously
+                    async with aiofiles.open(file_path, "rb") as f:
+                        content = await f.read()
 
-                # Upload via HTTP PUT to WebDAV endpoint
-                response = await call_put(client, remote_path, content=content)
-                response.raise_for_status()
+                    # Upload via HTTP PUT to WebDAV endpoint
+                    response = await call_put(client, remote_path, content=content)
+                    response.raise_for_status()
 
-                total_bytes += file_path.stat().st_size
-
-        # Format size based on magnitude
+        # Format total size based on magnitude
         if total_bytes < 1024:
             size_str = f"{total_bytes} bytes"
         elif total_bytes < 1024 * 1024:
@@ -81,7 +98,11 @@ async def upload_path(
         else:
             size_str = f"{total_bytes / (1024 * 1024):.1f} MB"
 
-        print(f"✓ Upload complete: {len(files_to_upload)} file(s) ({size_str})")
+        if dry_run:
+            print(f"\nTotal: {len(files_to_upload)} file(s) ({size_str})")
+        else:
+            print(f"✓ Upload complete: {len(files_to_upload)} file(s) ({size_str})")
+
         return True
 
     except httpx.HTTPStatusError as e:

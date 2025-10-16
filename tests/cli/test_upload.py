@@ -414,3 +414,48 @@ class TestUploadPath:
         # With use_gitignore=False, should include files
         result = _get_files_to_upload(tmp_path, verbose=False, use_gitignore=False)
         assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_dry_run_shows_files_without_uploading(self, tmp_path, capsys):
+        """Test that --dry-run shows what would be uploaded without uploading."""
+        # Create test files
+        (tmp_path / "file1.txt").write_text("content1")
+        (tmp_path / "file2.txt").write_text("content2")
+
+        # Don't mock anything - we want to verify no actual upload happens
+        result = await upload_path(tmp_path, "test-project", dry_run=True)
+
+        # Should return success
+        assert result is True
+
+        # Check output shows dry run info
+        captured = capsys.readouterr()
+        assert "Found 2 file(s) to upload" in captured.out
+        assert "Files that would be uploaded:" in captured.out
+        assert "file1.txt" in captured.out
+        assert "file2.txt" in captured.out
+        assert "Total:" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_dry_run_with_verbose(self, tmp_path, capsys):
+        """Test that --dry-run works with --verbose."""
+        # Create test files
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / "ignore.pyc").write_text("ignore")
+
+        # Create .gitignore
+        gitignore_file = tmp_path / ".gitignore"
+        gitignore_file.write_text("*.pyc\n")
+
+        result = await upload_path(tmp_path, "test-project", verbose=True, dry_run=True)
+
+        # Should return success
+        assert result is True
+
+        # Check output shows both verbose and dry run info
+        captured = capsys.readouterr()
+        assert "Scanning directory:" in captured.out
+        assert "[INCLUDE] keep.txt" in captured.out
+        assert "[IGNORED] ignore.pyc" in captured.out
+        assert "Files that would be uploaded:" in captured.out
+        assert "keep.txt" in captured.out

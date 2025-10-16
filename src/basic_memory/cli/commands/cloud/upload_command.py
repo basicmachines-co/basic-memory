@@ -54,6 +54,11 @@ def upload(
         "--no-gitignore",
         help="Skip .gitignore patterns (still respects .bmignore)",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be uploaded without actually uploading",
+    ),
 ) -> None:
     """Upload local files or directories to cloud project via WebDAV.
 
@@ -63,6 +68,7 @@ def upload(
       bm cloud upload ~/docs --project work --no-sync
       bm cloud upload ./history --project proto --verbose
       bm cloud upload ./notes --project work --no-gitignore
+      bm cloud upload ./files --project test --dry-run
     """
 
     async def _upload():
@@ -85,19 +91,26 @@ def upload(
                 )
                 raise typer.Exit(1)
 
-        # Perform upload
-        console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
+        # Perform upload (or dry run)
+        if dry_run:
+            console.print(f"[yellow]DRY RUN: Showing what would be uploaded to '{project}'[/yellow]")
+        else:
+            console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
+
         success = await upload_path(
-            path, project, verbose=verbose, use_gitignore=not no_gitignore
+            path, project, verbose=verbose, use_gitignore=not no_gitignore, dry_run=dry_run
         )
         if not success:
             console.print("[red]Upload failed[/red]")
             raise typer.Exit(1)
 
-        console.print(f"[green]✅ Successfully uploaded to '{project}'[/green]")
+        if dry_run:
+            console.print(f"[yellow]DRY RUN complete - no files were uploaded[/yellow]")
+        else:
+            console.print(f"[green]✅ Successfully uploaded to '{project}'[/green]")
 
-        # Sync project if requested
-        if sync:
+        # Sync project if requested (skip on dry run)
+        if sync and not dry_run:
             console.print(f"[blue]Syncing project '{project}'...[/blue]")
             try:
                 await sync_project(project)
