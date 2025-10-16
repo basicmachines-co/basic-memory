@@ -10,6 +10,8 @@ from typing import Any, Optional
 
 import dateparser
 import frontmatter
+import yaml
+from loguru import logger
 from markdown_it import MarkdownIt
 
 from basic_memory.markdown.plugins import observation_plugin, relation_plugin
@@ -111,18 +113,35 @@ class EntityParser:
         return self.base_path / path
 
     async def parse_file_content(self, absolute_path, file_content):
-        post = frontmatter.loads(file_content)
+        # Parse frontmatter with proper error handling for malformed YAML (issue #185)
+        try:
+            post = frontmatter.loads(file_content)
+        except yaml.YAMLError as e:
+            # Log the YAML parsing error with file context
+            logger.warning(
+                f"Failed to parse YAML frontmatter in {absolute_path}: {e}. "
+                f"Treating file as plain markdown without frontmatter."
+            )
+            # Create a post with no frontmatter - treat entire content as markdown
+            post = frontmatter.Post(file_content, metadata={})
+
         # Extract file stat info
         file_stats = absolute_path.stat()
         metadata = post.metadata
+
+        # Ensure required fields have defaults (issue #184)
         metadata["title"] = post.metadata.get("title", absolute_path.stem)
-        metadata["type"] = post.metadata.get("type", "note")
+        # Handle type - use default if missing OR explicitly set to None/null
+        entity_type = post.metadata.get("type")
+        metadata["type"] = entity_type if entity_type is not None else "note"
+
         tags = parse_tags(post.metadata.get("tags", []))  # pyright: ignore
         if tags:
             metadata["tags"] = tags
-        # frontmatter
+
+        # frontmatter - use metadata with defaults applied
         entity_frontmatter = EntityFrontmatter(
-            metadata=post.metadata,
+            metadata=metadata,
         )
         entity_content = parse(post.content)
         return EntityMarkdown(
