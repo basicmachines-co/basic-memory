@@ -1,7 +1,6 @@
 """Tests for entity parser error handling (issues #184 and #185)."""
 
 import pytest
-from pathlib import Path
 from textwrap import dedent
 
 from basic_memory.markdown.entity_parser import EntityParser

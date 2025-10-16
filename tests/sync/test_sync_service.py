@@ -646,6 +646,90 @@ Testing file timestamps
 
 
 @pytest.mark.asyncio
+async def test_sync_updates_timestamps_on_file_modification(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    entity_service: EntityService,
+):
+    """Test that sync updates entity timestamps when files are modified.
+
+    This test specifically validates that when an existing file is modified and re-synced,
+    the updated_at timestamp in the database reflects the file's actual modification time,
+    not the database operation time. This is critical for accurate temporal ordering in
+    search and recent_activity queries.
+    """
+    import time
+
+    project_dir = project_config.home
+
+    # Create initial file
+    initial_content = """
+---
+type: knowledge
+---
+# Test File
+Initial content for timestamp test
+"""
+    file_path = project_dir / "timestamp_test.md"
+    await create_test_file(file_path, initial_content)
+
+    # Initial sync
+    await sync_service.sync(project_config.home)
+
+    # Get initial entity and timestamps
+    entity_before = await entity_service.get_by_permalink("timestamp-test")
+    initial_updated_at = entity_before.updated_at
+
+    # Wait a bit to ensure filesystem timestamp changes
+    time.sleep(0.1)
+
+    # Modify the file content
+    modified_content = """
+---
+type: knowledge
+---
+# Test File
+Modified content for timestamp test
+
+## Observations
+- [test] This was modified
+"""
+    file_path.write_text(modified_content)
+
+    # Wait to ensure mtime is different
+    time.sleep(0.1)
+
+    # Get the file's modification time after our changes
+    file_stats_after_modification = file_path.stat()
+
+    # Re-sync the modified file
+    await sync_service.sync(project_config.home)
+
+    # Get entity after re-sync
+    entity_after = await entity_service.get_by_permalink("timestamp-test")
+
+    # Verify that updated_at changed
+    assert entity_after.updated_at != initial_updated_at, (
+        "updated_at should change when file is modified"
+    )
+
+    # Verify that updated_at matches the file's modification time, not db operation time
+    entity_updated_epoch = entity_after.updated_at.timestamp()
+    file_mtime = file_stats_after_modification.st_mtime
+
+    # Allow 2s difference on Windows due to filesystem timing precision
+    tolerance = 2 if os.name == "nt" else 1
+    assert abs(entity_updated_epoch - file_mtime) < tolerance, (
+        f"Entity updated_at ({entity_after.updated_at}) should match file mtime "
+        f"({datetime.fromtimestamp(file_mtime)}) within {tolerance}s tolerance"
+    )
+
+    # Verify the content was actually updated
+    assert len(entity_after.observations) == 1
+    assert entity_after.observations[0].content == "This was modified"
+
+
+@pytest.mark.asyncio
 async def test_file_move_updates_search_index(
     sync_service: SyncService,
     project_config: ProjectConfig,

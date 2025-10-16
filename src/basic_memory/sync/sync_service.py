@@ -547,6 +547,11 @@ class SyncService:
         file_content = await self._read_file_async(file_path)
         file_contains_frontmatter = has_frontmatter(file_content)
 
+        # Get file timestamps for tracking modification times
+        file_stats = self.file_service.file_stats(path)
+        created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
+        modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+
         # entity markdown will always contain front matter, so it can be used up create/update the entity
         entity_markdown = await self.entity_parser.parse_file(path)
 
@@ -585,8 +590,11 @@ class SyncService:
         # after relation processing is complete
         final_checksum = await self._compute_checksum_async(path)
 
-        # set checksum
-        await self.entity_repository.update(entity.id, {"checksum": final_checksum})
+        # Update checksum and timestamps from file system
+        # This ensures temporal ordering in search and recent activity uses actual file modification times
+        await self.entity_repository.update(
+            entity.id, {"checksum": final_checksum, "created_at": created, "updated_at": modified}
+        )
 
         logger.debug(
             f"Markdown sync completed: path={path}, entity_id={entity.id}, "
@@ -659,13 +667,18 @@ class SyncService:
                     # Re-raise if it's a different integrity error
                     raise
         else:
+            # Get file timestamps for updating modification time
+            file_stats = self.file_service.file_stats(path)
+            modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+
             entity = await self.entity_repository.get_by_file_path(path)
             if entity is None:  # pragma: no cover
                 logger.error(f"Entity not found for existing file, path={path}")
                 raise ValueError(f"Entity not found for existing file: {path}")
 
+            # Update checksum and modification time from file system
             updated = await self.entity_repository.update(
-                entity.id, {"file_path": path, "checksum": checksum}
+                entity.id, {"file_path": path, "checksum": checksum, "updated_at": modified}
             )
 
             if updated is None:  # pragma: no cover
