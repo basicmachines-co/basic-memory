@@ -163,25 +163,28 @@ class EntityRepository(Repository[Entity]):
 
                 if existing_entity:
                     # File path conflict - update the existing entity
-                    for key, value in {
-                        "title": entity.title,
-                        "entity_type": entity.entity_type,
-                        "entity_metadata": entity.entity_metadata,
-                        "content_type": entity.content_type,
-                        "permalink": entity.permalink,
-                        "checksum": entity.checksum,
-                        "updated_at": entity.updated_at,
-                    }.items():
-                        setattr(existing_entity, key, value)
+                    # Use merge to avoid session state conflicts
+                    # Set the ID to update existing entity
+                    entity.id = existing_entity.id
 
-                    # Clear and re-add observations
-                    existing_entity.observations.clear()
+                    # Ensure observations reference the correct entity_id
                     for obs in entity.observations:
                         obs.entity_id = existing_entity.id
-                        existing_entity.observations.append(obs)
+                        # Clear any existing ID to force INSERT as new observation
+                        obs.id = None
+
+                    # Merge the entity which will update the existing one
+                    merged_entity = await session.merge(entity)
 
                     await session.commit()
-                    return existing_entity
+
+                    # Re-query to get proper relationships loaded
+                    final_result = await session.execute(
+                        select(Entity)
+                        .where(Entity.id == merged_entity.id)
+                        .options(*self.get_load_options())
+                    )
+                    return final_result.scalar_one()
 
                 else:
                     # No file_path conflict - must be permalink conflict
