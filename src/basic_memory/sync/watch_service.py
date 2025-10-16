@@ -236,6 +236,17 @@ class WatchService:
         # avoid circular imports
         from basic_memory.sync.sync_service import get_sync_service
 
+        # Check if project still exists in configuration before processing
+        # This prevents deleted projects from being recreated by background sync
+        from basic_memory.config import ConfigManager
+        config_manager = ConfigManager()
+        if project.name not in config_manager.projects and project.permalink not in config_manager.projects:
+            logger.info(
+                f"Skipping sync for deleted project: {project.name}, "
+                f"change_count={len(changes)}"
+            )
+            return
+
         sync_service = await get_sync_service(project)
         file_service = sync_service.file_service
 

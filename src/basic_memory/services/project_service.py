@@ -360,11 +360,15 @@ class ProjectService:
                 }
                 await self.repository.create(project_data)
 
-        # Add projects that exist in DB but not in config to config
+        # Remove projects that exist in DB but not in config
+        # Config is the source of truth - if a project was deleted from config,
+        # it should be deleted from DB too (fixes issue #193)
         for name, project in db_projects_by_permalink.items():
             if name not in config_projects:
-                logger.info(f"Adding project '{name}' to configuration")
-                self.config_manager.add_project(name, project.path)
+                logger.info(
+                    f"Removing project '{name}' from database (deleted from config, source of truth)"
+                )
+                await self.repository.delete(project.id)
 
         # Ensure database default project state is consistent
         await self._ensure_single_default_project()

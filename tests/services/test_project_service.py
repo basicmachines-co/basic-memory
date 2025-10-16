@@ -1198,3 +1198,55 @@ async def test_add_project_nested_validation_with_project_root(
             # Clean up
             if parent_project_name in project_service.projects:
                 await project_service.remove_project(parent_project_name)
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_removes_db_only_projects(project_service: ProjectService):
+    """Test that synchronize_projects removes projects that exist in DB but not in config.
+
+    This is a regression test for issue #193 where deleted projects would be re-added
+    to config during synchronization, causing them to reappear after deletion.
+    Config is the source of truth - if a project is deleted from config, it should be
+    removed from the database during synchronization.
+    """
+    test_project_name = f"test-db-only-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        test_project_path = str(test_root / "test-db-only")
+
+        # Make sure the test directory exists
+        os.makedirs(test_project_path, exist_ok=True)
+
+        try:
+            # Add project to database only (not to config) - simulating orphaned DB entry
+            project_data = {
+                "name": test_project_name,
+                "path": test_project_path,
+                "permalink": test_project_name.lower().replace(" ", "-"),
+                "is_active": True,
+            }
+            created_project = await project_service.repository.create(project_data)
+
+            # Verify it exists in DB but not in config
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            assert db_project is not None
+            assert test_project_name not in project_service.projects
+
+            # Call synchronize_projects - this should remove the orphaned DB entry
+            # because config is the source of truth
+            await project_service.synchronize_projects()
+
+            # Verify project was removed from database
+            db_project_after = await project_service.repository.get_by_name(test_project_name)
+            assert db_project_after is None, (
+                "Project should be removed from DB when not in config (config is source of truth)"
+            )
+
+            # Verify it's still not in config
+            assert test_project_name not in project_service.projects
+
+        finally:
+            # Clean up if needed
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            if db_project:
+                await project_service.repository.delete(db_project.id)
