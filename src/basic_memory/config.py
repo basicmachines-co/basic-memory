@@ -84,7 +84,13 @@ class BasicMemoryConfig(BaseSettings):
 
     sync_thread_pool_size: int = Field(
         default=4,
-        description="Size of thread pool for file I/O operations in sync service",
+        description="Size of thread pool for file I/O operations in sync service. Default of 4 is optimized for cloud deployments with 1-2GB RAM.",
+        gt=0,
+    )
+
+    sync_max_concurrent_files: int = Field(
+        default=10,
+        description="Maximum number of files to process concurrently during sync. Limits memory usage on large projects (2000+ files). Lower values reduce memory consumption.",
         gt=0,
     )
 

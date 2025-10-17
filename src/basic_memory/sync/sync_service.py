@@ -3,6 +3,7 @@
 import asyncio
 import os
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -133,15 +134,27 @@ class SyncService:
         # Load ignore patterns once at initialization for performance
         self._ignore_patterns = load_bmignore_patterns()
         # Circuit breaker: track file failures to prevent infinite retry loops
-        self._file_failures: Dict[str, FileFailureInfo] = {}
+        # Use OrderedDict for LRU behavior with bounded size to prevent unbounded memory growth
+        self._file_failures: OrderedDict[str, FileFailureInfo] = OrderedDict()
+        self._max_tracked_failures = 100  # Limit failure cache size
+        # Semaphore to limit concurrent file operations and prevent OOM on large projects
+        # Limits peak memory usage by processing files in batches rather than all at once
+        self._file_semaphore = asyncio.Semaphore(app_config.sync_max_concurrent_files)
 
     async def _read_file_async(self, file_path: Path) -> str:
-        """Read file content in thread pool to avoid blocking the event loop."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self._thread_pool, file_path.read_text, "utf-8")
+        """Read file content in thread pool to avoid blocking the event loop.
+
+        Uses semaphore to limit concurrent file reads and prevent OOM on large projects.
+        """
+        async with self._file_semaphore:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(self._thread_pool, file_path.read_text, "utf-8")
 
     async def _compute_checksum_async(self, path: str) -> str:
-        """Compute file checksum in thread pool to avoid blocking the event loop."""
+        """Compute file checksum in thread pool to avoid blocking the event loop.
+
+        Uses semaphore to limit concurrent file reads and prevent OOM on large projects.
+        """
 
         def _sync_compute_checksum(path_str: str) -> str:
             # Synchronous version for thread pool execution
@@ -161,8 +174,9 @@ class SyncService:
                 content_bytes = content
             return hashlib.sha256(content_bytes).hexdigest()
 
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self._thread_pool, _sync_compute_checksum, path)
+        async with self._file_semaphore:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(self._thread_pool, _sync_compute_checksum, path)
 
     def __del__(self):
         """Cleanup thread pool when service is destroyed."""
@@ -212,6 +226,8 @@ class SyncService:
     async def _record_failure(self, path: str, error: str) -> None:
         """Record a file sync failure for circuit breaker tracking.
 
+        Uses LRU cache with bounded size to prevent unbounded memory growth.
+
         Args:
             path: File path that failed
             error: Error message from the failure
@@ -226,12 +242,13 @@ class SyncService:
             checksum = ""
 
         if path in self._file_failures:
-            # Update existing failure record
-            failure_info = self._file_failures[path]
+            # Update existing failure record and move to end (most recently used)
+            failure_info = self._file_failures.pop(path)
             failure_info.count += 1
             failure_info.last_failure = now
             failure_info.last_error = error
             failure_info.last_checksum = checksum
+            self._file_failures[path] = failure_info
 
             logger.warning(
                 f"File sync failed (attempt {failure_info.count}/{MAX_CONSECUTIVE_FAILURES}): "
@@ -254,6 +271,14 @@ class SyncService:
                 last_checksum=checksum,
             )
             logger.debug(f"Recording first failure for {path}: {error}")
+
+            # Enforce cache size limit - remove oldest entry if over limit
+            if len(self._file_failures) > self._max_tracked_failures:
+                removed_path, removed_info = self._file_failures.popitem(last=False)
+                logger.debug(
+                    f"Evicting oldest failure record from cache: path={removed_path}, "
+                    f"failures={removed_info.count}"
+                )
 
     def _clear_failure(self, path: str) -> None:
         """Clear failure tracking for a file after successful sync.
