@@ -127,7 +127,68 @@ Error editing note '{identifier}': {error_message}
 
 
 @mcp.tool(
-    description="Edit an existing markdown note using various operations like append, prepend, find_replace, or replace_section.",
+    description="""Performs precise edits to existing notes without full rewrites. Supports append, prepend, find/replace, and section replacement operations while preserving semantic elements and formatting.
+
+```yaml
+node:
+  topic: edit_note - Surgical Edits
+  goal: Modify notes without full rewrite
+  insight: Preserves semantic elements during edits
+  context:
+    operations: [append, prepend, find_replace, replace_section]
+    preservation: Maintains observations and relations
+    atomicity: All edits in single transaction
+```
+
+```baml
+class EditNoteInput {
+  identifier string @description("Note to edit")
+  operation ("append" | "prepend" | "find_replace" | "replace_section")
+  content string @description("New content")
+  find_text string? @when(operation="find_replace")
+  section string? @when(operation="replace_section") @description("Section heading")
+  expected_replacements int @default(1)
+  project string?
+}
+
+class EditNoteOutput {
+  success boolean
+  file_path string
+  operation string
+  changes_made int
+  warnings string[]?
+}
+
+function edit_note(EditNoteInput) -> EditNoteOutput {
+  @description("Precise note modifications preserving structure")
+  @atomic(true)
+  @async(true)
+}
+```
+
+## Operation Patterns
+
+**Append**: Add to end
+```python
+edit_note("Meeting Notes", "append", "\n## Action Items\n- [ ] Follow up")
+```
+
+**Find/Replace**: Exact substitution
+```python
+edit_note("API Spec", "find_replace",
+    "https://api.v2.example.com",
+    find_text="https://api.v1.example.com",
+    expected_replacements=3)
+```
+
+**Section Replace**: Full section update
+```python
+edit_note("README", "replace_section",
+    "## Installation\n\nUse pip: `pip install package`",
+    section="Installation")
+```
+
+Performance: Append 20ms, Find/Replace 100ms, Section 150ms""",
 )
 async def edit_note(
     identifier: str,

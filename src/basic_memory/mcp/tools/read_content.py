@@ -148,7 +148,74 @@ def optimize_image(img, content_length, max_output_bytes=350000):
             return buf.getvalue()
 
 
-@mcp.tool(description="Read a file's raw content by path or permalink")
+@mcp.tool(description="""Provides raw file access for any content type including text, images, PDFs, and notebooks. Returns appropriate encoding based on file type with automatic optimization for images.
+
+```yaml
+node:
+  topic: read_content - Universal File Reader
+  goal: Access any file type with appropriate handling
+  insight: Handles binary and text with smart encoding
+  context:
+    text_types: [md, txt, yaml, json, code]
+    binary_types: [images, pdfs, documents]
+    special: [notebooks with cell parsing]
+    size_limit: 10MB for binary files
+```
+
+```baml
+class ReadContentInput {
+  path string @description("File path or memory:// URL")
+  project string?
+}
+
+class TextContent {
+  type: "text"
+  text string
+  encoding string @default("utf-8")
+  content_type string
+}
+
+class BinaryContent {
+  type: ("image" | "document")
+  source {
+    type: "base64"
+    media_type string
+    data string @encoding("base64")
+  }
+}
+
+class ErrorContent {
+  type: "error"
+  error string
+}
+
+type ReadContentOutput = TextContent | BinaryContent | ErrorContent
+
+function read_content(ReadContentInput) -> ReadContentOutput {
+  @description("Universal file reader with type detection")
+  @max_size("10MB")
+  @async(true)
+}
+```
+
+## Type Handling
+```python
+# Text file
+result = read_content("config.yaml")
+if result["type"] == "text":
+    config = result["text"]
+
+# Image with base64
+result = read_content("logo.png")
+if result["type"] == "image":
+    base64_data = result["source"]["data"]
+    # Use in HTML: <img src="data:{media_type};base64,{data}">
+
+# Memory URL
+result = read_content("memory://assets/template")
+```
+
+Performance: Text 10-50ms, Images 50-200ms (with optimization)""")
 async def read_content(
     path: str, project: Optional[str] = None, context: Context | None = None
 ) -> dict:

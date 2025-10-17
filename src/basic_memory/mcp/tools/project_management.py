@@ -18,28 +18,55 @@ from basic_memory.schemas.project_info import (
 from basic_memory.utils import generate_permalink
 
 
-@mcp.tool("list_memory_projects")
+@mcp.tool("list_memory_projects",
+    description="""Discovers all configured Basic Memory projects. Essential first step for multi-project environments to identify available knowledge bases.
+
+```yaml
+node:
+  topic: list_memory_projects - Discovery
+  goal: Find all available projects
+  insight: Entry point for project selection
+  context:
+    caching: 60 second TTL
+    includes: [status, file_count, last_sync]
+```
+
+```baml
+class Project {
+  name string
+  path string
+  is_default boolean
+  status ("active" | "inactive" | "error")
+  file_count int
+  last_sync datetime?
+}
+
+class ListProjectsOutput {
+  projects Project[]
+  default_project string?
+  total int
+}
+
+function list_memory_projects() -> ListProjectsOutput {
+  @description("Discover all configured projects")
+  @cache_ttl(60)
+  @async(true)
+}
+```
+
+## Usage
+```python
+projects = list_memory_projects()
+for p in projects["projects"]:
+    print(f"{p['name']}: {p['path']}")
+    if p["is_default"]:
+        print("  (default)")
+```
+
+Performance: 20-60ms | Cached for 60 seconds"""
+)
 async def list_memory_projects(context: Context | None = None) -> str:
-    """List all available projects with their status.
-
-    Shows all Basic Memory projects that are available for MCP operations.
-    Use this tool to discover projects when you need to know which project to use.
-
-    Use this tool:
-    - At conversation start when project is unknown
-    - When user asks about available projects
-    - Before any operation requiring a project
-
-    After calling:
-    - Ask user which project to use
-    - Remember their choice for the session
-
-    Returns:
-        Formatted list of projects with session management guidance
-
-    Example:
-        list_memory_projects()
-    """
+    """List all available projects with their status."""
     async with get_client() as client:
         if context:  # pragma: no cover
             await context.info("Listing all available projects")
@@ -71,27 +98,47 @@ async def list_memory_projects(context: Context | None = None) -> str:
         return result
 
 
-@mcp.tool("create_memory_project")
+@mcp.tool("create_memory_project",
+    description="""Initializes a new Basic Memory project at the specified location. Creates necessary structure and optionally sets as default project.
+
+```yaml
+node:
+  topic: create_memory_project - Initialization
+  goal: Setup new knowledge base project
+  insight: One-time project bootstrap
+```
+
+```baml
+class CreateProjectInput {
+  project_name string @pattern("^[a-z0-9-]+$")
+  project_path string @format("path")
+  set_default boolean @default(false)
+}
+
+class CreateProjectOutput {
+  success boolean
+  project {name: string, path: string}
+  message string
+}
+
+function create_memory_project(CreateProjectInput) -> CreateProjectOutput {
+  @description("Initialize new project")
+  @idempotent(true)
+}
+```
+
+```python
+create_memory_project(
+    "research-2024",
+    "/Users/me/research/2024",
+    set_default=True
+)
+```"""
+)
 async def create_memory_project(
     project_name: str, project_path: str, set_default: bool = False, context: Context | None = None
 ) -> str:
-    """Create a new Basic Memory project.
-
-    Creates a new project with the specified name and path. The project directory
-    will be created if it doesn't exist. Optionally sets the new project as default.
-
-    Args:
-        project_name: Name for the new project (must be unique)
-        project_path: File system path where the project will be stored
-        set_default: Whether to set this project as the default (optional, defaults to False)
-
-    Returns:
-        Confirmation message with project details
-
-    Example:
-        create_memory_project("my-research", "~/Documents/research")
-        create_memory_project("work-notes", "/home/user/work", set_default=True)
-    """
+    """Create a new Basic Memory project."""
     async with get_client() as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
@@ -126,27 +173,47 @@ async def create_memory_project(
         return result
 
 
-@mcp.tool()
+@mcp.tool(
+    description="""Removes a project from Basic Memory configuration. Files remain on disk but project is no longer tracked. Requires re-addition to access content again.
+
+```yaml
+node:
+  topic: delete_project - Project Removal
+  goal: Remove project from configuration
+  insight: Files preserved, only tracking removed
+  context:
+    safety: No file deletion
+    reversibility: Re-add project to restore access
+```
+
+```baml
+class DeleteProjectInput {
+  project_name string @description("Project to remove")
+}
+
+class DeleteProjectOutput {
+  success boolean
+  removed_project {name: string, path: string?}
+  message string
+  warning string @default("Files remain on disk")
+}
+
+function delete_project(DeleteProjectInput) -> DeleteProjectOutput {
+  @description("Remove project tracking")
+  @safe(true) // No file deletion
+  @async(true)
+}
+```
+
+```python
+# Remove old project
+delete_project("archived-research")
+```
+
+Performance: 30-100ms | No files deleted | Reversible"""
+)
 async def delete_project(project_name: str, context: Context | None = None) -> str:
-    """Delete a Basic Memory project.
-
-    Removes a project from the configuration and database. This does NOT delete
-    the actual files on disk - only removes the project from Basic Memory's
-    configuration and database records.
-
-    Args:
-        project_name: Name of the project to delete
-
-    Returns:
-        Confirmation message about project deletion
-
-    Example:
-        delete_project("old-project")
-
-    Warning:
-        This action cannot be undone. The project will need to be re-added
-        to access its content through Basic Memory again.
-    """
+    """Delete a Basic Memory project."""
     async with get_client() as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")

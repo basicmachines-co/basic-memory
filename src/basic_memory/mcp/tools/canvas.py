@@ -16,7 +16,103 @@ from basic_memory.mcp.tools.utils import call_put
 
 
 @mcp.tool(
-    description="Create an Obsidian canvas file to visualize concepts and connections.",
+    description="""Creates interactive Obsidian Canvas files to visualize your knowledge graph. Transforms structured node and edge data into spatial maps, enabling visual exploration of relationships and concepts.
+
+```yaml
+node:
+  topic: canvas - Visual Knowledge Maps
+  goal: Generate Obsidian Canvas visualizations
+  insight: Spatial representation enhances understanding
+  context:
+    format: JSON Canvas 1.0 specification
+    nodes: [file, text, link, group]
+    layout: Manual positioning required
+    compatibility: Full Obsidian support
+```
+
+```baml
+class CanvasNode {
+  id string @description("Unique identifier for edges")
+  type ("file" | "text" | "link" | "group")
+  x int @description("Horizontal position")
+  y int @description("Vertical position")
+  width int @min(100)
+  height int @min(50)
+  color string? @pattern("^(#[0-9a-f]{6}|[1-6])$")
+
+  // Type-specific fields
+  file string? @when(type="file") @description("Path to .md file")
+  text string? @when(type="text") @description("Markdown content")
+  url string? @when(type="link") @format("uri")
+  label string? @when(type="group")
+}
+
+class CanvasEdge {
+  id string
+  fromNode string @description("Source node id")
+  toNode string @description("Target node id")
+  fromSide ("left" | "right" | "top" | "bottom")?
+  toSide ("left" | "right" | "top" | "bottom")?
+  label string? @description("Edge annotation")
+  color string? @pattern("^(#[0-9a-f]{6}|[1-6])$")
+}
+
+class CanvasInput {
+  nodes CanvasNode[]
+  edges CanvasEdge[]
+  title string
+  folder string
+  project string?
+}
+
+class CanvasOutput {
+  status ("created" | "updated")
+  path string
+  stats {nodes: int, edges: int}
+  checksum string
+}
+
+function canvas(CanvasInput) -> CanvasOutput {
+  @description("Generate Obsidian Canvas for knowledge visualization")
+  @format("json_canvas_1.0")
+  @async(true)
+}
+```
+
+## Node Creation Example
+```python
+canvas(
+    nodes=[
+        {
+            "id": "doc1",
+            "type": "file",
+            "file": "docs/architecture.md",
+            "x": 0, "y": 0,
+            "width": 400, "height": 300,
+            "color": "3"
+        },
+        {
+            "id": "note1",
+            "type": "text",
+            "text": "# Key Points\n- Scalability",
+            "x": 500, "y": 0,
+            "width": 300, "height": 200
+        }
+    ],
+    edges=[
+        {
+            "id": "e1",
+            "fromNode": "doc1",
+            "toNode": "note1",
+            "label": "summarizes"
+        }
+    ],
+    title="Architecture Overview",
+    folder="visualizations"
+)
+```
+
+Colors: "1"-"6" or hex "#rrggbb" | Max recommended: 500 nodes""",
 )
 async def canvas(
     nodes: List[Dict[str, Any]],

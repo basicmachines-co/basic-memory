@@ -12,7 +12,62 @@ from basic_memory.mcp.tools.utils import call_get
 
 
 @mcp.tool(
-    description="List directory contents with filtering and depth control.",
+    description="""Lists directory contents with filtering and recursive traversal. Detects semantic notes automatically and provides file metadata for comprehensive browsing.
+
+```yaml
+node:
+  topic: list_directory - Structured Browsing
+  goal: Navigate file system with semantic awareness
+  insight: Distinguishes notes from regular files
+  context:
+    features: [recursive, glob_filtering, metadata]
+    note_detection: Checks for semantic content
+    performance: Linear with depth and file count
+```
+
+```baml
+class ListDirectoryInput {
+  dir_name string @default("/") @description("Directory path")
+  project string?
+  depth int @default(1) @range(1, 5)
+  file_name_glob string? @pattern("*.md") @description("Filter pattern")
+}
+
+class FileEntry {
+  name string
+  path string
+  type ("file" | "directory")
+  size int @when(type="file")
+  modified datetime
+  is_note boolean @description("Contains semantic elements")
+}
+
+class ListDirectoryOutput {
+  entries FileEntry[]
+  total_files int
+  total_dirs int
+  base_path string
+}
+
+function list_directory(ListDirectoryInput) -> ListDirectoryOutput {
+  @description("Browse with semantic note detection")
+  @async(true)
+}
+```
+
+## Browse Patterns
+```python
+# List markdown only
+files = list_directory("docs", file_name_glob="*.md")
+
+# Deep scan with filter
+files = list_directory("/", depth=3, file_name_glob="README*")
+
+# Browse specific folder
+files = list_directory("specs/v2")
+```
+
+Performance: Depth 1: 20ms, Depth 2: 150ms, Depth 3+: May be slower""",
 )
 async def list_directory(
     dir_name: str = "/",

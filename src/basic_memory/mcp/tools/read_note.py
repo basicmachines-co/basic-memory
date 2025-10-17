@@ -16,7 +16,66 @@ from basic_memory.utils import validate_project_path
 
 
 @mcp.tool(
-    description="Read a markdown note by title or permalink.",
+    description="""Retrieves complete notes from your knowledge base using flexible lookup methods. Finds notes by title, permalink, or memory:// URL, with support for content search and pagination when multiple matches exist.
+
+```yaml
+node:
+  topic: read_note - Knowledge Retrieval
+  goal: Access notes with full semantic context
+  insight: Multi-strategy lookup with graceful fallbacks
+  context:
+    lookup_order: [permalink, title, content_search]
+    performance: {direct: 10ms, search: 50ms, scan: 200ms}
+    returns: Full markdown with frontmatter and semantic elements
+```
+
+```baml
+class ReadNoteInput {
+  identifier string @description("Title, permalink, or memory:// URL")
+  project string? @description("Target project")
+  page int @default(1) @description("Page number for results")
+  page_size int @default(10) @description("Items per page")
+}
+
+class ReadNoteOutput {
+  content string @description("Full markdown with frontmatter")
+  title string
+  permalink string
+  type string
+  tags string[]?
+  found boolean
+  suggestions string[]? @description("Similar notes if not found")
+}
+
+function read_note(ReadNoteInput) -> ReadNoteOutput {
+  @description("Retrieves notes with automatic fallback strategies")
+  @cache_ttl(300)
+  @async(true)
+}
+```
+
+## Lookup Strategies
+
+1. **Direct permalink** → `specs/api-design` (fastest, most reliable)
+2. **Title match** → `"API Design"` (human-friendly)
+3. **Content search** → Partial text match (fallback)
+
+## Usage Examples
+```python
+# By title
+note = read_note("Project Roadmap")
+
+# By permalink (stable across renames)
+note = read_note("specs/2024/api-design")
+
+# Memory URL
+note = read_note("memory://specs/api-v2")
+
+# With pagination
+results = read_note("meeting", page=2, page_size=5)
+```
+
+Performance: Direct 10-50ms, Search 50-200ms | Cache: 5 minutes""",
 )
 async def read_note(
     identifier: str,

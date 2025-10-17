@@ -20,21 +20,79 @@ type StringOrInt = str | int
 
 
 @mcp.tool(
-    description="""Build context from a memory:// URI to continue conversations naturally.
+    description="""Navigates your knowledge graph by following relations from a starting point. Builds comprehensive context by traversing semantic connections, perfect for continuing conversations or exploring related concepts.
 
-    Use this to follow up on previous discussions or explore related topics.
+```yaml
+node:
+  topic: build_context - Graph Traversal
+  goal: Navigate knowledge graph via relations
+  insight: Memory URLs enable conversation continuity
+  context:
+    traversal: Breadth-first with depth control
+    patterns: ["memory://exact", "memory://folder/*", "memory://*"]
+    performance: O(n^depth) complexity
+    use_case: Continue discussions with full context
+```
 
-    Memory URL Format:
-    - Use paths like "folder/note" or "memory://folder/note"
-    - Pattern matching: "folder/*" matches all notes in folder
-    - Valid characters: letters, numbers, hyphens, underscores, forward slashes
-    - Avoid: double slashes (//), angle brackets (<>), quotes, pipes (|)
-    - Examples: "specs/search", "projects/basic-memory", "notes/*"
+```baml
+class BuildContextInput {
+  url string @pattern("memory://.*") @description("Memory URI pattern")
+  project string?
+  depth int @default(1) @range(1, 5) @description("Relation traversal depth")
+  timeframe string @default("7d") @description("Period like '2 days ago'")
+  types string[]? @description("Filter entity types")
+  page int @default(1)
+  page_size int @default(10)
+  max_related int @default(10)
+}
 
-    Timeframes support natural language like:
-    - "2 days ago", "last week", "today", "3 months ago"
-    - Or standard formats like "7d", "24h"
-    """,
+class ContextResult {
+  primary_results Note[] @description("Direct matches")
+  related_results Note[] @description("Connected via relations")
+  metadata ContextMetadata
+}
+
+class ContextMetadata {
+  depth int
+  timeframe string
+  primary_count int
+  related_count int
+  generated_at datetime
+}
+
+function build_context(BuildContextInput) -> ContextResult {
+  @description("Traverse knowledge graph from memory:// starting points")
+  @complexity("O(n^depth)")
+  @async(true)
+}
+```
+
+## Memory Patterns
+
+- `memory://specs/search` - Exact note
+- `memory://specs/*` - All in folder
+- `memory://*` - Everything
+
+## Traversal Examples
+```python
+# Continue discussion
+context = build_context("memory://discussions/api-design")
+
+# Deep exploration (2 hops)
+context = build_context(
+    "memory://architecture/microservices",
+    depth=2,
+    timeframe="30d"
+)
+
+# Filtered traversal
+context = build_context(
+    "memory://specs/*",
+    types=["entity", "observation"]
+)
+```
+
+Performance: Depth 1: 100ms, Depth 2: 500ms, Depth 3+: May be slow""",
 )
 async def build_context(
     url: MemoryUrl,

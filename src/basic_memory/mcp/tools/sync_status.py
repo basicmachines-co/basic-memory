@@ -65,21 +65,57 @@ def _get_all_projects_status() -> list[str]:
 
 
 @mcp.tool(
-    description="""Check the status of file synchronization and background operations.
-    
-    Use this tool to:
-    - Check if file sync is in progress or completed
-    - Get detailed sync progress information  
-    - Understand if your files are fully indexed
-    - Get specific error details if sync operations failed
-    - Monitor initial project setup and legacy migration
-    
-    This covers all sync operations including:
-    - Initial project setup and file indexing
-    - Legacy project migration to unified database
-    - Ongoing file monitoring and updates
-    - Background processing of knowledge graphs
-    """,
+    description="""Monitors file synchronization and background operations. Essential for understanding system state during indexing, migrations, and sync operations.
+
+```yaml
+node:
+  topic: sync_status - Operation Monitor
+  goal: Track system synchronization state
+  insight: Real-time visibility into background ops
+  context:
+    states: [idle, indexing, migrating, syncing, error]
+    monitoring: Progress tracking with estimates
+    use_case: Pre-operation checks, debugging
+```
+
+```baml
+class SyncStatusInput {
+  project string?
+  verbose boolean @default(false)
+}
+
+class SyncStatusOutput {
+  state ("idle" | "indexing" | "migrating" | "syncing" | "error")
+  progress float? @range(0, 100)
+  message string
+  files_processed int?
+  files_total int?
+  errors string[]?
+  estimated_time string? @format("duration")
+}
+
+function sync_status(SyncStatusInput) -> SyncStatusOutput {
+  @description("Monitor synchronization and background operations")
+  @real_time(true)
+  @async(true)
+}
+```
+
+## Monitoring Patterns
+```python
+# Basic check
+status = sync_status()
+if status["state"] == "idle":
+    print("System ready")
+
+# Detailed monitoring
+status = sync_status(verbose=True)
+if status["state"] == "indexing":
+    print(f"Progress: {status['progress']}%")
+    print(f"Files: {status['files_processed']}/{status['files_total']}")
+```
+
+Performance: Check 10-30ms | Non-blocking | Real-time updates""",
 )
 async def sync_status(project: Optional[str] = None, context: Context | None = None) -> str:
     """Get current sync status and system readiness information.

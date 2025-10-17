@@ -338,7 +338,53 @@ delete_note("{identifier}")
 
 
 @mcp.tool(
-    description="Move a note to a new location, updating database and maintaining links.",
+    description="""Relocates notes while maintaining knowledge graph integrity. Updates all incoming relations automatically and creates redirects from the old location.
+
+```yaml
+node:
+  topic: move_note - Graph-Aware Relocation
+  goal: Move notes with automatic relation updates
+  insight: Maintains graph connectivity during moves
+  context:
+    features: [relation_updates, permalink_generation, redirects]
+    atomicity: All updates in single transaction
+    performance: Linear with relation count
+```
+
+```baml
+class MoveNoteInput {
+  identifier string @description("Current location")
+  destination_path string @description("New location")
+  project string?
+  update_relations boolean @default(true)
+}
+
+class MoveNoteOutput {
+  success boolean
+  old_path string
+  new_path string
+  new_permalink string
+  relations_updated int
+  redirects_created boolean
+}
+
+function move_note(MoveNoteInput) -> MoveNoteOutput {
+  @description("Relocate with automatic relation updates")
+  @atomic(true)
+  @async(true)
+}
+```
+
+## Move Examples
+```python
+# With automatic updates
+move_note("drafts/api-design", "specs/v2/api-design")
+
+# Without relation updates (faster but breaks links)
+move_note("temp/notes", "archive/old", update_relations=False)
+```
+
+Performance: Base 50ms + 10ms per relation | Atomic transaction""",
 )
 async def move_note(
     identifier: str,

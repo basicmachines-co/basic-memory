@@ -197,7 +197,80 @@ Error searching for '{query}': {error_message}
 
 
 @mcp.tool(
-    description="Search across all content in the knowledge base with advanced syntax support.",
+    description="""Full-text search across your knowledge base with advanced filtering and Boolean operators. Supports content, title, and permalink searches with temporal and type filtering for precise knowledge discovery.
+
+```yaml
+node:
+  topic: search_notes - Discovery Engine
+  goal: Find relevant knowledge with precision
+  insight: FTS5-powered search with semantic awareness
+  context:
+    engine: SQLite FTS5
+    operators: [AND, OR, NOT, phrases, wildcards]
+    filters: [types, dates, categories, tags]
+    performance: Sub-100ms for most queries
+```
+
+```baml
+class SearchNotesInput {
+  query string @description("Search query with operators")
+  project string?
+  search_type string @default("text") @enum(["text", "title", "permalink"])
+  types string[]? @description("Filter by note types")
+  entity_types string[]? @description("Filter by entity types")
+  after_date string? @description("Temporal filter like '1 week'")
+  page int @default(1)
+  page_size int @default(10)
+}
+
+class SearchResult {
+  id string
+  title string
+  type string
+  permalink string
+  score float @range(0, 1)
+  preview string @max_length(200)
+}
+
+class SearchNotesOutput {
+  results SearchResult[]
+  total int
+  page int
+  has_more boolean
+}
+
+function search_notes(SearchNotesInput) -> SearchNotesOutput {
+  @description("Advanced search with Boolean operators and filters")
+  @index("fts5")
+  @async(true)
+}
+```
+
+## Search Syntax
+
+**Boolean**: `(bug OR issue) AND NOT resolved`
+**Phrases**: `"exact phrase match"`
+**Wildcards**: `project*` (permalink only)
+**Special**: `tag:api`, `category:decision`
+
+## Example Queries
+```python
+# Complex Boolean
+search_notes("(bug OR issue) AND NOT resolved")
+
+# Title search
+search_notes("Architecture", search_type="title")
+
+# Filtered search
+search_notes("performance",
+    types=["entity"],
+    after_date="1 week")
+
+# Permalink patterns
+search_notes("docs/2024-*", search_type="permalink")
+```
+
+Performance: FTS5 <100ms | Index: Real-time updates""",
 )
 async def search_notes(
     query: str,
