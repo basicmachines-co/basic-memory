@@ -1,5 +1,6 @@
 """Utilities for file operations."""
 
+import asyncio
 import hashlib
 from pathlib import Path
 import re
@@ -10,6 +11,27 @@ import frontmatter
 from loguru import logger
 
 from basic_memory.utils import FilePath
+
+
+def get_streaming_checksum_threshold() -> int:
+    """Get the streaming checksum threshold from config.
+
+    Returns threshold in bytes. Defaults to 1MB if config is unavailable.
+    """
+    try:
+        from basic_memory.config import ConfigManager
+
+        config = ConfigManager().config
+        return config.streaming_checksum_threshold_mb * 1024 * 1024
+    except Exception:
+        # Default to 1MB if config unavailable (e.g., during tests)
+        return 1024 * 1024
+
+
+# Default threshold for streaming vs in-memory checksum computation (1MB)
+STREAMING_CHECKSUM_THRESHOLD = 1024 * 1024  # 1MB in bytes
+# Chunk size for streaming reads (64KB - optimal for most file systems)
+STREAMING_CHUNK_SIZE = 64 * 1024  # 64KB
 
 
 class FileError(Exception):
@@ -50,6 +72,42 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
     except Exception as e:  # pragma: no cover
         logger.error(f"Failed to compute checksum: {e}")
         raise FileError(f"Failed to compute checksum: {e}")
+
+
+async def compute_checksum_streaming(file_path: Path, chunk_size: int = STREAMING_CHUNK_SIZE) -> str:
+    """
+    Compute SHA-256 checksum using streaming for large files.
+
+    This function reads the file in chunks to avoid loading the entire file into memory,
+    which is critical for large binary files (PDFs, images, videos).
+
+    Args:
+        file_path: Path to file to hash
+        chunk_size: Size of chunks to read (default 64KB)
+
+    Returns:
+        SHA-256 hex digest
+
+    Raises:
+        FileError: If checksum computation fails
+    """
+    try:
+        hasher = hashlib.sha256()
+
+        def read_chunks():
+            """Read file in chunks synchronously (for thread pool execution)."""
+            with open(file_path, "rb") as f:
+                while chunk := f.read(chunk_size):
+                    hasher.update(chunk)
+
+        # Run blocking I/O in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, read_chunks)
+
+        return hasher.hexdigest()
+    except Exception as e:  # pragma: no cover
+        logger.error(f"Failed to compute streaming checksum for {file_path}: {e}")
+        raise FileError(f"Failed to compute streaming checksum: {e}")
 
 
 async def ensure_directory(path: FilePath) -> None:

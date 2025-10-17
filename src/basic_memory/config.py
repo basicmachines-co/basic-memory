@@ -94,6 +94,12 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    streaming_checksum_threshold_mb: int = Field(
+        default=1,
+        description="File size threshold in MB for using streaming checksum computation. Files larger than this will be processed in chunks to reduce memory usage. Default: 1MB",
+        gt=0,
+    )
+
     kebab_filenames: bool = Field(
         default=False,
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",

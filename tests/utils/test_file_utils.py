@@ -11,6 +11,7 @@ from basic_memory.file_utils import (
     FileWriteError,
     ParseError,
     compute_checksum,
+    compute_checksum_streaming,
     ensure_directory,
     has_frontmatter,
     parse_frontmatter,
@@ -19,6 +20,7 @@ from basic_memory.file_utils import (
     sanitize_for_folder,
     update_frontmatter,
     write_file_atomic,
+    STREAMING_CHECKSUM_THRESHOLD,
 )
 
 
@@ -327,3 +329,97 @@ def test_sanitize_for_filename_removes_invalid_characters():
 )
 def test_sanitize_for_folder_edge_cases(input_folder, expected):
     assert sanitize_for_folder(input_folder) == expected
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_small_file(tmp_path: Path):
+    """Test streaming checksum computation on a small file."""
+    test_file = tmp_path / "small.txt"
+    content = "test content for streaming"
+    test_file.write_text(content, encoding="utf-8")
+
+    # Compute checksum using streaming
+    streaming_checksum = await compute_checksum_streaming(test_file)
+
+    # Compute checksum using regular method for comparison
+    regular_checksum = await compute_checksum(content)
+
+    # Both methods should produce the same checksum
+    assert streaming_checksum == regular_checksum
+    assert len(streaming_checksum) == 64  # SHA-256 produces 64 char hex string
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_large_file(tmp_path: Path):
+    """Test streaming checksum computation on a large file (>1MB)."""
+    test_file = tmp_path / "large.bin"
+
+    # Create a file larger than STREAMING_CHECKSUM_THRESHOLD (1MB)
+    # Use 2MB to ensure we're testing the streaming path
+    large_content = b"x" * (2 * 1024 * 1024)  # 2MB of 'x' bytes
+    test_file.write_bytes(large_content)
+
+    # Compute checksum using streaming
+    streaming_checksum = await compute_checksum_streaming(test_file)
+
+    # Compute checksum using regular method for comparison
+    regular_checksum = await compute_checksum(large_content)
+
+    # Both methods should produce the same checksum
+    assert streaming_checksum == regular_checksum
+    assert len(streaming_checksum) == 64
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_binary_file(tmp_path: Path):
+    """Test streaming checksum on binary file content."""
+    test_file = tmp_path / "binary.bin"
+
+    # Create binary content with various byte values
+    binary_content = bytes(range(256)) * 1000  # ~256KB of binary data
+    test_file.write_bytes(binary_content)
+
+    # Compute checksum using streaming
+    streaming_checksum = await compute_checksum_streaming(test_file)
+
+    # Compute checksum using regular method for comparison
+    regular_checksum = await compute_checksum(binary_content)
+
+    # Both methods should produce the same checksum
+    assert streaming_checksum == regular_checksum
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_empty_file(tmp_path: Path):
+    """Test streaming checksum on an empty file."""
+    test_file = tmp_path / "empty.txt"
+    test_file.write_text("", encoding="utf-8")
+
+    # Compute checksum using streaming
+    streaming_checksum = await compute_checksum_streaming(test_file)
+
+    # Compute checksum using regular method for comparison
+    regular_checksum = await compute_checksum("")
+
+    # Both methods should produce the same checksum
+    assert streaming_checksum == regular_checksum
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_custom_chunk_size(tmp_path: Path):
+    """Test streaming checksum with custom chunk size."""
+    test_file = tmp_path / "custom.txt"
+    content = "test content " * 10000  # ~130KB
+    test_file.write_text(content, encoding="utf-8")
+
+    # Test with various chunk sizes
+    chunk_sizes = [1024, 4096, 65536]  # 1KB, 4KB, 64KB
+
+    checksums = []
+    for chunk_size in chunk_sizes:
+        checksum = await compute_checksum_streaming(test_file, chunk_size=chunk_size)
+        checksums.append(checksum)
+
+    # All chunk sizes should produce the same checksum
+    assert len(set(checksums)) == 1
+    assert checksums[0] == await compute_checksum(content)

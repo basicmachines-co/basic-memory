@@ -16,7 +16,11 @@ from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.file_utils import has_frontmatter
+from basic_memory.file_utils import (
+    has_frontmatter,
+    compute_checksum_streaming,
+    get_streaming_checksum_threshold,
+)
 from basic_memory.ignore_utils import load_bmignore_patterns, should_ignore_path
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.models import Entity, Project
@@ -154,6 +158,8 @@ class SyncService:
         """Compute file checksum in thread pool to avoid blocking the event loop.
 
         Uses semaphore to limit concurrent file reads and prevent OOM on large projects.
+        For files larger than STREAMING_CHECKSUM_THRESHOLD (1MB), uses streaming
+        checksum computation to avoid loading entire file into memory.
         """
 
         def _sync_compute_checksum(path_str: str) -> str:
@@ -175,6 +181,27 @@ class SyncService:
             return hashlib.sha256(content_bytes).hexdigest()
 
         async with self._file_semaphore:
+            path_obj = self.file_service.base_path / path
+
+            # Check file size to decide between streaming and in-memory checksum
+            try:
+                file_size = path_obj.stat().st_size
+                threshold = get_streaming_checksum_threshold()
+
+                # For large files (>threshold), use streaming checksum to avoid memory issues
+                if file_size > threshold:
+                    logger.debug(
+                        f"Using streaming checksum for large file: path={path}, "
+                        f"size_mb={file_size / (1024 * 1024):.2f}, "
+                        f"threshold_mb={threshold / (1024 * 1024):.2f}"
+                    )
+                    return await compute_checksum_streaming(path_obj)
+
+            except Exception as e:
+                # If we can't get file size, fall back to original method
+                logger.warning(f"Failed to check file size for {path}: {e}, using non-streaming checksum")
+
+            # For smaller files, use the original in-memory method
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(self._thread_pool, _sync_compute_checksum, path)
 
