@@ -260,6 +260,37 @@ async def test_update_frontmatter_errors(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_update_frontmatter_handles_malformed_yaml(tmp_path: Path):
+    """Test that update_frontmatter handles malformed YAML gracefully (issue #378)."""
+    test_file = tmp_path / "test.md"
+
+    # Create file with malformed YAML frontmatter (colon in title breaks YAML)
+    content = """---
+title: KB: Something
+---
+
+# Test Content
+
+Some content here"""
+    test_file.write_text(content)
+
+    # Should handle gracefully and treat as having no frontmatter
+    updates = {"title": "Fixed Title", "type": "note"}
+    await update_frontmatter(test_file, updates)
+
+    # Verify file was updated successfully
+    updated = test_file.read_text(encoding="utf-8")
+    assert "title: Fixed Title" in updated
+    assert "type: note" in updated
+    assert "Test Content" in updated
+    assert "Some content here" in updated
+
+    # Verify new frontmatter is valid
+    fm = parse_frontmatter(updated)
+    assert fm == updates
+
+
+@pytest.mark.asyncio
 def test_sanitize_for_filename_removes_invalid_characters():
     # Test all invalid characters listed in the regex
     invalid_chars = '<>:"|?*'

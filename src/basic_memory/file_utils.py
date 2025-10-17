@@ -210,11 +210,20 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         # Read current content
         content = path_obj.read_text(encoding="utf-8")
 
-        # Parse current frontmatter
+        # Parse current frontmatter with proper error handling for malformed YAML
         current_fm = {}
         if has_frontmatter(content):
-            current_fm = parse_frontmatter(content)
-            content = remove_frontmatter(content)
+            try:
+                current_fm = parse_frontmatter(content)
+                content = remove_frontmatter(content)
+            except (ParseError, yaml.YAMLError) as e:
+                # Log warning and treat as plain markdown without frontmatter
+                logger.warning(
+                    f"Failed to parse YAML frontmatter in {path_obj}: {e}. "
+                    "Treating file as plain markdown without frontmatter."
+                )
+                # Keep full content, treat as having no frontmatter
+                current_fm = {}
 
         # Update frontmatter
         new_fm = {**current_fm, **updates}
@@ -229,11 +238,13 @@ async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
         return await compute_checksum(final_content)
 
     except Exception as e:  # pragma: no cover
-        logger.error(
-            "Failed to update frontmatter",
-            path=str(path) if isinstance(path, (str, Path)) else "<unknown>",
-            error=str(e),
-        )
+        # Only log real errors (not YAML parsing, which is handled above)
+        if not isinstance(e, (ParseError, yaml.YAMLError)):
+            logger.error(
+                "Failed to update frontmatter",
+                path=str(path) if isinstance(path, (str, Path)) else "<unknown>",
+                error=str(e),
+            )
         raise FileError(f"Failed to update frontmatter: {e}")
 
 
