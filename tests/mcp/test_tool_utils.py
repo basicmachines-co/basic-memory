@@ -1,6 +1,6 @@
 """Tests for MCP tool utilities."""
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient, HTTPStatusError

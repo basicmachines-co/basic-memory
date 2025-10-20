@@ -510,5 +510,3 @@ async def call_delete(
 
     except HTTPStatusError as e:
         raise ToolError(error_message) from e
-
-

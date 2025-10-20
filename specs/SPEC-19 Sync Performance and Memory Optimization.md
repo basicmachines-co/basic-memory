@@ -437,7 +437,13 @@ ALTER TABLE entity ADD COLUMN size INTEGER;
   - [x] Removed `SyncService._compute_checksum_async()` wrapper method
   - [x] Inlined all 7 checksum calls to use `file_service.compute_checksum()` directly
   - [x] All file I/O operations now properly consolidated in FileService with non-blocking I/O
-- [ ] Keep sync status service (used by MCP tools)
+- [x] Removed sync_status_service completely (unnecessary complexity and state tracking)
+  - [x] Removed `sync_status_service.py` and `sync_status` MCP tool
+  - [x] Removed all `sync_status_tracker` calls from `sync_service.py`
+  - [x] Removed migration status checks from MCP tools (`write_note`, `read_note`, `build_context`)
+  - [x] Removed `check_migration_status()` and `wait_for_migration_or_return_status()` from `utils.py`
+  - [x] Removed all related tests (4 test files deleted)
+  - [x] All 1184 tests passing
 
 **Phase 1 Implementation Summary:**
 
@@ -484,6 +490,13 @@ Phase 1 is now complete with all core fixes implemented and tested:
 - I/O efficiency: True async with aiofiles (no thread pool blocking)
 - Network efficiency: 50% fewer calls on TigrisFS via scandir caching
 - Architecture: Clean separation of concerns (FileService owns all file I/O)
+- Reduced complexity: Removed unnecessary sync_status_service state tracking
+
+**Observability**:
+- [x] Added Logfire instrumentation to `sync_file()` and `sync_markdown_file()`
+- [x] Logfire disabled by default via `ignore_no_config = true` in pyproject.toml
+- [x] No telemetry in FOSS version unless explicitly configured
+- [x] Cloud deployment can enable Logfire for performance monitoring
 
 **Next Steps**: Phase 2 cloud-specific fixes and Phase 3 production measurement.
 
