@@ -1225,7 +1225,7 @@ async def test_synchronize_projects_removes_db_only_projects(project_service: Pr
                 "permalink": test_project_name.lower().replace(" ", "-"),
                 "is_active": True,
             }
-            created_project = await project_service.repository.create(project_data)
+            await project_service.repository.create(project_data)
 
             # Verify it exists in DB but not in config
             db_project = await project_service.repository.get_by_name(test_project_name)

@@ -766,7 +766,9 @@ async def test_get_all_file_paths_performance(entity_repository: EntityRepositor
 
 
 @pytest.mark.asyncio
-async def test_get_all_file_paths_project_isolation(entity_repository: EntityRepository, session_maker):
+async def test_get_all_file_paths_project_isolation(
+    entity_repository: EntityRepository, session_maker
+):
     """Test that get_all_file_paths only returns paths from the current project."""
     # Create entities in the repository's project
     async with db.scoped_session(session_maker) as session:

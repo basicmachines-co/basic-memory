@@ -239,11 +239,14 @@ class WatchService:
         # Check if project still exists in configuration before processing
         # This prevents deleted projects from being recreated by background sync
         from basic_memory.config import ConfigManager
+
         config_manager = ConfigManager()
-        if project.name not in config_manager.projects and project.permalink not in config_manager.projects:
+        if (
+            project.name not in config_manager.projects
+            and project.permalink not in config_manager.projects
+        ):
             logger.info(
-                f"Skipping sync for deleted project: {project.name}, "
-                f"change_count={len(changes)}"
+                f"Skipping sync for deleted project: {project.name}, change_count={len(changes)}"
             )
             return
 

@@ -475,7 +475,7 @@ async def test_sync_empty_directories(sync_service: SyncService, project_config:
     await sync_service.sync(project_config.home)
 
     # Should not raise exceptions for empty dirs
-    assert (project_config.home).exists()
+    assert project_config.home.exists()
 
 
 @pytest.mark.skip("flaky on Windows due to filesystem timing precision")
@@ -568,7 +568,6 @@ Testing permalink generation.
 async def test_handle_entity_deletion(
     test_graph,
     sync_service: SyncService,
-    project_config: ProjectConfig,
     entity_repository: EntityRepository,
     search_service: SearchService,
 ):
@@ -772,7 +771,6 @@ async def test_sync_null_checksum_cleanup(
     sync_service: SyncService,
     project_config: ProjectConfig,
     entity_service: EntityService,
-    app_config,
 ):
     """Test handling of entities with null checksums from incomplete syncs."""
     # Create entity with null checksum (simulating incomplete sync)
@@ -987,7 +985,6 @@ async def test_sync_permalink_updated_on_move(
 ):
     """Test that we update a permalink on a file move if set in config ."""
     project_dir = project_config.home
-    sync_service.project_config = project_config
 
     # Create initial file
     content = dedent(
@@ -1211,7 +1208,7 @@ This is a test file for race condition handling.
         call_count += 1
         if call_count == 1:
             # Simulate race condition - another process created the entity
-            raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)
+            raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)  # pyright: ignore [reportArgumentType]
         else:
             return await original_add(*args, **kwargs)
 
@@ -1293,7 +1290,7 @@ This is a test file for integrity error handling.
     # Mock the entity_repository.add to raise a different IntegrityError (not file_path constraint)
     async def mock_add(*args, **kwargs):
         # Simulate a different constraint violation
-        raise IntegrityError("UNIQUE constraint failed: entity.some_other_field", None, None)
+        raise IntegrityError("UNIQUE constraint failed: entity.some_other_field", None, None)  # pyright: ignore [reportArgumentType]
 
     with patch.object(sync_service.entity_repository, "add", side_effect=mock_add):
         # Should re-raise the IntegrityError since it's not a file_path constraint
@@ -1326,7 +1323,7 @@ This is a test file for entity not found after constraint violation.
 
     # Mock the entity_repository.add to raise IntegrityError
     async def mock_add(*args, **kwargs):
-        raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)
+        raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)  # pyright: ignore [reportArgumentType]
 
     # Mock get_by_file_path to return None (entity not found)
     async def mock_get_by_file_path(file_path):
@@ -1367,7 +1364,7 @@ This is a test file for update failure after constraint violation.
 
     # Mock the entity_repository.add to raise IntegrityError
     async def mock_add(*args, **kwargs):
-        raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)
+        raise IntegrityError("UNIQUE constraint failed: entity.file_path", None, None)  # pyright: ignore [reportArgumentType]
 
     # Mock get_by_file_path to return an existing entity
     async def mock_get_by_file_path(file_path):
@@ -1622,7 +1619,7 @@ async def test_circuit_breaker_handles_checksum_computation_failure(
         raise ValueError("Sync failure")
 
     # Mock checksum computation to fail only during _record_failure (not during scan)
-    original_compute_checksum = sync_service._compute_checksum_async
+    original_compute_checksum = sync_service.file_service.compute_checksum
     call_count = 0
 
     async def mock_compute_checksum(path):
@@ -1637,8 +1634,8 @@ async def test_circuit_breaker_handles_checksum_computation_failure(
     with (
         patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file),
         patch.object(
-            sync_service,
-            "_compute_checksum_async",
+            sync_service.file_service,
+            "compute_checksum",
             side_effect=mock_compute_checksum,
         ),
     ):
@@ -1729,9 +1726,7 @@ async def test_sync_fatal_error_terminates_sync_immediately(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_streaming_basic(
-    sync_service: SyncService, project_config: ProjectConfig
-):
+async def test_scan_directory_basic(sync_service: SyncService, project_config: ProjectConfig):
     """Test basic streaming directory scan functionality."""
     project_dir = project_config.home
 
@@ -1743,7 +1738,7 @@ async def test_scan_directory_streaming_basic(
 
     # Collect results from streaming iterator
     results = []
-    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+    async for file_path, stat_info in sync_service.scan_directory(project_dir):
         rel_path = Path(file_path).relative_to(project_dir).as_posix()
         results.append((rel_path, stat_info))
 
@@ -1763,7 +1758,7 @@ async def test_scan_directory_streaming_basic(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_streaming_respects_ignore_patterns(
+async def test_scan_directory_respects_ignore_patterns(
     sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test that streaming scan respects .gitignore patterns."""
@@ -1785,7 +1780,7 @@ async def test_scan_directory_streaming_respects_ignore_patterns(
 
     # Collect results
     results = []
-    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+    async for file_path, stat_info in sync_service.scan_directory(project_dir):
         rel_path = Path(file_path).relative_to(project_dir).as_posix()
         results.append(rel_path)
 
@@ -1798,7 +1793,7 @@ async def test_scan_directory_streaming_respects_ignore_patterns(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_streaming_cached_stat_info(
+async def test_scan_directory_cached_stat_info(
     sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test that streaming scan provides cached stat info (no redundant stat calls)."""
@@ -1809,7 +1804,7 @@ async def test_scan_directory_streaming_cached_stat_info(
     await create_test_file(test_file, "test content")
 
     # Get stat info from streaming scan
-    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+    async for file_path, stat_info in sync_service.scan_directory(project_dir):
         if Path(file_path).name == "test.md":
             # Get independent stat for comparison
             independent_stat = test_file.stat()
@@ -1822,7 +1817,7 @@ async def test_scan_directory_streaming_cached_stat_info(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_streaming_empty_directory(
+async def test_scan_directory_empty_directory(
     sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test streaming scan on empty directory (ignoring hidden files)."""
@@ -1834,7 +1829,7 @@ async def test_scan_directory_streaming_empty_directory(
     # Don't create any user files - just scan empty directory
     # Scan should yield no results (hidden files are ignored by default)
     results = []
-    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+    async for file_path, stat_info in sync_service.scan_directory(project_dir):
         results.append(file_path)
 
     # Should find no files (config dirs are hidden and ignored)
@@ -1842,7 +1837,7 @@ async def test_scan_directory_streaming_empty_directory(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_streaming_handles_permission_error(
+async def test_scan_directory_handles_permission_error(
     sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test that streaming scan handles permission errors gracefully."""
@@ -1868,7 +1863,7 @@ async def test_scan_directory_streaming_handles_permission_error(
     try:
         # Scan should handle permission error and continue
         results = []
-        async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+        async for file_path, stat_info in sync_service.scan_directory(project_dir):
             rel_path = Path(file_path).relative_to(project_dir).as_posix()
             results.append(rel_path)
 
@@ -1882,7 +1877,7 @@ async def test_scan_directory_streaming_handles_permission_error(
 
 
 @pytest.mark.asyncio
-async def test_scan_directory_streaming_non_markdown_files(
+async def test_scan_directory_non_markdown_files(
     sync_service: SyncService, project_config: ProjectConfig
 ):
     """Test that streaming scan finds all file types, not just markdown."""
@@ -1896,7 +1891,7 @@ async def test_scan_directory_streaming_non_markdown_files(
 
     # Collect results
     results = []
-    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+    async for file_path, stat_info in sync_service.scan_directory(project_dir):
         rel_path = Path(file_path).relative_to(project_dir).as_posix()
         results.append(rel_path)
 
@@ -1908,125 +1903,23 @@ async def test_scan_directory_streaming_non_markdown_files(
 
 
 @pytest.mark.asyncio
-async def test_compute_checksum_streaming_equivalence(
+async def test_file_service_checksum_correctness(
     sync_service: SyncService, project_config: ProjectConfig
 ):
-    """Test that streaming and non-streaming checksums produce identical results."""
-    project_dir = project_config.home
-
-    # Create test file with known content
-    test_content = "Test content for checksum validation" * 100  # Multi-line content
-    test_file = project_dir / "checksum_test.md"
-    await create_test_file(test_file, test_content)
-
-    rel_path = test_file.relative_to(project_dir).as_posix()
-
-    # Compute checksum using streaming method
-    streaming_checksum = await sync_service._compute_checksum_streaming(rel_path)
-
-    # Compute checksum using the unified method (which will use non-streaming for small files)
-    unified_checksum = await sync_service._compute_checksum_async(rel_path)
-
-    # Both should produce identical results
-    assert streaming_checksum == unified_checksum
-    assert len(streaming_checksum) == 64  # SHA256 hex digest length
-
-
-@pytest.mark.asyncio
-async def test_compute_checksum_large_file_uses_streaming(
-    sync_service: SyncService, project_config: ProjectConfig
-):
-    """Test that files >1MB automatically use streaming checksum computation."""
-    from unittest.mock import patch
+    """Test that FileService computes correct checksums."""
+    import hashlib
 
     project_dir = project_config.home
 
-    # Create a file larger than 1MB threshold
-    large_content = "x" * (1_048_577)  # Just over 1MB
-    large_file = project_dir / "large_file.pdf"
-    large_file.write_bytes(large_content.encode())
-
-    rel_path = large_file.relative_to(project_dir).as_posix()
-
-    # Track whether streaming method was called
-    streaming_called = False
-    original_streaming = sync_service._compute_checksum_streaming
-
-    async def mock_streaming(*args, **kwargs):
-        nonlocal streaming_called
-        streaming_called = True
-        return await original_streaming(*args, **kwargs)
-
-    with patch.object(
-        sync_service, "_compute_checksum_streaming", side_effect=mock_streaming
-    ):
-        checksum = await sync_service._compute_checksum_async(rel_path)
-
-    # Verify streaming was used
-    assert streaming_called, "Large file should use streaming checksum"
-    assert checksum is not None
-    assert len(checksum) == 64
-
-
-@pytest.mark.asyncio
-async def test_compute_checksum_small_file_uses_fast_path(
-    sync_service: SyncService, project_config: ProjectConfig
-):
-    """Test that files <1MB use fast non-streaming path."""
-    from unittest.mock import patch
-
-    project_dir = project_config.home
-
-    # Create a small file (under 1MB)
-    small_content = "Small file content"
-    small_file = project_dir / "small_file.md"
+    # Test small markdown file
+    small_content = "Test content for checksum validation" * 10
+    small_file = project_dir / "small.md"
     await create_test_file(small_file, small_content)
 
     rel_path = small_file.relative_to(project_dir).as_posix()
+    checksum = await sync_service.file_service.compute_checksum(rel_path)
 
-    # Track whether streaming method was called
-    streaming_called = False
-    original_streaming = sync_service._compute_checksum_streaming
-
-    async def mock_streaming(*args, **kwargs):
-        nonlocal streaming_called
-        streaming_called = True
-        return await original_streaming(*args, **kwargs)
-
-    with patch.object(
-        sync_service, "_compute_checksum_streaming", side_effect=mock_streaming
-    ):
-        checksum = await sync_service._compute_checksum_async(rel_path)
-
-    # Verify streaming was NOT used for small file
-    assert not streaming_called, "Small file should use fast non-streaming path"
-    assert checksum is not None
-    assert len(checksum) == 64
-
-
-@pytest.mark.asyncio
-async def test_compute_checksum_streaming_binary_files(
-    sync_service: SyncService, project_config: ProjectConfig
-):
-    """Test that streaming checksum works correctly with binary files."""
-    project_dir = project_config.home
-
-    # Create a binary file with specific byte pattern
-    binary_content = bytes(range(256)) * 100  # 25.6KB of binary data
-    binary_file = project_dir / "binary_test.bin"
-    binary_file.write_bytes(binary_content)
-
-    rel_path = binary_file.relative_to(project_dir).as_posix()
-
-    # Compute checksum using streaming
-    streaming_checksum = await sync_service._compute_checksum_streaming(rel_path)
-
-    # Verify checksum is valid
-    assert streaming_checksum is not None
-    assert len(streaming_checksum) == 64
-
-    # Compute expected checksum manually for verification
-    import hashlib
-
-    expected_checksum = hashlib.sha256(binary_content).hexdigest()
-    assert streaming_checksum == expected_checksum
+    # Verify checksum is correct
+    expected = hashlib.sha256(small_content.encode("utf-8")).hexdigest()
+    assert checksum == expected
+    assert len(checksum) == 64  # SHA256 hex digest length

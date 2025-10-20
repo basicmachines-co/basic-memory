@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Union
 
+import aiofiles
 import yaml
 import frontmatter
 from loguru import logger
@@ -52,28 +53,11 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
         raise FileError(f"Failed to compute checksum: {e}")
 
 
-async def ensure_directory(path: FilePath) -> None:
-    """
-    Ensure directory exists, creating if necessary.
-
-    Args:
-        path: Directory path to ensure (Path or string)
-
-    Raises:
-        FileWriteError: If directory creation fails
-    """
-    try:
-        # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
-        path_obj.mkdir(parents=True, exist_ok=True)
-    except Exception as e:  # pragma: no cover
-        logger.error("Failed to create directory", path=str(path), error=str(e))
-        raise FileWriteError(f"Failed to create directory {path}: {e}")
-
-
 async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     Write file with atomic operation using temporary file.
+
+    Uses aiofiles for true async I/O (non-blocking).
 
     Args:
         path: Target file path (Path or string)
@@ -87,7 +71,11 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     temp_path = path_obj.with_suffix(".tmp")
 
     try:
-        temp_path.write_text(content, encoding="utf-8")
+        # Use aiofiles for non-blocking write
+        async with aiofiles.open(temp_path, mode="w", encoding="utf-8") as f:
+            await f.write(content)
+
+        # Atomic rename (this is fast, doesn't need async)
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
@@ -183,69 +171,6 @@ def remove_frontmatter(content: str) -> str:
         raise ParseError("Invalid frontmatter format")
 
     return parts[2].strip()
-
-
-async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
-    """Update frontmatter fields in a file while preserving all content.
-
-    Only modifies the frontmatter section, leaving all content untouched.
-    Creates frontmatter section if none exists.
-    Returns checksum of updated file.
-
-    Args:
-        path: Path to markdown file (Path or string)
-        updates: Dict of frontmatter fields to update
-
-    Returns:
-        Checksum of updated file
-
-    Raises:
-        FileError: If file operations fail
-        ParseError: If frontmatter parsing fails
-    """
-    try:
-        # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
-
-        # Read current content
-        content = path_obj.read_text(encoding="utf-8")
-
-        # Parse current frontmatter with proper error handling for malformed YAML
-        current_fm = {}
-        if has_frontmatter(content):
-            try:
-                current_fm = parse_frontmatter(content)
-                content = remove_frontmatter(content)
-            except (ParseError, yaml.YAMLError) as e:
-                # Log warning and treat as plain markdown without frontmatter
-                logger.warning(
-                    f"Failed to parse YAML frontmatter in {path_obj}: {e}. "
-                    "Treating file as plain markdown without frontmatter."
-                )
-                # Keep full content, treat as having no frontmatter
-                current_fm = {}
-
-        # Update frontmatter
-        new_fm = {**current_fm, **updates}
-
-        # Write new file with updated frontmatter
-        yaml_fm = yaml.dump(new_fm, sort_keys=False, allow_unicode=True)
-        final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
-
-        logger.debug("Updating frontmatter", path=str(path_obj), update_keys=list(updates.keys()))
-
-        await write_file_atomic(path_obj, final_content)
-        return await compute_checksum(final_content)
-
-    except Exception as e:  # pragma: no cover
-        # Only log real errors (not YAML parsing, which is handled above)
-        if not isinstance(e, (ParseError, yaml.YAMLError)):
-            logger.error(
-                "Failed to update frontmatter",
-                path=str(path) if isinstance(path, (str, Path)) else "<unknown>",
-                error=str(e),
-            )
-        raise FileError(f"Failed to update frontmatter: {e}")
 
 
 def dump_frontmatter(post: frontmatter.Post) -> str:

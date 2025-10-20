@@ -74,7 +74,7 @@ class Entity(Base):
     # checksum of file
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
-    # File metadata for sync optimization
+    # File metadata for sync
     # mtime: file modification timestamp (Unix epoch float) for change detection
     mtime: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     # size: file size in bytes for quick change detection

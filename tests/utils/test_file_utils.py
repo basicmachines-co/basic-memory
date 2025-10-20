@@ -11,13 +11,11 @@ from basic_memory.file_utils import (
     FileWriteError,
     ParseError,
     compute_checksum,
-    ensure_directory,
     has_frontmatter,
     parse_frontmatter,
     remove_frontmatter,
     sanitize_for_filename,
     sanitize_for_folder,
-    update_frontmatter,
     write_file_atomic,
 )
 
@@ -49,15 +47,6 @@ async def test_compute_checksum_error():
     with pytest.raises(FileError):
         # Try to hash an object that can't be encoded
         await compute_checksum(object())  # pyright: ignore [reportArgumentType]
-
-
-@pytest.mark.asyncio
-async def test_ensure_directory(tmp_path: Path):
-    """Test directory creation."""
-    test_dir = tmp_path / "test_dir"
-    await ensure_directory(test_dir)
-    assert test_dir.exists()
-    assert test_dir.is_dir()
 
 
 @pytest.mark.asyncio
@@ -186,108 +175,6 @@ title: Test
         remove_frontmatter("""---
 title: Test""")
     assert "Invalid frontmatter format" in str(exc.value)
-
-
-@pytest.mark.asyncio
-async def test_update_frontmatter(tmp_path: Path):
-    """Test updating frontmatter in a file."""
-    test_file = tmp_path / "test.md"
-
-    # Test 1: Add frontmatter to file without any
-    content = "# Test Content\n\nSome content here"
-    test_file.write_text(content)
-
-    updates = {"title": "Test", "type": "note"}
-    checksum = await update_frontmatter(test_file, updates)
-
-    # Verify content
-    updated = test_file.read_text(encoding="utf-8")
-    assert "title: Test" in updated
-    assert "type: note" in updated
-    assert "Test Content" in updated
-    assert "Some content here" in updated
-
-    # Verify structure
-    fm = parse_frontmatter(updated)
-    assert fm == updates
-    assert remove_frontmatter(updated).strip() == content
-
-    # Test 2: Update existing frontmatter
-    updates = {"type": "doc", "tags": ["test"]}
-    new_checksum = await update_frontmatter(test_file, updates)
-
-    # Verify checksum changed
-    assert new_checksum != checksum
-
-    # Verify content
-    updated = test_file.read_text(encoding="utf-8")
-    fm = parse_frontmatter(updated)
-    assert fm == {"title": "Test", "type": "doc", "tags": ["test"]}
-    assert "Test Content" in updated
-
-    # Test 3: Update with empty dict shouldn't change anything
-    checksum_before = await compute_checksum(test_file.read_text(encoding="utf-8"))
-    new_checksum = await update_frontmatter(test_file, {})
-    assert new_checksum == checksum_before
-
-    # Test 4: Handle multi-line content properly
-    content = """# Heading
-
-Some content
-
-## Section
-- Point 1
-- Point 2
-
-### Subsection
-More content here"""
-
-    test_file.write_text(content)
-    await update_frontmatter(test_file, {"title": "Test"})
-
-    updated = test_file.read_text(encoding="utf-8")
-    assert remove_frontmatter(updated).strip() == content
-
-
-@pytest.mark.asyncio
-async def test_update_frontmatter_errors(tmp_path: Path):
-    """Test error handling in update_frontmatter."""
-
-    # Test 1: Invalid file path
-    nonexistent = tmp_path / "nonexistent" / "test.md"
-    with pytest.raises(FileError):
-        await update_frontmatter(nonexistent, {"title": "Test"})
-
-
-@pytest.mark.asyncio
-async def test_update_frontmatter_handles_malformed_yaml(tmp_path: Path):
-    """Test that update_frontmatter handles malformed YAML gracefully (issue #378)."""
-    test_file = tmp_path / "test.md"
-
-    # Create file with malformed YAML frontmatter (colon in title breaks YAML)
-    content = """---
-title: KB: Something
----
-
-# Test Content
-
-Some content here"""
-    test_file.write_text(content)
-
-    # Should handle gracefully and treat as having no frontmatter
-    updates = {"title": "Fixed Title", "type": "note"}
-    await update_frontmatter(test_file, updates)
-
-    # Verify file was updated successfully
-    updated = test_file.read_text(encoding="utf-8")
-    assert "title: Fixed Title" in updated
-    assert "type: note" in updated
-    assert "Test Content" in updated
-    assert "Some content here" in updated
-
-    # Verify new frontmatter is valid
-    fm = parse_frontmatter(updated)
-    assert fm == updates
 
 
 @pytest.mark.asyncio
