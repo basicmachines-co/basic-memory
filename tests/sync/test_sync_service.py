@@ -1726,3 +1726,182 @@ async def test_sync_fatal_error_terminates_sync_immediately(
     # Verify that no other files were attempted (sync terminated on first error)
     # If circuit breaker was used, we'd see file1 in failures
     # If sync continued, we'd see attempts for file2 and file3
+
+
+@pytest.mark.asyncio
+async def test_scan_directory_streaming_basic(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test basic streaming directory scan functionality."""
+    project_dir = project_config.home
+
+    # Create test files in different directories
+    await create_test_file(project_dir / "root.md", "root content")
+    await create_test_file(project_dir / "subdir/file1.md", "file 1 content")
+    await create_test_file(project_dir / "subdir/file2.md", "file 2 content")
+    await create_test_file(project_dir / "subdir/nested/file3.md", "file 3 content")
+
+    # Collect results from streaming iterator
+    results = []
+    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+        rel_path = Path(file_path).relative_to(project_dir).as_posix()
+        results.append((rel_path, stat_info))
+
+    # Verify all files were found
+    file_paths = {rel_path for rel_path, _ in results}
+    assert "root.md" in file_paths
+    assert "subdir/file1.md" in file_paths
+    assert "subdir/file2.md" in file_paths
+    assert "subdir/nested/file3.md" in file_paths
+    assert len(file_paths) == 4
+
+    # Verify stat info is present for each file
+    for rel_path, stat_info in results:
+        assert stat_info is not None
+        assert stat_info.st_size > 0  # Files have content
+        assert stat_info.st_mtime > 0  # Have modification time
+
+
+@pytest.mark.asyncio
+async def test_scan_directory_streaming_respects_ignore_patterns(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that streaming scan respects .gitignore patterns."""
+    project_dir = project_config.home
+
+    # Create .gitignore file in project (will be used along with .bmignore)
+    (project_dir / ".gitignore").write_text("*.ignored\n.hidden/\n")
+
+    # Reload ignore patterns using project's .gitignore
+    from basic_memory.ignore_utils import load_gitignore_patterns
+
+    sync_service._ignore_patterns = load_gitignore_patterns(project_dir)
+
+    # Create test files - some should be ignored
+    await create_test_file(project_dir / "included.md", "included")
+    await create_test_file(project_dir / "excluded.ignored", "excluded")
+    await create_test_file(project_dir / ".hidden/secret.md", "secret")
+    await create_test_file(project_dir / "subdir/file.md", "file")
+
+    # Collect results
+    results = []
+    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+        rel_path = Path(file_path).relative_to(project_dir).as_posix()
+        results.append(rel_path)
+
+    # Verify ignored files were not returned
+    assert "included.md" in results
+    assert "subdir/file.md" in results
+    assert "excluded.ignored" not in results
+    assert ".hidden/secret.md" not in results
+    assert ".bmignore" not in results  # .bmignore itself should be ignored
+
+
+@pytest.mark.asyncio
+async def test_scan_directory_streaming_cached_stat_info(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that streaming scan provides cached stat info (no redundant stat calls)."""
+    project_dir = project_config.home
+
+    # Create test file
+    test_file = project_dir / "test.md"
+    await create_test_file(test_file, "test content")
+
+    # Get stat info from streaming scan
+    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+        if Path(file_path).name == "test.md":
+            # Get independent stat for comparison
+            independent_stat = test_file.stat()
+
+            # Verify stat info matches (cached stat should be accurate)
+            assert stat_info.st_size == independent_stat.st_size
+            assert abs(stat_info.st_mtime - independent_stat.st_mtime) < 1  # Allow 1s tolerance
+            assert abs(stat_info.st_ctime - independent_stat.st_ctime) < 1
+            break
+
+
+@pytest.mark.asyncio
+async def test_scan_directory_streaming_empty_directory(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test streaming scan on empty directory (ignoring hidden files)."""
+    project_dir = project_config.home
+
+    # Directory exists but has no user files (may have .basic-memory config dir)
+    assert project_dir.exists()
+
+    # Don't create any user files - just scan empty directory
+    # Scan should yield no results (hidden files are ignored by default)
+    results = []
+    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+        results.append(file_path)
+
+    # Should find no files (config dirs are hidden and ignored)
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_scan_directory_streaming_handles_permission_error(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that streaming scan handles permission errors gracefully."""
+    import sys
+
+    # Skip on Windows - permission handling is different
+    if sys.platform == "win32":
+        pytest.skip("Permission tests not reliable on Windows")
+
+    project_dir = project_config.home
+
+    # Create accessible file
+    await create_test_file(project_dir / "accessible.md", "accessible")
+
+    # Create restricted directory
+    restricted_dir = project_dir / "restricted"
+    restricted_dir.mkdir()
+    await create_test_file(restricted_dir / "secret.md", "secret")
+
+    # Remove read permission from restricted directory
+    restricted_dir.chmod(0o000)
+
+    try:
+        # Scan should handle permission error and continue
+        results = []
+        async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+            rel_path = Path(file_path).relative_to(project_dir).as_posix()
+            results.append(rel_path)
+
+        # Should have found accessible file but not restricted one
+        assert "accessible.md" in results
+        assert "restricted/secret.md" not in results
+
+    finally:
+        # Restore permissions for cleanup
+        restricted_dir.chmod(0o755)
+
+
+@pytest.mark.asyncio
+async def test_scan_directory_streaming_non_markdown_files(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that streaming scan finds all file types, not just markdown."""
+    project_dir = project_config.home
+
+    # Create various file types
+    await create_test_file(project_dir / "doc.md", "markdown")
+    (project_dir / "image.png").write_bytes(b"PNG content")
+    (project_dir / "data.json").write_text('{"key": "value"}')
+    (project_dir / "script.py").write_text("print('hello')")
+
+    # Collect results
+    results = []
+    async for file_path, stat_info in sync_service._scan_directory_streaming(project_dir):
+        rel_path = Path(file_path).relative_to(project_dir).as_posix()
+        results.append(rel_path)
+
+    # All files should be found
+    assert "doc.md" in results
+    assert "image.png" in results
+    assert "data.json" in results
+    assert "script.py" in results

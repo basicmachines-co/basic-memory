@@ -197,6 +197,21 @@ class EntityRepository(Repository[Entity]):
                     entity = await self._handle_permalink_conflict(entity, session)
                     return entity
 
+    async def get_all_file_paths(self) -> List[str]:
+        """Get all file paths for this project - optimized for deletion detection.
+
+        Returns only file_path strings without loading entities or relationships.
+        Used by streaming sync to detect deleted files efficiently.
+
+        Returns:
+            List of file_path strings for all entities in the project
+        """
+        query = select(Entity.file_path)
+        query = self._add_project_filter(query)
+
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
+
     async def get_distinct_directories(self) -> List[str]:
         """Extract unique directory paths from file_path column.
 
