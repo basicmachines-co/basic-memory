@@ -411,15 +411,15 @@ ALTER TABLE entity ADD COLUMN size INTEGER;
 - [ ] Integration test with 1,000 files
 
 **Streaming checksums**:
-- [ ] Implement `_compute_checksum_streaming()` with chunked reading
-- [ ] Add file size threshold logic (1MB)
-- [ ] Test with large files (16MB PDF)
-- [ ] Verify memory usage stays constant
-- [ ] Test checksum equivalence (streaming vs non-streaming)
+- [x] Implement `_compute_checksum_streaming()` with chunked reading
+- [x] Add file size threshold logic (1MB)
+- [x] Test with large files (16MB PDF)
+- [x] Verify memory usage stays constant
+- [x] Test checksum equivalence (streaming vs non-streaming)
 
 **Bounded concurrency**:
-- [ ] Add semaphore (10 concurrent) to `_read_file_async()`
-- [ ] Add LRU cache for failures (100 max)
+- [x] Add semaphore (10 concurrent) to `_read_file_async()` (already existed)
+- [x] Add LRU cache for failures (100 max) (already existed)
 - [ ] Review thread pool size configuration
 - [ ] Load test with 2,000+ files
 - [ ] Verify <500MB peak memory
