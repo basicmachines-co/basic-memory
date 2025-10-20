@@ -118,18 +118,8 @@ async def initialize_file_sync(
             sync_dir = Path(project.path)
             await sync_service.sync(sync_dir, project_name=project.name)
             logger.info(f"Background sync completed successfully for project: {project.name}")
-
-            # Mark project as watching for changes after successful sync
-            from basic_memory.services.sync_status_service import sync_status_tracker
-
-            sync_status_tracker.start_project_watch(project.name)
-            logger.info(f"Project {project.name} is now watching for changes")
         except Exception as e:  # pragma: no cover
             logger.error(f"Error in background sync for project {project.name}: {e}")
-            # Mark sync as failed for this project
-            from basic_memory.services.sync_status_service import sync_status_tracker
-
-            sync_status_tracker.fail_project_sync(project.name, str(e))
 
     # Create background tasks for all project syncs (non-blocking)
     sync_tasks = [
