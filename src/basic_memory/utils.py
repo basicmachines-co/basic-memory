@@ -185,6 +185,21 @@ def setup_logging(
 
     logger.info(f"ENV: '{env}' Log level: '{log_level}' Logging to {log_file}")
 
+    # Bind environment context for structured logging (works in both local and cloud)
+    tenant_id = os.getenv("BASIC_MEMORY_TENANT_ID", "local")
+    fly_app_name = os.getenv("FLY_APP_NAME", "local")
+    fly_machine_id = os.getenv("FLY_MACHINE_ID", "local")
+    fly_region = os.getenv("FLY_REGION", "local")
+
+    logger.configure(
+        extra={
+            "tenant_id": tenant_id,
+            "fly_app_name": fly_app_name,
+            "fly_machine_id": fly_machine_id,
+            "fly_region": fly_region,
+        }
+    )
+
     # Reduce noise from third-party libraries
     noisy_loggers = {
         # HTTP client logs

@@ -242,6 +242,7 @@ class SyncService:
             logger.info(f"Clearing failure history for {path} after successful sync")
             del self._file_failures[path]
 
+    @logfire.instrument()
     async def sync(self, directory: Path, project_name: Optional[str] = None) -> SyncReport:
         """Sync all files with database."""
 
@@ -329,6 +330,7 @@ class SyncService:
 
         return report
 
+    @logfire.instrument()
     async def scan(self, directory):
         """Scan directory for changes using streaming architecture with mtime-based comparison.
 
@@ -440,7 +442,6 @@ class SyncService:
         )
         return report
 
-    @logfire.instrument()
     async def sync_file(
         self, path: str, new: bool = True
     ) -> Tuple[Optional[Entity], Optional[str]]:
@@ -495,7 +496,6 @@ class SyncService:
 
             return None, None
 
-    @logfire.instrument()
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a markdown file with full processing.
 
