@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator, Dict, List, Optional, Set, Tuple
 
+import logfire
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
@@ -495,6 +496,7 @@ class SyncService:
         )
         return report
 
+    @logfire.instrument()
     async def sync_file(
         self, path: str, new: bool = True
     ) -> Tuple[Optional[Entity], Optional[str]]:
@@ -549,6 +551,7 @@ class SyncService:
 
             return None, None
 
+    @logfire.instrument()
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a markdown file with full processing.
 
