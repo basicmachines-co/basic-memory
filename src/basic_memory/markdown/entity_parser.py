@@ -129,8 +129,10 @@ class EntityParser:
         file_stats = absolute_path.stat()
         metadata = post.metadata
 
-        # Ensure required fields have defaults (issue #184)
-        metadata["title"] = post.metadata.get("title", absolute_path.stem)
+        # Ensure required fields have defaults (issue #184, #387)
+        # Handle title - use default if missing OR explicitly set to None/null/empty
+        title = post.metadata.get("title")
+        metadata["title"] = title if title else absolute_path.stem
         # Handle type - use default if missing OR explicitly set to None/null
         entity_type = post.metadata.get("type")
         metadata["type"] = entity_type if entity_type is not None else "note"
