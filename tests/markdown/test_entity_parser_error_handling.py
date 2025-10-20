@@ -184,6 +184,84 @@ async def test_parse_file_with_null_entity_type(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_parse_file_with_null_title(tmp_path):
+    """Test that files with explicit null title get default from filename (issue #387)."""
+    # Create a file with null title
+    test_file = tmp_path / "null_title.md"
+    content = dedent(
+        """
+        ---
+        title: null
+        type: note
+        ---
+        # Content
+        """
+    ).strip()
+    test_file.write_text(content)
+
+    # Parse the file
+    parser = EntityParser(tmp_path)
+    result = await parser.parse_file(test_file)
+
+    # Should have default title from filename even when explicitly set to null
+    assert result is not None
+    assert result.frontmatter.title == "null_title"  # Default from filename
+    assert result.frontmatter.type == "note"
+
+
+@pytest.mark.asyncio
+async def test_parse_file_with_empty_title(tmp_path):
+    """Test that files with empty title get default from filename (issue #387)."""
+    # Create a file with empty title
+    test_file = tmp_path / "empty_title.md"
+    content = dedent(
+        """
+        ---
+        title:
+        type: note
+        ---
+        # Content
+        """
+    ).strip()
+    test_file.write_text(content)
+
+    # Parse the file
+    parser = EntityParser(tmp_path)
+    result = await parser.parse_file(test_file)
+
+    # Should have default title from filename when title is empty
+    assert result is not None
+    assert result.frontmatter.title == "empty_title"  # Default from filename
+    assert result.frontmatter.type == "note"
+
+
+@pytest.mark.asyncio
+async def test_parse_file_with_string_none_title(tmp_path):
+    """Test that files with string 'None' title get default from filename (issue #387)."""
+    # Create a file with string "None" as title (common in templates)
+    test_file = tmp_path / "template_file.md"
+    content = dedent(
+        """
+        ---
+        title: "None"
+        type: note
+        ---
+        # Content
+        """
+    ).strip()
+    test_file.write_text(content)
+
+    # Parse the file
+    parser = EntityParser(tmp_path)
+    result = await parser.parse_file(test_file)
+
+    # Should have default title from filename when title is string "None"
+    assert result is not None
+    assert result.frontmatter.title == "template_file"  # Default from filename
+    assert result.frontmatter.type == "note"
+
+
+@pytest.mark.asyncio
 async def test_parse_valid_file_still_works(tmp_path):
     """Test that valid files with proper frontmatter still parse correctly."""
     # Create a valid file
