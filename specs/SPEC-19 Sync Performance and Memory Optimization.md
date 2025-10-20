@@ -402,32 +402,32 @@ ALTER TABLE entity ADD COLUMN size INTEGER;
 ### Phase 1: Core Fixes
 
 **mtime-based scanning**:
-- [ ] Add mtime/size columns to Entity model
-- [ ] Database migration (alembic)
-- [ ] Update `scan_directory()` to use stat()
-- [ ] Update `scan()` to compare mtime/size
-- [ ] Only compute checksums for changed files
-- [ ] Unit tests for mtime comparison
+- [x] Add mtime/size columns to Entity model (completed in Phase 0.5)
+- [x] Database migration (alembic) (completed in Phase 0.5)
+- [ ] Refactor `scan()` to use streaming architecture with mtime/size comparison
+- [ ] Update `_process_file()` to store mtime/size in database on upsert
+- [ ] Only compute checksums for changed files (mtime/size differ)
+- [ ] Unit tests for mtime comparison logic
 - [ ] Integration test with 1,000 files
 
 **Streaming checksums**:
-- [ ] Implement `_compute_checksum_streaming()`
+- [ ] Implement `_compute_checksum_streaming()` with chunked reading
 - [ ] Add file size threshold logic (1MB)
 - [ ] Test with large files (16MB PDF)
 - [ ] Verify memory usage stays constant
-- [ ] Test checksum equivalence
+- [ ] Test checksum equivalence (streaming vs non-streaming)
 
 **Bounded concurrency**:
-- [ ] Add semaphore (10 concurrent)
+- [ ] Add semaphore (10 concurrent) to `_read_file_async()`
 - [ ] Add LRU cache for failures (100 max)
 - [ ] Review thread pool size configuration
 - [ ] Load test with 2,000+ files
 - [ ] Verify <500MB peak memory
 
-**cleanup**
-- [ ] remove sync status service
-- [ ] db state - don't select all entities in project - basic_memory.sync.sync_service.SyncService.get_db_file_state
-- [ ] use aiofiles in file_service for file io. Don't block reading files in async loop
+**Cleanup & Optimization**:
+- [ ] Eliminate `get_db_file_state()` - no upfront SELECT all entities
+- [ ] Remove sync status service (if unused)
+- [ ] Consider aiofiles for non-blocking I/O (future enhancement)
 
 ### Phase 2: Cloud Fixes 
 

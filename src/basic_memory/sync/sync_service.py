@@ -150,12 +150,66 @@ class SyncService:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(self._thread_pool, file_path.read_text, "utf-8")
 
-    async def _compute_checksum_async(self, path: str) -> str:
-        """Compute file checksum in thread pool to avoid blocking the event loop.
+    async def _compute_checksum_streaming(self, path: str, chunk_size: int = 65536) -> str:
+        """Compute file checksum using chunked reading for large files.
 
-        Uses semaphore to limit concurrent file reads and prevent OOM on large projects.
+        Reads file in 64KB chunks to maintain constant memory usage regardless of file size.
+        Critical for handling large PDFs and images without causing OOM.
+
+        Args:
+            path: Relative file path
+            chunk_size: Size of chunks to read (default 64KB)
+
+        Returns:
+            SHA256 hexdigest of file content
         """
 
+        def _sync_compute_checksum_streaming(path_str: str) -> str:
+            """Synchronous streaming checksum computation for thread pool."""
+            import hashlib
+
+            path_obj = self.file_service.base_path / path_str
+            hasher = hashlib.sha256()
+
+            # Always use binary mode for streaming to handle all file types
+            with open(path_obj, "rb") as f:
+                while chunk := f.read(chunk_size):
+                    hasher.update(chunk)
+
+            return hasher.hexdigest()
+
+        async with self._file_semaphore:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                self._thread_pool, _sync_compute_checksum_streaming, path
+            )
+
+    async def _compute_checksum_async(self, path: str) -> str:
+        """Compute file checksum with automatic streaming for large files.
+
+        Uses semaphore to limit concurrent file reads and prevent OOM on large projects.
+        For files >1MB, uses chunked streaming to maintain constant memory usage.
+
+        Args:
+            path: Relative file path
+
+        Returns:
+            SHA256 hexdigest of file content
+        """
+        # Check file size to decide whether to stream
+        path_obj = self.file_service.base_path / path
+        try:
+            file_stat = path_obj.stat()
+            # Use streaming for files larger than 1MB
+            if file_stat.st_size > 1_048_576:  # 1MB threshold
+                logger.trace(
+                    f"Using streaming checksum for large file: {path}, size={file_stat.st_size}"
+                )
+                return await self._compute_checksum_streaming(path)
+        except OSError as e:
+            logger.warning(f"Could not stat file {path}: {e}, falling back to non-streaming")
+
+        # Small files: use existing fast path
         def _sync_compute_checksum(path_str: str) -> str:
             # Synchronous version for thread pool execution
             path_obj = self.file_service.base_path / path_str

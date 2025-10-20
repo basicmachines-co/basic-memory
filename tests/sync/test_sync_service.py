@@ -1905,3 +1905,128 @@ async def test_scan_directory_streaming_non_markdown_files(
     assert "image.png" in results
     assert "data.json" in results
     assert "script.py" in results
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_equivalence(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that streaming and non-streaming checksums produce identical results."""
+    project_dir = project_config.home
+
+    # Create test file with known content
+    test_content = "Test content for checksum validation" * 100  # Multi-line content
+    test_file = project_dir / "checksum_test.md"
+    await create_test_file(test_file, test_content)
+
+    rel_path = test_file.relative_to(project_dir).as_posix()
+
+    # Compute checksum using streaming method
+    streaming_checksum = await sync_service._compute_checksum_streaming(rel_path)
+
+    # Compute checksum using the unified method (which will use non-streaming for small files)
+    unified_checksum = await sync_service._compute_checksum_async(rel_path)
+
+    # Both should produce identical results
+    assert streaming_checksum == unified_checksum
+    assert len(streaming_checksum) == 64  # SHA256 hex digest length
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_large_file_uses_streaming(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that files >1MB automatically use streaming checksum computation."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+
+    # Create a file larger than 1MB threshold
+    large_content = "x" * (1_048_577)  # Just over 1MB
+    large_file = project_dir / "large_file.pdf"
+    large_file.write_bytes(large_content.encode())
+
+    rel_path = large_file.relative_to(project_dir).as_posix()
+
+    # Track whether streaming method was called
+    streaming_called = False
+    original_streaming = sync_service._compute_checksum_streaming
+
+    async def mock_streaming(*args, **kwargs):
+        nonlocal streaming_called
+        streaming_called = True
+        return await original_streaming(*args, **kwargs)
+
+    with patch.object(
+        sync_service, "_compute_checksum_streaming", side_effect=mock_streaming
+    ):
+        checksum = await sync_service._compute_checksum_async(rel_path)
+
+    # Verify streaming was used
+    assert streaming_called, "Large file should use streaming checksum"
+    assert checksum is not None
+    assert len(checksum) == 64
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_small_file_uses_fast_path(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that files <1MB use fast non-streaming path."""
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+
+    # Create a small file (under 1MB)
+    small_content = "Small file content"
+    small_file = project_dir / "small_file.md"
+    await create_test_file(small_file, small_content)
+
+    rel_path = small_file.relative_to(project_dir).as_posix()
+
+    # Track whether streaming method was called
+    streaming_called = False
+    original_streaming = sync_service._compute_checksum_streaming
+
+    async def mock_streaming(*args, **kwargs):
+        nonlocal streaming_called
+        streaming_called = True
+        return await original_streaming(*args, **kwargs)
+
+    with patch.object(
+        sync_service, "_compute_checksum_streaming", side_effect=mock_streaming
+    ):
+        checksum = await sync_service._compute_checksum_async(rel_path)
+
+    # Verify streaming was NOT used for small file
+    assert not streaming_called, "Small file should use fast non-streaming path"
+    assert checksum is not None
+    assert len(checksum) == 64
+
+
+@pytest.mark.asyncio
+async def test_compute_checksum_streaming_binary_files(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that streaming checksum works correctly with binary files."""
+    project_dir = project_config.home
+
+    # Create a binary file with specific byte pattern
+    binary_content = bytes(range(256)) * 100  # 25.6KB of binary data
+    binary_file = project_dir / "binary_test.bin"
+    binary_file.write_bytes(binary_content)
+
+    rel_path = binary_file.relative_to(project_dir).as_posix()
+
+    # Compute checksum using streaming
+    streaming_checksum = await sync_service._compute_checksum_streaming(rel_path)
+
+    # Verify checksum is valid
+    assert streaming_checksum is not None
+    assert len(streaming_checksum) == 64
+
+    # Compute expected checksum manually for verification
+    import hashlib
+
+    expected_checksum = hashlib.sha256(binary_content).hexdigest()
+    assert streaming_checksum == expected_checksum
