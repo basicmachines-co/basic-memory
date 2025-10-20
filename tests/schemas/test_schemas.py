@@ -14,7 +14,7 @@ from basic_memory.schemas import (
     RelationResponse,
 )
 from basic_memory.schemas.request import EditEntityRequest
-from basic_memory.schemas.base import to_snake_case, TimeFrame, parse_timeframe, validate_timeframe
+from basic_memory.schemas.base import to_snake_case, TimeFrame, parse_timeframe, validate_timeframe, Observation
 
 
 def test_entity_project_name():
@@ -53,6 +53,37 @@ def test_entity_in_validation():
     """Test validation errors for EntityIn."""
     with pytest.raises(ValidationError):
         Entity.model_validate({"entity_type": "test"})  # Missing required fields
+
+
+def test_observation_content_length():
+    """Test observation content length validation (issue #385).
+
+    The limit was increased from 1000 to 5000 characters to support
+    longer code snippets, JSON schemas, and detailed explanations.
+    """
+    # Test with content under the limit (should pass)
+    short_content = "a" * 100
+    observation = Observation.model_validate({"content": short_content})
+    assert len(observation.content) == 100
+
+    # Test with content at the old limit (1000 chars, should pass)
+    medium_content = "a" * 1000
+    observation = Observation.model_validate({"content": medium_content})
+    assert len(observation.content) == 1000
+
+    # Test with content between old and new limit (should pass)
+    long_content = "a" * 2000
+    observation = Observation.model_validate({"content": long_content})
+    assert len(observation.content) == 2000
+
+    # Test with content at the new limit (5000 chars, should pass)
+    max_content = "a" * 5000
+    observation = Observation.model_validate({"content": max_content})
+    assert len(observation.content) == 5000
+
+    # Test with content exceeding the new limit (should fail)
+    with pytest.raises(ValidationError, match="at most 5000"):
+        Observation.model_validate({"content": "a" * 5001})
 
 
 def test_relation_in_validation():
