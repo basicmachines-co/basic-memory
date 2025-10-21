@@ -635,3 +635,86 @@ async def test_create_project_fails_different_path(test_config, client, project_
         await project_service.remove_project(test_project_name)
     except Exception:
         pass
+
+
+@pytest.mark.asyncio
+async def test_remove_project_with_delete_notes_false(test_config, client, project_service):
+    """Test that removing a project with delete_notes=False leaves directory intact."""
+    # Create a test project with actual directory
+    test_project_name = "test-remove-keep-files"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_path = Path(temp_dir) / "test-project"
+        test_path.mkdir()
+        test_file = test_path / "test.md"
+        test_file.write_text("# Test Note")
+
+        await project_service.add_project(test_project_name, str(test_path))
+
+        # Remove the project without deleting files (default)
+        response = await client.delete(f"/projects/{test_project_name}")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify project is removed from config/db
+        removed_project = await project_service.get_project(test_project_name)
+        assert removed_project is None
+
+        # Verify directory still exists
+        assert test_path.exists()
+        assert test_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_remove_project_with_delete_notes_true(test_config, client, project_service):
+    """Test that removing a project with delete_notes=True deletes the directory."""
+    # Create a test project with actual directory
+    test_project_name = "test-remove-delete-files"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_path = Path(temp_dir) / "test-project"
+        test_path.mkdir()
+        test_file = test_path / "test.md"
+        test_file.write_text("# Test Note")
+
+        await project_service.add_project(test_project_name, str(test_path))
+
+        # Remove the project with delete_notes=True
+        response = await client.delete(f"/projects/{test_project_name}?delete_notes=true")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify project is removed from config/db
+        removed_project = await project_service.get_project(test_project_name)
+        assert removed_project is None
+
+        # Verify directory is deleted
+        assert not test_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_remove_project_delete_notes_nonexistent_directory(
+    test_config, client, project_service
+):
+    """Test that removing a project with delete_notes=True handles missing directory gracefully."""
+    # Create a project pointing to a non-existent path
+    test_project_name = "test-remove-missing-dir"
+    test_path = "/tmp/this-directory-does-not-exist-12345"
+
+    await project_service.add_project(test_project_name, test_path)
+
+    # Remove the project with delete_notes=True (should not fail even if dir doesn't exist)
+    response = await client.delete(f"/projects/{test_project_name}?delete_notes=true")
+
+    # Should succeed
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+
+    # Verify project is removed
+    removed_project = await project_service.get_project(test_project_name)
+    assert removed_project is None

@@ -119,13 +119,18 @@ def add_project(
 @project_app.command("remove")
 def remove_project(
     name: str = typer.Argument(..., help="Name of the project to remove"),
+    delete_notes: bool = typer.Option(
+        False, "--delete-notes", help="Delete project files from disk"
+    ),
 ) -> None:
     """Remove a project."""
 
     async def _remove_project():
         async with get_client() as client:
             project_permalink = generate_permalink(name)
-            response = await call_delete(client, f"/projects/{project_permalink}")
+            response = await call_delete(
+                client, f"/projects/{project_permalink}?delete_notes={delete_notes}"
+            )
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
@@ -135,8 +140,9 @@ def remove_project(
         console.print(f"[red]Error removing project: {str(e)}[/red]")
         raise typer.Exit(1)
 
-    # Show this message regardless of method used
-    console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
+    # Show this message only if files were not deleted
+    if not delete_notes:
+        console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
 
 
 @project_app.command("default")

@@ -1,7 +1,7 @@
 """Router for project management."""
 
 import os
-from fastapi import APIRouter, HTTPException, Path, Body, BackgroundTasks, Response
+from fastapi import APIRouter, HTTPException, Path, Body, BackgroundTasks, Response, Query
 from typing import Optional
 from loguru import logger
 
@@ -247,11 +247,15 @@ async def add_project(
 async def remove_project(
     project_service: ProjectServiceDep,
     name: str = Path(..., description="Name of the project to remove"),
+    delete_notes: bool = Query(
+        False, description="If True, delete project directory from filesystem"
+    ),
 ) -> ProjectStatusResponse:
     """Remove a project from configuration and database.
 
     Args:
         name: The name of the project to remove
+        delete_notes: If True, delete the project directory from the filesystem
 
     Returns:
         Response confirming the project was removed
@@ -276,7 +280,7 @@ async def remove_project(
                 detail += "This is the only project in your configuration."
             raise HTTPException(status_code=400, detail=detail)
 
-        await project_service.remove_project(name)
+        await project_service.remove_project(name, delete_notes=delete_notes)
 
         return ProjectStatusResponse(
             message=f"Project '{name}' removed successfully",

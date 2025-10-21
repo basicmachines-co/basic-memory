@@ -1,7 +1,9 @@
 """Project management service for Basic Memory."""
 
+import asyncio
 import json
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Sequence
@@ -219,11 +221,12 @@ class ProjectService:
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 
-    async def remove_project(self, name: str) -> None:
+    async def remove_project(self, name: str, delete_notes: bool = False) -> None:
         """Remove a project from configuration and database.
 
         Args:
             name: The name of the project to remove
+            delete_notes: If True, delete the project directory from filesystem
 
         Raises:
             ValueError: If the project doesn't exist or is the default project
@@ -231,15 +234,32 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for remove_project")
 
+        # Get project path before removing from config
+        project = await self.get_project(name)
+        project_path = project.path if project else None
+
         # First remove from config (this will validate the project exists and is not default)
         self.config_manager.remove_project(name)
 
         # Then remove from database using robust lookup
-        project = await self.get_project(name)
         if project:
             await self.repository.delete(project.id)
 
         logger.info(f"Project '{name}' removed from configuration and database")
+
+        # Optionally delete the project directory
+        if delete_notes and project_path:
+            try:
+                path_obj = Path(project_path)
+                if path_obj.exists() and path_obj.is_dir():
+                    await asyncio.to_thread(shutil.rmtree, project_path)
+                    logger.info(f"Deleted project directory: {project_path}")
+                else:
+                    logger.warning(
+                        f"Project directory not found or not a directory: {project_path}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to delete project directory {project_path}: {e}")
 
     async def set_default_project(self, name: str) -> None:
         """Set the default project in configuration and database.
