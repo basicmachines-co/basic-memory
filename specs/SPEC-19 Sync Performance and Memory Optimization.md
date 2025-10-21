@@ -707,28 +707,81 @@ logfire.metric_histogram("sync.scan.watermark_age", unit="s").record(
 
 **Test Plan**:
 - [x] SSH test on TigrisFS confirms `find -newermt` works (completed)
-- [ ] Unit tests for scan strategy selection
-- [ ] Unit tests for file count detection
-- [ ] Integration test: verify incremental scan finds changed files
-- [ ] Integration test: verify deletion detection triggers full scan
-- [ ] Load test on tenant-0a20eb58 (1,460 files)
-- [ ] Verify <3s for no-change sync
+- [x] Unit tests for scan strategy selection (4 tests)
+- [x] Unit tests for file count detection (integrated in strategy tests)
+- [x] Integration test: verify incremental scan finds changed files (4 tests)
+- [x] Integration test: verify deletion detection triggers full scan (2 tests)
+- [ ] Load test on tenant-0a20eb58 (1,460 files) - pending production deployment
+- [ ] Verify <3s for no-change sync - pending production deployment
+
+**Implementation Status**: ✅ **COMPLETED**
+
+**Code Changes** (Commit: `fb16055d`):
+- ✅ Added `last_scan_timestamp` and `last_file_count` to Project model
+- ✅ Created database migration `e7e1f4367280_add_scan_watermark_tracking_to_project.py`
+- ✅ Implemented smart scan strategy selection in `sync_service.py`
+- ✅ Added `_quick_count_files()` using `find | wc -l` (~1.4s for 1,460 files)
+- ✅ Added `_scan_directory_modified_since()` using `find -newermt` (~0.2s)
+- ✅ Added `_scan_directory_full()` wrapper for full scans
+- ✅ Watermark update logic after successful sync (uses sync START time)
+- ✅ Logfire metrics for scan types and performance tracking
+
+**Test Coverage** (18 tests in `test_sync_service_incremental.py`):
+- ✅ Scan strategy selection (4 tests)
+  - First sync uses full scan
+  - File count decreased triggers full scan
+  - Same file count uses incremental scan
+  - Increased file count uses incremental scan
+- ✅ Incremental scan base cases (4 tests)
+  - No changes scenario
+  - Detects new files
+  - Detects modified files
+  - Detects multiple changes
+- ✅ Deletion detection (2 tests)
+  - Single file deletion
+  - Multiple file deletions
+- ✅ Move detection (2 tests)
+  - Moves require full scan (renames don't update mtime)
+  - Moves detected in full scan via checksum
+- ✅ Watermark update (3 tests)
+  - Watermark updated after successful sync
+  - Watermark uses sync start time
+  - File count accuracy
+- ✅ Edge cases (3 tests)
+  - Concurrent file changes
+  - Empty directory handling
+  - Respects .gitignore patterns
+
+**Performance Expectations** (to be verified in production):
+- No changes: 420s → ~2s (210x faster)
+- Few changes (5-10): 420s → ~5s (84x faster)
+- Many changes (100+): 420s → ~30s (14x faster)
+- Deletions: 420s → 420s (full scan, rare case)
 
 **Rollout Strategy**:
-1. Deploy to staging tenant with watermark optimization
-2. Monitor scan performance metrics via Logfire
-3. Verify no missed files (compare full vs incremental results)
-4. Deploy to production tenant-0a20eb58
-5. Measure actual improvement (expect 420s → 2-3s)
+1. ✅ Code complete and tested (18 new tests, all passing)
+2. ✅ Pushed to `phase-0.5-streaming-foundation` branch
+3. ⏳ Windows CI tests running
+4. 📊 Deploy to staging tenant with watermark optimization
+5. 📊 Monitor scan performance metrics via Logfire
+6. 📊 Verify no missed files (compare full vs incremental results)
+7. 📊 Deploy to production tenant-0a20eb58
+8. 📊 Measure actual improvement (expect 420s → 2-3s)
 
 **Success Criteria**:
-- ✅ No-change syncs complete in <3 seconds (was 420s)
-- ✅ Incremental scans (95% of cases) use watermark
-- ✅ Deletion detection works correctly (full scan when needed)
-- ✅ No files missed due to watermark logic
-- ✅ Metrics show scan type distribution matches expectations
+- ✅ Implementation complete with comprehensive tests
+- [ ] No-change syncs complete in <3 seconds (was 420s) - pending production test
+- [ ] Incremental scans (95% of cases) use watermark - pending production test
+- [ ] Deletion detection works correctly (full scan when needed) - tested in unit tests ✅
+- [ ] No files missed due to watermark logic - tested in unit tests ✅
+- [ ] Metrics show scan type distribution matches expectations - pending production test
 
-**Next Steps**: Phase 2 cloud-specific fixes and Phase 3 production measurement.
+**Next Steps**:
+1. Production deployment to tenant-0a20eb58
+2. Measure actual performance improvements
+3. Monitor metrics for 1 week
+4. Phase 2 cloud-specific fixes
+5. Phase 3 production measurement and UberSync decision
 
 ### Phase 2: Cloud Fixes 
 
