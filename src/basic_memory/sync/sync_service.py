@@ -324,8 +324,13 @@ class SyncService:
                         )
                     )
 
+        # Only resolve relations if there were actual changes
+        # If no files changed, no new unresolved relations could have been created
         with logfire.span("resolve_relations"):
-            await self.resolve_relations()
+            if report.total > 0:
+                await self.resolve_relations()
+            else:
+                logger.info("Skipping relation resolution - no file changes detected")
 
         # Update scan watermark after successful sync
         # Use the timestamp from sync start (not end) to ensure we catch files

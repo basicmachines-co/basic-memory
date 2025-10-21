@@ -624,3 +624,106 @@ async def test_incremental_scan_respects_gitignore(
     report2 = await sync_service.sync(project_dir)
     assert "included2.md" in report2.new
     assert "excluded2.ignored" not in report2.new
+
+
+# ==============================================================================
+# Relation Resolution Optimization Tests
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_skipped_when_no_changes(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that relation resolution is skipped when no file changes detected.
+
+    This optimization prevents wasting time resolving relations when there are
+    no changes, dramatically improving sync performance for large projects.
+    """
+    project_dir = project_config.home
+
+    # Create initial file with wikilink
+    content = dedent(
+        """
+        ---
+        title: File with Link
+        type: note
+        ---
+        # File with Link
+        This links to [[Target File]]
+        """
+    ).strip()
+    await create_test_file(project_dir / "file1.md", content)
+
+    # First sync - will resolve relations (or leave unresolved)
+    report1 = await sync_service.sync(project_dir)
+    assert len(report1.new) == 1
+
+    # Check that there are unresolved relations (target doesn't exist)
+    unresolved = await sync_service.relation_repository.find_unresolved_relations()
+    unresolved_count_before = len(unresolved)
+    assert unresolved_count_before > 0  # Should have unresolved relation to [[Target File]]
+
+    # Sleep to ensure time passes
+    await sleep_past_watermark()
+
+    # Second sync - no changes, should skip relation resolution
+    report2 = await sync_service.sync(project_dir)
+    assert report2.total == 0  # No changes detected
+
+    # Verify unresolved relations count unchanged (resolution was skipped)
+    unresolved_after = await sync_service.relation_repository.find_unresolved_relations()
+    assert len(unresolved_after) == unresolved_count_before
+
+
+@pytest.mark.asyncio
+async def test_relation_resolution_runs_when_files_modified(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that relation resolution runs when files are actually modified."""
+    project_dir = project_config.home
+
+    # Create file with unresolved wikilink
+    content1 = dedent(
+        """
+        ---
+        title: File with Link
+        type: note
+        ---
+        # File with Link
+        This links to [[Target File]]
+        """
+    ).strip()
+    await create_test_file(project_dir / "file1.md", content1)
+
+    # First sync
+    await sync_service.sync(project_dir)
+
+    # Verify unresolved relation exists
+    unresolved_before = await sync_service.relation_repository.find_unresolved_relations()
+    assert len(unresolved_before) > 0
+
+    # Sleep to ensure mtime will be newer
+    await sleep_past_watermark()
+
+    # Create the target file (should resolve the relation)
+    content2 = dedent(
+        """
+        ---
+        title: Target File
+        type: note
+        ---
+        # Target File
+        This is the target.
+        """
+    ).strip()
+    await create_test_file(project_dir / "target.md", content2)
+
+    # Second sync - should detect new file and resolve relations
+    report = await sync_service.sync(project_dir)
+    assert len(report.new) == 1
+    assert "target.md" in report.new
+
+    # Verify relation was resolved (unresolved count decreased)
+    unresolved_after = await sync_service.relation_repository.find_unresolved_relations()
+    assert len(unresolved_after) < len(unresolved_before)
