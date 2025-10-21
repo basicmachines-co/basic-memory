@@ -9,6 +9,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     DateTime,
+    Float,
     Index,
     event,
 )
@@ -60,6 +61,10 @@ class Project(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+    # Sync optimization - scan watermark tracking
+    last_scan_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    last_file_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Define relationships to entities, observations, and relations
     # These relationships will be established once we add project_id to those models

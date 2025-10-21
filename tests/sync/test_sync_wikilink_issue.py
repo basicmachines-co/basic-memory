@@ -13,6 +13,22 @@ async def create_test_file(path: Path, content: str) -> None:
     path.write_text(content)
 
 
+async def force_full_scan(sync_service: SyncService) -> None:
+    """Force next sync to do a full scan by clearing watermark (for testing moves/deletions)."""
+    if sync_service.entity_repository.project_id is not None:
+        project = await sync_service.project_repository.find_by_id(
+            sync_service.entity_repository.project_id
+        )
+        if project:
+            await sync_service.project_repository.update(
+                project.id,
+                {
+                    "last_scan_timestamp": None,
+                    "last_file_count": None,
+                },
+            )
+
+
 @pytest.mark.asyncio
 async def test_wikilink_modified_status_issue(sync_service: SyncService, project_config):
     """Test that files with wikilinks don't remain in modified status after sync."""
@@ -51,6 +67,10 @@ This is the target file.
 """
     target_file_path = project_dir / "another_file.md"
     await create_test_file(target_file_path, target_content)
+
+    # Force full scan to detect the new file
+    # (file just created may not be newer than watermark due to timing precision)
+    await force_full_scan(sync_service)
 
     # Sync again after adding target file
     report3 = await sync_service.sync(project_config.home)

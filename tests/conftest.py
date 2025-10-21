@@ -250,6 +250,7 @@ async def sync_service(
     app_config: BasicMemoryConfig,
     entity_service: EntityService,
     entity_parser: EntityParser,
+    project_repository: ProjectRepository,
     entity_repository: EntityRepository,
     relation_repository: RelationRepository,
     search_service: SearchService,
@@ -259,6 +260,7 @@ async def sync_service(
     return SyncService(
         app_config=app_config,
         entity_service=entity_service,
+        project_repository=project_repository,
         entity_repository=entity_repository,
         relation_repository=relation_repository,
         entity_parser=entity_parser,

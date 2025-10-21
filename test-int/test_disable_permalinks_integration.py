@@ -8,6 +8,7 @@ from basic_memory.repository import (
     EntityRepository,
     ObservationRepository,
     RelationRepository,
+    ProjectRepository,
 )
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.schemas import Entity as EntitySchema
@@ -88,6 +89,7 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory):
     observation_repository = ObservationRepository(session_maker, project_id=1)
     relation_repository = RelationRepository(session_maker, project_id=1)
     search_repository = SearchRepository(session_maker, project_id=1)
+    project_repository = ProjectRepository(session_maker)
 
     # Setup services
     entity_parser = EntityParser(tmp_path)
@@ -110,6 +112,7 @@ async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory):
     sync_service = SyncService(
         app_config=app_config,
         entity_service=entity_service,
+        project_repository=project_repository,
         entity_parser=entity_parser,
         entity_repository=entity_repository,
         relation_repository=relation_repository,

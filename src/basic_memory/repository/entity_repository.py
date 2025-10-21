@@ -63,6 +63,23 @@ class EntityRepository(Repository[Entity]):
         )
         return await self.find_one(query)
 
+    async def find_by_checksum(self, checksum: str) -> Sequence[Entity]:
+        """Find entities with the given checksum.
+
+        Used for move detection - finds entities that may have been moved to a new path.
+        Multiple entities may have the same checksum if files were copied.
+
+        Args:
+            checksum: File content checksum to search for
+
+        Returns:
+            Sequence of entities with matching checksum (may be empty)
+        """
+        query = self.select().where(Entity.checksum == checksum)
+        # Don't load relationships for move detection - we only need file_path and checksum
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
+
     async def delete_by_file_path(self, file_path: Union[Path, str]) -> bool:
         """Delete entity with the provided file_path.
 

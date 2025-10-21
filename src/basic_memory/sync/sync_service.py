@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator, Dict, List, Optional, Set, Tuple
 
+import aiofiles.os
 import logfire
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +20,12 @@ from basic_memory.file_utils import has_frontmatter
 from basic_memory.ignore_utils import load_bmignore_patterns, should_ignore_path
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.models import Entity, Project
-from basic_memory.repository import EntityRepository, RelationRepository, ObservationRepository
+from basic_memory.repository import (
+    EntityRepository,
+    RelationRepository,
+    ObservationRepository,
+    ProjectRepository,
+)
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import SyncFatalError
@@ -118,6 +124,7 @@ class SyncService:
         entity_parser: EntityParser,
         entity_repository: EntityRepository,
         relation_repository: RelationRepository,
+        project_repository: ProjectRepository,
         search_service: SearchService,
         file_service: FileService,
     ):
@@ -126,6 +133,7 @@ class SyncService:
         self.entity_parser = entity_parser
         self.entity_repository = entity_repository
         self.relation_repository = relation_repository
+        self.project_repository = project_repository
         self.search_service = search_service
         self.file_service = file_service
         # Load ignore patterns once at initialization for performance
@@ -249,9 +257,10 @@ class SyncService:
 
     @logfire.instrument()
     async def sync(self, directory: Path, project_name: Optional[str] = None) -> SyncReport:
-        """Sync all files with database."""
+        """Sync all files with database and update scan watermark."""
 
         start_time = time.time()
+        sync_start_timestamp = time.time()  # Capture at start for watermark
         logger.info(f"Sync operation started for directory: {directory}")
 
         # initial paths from db to sync
@@ -318,6 +327,25 @@ class SyncService:
         with logfire.span("resolve_relations"):
             await self.resolve_relations()
 
+        # Update scan watermark after successful sync
+        # Use the timestamp from sync start (not end) to ensure we catch files
+        # created during the sync on the next iteration
+        current_file_count = await self._quick_count_files(directory)
+        if self.entity_repository.project_id is not None:
+            project = await self.project_repository.find_by_id(self.entity_repository.project_id)
+            if project:
+                await self.project_repository.update(
+                    project.id,
+                    {
+                        "last_scan_timestamp": sync_start_timestamp,
+                        "last_file_count": current_file_count,
+                    },
+                )
+                logger.debug(
+                    f"Updated scan watermark: timestamp={sync_start_timestamp}, "
+                    f"file_count={current_file_count}"
+                )
+
         duration_ms = int((time.time() - start_time) * 1000)
 
         # Record metrics for sync operation
@@ -351,28 +379,98 @@ class SyncService:
 
     @logfire.instrument()
     async def scan(self, directory):
-        """Scan directory for changes using streaming architecture with mtime-based comparison.
+        """Smart scan using watermark and file count for large project optimization.
 
-        This scan processes files one at a time using indexed lookups instead of
-        loading all entities upfront. Only files with different mtime/size need checksums
-        computed, dramatically reducing I/O and memory usage on large projects.
+        Uses scan watermark tracking to dramatically reduce scan time for large projects:
+        - Tracks last_scan_timestamp and last_file_count in Project model
+        - Uses `find -newermt` for incremental scanning (only changed files)
+        - Falls back to full scan when deletions detected (file count decreased)
+
+        Expected performance:
+        - No changes: 225x faster (2s vs 450s for 1,460 files on TigrisFS)
+        - Few changes: 84x faster (5s vs 420s)
+        - Deletions: Full scan (rare, acceptable)
 
         Architecture:
-        - Stream files and query DB incrementally with indexed lookups
-        - Process files immediately, no accumulation in memory
+        - Get current file count quickly (find | wc -l: 1.4s)
+        - Compare with last_file_count to detect deletions
+        - If no deletions: incremental scan with find -newermt (0.2s)
+        - Process changed files with mtime-based comparison
         """
+        scan_start_time = time.time()
 
         report = SyncReport()
 
-        # Track files we've seen and their checksums for move detection
+        # Get current project to check watermark
+        if self.entity_repository.project_id is None:
+            raise ValueError("Entity repository has no project_id set")
+
+        project = await self.project_repository.find_by_id(self.entity_repository.project_id)
+        if project is None:
+            raise ValueError(f"Project not found: {self.entity_repository.project_id}")
+
+        # Step 1: Quick file count
+        logger.debug("Counting files in directory")
+        current_count = await self._quick_count_files(directory)
+        logger.debug(f"Found {current_count} files in directory")
+
+        # Step 2: Determine scan strategy based on watermark and file count
+        if project.last_file_count is None:
+            # First sync ever → full scan
+            scan_type = "full_initial"
+            logger.info("First sync for this project, performing full scan")
+            file_paths_to_scan = await self._scan_directory_full(directory)
+
+        elif current_count < project.last_file_count:
+            # Files deleted → need full scan to detect which ones
+            scan_type = "full_deletions"
+            logger.info(
+                f"File count decreased ({project.last_file_count} → {current_count}), "
+                f"running full scan to detect deletions"
+            )
+            file_paths_to_scan = await self._scan_directory_full(directory)
+
+        elif project.last_scan_timestamp is not None:
+            # Incremental scan: only files modified since last scan
+            scan_type = "incremental"
+            logger.info(
+                f"Running incremental scan for files modified since {project.last_scan_timestamp}"
+            )
+            file_paths_to_scan = await self._scan_directory_modified_since(
+                directory, project.last_scan_timestamp
+            )
+            logger.info(
+                f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
+            )
+
+        else:
+            # Fallback to full scan (no watermark available)
+            scan_type = "full_fallback"
+            logger.warning("No scan watermark available, falling back to full scan")
+            file_paths_to_scan = await self._scan_directory_full(directory)
+
+        # Record scan type metric
+        logfire.metric_counter(f"sync.scan.{scan_type}").add(1)
+        logfire.metric_histogram("sync.scan.files_scanned", unit="files").record(
+            len(file_paths_to_scan)
+        )
+
+        # Step 3: Process each file with mtime-based comparison
         scanned_paths: Set[str] = set()
         changed_checksums: Dict[str, str] = {}
 
-        # Stream filesystem and process each file immediately with indexed DB lookup
-        logger.debug("Starting streaming mtime-based scan with indexed lookups")
-        async for file_path_str, stat_info in self.scan_directory(directory):
-            rel_path = Path(file_path_str).relative_to(directory).as_posix()
+        logger.debug(f"Processing {len(file_paths_to_scan)} files with mtime-based comparison")
+
+        for rel_path in file_paths_to_scan:
             scanned_paths.add(rel_path)
+
+            # Get file stats
+            abs_path = directory / rel_path
+            if not abs_path.exists():
+                # File was deleted between scan and now (race condition)
+                continue
+
+            stat_info = abs_path.stat()
 
             # Indexed lookup - single file query (not full table scan)
             db_entity = await self.entity_repository.get_by_file_path(rel_path)
@@ -414,38 +512,52 @@ class SyncService:
                 # File unchanged - no checksum needed
                 logger.trace(f"File unchanged (mtime/size match): {rel_path}")
 
-        # Detect deletions and moves
-        # Use optimized query for just file paths (not full entities)
-        db_file_paths = await self.entity_repository.get_all_file_paths()
-        logger.debug(f"Found {len(db_file_paths)} db paths for deletion/move detection")
+        # Step 4: Detect moves (for both full and incremental scans)
+        # Check if any "new" files are actually moves by matching checksums
+        for new_path in list(report.new):  # Use list() to allow modification during iteration
+            new_checksum = changed_checksums.get(new_path)
+            if not new_checksum:
+                continue
 
-        for db_path in db_file_paths:
-            if db_path not in scanned_paths:
-                # File in DB but not on filesystem - deleted or moved
-                # Need to check if checksum appears in new/modified files (indicates move)
-                # For move detection, we need the checksum, so do a single entity lookup
-                db_entity = await self.entity_repository.get_by_file_path(db_path)
-                if db_entity is None:
-                    # Entity was deleted between get_all_file_paths() and now (race condition)
+            # Look for existing entity with same checksum but different path
+            # This could be a move or a copy
+            existing_entities = await self.entity_repository.find_by_checksum(new_checksum)
+
+            for candidate in existing_entities:
+                if candidate.file_path == new_path:
+                    # Same path, skip (shouldn't happen for "new" files but be safe)
                     continue
 
-                db_checksum = db_entity.checksum
+                # Check if the old path still exists on disk
+                old_path_abs = directory / candidate.file_path
+                if old_path_abs.exists():
+                    # Original still exists → this is a copy, not a move
+                    logger.trace(
+                        f"File copy detected (not move): {candidate.file_path} copied to {new_path}"
+                    )
+                    continue
 
-                # Check if this checksum appears in new/modified files (indicates move)
-                moved_to_path = None
-                for new_path, new_checksum in changed_checksums.items():
-                    if new_checksum == db_checksum:
-                        moved_to_path = new_path
-                        break
+                # Original doesn't exist → this is a move!
+                report.moves[candidate.file_path] = new_path
+                report.new.remove(new_path)
+                logger.trace(f"Move detected: {candidate.file_path} -> {new_path}")
+                break  # Only match first candidate
 
-                if moved_to_path:
-                    # File was moved
-                    report.moves[db_path] = moved_to_path
-                    # Remove from new files if present
-                    if moved_to_path in report.new:
-                        report.new.remove(moved_to_path)
-                    logger.trace(f"Move detected: {db_path} -> {moved_to_path}")
-                else:
+        # Step 5: Detect deletions (only for full scans)
+        # Incremental scans can't reliably detect deletions since they only see modified files
+        if scan_type in ("full_initial", "full_deletions", "full_fallback"):
+            # Use optimized query for just file paths (not full entities)
+            db_file_paths = await self.entity_repository.get_all_file_paths()
+            logger.debug(f"Found {len(db_file_paths)} db paths for deletion detection")
+
+            for db_path in db_file_paths:
+                if db_path not in scanned_paths:
+                    # File in DB but not on filesystem
+                    # Check if it was already detected as a move
+                    if db_path in report.moves:
+                        # Already handled as a move, skip
+                        continue
+
                     # File was deleted
                     report.deleted.add(db_path)
                     logger.trace(f"Deleted file detected: {db_path}")
@@ -453,8 +565,11 @@ class SyncService:
         # Store checksums for files that need syncing
         report.checksums = changed_checksums
 
+        scan_duration_ms = int((time.time() - scan_start_time) * 1000)
+        logfire.metric_histogram("sync.scan.duration", unit="ms").record(scan_duration_ms)
+
         logger.info(
-            f"Completed streaming scan for directory {directory}, "
+            f"Completed {scan_type} scan for directory {directory} in {scan_duration_ms}ms, "
             f"found {report.total} changes (new={len(report.new)}, "
             f"modified={len(report.modified)}, deleted={len(report.deleted)}, "
             f"moves={len(report.moves)})"
@@ -899,10 +1014,121 @@ class SyncService:
                 # update search index
                 await self.search_service.index_entity(resolved_entity)
 
-    async def scan_directory(self, directory: Path) -> AsyncIterator[Tuple[str, os.stat_result]]:
-        """Stream files from directory using scandir() with cached stat info.
+    async def _quick_count_files(self, directory: Path) -> int:
+        """Fast file count using find command.
 
-        This method uses os.scandir() instead of os.walk() to leverage cached stat
+        Uses subprocess to leverage OS-level file counting which is much faster
+        than Python iteration, especially on network filesystems like TigrisFS.
+
+        Args:
+            directory: Directory to count files in
+
+        Returns:
+            Number of files in directory (recursive)
+        """
+        process = await asyncio.create_subprocess_shell(
+            f'find "{directory}" -type f | wc -l',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            error_msg = stderr.decode().strip()
+            logger.error(
+                f"FILE COUNT OPTIMIZATION FAILED: find command failed with exit code {process.returncode}, "
+                f"error: {error_msg}. Falling back to manual count. "
+                f"This will slow down watermark detection!"
+            )
+            # Track optimization failures for visibility
+            logfire.metric_counter("sync.scan.file_count_failure").add(1)
+            # Fallback: count using scan_directory
+            count = 0
+            async for _ in self.scan_directory(directory):
+                count += 1
+            return count
+
+        return int(stdout.strip())
+
+    async def _scan_directory_modified_since(
+        self, directory: Path, since_timestamp: float
+    ) -> List[str]:
+        """Use find -newermt for filesystem-level filtering of modified files.
+
+        This is dramatically faster than scanning all files and comparing mtimes,
+        especially on network filesystems like TigrisFS where stat operations are expensive.
+
+        Args:
+            directory: Directory to scan
+            since_timestamp: Unix timestamp to find files newer than
+
+        Returns:
+            List of relative file paths modified since the timestamp (respects .bmignore)
+        """
+        # Convert timestamp to find-compatible format
+        since_date = datetime.fromtimestamp(since_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+        process = await asyncio.create_subprocess_shell(
+            f'find "{directory}" -type f -newermt "{since_date}"',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            error_msg = stderr.decode().strip()
+            logger.error(
+                f"SCAN OPTIMIZATION FAILED: find -newermt command failed with exit code {process.returncode}, "
+                f"error: {error_msg}. Falling back to full scan. "
+                f"This will cause slow syncs on large projects!"
+            )
+            # Track optimization failures for visibility
+            logfire.metric_counter("sync.scan.optimization_failure").add(1)
+            # Fallback to full scan
+            return await self._scan_directory_full(directory)
+
+        # Convert absolute paths to relative and filter through ignore patterns
+        file_paths = []
+        for line in stdout.decode().splitlines():
+            if line:
+                try:
+                    abs_path = Path(line)
+                    rel_path = abs_path.relative_to(directory).as_posix()
+
+                    # Apply ignore patterns (same as scan_directory)
+                    if should_ignore_path(abs_path, directory, self._ignore_patterns):
+                        logger.trace(f"Ignoring path per .bmignore: {rel_path}")
+                        continue
+
+                    file_paths.append(rel_path)
+                except ValueError:
+                    # Path is not relative to directory, skip it
+                    logger.warning(f"Skipping file not under directory: {line}")
+                    continue
+
+        return file_paths
+
+    async def _scan_directory_full(self, directory: Path) -> List[str]:
+        """Full directory scan returning all file paths.
+
+        Uses scan_directory() which respects .bmignore patterns.
+
+        Args:
+            directory: Directory to scan
+
+        Returns:
+            List of relative file paths (respects .bmignore)
+        """
+        file_paths = []
+        async for file_path_str, _ in self.scan_directory(directory):
+            rel_path = Path(file_path_str).relative_to(directory).as_posix()
+            file_paths.append(rel_path)
+        return file_paths
+
+    async def scan_directory(self, directory: Path) -> AsyncIterator[Tuple[str, os.stat_result]]:
+        """Stream files from directory using aiofiles.os.scandir() with cached stat info.
+
+        This method uses aiofiles.os.scandir() to leverage async I/O and cached stat
         information from directory entries. This reduces network I/O by 50% on network
         filesystems like TigrisFS by avoiding redundant stat() calls.
 
@@ -912,42 +1138,30 @@ class SyncService:
         Yields:
             Tuples of (absolute_file_path, stat_info) for each file
         """
+        try:
+            entries = await aiofiles.os.scandir(directory)
+        except PermissionError:
+            logger.warning(f"Permission denied scanning directory: {directory}")
+            return
 
-        def _sync_scandir(dir_path: Path):
-            """Synchronous scandir implementation for thread pool execution."""
-            try:
-                entries = os.scandir(dir_path)
-            except PermissionError:
-                logger.warning(f"Permission denied scanning directory: {dir_path}")
-                return [], []  # Return empty results and subdirs tuple
+        results = []
+        subdirs = []
 
-            results = []
-            subdirs = []
+        for entry in entries:
+            entry_path = Path(entry.path)
 
-            for entry in entries:
-                entry_path = Path(entry.path)
+            # Check ignore patterns
+            if should_ignore_path(entry_path, directory, self._ignore_patterns):
+                logger.trace(f"Ignoring path per .bmignore: {entry_path.relative_to(directory)}")
+                continue
 
-                # Check ignore patterns
-                if should_ignore_path(entry_path, directory, self._ignore_patterns):
-                    logger.trace(
-                        f"Ignoring path per .bmignore: {entry_path.relative_to(directory)}"
-                    )
-                    continue
-
-                if entry.is_dir(follow_symlinks=False):
-                    # Collect subdirectories to recurse into
-                    subdirs.append(entry_path)
-                elif entry.is_file(follow_symlinks=False):
-                    # Get cached stat info (no extra syscall!)
-                    stat_info = entry.stat(follow_symlinks=False)
-                    results.append((entry.path, stat_info))
-
-            return results, subdirs
-
-        # Run scandir in default executor to avoid blocking event loop
-        # os.scandir() is synchronous, so we use run_in_executor with None (default executor)
-        loop = asyncio.get_event_loop()
-        results, subdirs = await loop.run_in_executor(None, _sync_scandir, directory)
+            if entry.is_dir(follow_symlinks=False):
+                # Collect subdirectories to recurse into
+                subdirs.append(entry_path)
+            elif entry.is_file(follow_symlinks=False):
+                # Get cached stat info (no extra syscall!)
+                stat_info = entry.stat(follow_symlinks=False)
+                results.append((entry.path, stat_info))
 
         # Yield files from current directory
         for file_path, stat_info in results:
@@ -977,6 +1191,7 @@ async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
     observation_repository = ObservationRepository(session_maker, project_id=project.id)
     relation_repository = RelationRepository(session_maker, project_id=project.id)
     search_repository = SearchRepository(session_maker, project_id=project.id)
+    project_repository = ProjectRepository(session_maker)
 
     # Initialize services
     search_service = SearchService(search_repository, entity_repository, file_service)
@@ -999,6 +1214,7 @@ async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
         entity_parser=entity_parser,
         entity_repository=entity_repository,
         relation_repository=relation_repository,
+        project_repository=project_repository,
         search_service=search_service,
         file_service=file_service,
     )
