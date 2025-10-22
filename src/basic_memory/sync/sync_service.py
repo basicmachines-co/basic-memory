@@ -650,11 +650,32 @@ class SyncService:
         # Parse markdown first to get any existing permalink
         logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
 
-        file_content = await self.file_service.read_file_content(path)
+        try:
+            file_content = await self.file_service.read_file_content(path)
+        except FileNotFoundError:
+            # File exists in database but not on filesystem - treat as deletion
+            logger.warning(
+                f"File missing during sync (treating as deletion): path={path}, "
+                f"is_new={new}. This indicates a database/filesystem inconsistency - "
+                f"the file may have been deleted manually or by another process."
+            )
+            await self.handle_delete(path)
+            # Return None to signal the file was handled as a deletion
+            return None, ""
+
         file_contains_frontmatter = has_frontmatter(file_content)
 
         # Get file timestamps for tracking modification times
-        file_stats = self.file_service.file_stats(path)
+        try:
+            file_stats = self.file_service.file_stats(path)
+        except FileNotFoundError:
+            # File was deleted between read and stat - treat as deletion
+            logger.warning(
+                f"File deleted during sync (race condition): path={path}. "
+                f"Treating as deletion."
+            )
+            await self.handle_delete(path)
+            return None, ""
         created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
         modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
@@ -730,13 +751,33 @@ class SyncService:
         Returns:
             Tuple of (entity, checksum)
         """
-        checksum = await self.file_service.compute_checksum(path)
+        try:
+            checksum = await self.file_service.compute_checksum(path)
+        except FileNotFoundError:
+            # File exists in database but not on filesystem - treat as deletion
+            logger.warning(
+                f"File missing during sync (treating as deletion): path={path}, "
+                f"is_new={new}. This indicates a database/filesystem inconsistency - "
+                f"the file may have been deleted manually or by another process."
+            )
+            await self.handle_delete(path)
+            return None, ""
+
         if new:
             # Generate permalink from path - skip conflict checks during bulk sync
             await self.entity_service.resolve_permalink(path, skip_conflict_check=True)
 
             # get file timestamps
-            file_stats = self.file_service.file_stats(path)
+            try:
+                file_stats = self.file_service.file_stats(path)
+            except FileNotFoundError:
+                # File was deleted between checksum and stat - treat as deletion
+                logger.warning(
+                    f"File deleted during sync (race condition): path={path}. "
+                    f"Treating as deletion."
+                )
+                await self.handle_delete(path)
+                return None, ""
             created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
             modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
@@ -772,7 +813,16 @@ class SyncService:
                         raise ValueError(f"Entity not found after constraint violation: {path}")
 
                     # Re-get file stats since we're in update path
-                    file_stats_for_update = self.file_service.file_stats(path)
+                    try:
+                        file_stats_for_update = self.file_service.file_stats(path)
+                    except FileNotFoundError:
+                        # File was deleted during update - treat as deletion
+                        logger.warning(
+                            f"File deleted during sync (race condition in update path): path={path}. "
+                            f"Treating as deletion."
+                        )
+                        await self.handle_delete(path)
+                        return None, ""
                     updated = await self.entity_repository.update(
                         entity.id,
                         {
@@ -793,7 +843,16 @@ class SyncService:
                     raise
         else:
             # Get file timestamps for updating modification time
-            file_stats = self.file_service.file_stats(path)
+            try:
+                file_stats = self.file_service.file_stats(path)
+            except FileNotFoundError:
+                # File was deleted before update - treat as deletion
+                logger.warning(
+                    f"File deleted during sync (update path): path={path}. "
+                    f"Treating as deletion."
+                )
+                await self.handle_delete(path)
+                return None, ""
             modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
 
             entity = await self.entity_repository.get_by_file_path(path)
