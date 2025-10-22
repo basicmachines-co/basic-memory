@@ -1,7 +1,8 @@
 """Search tools for Basic Memory MCP server."""
 
+import json
 from textwrap import dedent
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from loguru import logger
 from fastmcp import Context
@@ -11,6 +12,33 @@ from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
+
+
+def _normalize_list_param(param: Optional[Union[str, List[str]]]) -> Optional[List[str]]:
+    """Normalize a parameter that can be either a JSON string or a list.
+
+    Args:
+        param: Either a JSON string like '["item1", "item2"]' or a list ["item1", "item2"]
+
+    Returns:
+        A list of strings, or None if param is None
+
+    Raises:
+        ValueError: If the string cannot be parsed as JSON
+    """
+    if param is None:
+        return None
+
+    if isinstance(param, str):
+        try:
+            parsed = json.loads(param)
+            if not isinstance(parsed, list):
+                raise ValueError(f"Expected JSON array, got {type(parsed).__name__}")
+            return parsed
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON string: {e}")
+
+    return param
 
 
 def _format_search_error_response(
@@ -205,8 +233,8 @@ async def search_notes(
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
-    types: Optional[List[str]] = None,
-    entity_types: Optional[List[str]] = None,
+    types: Optional[Union[str, List[str]]] = None,
+    entity_types: Optional[Union[str, List[str]]] = None,
     after_date: Optional[str] = None,
     context: Context | None = None,
 ) -> SearchResponse | str:
@@ -263,8 +291,10 @@ async def search_notes(
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of: "text", "title", "permalink" (default: "text")
-        types: Optional list of note types to search (e.g., ["note", "person"])
-        entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
+        types: Optional list of note types to search. Accepts either a list ["note", "person"]
+               or a JSON string '["note", "person"]' for clients that serialize arrays as strings.
+        entity_types: Optional list of entity types to filter by. Accepts either a list
+                     ["entity", "observation"] or a JSON string '["entity", "observation"]'.
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
         context: Optional FastMCP context for performance caching.
 
@@ -330,6 +360,10 @@ async def search_notes(
         # Explicit project specification
         results = await search_notes("project planning", project="my-project")
     """
+    # Normalize list parameters (accept both JSON strings and lists)
+    normalized_types = _normalize_list_param(types)
+    normalized_entity_types = _normalize_list_param(entity_types)
+
     # Create a SearchQuery object based on the parameters
     search_query = SearchQuery()
 
@@ -346,10 +380,10 @@ async def search_notes(
         search_query.text = query  # Default to text search
 
     # Add optional filters if provided
-    if entity_types:
-        search_query.entity_types = [SearchItemType(t) for t in entity_types]
-    if types:
-        search_query.types = types
+    if normalized_entity_types:
+        search_query.entity_types = [SearchItemType(t) for t in normalized_entity_types]
+    if normalized_types:
+        search_query.types = normalized_types
     if after_date:
         search_query.after_date = after_date
 

@@ -499,3 +499,185 @@ async def test_search_case_insensitive(mcp_server, app, test_project):
 
             result_text = search_result.content[0].text
             assert "Machine Learning Guide" in result_text, f"Failed for search term: {search_term}"
+
+
+@pytest.mark.asyncio
+async def test_search_with_json_string_entity_types(mcp_server, app, test_project):
+    """Test search with entity_types as JSON string (for ChatGPT compatibility)."""
+
+    async with Client(mcp_server) as client:
+        # Create a note with observations and relations
+        content_with_observations = """# Development Process
+
+This describes our development workflow.
+
+## Observations
+- [process] We use Git for version control
+- [tool] We use VS Code as our editor
+
+## Relations
+- uses [[Git]]
+- part_of [[Development Workflow]]
+
+Regular content about development practices."""
+
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Development Process",
+                "folder": "processes",
+                "content": content_with_observations,
+                "tags": "development,process",
+            },
+        )
+
+        # Search with entity_types as JSON string (simulating ChatGPT behavior)
+        search_result = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "development",
+                "entity_types": '["entity"]',  # JSON string format
+            },
+        )
+
+        result_text = search_result.content[0].text
+        # Should find the main entity
+        assert "Development Process" in result_text
+
+
+@pytest.mark.asyncio
+async def test_search_with_json_string_types(mcp_server, app, test_project):
+    """Test search with types as JSON string (for ChatGPT compatibility)."""
+
+    async with Client(mcp_server) as client:
+        # Create test notes with different types
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Python Programming",
+                "folder": "docs",
+                "content": """# Python Programming
+---
+type: entity
+---
+
+Python programming language guide.""",
+                "tags": "python,programming",
+            },
+        )
+
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "JavaScript Basics",
+                "folder": "docs",
+                "content": """# JavaScript Basics
+---
+type: note
+---
+
+JavaScript programming guide.""",
+                "tags": "javascript,programming",
+            },
+        )
+
+        # Search with types as JSON string
+        search_result = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "programming",
+                "types": '["entity"]',  # JSON string format
+            },
+        )
+
+        result_text = search_result.content[0].text
+        assert "Python Programming" in result_text
+        # Note: Can't definitively assert "JavaScript Basics" not in result_text
+        # without checking the type filtering logic, but the test verifies
+        # that JSON string format is accepted
+
+
+@pytest.mark.asyncio
+async def test_search_with_json_string_observation_filter(mcp_server, app, test_project):
+    """Test search with entity_types filtering for observations using JSON string."""
+
+    async with Client(mcp_server) as client:
+        # Create a note with observations
+        content = """# Project Planning
+
+## Observations
+- [requirement] Must support authentication
+- [decision] Using OAuth2 for auth
+- [problem] Legacy systems don't support OAuth
+
+## Content
+Planning our project architecture."""
+
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Project Planning",
+                "folder": "planning",
+                "content": content,
+                "tags": "planning,project",
+            },
+        )
+
+        # Search for observations using JSON string format
+        search_result = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "auth",
+                "entity_types": '["observation"]',  # JSON string format
+            },
+        )
+
+        result_text = search_result.content[0].text
+        # Should find observations containing "auth"
+        assert "authentication" in result_text or "OAuth" in result_text
+
+
+@pytest.mark.asyncio
+async def test_search_with_multiple_entity_types_json_string(mcp_server, app, test_project):
+    """Test search with multiple entity_types in JSON string format."""
+
+    async with Client(mcp_server) as client:
+        # Create a note with both entities and observations
+        content = """# Development Tools
+
+## Observations
+- [tool] VS Code is our primary editor
+- [process] We use Git for version control
+
+Regular content about development."""
+
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Development Tools",
+                "folder": "tools",
+                "content": content,
+                "tags": "development,tools",
+            },
+        )
+
+        # Search with multiple entity_types as JSON string
+        search_result = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "development",
+                "entity_types": '["entity", "observation"]',  # JSON string with multiple values
+            },
+        )
+
+        result_text = search_result.content[0].text
+        assert "Development Tools" in result_text
