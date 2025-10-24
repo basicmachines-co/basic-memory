@@ -1275,6 +1275,53 @@ async def test_edit_entity_replace_section_with_subsections(
     assert "Other content" in file_content
 
 
+@pytest.mark.asyncio
+async def test_edit_entity_replace_section_strips_duplicate_header(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test that replace_section strips duplicate header from content (issue #390)."""
+    # Create test entity with a section
+    content = dedent("""
+        # Main Title
+
+        ## Testing
+        Original content
+
+        ## Another Section
+        Other content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Sample Note",
+            folder="docs",
+            entity_type="note",
+            content=content,
+        )
+    )
+
+    # Replace section with content that includes the duplicate header
+    # (This is what LLMs sometimes do)
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="replace_section",
+        content="## Testing\nNew content for testing section",
+        section="## Testing",
+    )
+
+    # Verify that we don't have duplicate headers
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+
+    # Count occurrences of "## Testing" - should only be 1
+    testing_header_count = file_content.count("## Testing")
+    assert testing_header_count == 1, f"Expected 1 '## Testing' header, found {testing_header_count}"
+
+    assert "New content for testing section" in file_content
+    assert "Original content" not in file_content
+    assert "## Another Section" in file_content  # Other sections preserved
+
+
 # Move entity tests
 @pytest.mark.asyncio
 async def test_move_entity_success(
