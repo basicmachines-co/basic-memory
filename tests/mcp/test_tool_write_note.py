@@ -538,7 +538,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
         folder="guides",
         content="# Guide Content\nThis is a guide",
         tags=["guide", "documentation"],
-        entity_type="guide",
+        note_type="guide",
     )
 
     assert result
@@ -574,14 +574,14 @@ async def test_write_note_with_custom_entity_type(app, test_project):
 
 @pytest.mark.asyncio
 async def test_write_note_with_report_entity_type(app, test_project):
-    """Test creating a note with entity_type="report"."""
+    """Test creating a note with note_type="report"."""
     result = await write_note.fn(
         project=test_project.name,
         title="Monthly Report",
         folder="reports",
         content="# Monthly Report\nThis is a monthly report",
         tags=["report", "monthly"],
-        entity_type="report",
+        note_type="report",
     )
 
     assert result
@@ -599,13 +599,13 @@ async def test_write_note_with_report_entity_type(app, test_project):
 
 @pytest.mark.asyncio
 async def test_write_note_with_config_entity_type(app, test_project):
-    """Test creating a note with entity_type="config"."""
+    """Test creating a note with note_type="config"."""
     result = await write_note.fn(
         project=test_project.name,
         title="System Config",
         folder="config",
         content="# System Configuration\nThis is a config file",
-        entity_type="config",
+        note_type="config",
     )
 
     assert result
@@ -659,21 +659,21 @@ async def test_write_note_update_existing_with_different_entity_type(app, test_p
         folder="test",
         content="# Initial Content\nThis starts as a note",
         tags=["test"],
-        entity_type="note",
+        note_type="note",
     )
 
     assert result1
     assert "# Created note" in result1
     assert f"project: {test_project.name}" in result1
 
-    # Update the same note with a different entity_type
+    # Update the same note with a different note_type
     result2 = await write_note.fn(
         project=test_project.name,
         title="Changeable Type",
         folder="test",
         content="# Updated Content\nThis is now a guide",
         tags=["guide"],
-        entity_type="guide",
+        note_type="guide",
     )
 
     assert result2
@@ -976,7 +976,7 @@ class TestWriteNoteSecurityValidation:
             folder="../../../etc/malicious",
             content="# Malicious Content\nThis should be blocked by security validation.",
             tags=["malicious", "test"],
-            entity_type="guide",
+            note_type="guide",
         )
 
         assert isinstance(result, str)
@@ -1026,7 +1026,7 @@ class TestWriteNoteSecurityValidation:
                 Additional content with various formatting.
             """).strip(),
             tags=["security", "test", "full-feature"],
-            entity_type="guide",
+            note_type="guide",
         )
 
         # Should succeed normally

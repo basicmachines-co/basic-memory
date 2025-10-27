@@ -29,7 +29,7 @@ async def write_note(
     folder: str,
     project: Optional[str] = None,
     tags=None,
-    entity_type: str = "note",
+    note_type: str = "note",
     context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
@@ -70,7 +70,8 @@ async def write_note(
                 available projects.
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
-        entity_type: Type of entity to create. Defaults to "note". Can be "guide", "report", "config", etc.
+        note_type: Type of note to create (stored in frontmatter). Defaults to "note".
+                   Can be "guide", "report", "config", "person", etc.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -96,14 +97,14 @@ async def write_note(
             content="# Weekly Standup\\n\\n- [decision] Use SQLite for storage #tech"
         )
 
-        # Create a note with tags and entity type
+        # Create a note with tags and note type
         write_note(
             project="work-project",
             title="API Design",
             folder="specs",
             content="# REST API Specification\\n\\n- implements [[Authentication]]",
             tags=["api", "design"],
-            entity_type="guide"
+            note_type="guide"
         )
 
         # Update existing note (same title/folder)
@@ -147,7 +148,7 @@ async def write_note(
         entity = Entity(
             title=title,
             folder=folder,
-            entity_type=entity_type,
+            entity_type=note_type,
             content_type="text/markdown",
             content=content,
             entity_metadata=metadata,
