@@ -62,6 +62,21 @@ uv tool install basic-memory
 
 You can view shared context via files in `~/basic-memory` (default directory location).
 
+## Documentation
+
+### MCP Tool Usage Guide
+
+For comprehensive documentation on all available MCP tools with examples and usage patterns, see:
+
+**[MCP Tool Usage Guide](docs/mcp-tool-usage.md)** - Complete reference for all 16 MCP tools including:
+- Content Management (write_note, read_note, edit_note, etc.)
+- Knowledge Graph Navigation (build_context, recent_activity, list_directory)
+- Search & Discovery (search_notes with advanced syntax)
+- Project Management (list_memory_projects, create_memory_project, etc.)
+- Visualization (canvas for Obsidian)
+
+This guide is perfect for creating custom instructions for your LLM or learning how to integrate Basic Memory into your workflows.
+
 ### Alternative Installation via Smithery
 
 You can use [Smithery](https://smithery.ai/server/@basicmachines-co/basic-memory) to automatically configure Basic
