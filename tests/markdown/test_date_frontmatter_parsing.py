@@ -177,7 +177,7 @@ This file has various YAML types that need to be normalized.
     # Boolean should be converted to string
     completed = entity_markdown.frontmatter.metadata.get("completed")
     assert isinstance(completed, str)
-    assert completed in ("True", "true")  # Python bools convert to "True"/"False"
+    assert completed == "True"  # Python's str(True) always returns "True"
 
     # List should be preserved as list, but items should be strings
     tags = entity_markdown.frontmatter.tags
@@ -193,3 +193,43 @@ This file has various YAML types that need to be normalized.
     assert metadata.get("author") == "Test User"
     assert isinstance(metadata.get("version"), str)
     assert metadata.get("version") in ("1.0", "1")
+
+
+@pytest.mark.asyncio
+async def test_parse_file_with_datetime_objects(tmp_path):
+    """Test that datetime objects (not just date objects) are properly normalized.
+
+    This tests the edge case where frontmatter might contain datetime values
+    with time components (as parsed by PyYAML), ensuring they're converted to ISO format strings.
+    """
+    test_file = tmp_path / "test_datetime.md"
+
+    # YAML datetime strings that PyYAML will parse as datetime objects
+    # Format: YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM:SS
+    content = """---
+title: Test Datetime
+created_at: 2025-10-24 14:30:00
+updated_at: 2025-10-24T00:00:00
+---
+
+# Test Content
+
+This file has datetime values in frontmatter that PyYAML will parse as datetime objects.
+"""
+    test_file.write_text(content)
+
+    parser = EntityParser(tmp_path)
+    entity_markdown = await parser.parse_file(test_file)
+
+    # Verify datetime objects are converted to ISO format strings
+    created_at = entity_markdown.frontmatter.metadata.get("created_at")
+    assert isinstance(created_at, str), "Datetime should be converted to string"
+    # PyYAML parses "2025-10-24 14:30:00" as datetime, which we normalize to ISO
+    assert "2025-10-24" in created_at and "14:30:00" in created_at, \
+        f"Datetime with time should be normalized to ISO format, got: {created_at}"
+
+    updated_at = entity_markdown.frontmatter.metadata.get("updated_at")
+    assert isinstance(updated_at, str), "Datetime should be converted to string"
+    # PyYAML parses "2025-10-24T00:00:00" as datetime, which we normalize to ISO
+    assert "2025-10-24" in updated_at and "00:00:00" in updated_at, \
+        f"Datetime at midnight should be normalized to ISO format, got: {updated_at}"
