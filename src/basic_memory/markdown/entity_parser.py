@@ -4,7 +4,7 @@ Uses markdown-it with plugins to parse structured data from markdown content.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +24,82 @@ from basic_memory.markdown.schemas import (
 from basic_memory.utils import parse_tags
 
 md = MarkdownIt().use(observation_plugin).use(relation_plugin)
+
+
+def normalize_frontmatter_value(value: Any) -> Any:
+    """Normalize frontmatter values to safe types for processing.
+
+    PyYAML automatically converts various string-like values into native Python types:
+    - Date strings ("2025-10-24") → datetime.date objects
+    - Numbers ("1.0") → int or float
+    - Booleans ("true") → bool
+    - Lists → list objects
+
+    This can cause AttributeError when code expects strings and calls string methods
+    like .strip() on these values (see GitHub issue #236).
+
+    This function normalizes all frontmatter values to safe types:
+    - Dates/datetimes → ISO format strings
+    - Numbers (int/float) → strings
+    - Booleans → strings ("True"/"False")
+    - Lists → preserved as lists, but items are recursively normalized
+    - Dicts → preserved as dicts, but values are recursively normalized
+    - Strings → kept as-is
+    - None → kept as None
+
+    Args:
+        value: The frontmatter value to normalize
+
+    Returns:
+        The normalized value safe for string operations
+
+    Example:
+        >>> normalize_frontmatter_value(datetime.date(2025, 10, 24))
+        '2025-10-24'
+        >>> normalize_frontmatter_value([datetime.date(2025, 10, 24), "tag", 123])
+        ['2025-10-24', 'tag', '123']
+        >>> normalize_frontmatter_value(True)
+        'True'
+    """
+    # Convert date/datetime objects to ISO format strings
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    # Convert boolean to string (must come before int check since bool is subclass of int)
+    if isinstance(value, bool):
+        return str(value)
+
+    # Convert numbers to strings
+    if isinstance(value, (int, float)):
+        return str(value)
+
+    # Recursively process lists (preserve as list, normalize items)
+    if isinstance(value, list):
+        return [normalize_frontmatter_value(item) for item in value]
+
+    # Recursively process dicts (preserve as dict, normalize values)
+    if isinstance(value, dict):
+        return {key: normalize_frontmatter_value(val) for key, val in value.items()}
+
+    # Keep strings and None as-is
+    return value
+
+
+def normalize_frontmatter_metadata(metadata: dict) -> dict:
+    """Normalize all values in frontmatter metadata dict.
+
+    Converts date/datetime objects to ISO format strings to prevent
+    AttributeError when code expects strings (GitHub issue #236).
+
+    Args:
+        metadata: The frontmatter metadata dictionary
+
+    Returns:
+        A new dictionary with all values normalized
+    """
+    return {key: normalize_frontmatter_value(value) for key, value in metadata.items()}
 
 
 @dataclass
@@ -127,20 +203,25 @@ class EntityParser:
 
         # Extract file stat info
         file_stats = absolute_path.stat()
-        metadata = post.metadata
+
+        # Normalize frontmatter values to prevent AttributeError on date objects (issue #236)
+        # PyYAML automatically converts date strings like "2025-10-24" to datetime.date objects
+        # This normalization converts them back to ISO format strings to ensure compatibility
+        # with code that expects string values
+        metadata = normalize_frontmatter_metadata(post.metadata)
 
         # Ensure required fields have defaults (issue #184, #387)
         # Handle title - use default if missing, None/null, empty, or string "None"
-        title = post.metadata.get("title")
+        title = metadata.get("title")
         if not title or title == "None":
             metadata["title"] = absolute_path.stem
         else:
             metadata["title"] = title
         # Handle type - use default if missing OR explicitly set to None/null
-        entity_type = post.metadata.get("type")
+        entity_type = metadata.get("type")
         metadata["type"] = entity_type if entity_type is not None else "note"
 
-        tags = parse_tags(post.metadata.get("tags", []))  # pyright: ignore
+        tags = parse_tags(metadata.get("tags", []))  # pyright: ignore
         if tags:
             metadata["tags"] = tags
 
