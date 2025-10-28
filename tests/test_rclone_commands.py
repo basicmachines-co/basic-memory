@@ -44,21 +44,24 @@ def test_sync_project_optional_local_path():
 
 
 def test_get_project_remote():
-    """Test building rclone remote path."""
-    project = SyncProject(name="research", path="app/data/research")
+    """Test building rclone remote path with normalized path."""
+    # Path comes from API already normalized (no /app/data/ prefix)
+    project = SyncProject(name="research", path="/research")
 
     remote = get_project_remote(project, "my-bucket")
 
-    assert remote == "basic-memory-cloud:my-bucket/app/data/research"
+    assert remote == "basic-memory-cloud:my-bucket/research"
 
 
-def test_get_project_remote_strips_leading_slash():
-    """Test that leading slash is stripped from cloud path."""
+def test_get_project_remote_strips_app_data_prefix():
+    """Test that /app/data/ prefix is stripped from cloud path."""
+    # If API returns path with /app/data/, it should be stripped
     project = SyncProject(name="research", path="/app/data/research")
 
     remote = get_project_remote(project, "my-bucket")
 
-    assert remote == "basic-memory-cloud:my-bucket/app/data/research"
+    # Should strip /app/data/ prefix to get actual S3 path
+    assert remote == "basic-memory-cloud:my-bucket/research"
 
 
 def test_get_project_bisync_state():
@@ -114,7 +117,7 @@ def test_project_sync_success(mock_run):
 
     project = SyncProject(
         name="research",
-        path="app/data/research",
+        path="/research",  # Normalized path from API
         local_sync_path="/tmp/research",
     )
 
@@ -128,7 +131,7 @@ def test_project_sync_success(mock_run):
     assert cmd[0] == "rclone"
     assert cmd[1] == "sync"
     assert cmd[2] == "/tmp/research"
-    assert cmd[3] == "basic-memory-cloud:my-bucket/app/data/research"
+    assert cmd[3] == "basic-memory-cloud:my-bucket/research"
     assert "--dry-run" in cmd
 
 
@@ -341,9 +344,9 @@ def test_project_ls_with_subpath(mock_run):
     """Test project ls with subdirectory."""
     mock_run.return_value = MagicMock(returncode=0, stdout="")
 
-    project = SyncProject(name="research", path="app/data/research")
+    project = SyncProject(name="research", path="/research")  # Normalized path
 
     project_ls(project, "my-bucket", path="subdir")
 
     cmd = mock_run.call_args[0][0]
-    assert cmd[-1] == "basic-memory-cloud:my-bucket/app/data/research/subdir"
+    assert cmd[-1] == "basic-memory-cloud:my-bucket/research/subdir"
