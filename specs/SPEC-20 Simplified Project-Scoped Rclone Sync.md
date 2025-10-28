@@ -1012,17 +1012,18 @@ rm -rf ~/basic-memory-cloud-sync/
 - [x] Write unit tests for rclone commands (22 tests, 99% coverage)
 - [x] Temporarily disable mount commands in core_commands.py
 
-### Phase 4: CLI Integration (2-3 days)
-- [ ] Update `project.py`: Add `--local` flag to `project add` command
-- [ ] Update `project.py`: Create `project sync-setup` command
-- [ ] Create `project.py`: Add `project sync` command
-- [ ] Create `project.py`: Add `project bisync` command
-- [ ] Create `project.py`: Add `project check` command
-- [ ] Create `project.py`: Add `project ls` command
-- [ ] Update `project list` to show sync status
-- [ ] Update `cloud/core_commands.py`: Simplify `cloud setup` command
-- [ ] Add helper functions: `get_all_sync_projects()`, `get_project_by_name()`
-- [ ] Write integration tests for new commands
+### Phase 4: CLI Integration (2-3 days) ✅
+- [x] Update `project.py`: Add `--local-path` flag to `project add` command
+- [x] Update `project.py`: Create `project sync-setup` command
+- [x] Create `project.py`: Add `project sync` command
+- [x] Create `project.py`: Add `project bisync` command
+- [x] Create `project.py`: Add `project check` command
+- [x] Create `project.py`: Add `project ls` command
+- [x] Import rclone_commands module and get_mount_info helper
+- [ ] Update `project list` to show sync status (optional)
+- [ ] Update `cloud/core_commands.py`: Simplify `cloud setup` command (optional)
+- [ ] Add helper functions: `get_all_sync_projects()`, `get_project_by_name()` (optional)
+- [ ] Write integration tests for new commands (deferred)
 
 ### Phase 5: Cleanup (1 day)
 - [ ] Remove `mount_commands.py` (entire file)
