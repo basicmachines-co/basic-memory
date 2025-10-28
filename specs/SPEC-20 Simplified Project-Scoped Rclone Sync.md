@@ -1025,32 +1025,33 @@ rm -rf ~/basic-memory-cloud-sync/
 - [ ] Add helper functions: `get_all_sync_projects()`, `get_project_by_name()` (optional)
 - [ ] Write integration tests for new commands (deferred)
 
-### Phase 5: Cleanup (1 day)
-- [ ] Remove `mount_commands.py` (entire file)
-- [ ] Remove mount-related functions from `rclone_config.py`:
-  - [ ] `MOUNT_PROFILES`
-  - [ ] `get_default_mount_path()`
-  - [ ] `build_mount_command()`
-  - [ ] `is_path_mounted()`
-  - [ ] `get_rclone_processes()`
-  - [ ] `kill_rclone_process()`
-  - [ ] `unmount_path()`
-  - [ ] `cleanup_orphaned_rclone_processes()`
-- [ ] Remove from `bisync_commands.py`:
-  - [ ] `BISYNC_PROFILES` (use single default)
-  - [ ] `setup_cloud_bisync()`
-  - [ ] `run_bisync_watch()`
-  - [ ] `show_bisync_status()`
-- [ ] Remove `bisync_config` from config schema
-- [ ] Remove deprecated cloud commands:
-  - [ ] `cloud mount`
-  - [ ] `cloud unmount`
-  - [ ] `cloud mount-status`
-  - [ ] `cloud bisync-setup`
-- [ ] Remove convenience commands:
-  - [ ] Root-level `bm sync` (without project)
-  - [ ] Root-level `bm bisync` (without project)
-- [ ] Update tests to remove references to deprecated functionality
+### Phase 5: Cleanup (1 day) ✅
+- [x] Remove `mount_commands.py` (entire file)
+- [x] Remove mount-related functions from `rclone_config.py`:
+  - [x] `MOUNT_PROFILES`
+  - [x] `get_default_mount_path()`
+  - [x] `build_mount_command()`
+  - [x] `is_path_mounted()`
+  - [x] `get_rclone_processes()`
+  - [x] `kill_rclone_process()`
+  - [x] `unmount_path()`
+  - [x] `cleanup_orphaned_rclone_processes()`
+- [x] Remove from `bisync_commands.py`:
+  - [x] `BISYNC_PROFILES` (use single default)
+  - [x] `setup_cloud_bisync()`
+  - [x] `run_bisync_watch()`
+  - [x] `show_bisync_status()`
+  - [x] `run_bisync()`
+  - [x] `run_check()`
+- [x] Remove `bisync_config` from config schema
+- [x] Remove deprecated cloud commands:
+  - [x] `cloud mount`
+  - [x] `cloud unmount`
+  - [x] Simplified `cloud setup` to just install rclone and configure credentials
+- [x] Remove convenience commands:
+  - [x] Root-level `bm sync` (removed - confusing in cloud mode, automatic in local mode)
+- [x] Update tests to remove references to deprecated functionality
+- [x] All typecheck errors resolved
 
 ### Phase 6: Documentation (1 day)
 - [ ] Update `docs/cloud-cli.md` with new workflow
