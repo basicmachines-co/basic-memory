@@ -991,22 +991,26 @@ rm -rf ~/basic-memory-cloud-sync/
 - [x] Test config loading/saving with new schema
 - [x] Handle migration from old config format
 
-### Phase 2: Rclone Config Simplification (1 day)
-- [ ] Update `configure_rclone_remote()` to use `basic-memory-cloud` as remote name
-- [ ] Remove `add_tenant_to_rclone_config()` (replaced by configure_rclone_remote)
-- [ ] Remove tenant_id from remote naming
-- [ ] Test rclone config generation
+### Phase 2: Rclone Config Simplification (1 day) ✅
+- [x] Update `configure_rclone_remote()` to use `basic-memory-cloud` as remote name
+- [x] Remove `add_tenant_to_rclone_config()` (replaced by configure_rclone_remote)
+- [x] Remove tenant_id from remote naming
+- [x] Test rclone config generation
+- [x] Clean up deprecated import references in bisync_commands.py and core_commands.py
 
-### Phase 3: Project-Scoped Rclone Commands (2-3 days)
-- [ ] Create `src/basic_memory/cli/commands/cloud/rclone_commands.py`
-- [ ] Implement `get_project_remote(project, bucket_name)`
-- [ ] Implement `project_sync()` (one-way: local → cloud)
-- [ ] Implement `project_bisync()` (two-way: local ↔ cloud)
-- [ ] Implement `project_check()` (integrity verification)
-- [ ] Implement `project_ls()` (list remote files)
-- [ ] Add helper: `get_project_bisync_state(project_name)`
-- [ ] Add helper: `bisync_initialized(project_name)`
-- [ ] Write unit tests for rclone commands
+### Phase 3: Project-Scoped Rclone Commands (2-3 days) ✅
+- [x] Create `src/basic_memory/cli/commands/cloud/rclone_commands.py`
+- [x] Implement `get_project_remote(project, bucket_name)`
+- [x] Implement `project_sync()` (one-way: local → cloud)
+- [x] Implement `project_bisync()` (two-way: local ↔ cloud)
+- [x] Implement `project_check()` (integrity verification)
+- [x] Implement `project_ls()` (list remote files)
+- [x] Add helper: `get_project_bisync_state(project_name)`
+- [x] Add helper: `bisync_initialized(project_name)`
+- [x] Add helper: `get_bmignore_filter_path()`
+- [x] Add `SyncProject` dataclass for project representation
+- [x] Write unit tests for rclone commands (22 tests, 99% coverage)
+- [x] Temporarily disable mount commands in core_commands.py
 
 ### Phase 4: CLI Integration (2-3 days)
 - [ ] Update `project.py`: Add `--local` flag to `project add` command
