@@ -623,7 +623,7 @@ class EntityService(BaseService[EntityModel]):
         Args:
             current_content: The current markdown content
             section_header: The section header to find and replace (e.g., "## Section Name")
-            new_content: The new content to replace the section with
+            new_content: The new content to replace the section with (should not include the header itself)
 
         Returns:
             The updated content with the section replaced
@@ -634,6 +634,13 @@ class EntityService(BaseService[EntityModel]):
         # Normalize the section header (ensure it starts with #)
         if not section_header.startswith("#"):
             section_header = "## " + section_header
+
+        # Strip duplicate header from new_content if present (fix for issue #390)
+        # LLMs sometimes include the section header in their content, which would create duplicates
+        new_content_lines = new_content.lstrip().split("\n")
+        if new_content_lines and new_content_lines[0].strip() == section_header.strip():
+            # Remove the duplicate header line
+            new_content = "\n".join(new_content_lines[1:]).lstrip()
 
         # First pass: count matching sections to check for duplicates
         lines = current_content.split("\n")
