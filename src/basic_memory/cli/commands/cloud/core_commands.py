@@ -15,12 +15,13 @@ from basic_memory.cli.commands.cloud.api_client import (
     get_cloud_config,
     make_api_request,
 )
-from basic_memory.cli.commands.cloud.mount_commands import (
-    mount_cloud_files,
-    setup_cloud_mount,
-    show_mount_status,
-    unmount_cloud_files,
-)
+# Temporarily disabled - will be removed in Phase 5
+# from basic_memory.cli.commands.cloud.mount_commands import (
+#     mount_cloud_files,
+#     setup_cloud_mount,
+#     show_mount_status,
+#     unmount_cloud_files,
+# )
 from basic_memory.cli.commands.cloud.bisync_commands import (
     run_bisync,
     run_bisync_watch,
@@ -146,7 +147,9 @@ def status(
         if bisync:
             show_bisync_status()
         else:
-            show_mount_status()
+            # Temporarily disabled - will be removed in Phase 5
+            console.print("[yellow]Mount status temporarily disabled[/yellow]")
+            # show_mount_status()
 
     except CloudAPIError as e:
         console.print(f"[red]Error checking cloud health: {e}[/red]")
@@ -185,7 +188,9 @@ def setup(
     if bisync:
         setup_cloud_bisync(sync_dir=sync_dir)
     else:
-        setup_cloud_mount()
+        # Temporarily disabled - will be removed in Phase 5
+        console.print("[red]Mount setup temporarily disabled[/red]")
+        # setup_cloud_mount()
 
 
 @cloud_app.command("mount")
@@ -198,21 +203,25 @@ def mount(
     ),
 ) -> None:
     """Mount cloud files locally for editing."""
-    try:
-        mount_cloud_files(profile_name=profile)
-    except Exception as e:
-        console.print(f"[red]Mount failed: {e}[/red]")
-        raise typer.Exit(1)
+    # Temporarily disabled - will be removed in Phase 5
+    console.print("[red]Mount command temporarily disabled[/red]")
+    # try:
+    #     mount_cloud_files(profile_name=profile)
+    # except Exception as e:
+    #     console.print(f"[red]Mount failed: {e}[/red]")
+    #     raise typer.Exit(1)
 
 
 @cloud_app.command("unmount")
 def unmount() -> None:
     """Unmount cloud files."""
-    try:
-        unmount_cloud_files()
-    except Exception as e:
-        console.print(f"[red]Unmount failed: {e}[/red]")
-        raise typer.Exit(1)
+    # Temporarily disabled - will be removed in Phase 5
+    console.print("[red]Unmount command temporarily disabled[/red]")
+    # try:
+    #     unmount_cloud_files()
+    # except Exception as e:
+    #     console.print(f"[red]Unmount failed: {e}[/red]")
+    #     raise typer.Exit(1)
 
 
 # Bisync commands
