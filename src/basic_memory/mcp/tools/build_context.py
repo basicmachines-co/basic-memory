@@ -16,8 +16,6 @@ from basic_memory.schemas.memory import (
     memory_url_path,
 )
 
-type StringOrInt = str | int
-
 
 @mcp.tool(
     description="""Build context from a memory:// URI to continue conversations naturally.
@@ -39,7 +37,7 @@ type StringOrInt = str | int
 async def build_context(
     url: MemoryUrl,
     project: Optional[str] = None,
-    depth: Optional[StringOrInt] = 1,
+    depth: str | int | None = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
     page_size: int = 10,
