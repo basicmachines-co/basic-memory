@@ -90,10 +90,17 @@ def get_project_remote(project: SyncProject, bucket_name: str) -> str:
         bucket_name: S3 bucket name
 
     Returns:
-        Remote path like "basic-memory-cloud:bucket-name/app/data/research"
+        Remote path like "basic-memory-cloud:bucket-name/basic-memory-llc"
+
+    Note:
+        The API returns paths like "/app/data/basic-memory-llc" because the S3 bucket
+        is mounted at /app/data on the fly machine. We need to strip the /app/data/
+        prefix to get the actual S3 path within the bucket.
     """
-    # Strip leading slash from cloud path
+    # Strip /app/data/ prefix from cloud path (mount point on fly machine)
     cloud_path = project.path.lstrip("/")
+    if cloud_path.startswith("app/data/"):
+        cloud_path = cloud_path.removeprefix("app/data/")
     return f"basic-memory-cloud:{bucket_name}/{cloud_path}"
 
 
@@ -131,7 +138,7 @@ def project_sync(
         "sync",
         str(local_path),
         remote_path,
-        "--filters-file",
+        "--filter-from",
         str(filter_path),
     ]
 
@@ -194,7 +201,7 @@ def project_bisync(
         "--resilient",
         "--conflict-resolve=newer",
         "--max-delete=25",
-        "--filters-file",
+        "--filter-from",
         str(filter_path),
         "--workdir",
         str(state_path),

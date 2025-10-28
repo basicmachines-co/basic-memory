@@ -174,11 +174,18 @@ def setup() -> None:
         console.print("\n[bold green]✓ Cloud setup completed successfully![/bold green]")
         console.print("\n[bold]Next steps:[/bold]")
         console.print("1. Add a project with local sync path:")
-        console.print("   bm project add research ~/projects/research --local-path ~/sync/research")
-        console.print("\n2. Sync your project:")
-        console.print("   bm project bisync --name research --resync  # First time")
-        console.print("   bm project bisync --name research            # Subsequent syncs")
-        console.print("\n[dim]Use 'bm project --help' for more commands[/dim]")
+        console.print("   bm project add research --local-path ~/Documents/research")
+        console.print("\n   Or configure sync for an existing project:")
+        console.print("   bm project sync-setup research ~/Documents/research")
+        console.print("\n2. Preview the initial sync (recommended):")
+        console.print("   bm project bisync --name research --resync --dry-run")
+        console.print("\n3. If all looks good, run the actual sync:")
+        console.print("   bm project bisync --name research --resync")
+        console.print("\n4. Subsequent syncs (no --resync needed):")
+        console.print("   bm project bisync --name research")
+        console.print(
+            "\n[dim]Tip: Always use --dry-run first to preview changes before syncing[/dim]"
+        )
 
     except (RcloneInstallError, BisyncError, CloudAPIError) as e:
         console.print(f"\n[red]Setup failed: {e}[/red]")

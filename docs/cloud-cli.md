@@ -52,7 +52,7 @@ bm project add research --local-path ~/Documents/research
 bm project add work --local-path ~/work-notes
 bm project add temp  # No local sync
 
-# Now you can sync individually:
+# Now you can sync individually (after initial --resync):
 bm project bisync --name research
 bm project bisync --name work
 # temp stays cloud-only
@@ -125,10 +125,13 @@ When you add a project with `--local-path`:
 
 ### 4. Sync Your Project
 
-Establish the initial sync baseline:
+Establish the initial sync baseline. **Best practice:** Always preview with `--dry-run` first:
 
 ```bash
-# First sync requires --resync to establish baseline
+# Step 1: Preview the initial sync (recommended)
+bm project bisync --name research --resync --dry-run
+
+# Step 2: If all looks good, run the actual sync
 bm project bisync --name research --resync
 ```
 
@@ -142,6 +145,14 @@ bm project bisync --name research --resync
    - Respects `.bmignore` patterns
 
 **Result:** Local and cloud are in sync. Baseline established.
+
+**Why `--resync`?** This is an rclone requirement for the first bisync run. It establishes the initial state that future syncs will compare against. After the first sync, never use `--resync` unless you need to force a new baseline.
+
+See: https://rclone.org/bisync/#resync
+```
+--resync
+This will effectively make both Path1 and Path2 filesystems contain a matching superset of all files. By default, Path2 files that do not exist in Path1 will be copied to Path1, and the process will then copy the Path1 tree to Path2.
+```
 
 ### 5. Subsequent Syncs
 
@@ -541,6 +552,49 @@ bm project bisync --name research --resync
 
 **Result:** Future syncs work without `--resync`.
 
+### Empty Directory Issues
+
+**Problem:** "Empty prior Path1 listing. Cannot sync to an empty directory"
+
+**Explanation:** Rclone bisync doesn't work well with completely empty directories. It needs at least one file to establish a baseline.
+
+**Solution:** Add at least one file before running `--resync`:
+
+```bash
+# Create a placeholder file
+echo "# Research Notes" > ~/Documents/research/README.md
+
+# Now run bisync
+bm project bisync --name research --resync
+```
+
+**Why this happens:** Bisync creates listing files that track the state of each side. When both directories are completely empty, these listing files are considered invalid by rclone.
+
+**Best practice:** Always have at least one file (like a README.md) in your project directory before setting up sync.
+
+### Bisync State Corruption
+
+**Problem:** Bisync fails with errors about corrupted state or listing files
+
+**Explanation:** Sometimes bisync state can become inconsistent (e.g., after mixing dry-run and actual runs, or after manual file operations).
+
+**Solution:** Clear bisync state and re-establish baseline:
+
+```bash
+# Clear bisync state
+bm project bisync-reset research
+
+# Re-establish baseline
+bm project bisync --name research --resync
+```
+
+**What this does:**
+- Removes all bisync metadata from `~/.basic-memory/bisync-state/research/`
+- Forces fresh baseline on next `--resync`
+- Safe operation (doesn't touch your files)
+
+**Note:** This command also runs automatically when you remove a project to clean up state directories.
+
 ### Too Many Deletes
 
 **Problem:** "Error: max delete limit (25) exceeded"
@@ -591,7 +645,7 @@ If instance is down, wait a few minutes and retry.
 ## Security
 
 - **Authentication**: OAuth 2.1 with PKCE flow
-- **Tokens**: Stored securely in `~/.basic-memory/auth/token`
+- **Tokens**: Stored securely in `~/.basic-memory/basic-memory-cloud.json`
 - **Transport**: All data encrypted in transit (HTTPS)
 - **Credentials**: Scoped S3 credentials (read-write to your tenant only)
 - **Isolation**: Your data isolated from other tenants
@@ -655,8 +709,9 @@ bm project ls --name <project> --path <subpath>
 1. **Enable cloud mode** - `bm cloud login`
 2. **Install rclone** - `bm cloud setup`
 3. **Add projects with sync** - `bm project add research --local-path ~/Documents/research`
-4. **Establish baseline** - `bm project bisync --name research --resync`
-5. **Daily workflow** - `bm project bisync --name research`
+4. **Preview first sync** - `bm project bisync --name research --resync --dry-run`
+5. **Establish baseline** - `bm project bisync --name research --resync`
+6. **Daily workflow** - `bm project bisync --name research`
 
 **Key benefits:**
 - ✅ Each project independently syncs (or doesn't)
