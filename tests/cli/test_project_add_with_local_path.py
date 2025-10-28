@@ -1,6 +1,7 @@
 """Tests for bm project add with --local-path flag."""
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -88,7 +89,8 @@ def test_project_add_with_local_path_saves_to_config(
     # Verify config was updated
     config_data = json.loads(mock_config.read_text())
     assert "test-project" in config_data["cloud_projects"]
-    assert config_data["cloud_projects"]["test-project"]["local_path"] == str(local_sync_dir)
+    # Use as_posix() for cross-platform compatibility (Windows uses backslashes)
+    assert config_data["cloud_projects"]["test-project"]["local_path"] == local_sync_dir.as_posix()
     assert config_data["cloud_projects"]["test-project"]["last_sync"] is None
     assert config_data["cloud_projects"]["test-project"]["bisync_initialized"] is False
 
@@ -125,7 +127,8 @@ def test_project_add_local_path_expands_tilde(runner, mock_config, mock_api_clie
     # Verify config has expanded path
     config_data = json.loads(mock_config.read_text())
     local_path = config_data["cloud_projects"]["test-project"]["local_path"]
-    assert local_path.startswith("/")
+    # Path should be absolute (starts with / on Unix or drive letter on Windows)
+    assert Path(local_path).is_absolute()
     assert "~" not in local_path
     assert local_path.endswith("/test-sync")
 
