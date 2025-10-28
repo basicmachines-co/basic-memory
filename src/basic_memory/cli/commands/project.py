@@ -89,8 +89,9 @@ def list_projects() -> None:
         if config.cloud_mode_enabled:
             table.add_column("Local Path", style="yellow", no_wrap=True, overflow="fold")
 
-        # Only show Default column if default_project_mode is enabled
-        if config.default_project_mode:
+        # Show Default column in local mode or if default_project_mode is enabled in cloud mode
+        show_default_column = not config.cloud_mode_enabled or config.default_project_mode
+        if show_default_column:
             table.add_column("Default", style="magenta")
 
         for project in result.projects:
@@ -108,8 +109,8 @@ def list_projects() -> None:
                     local_path = format_path(local_path)
                 row.append(local_path)
 
-            # Add default indicator if default_project_mode is enabled
-            if config.default_project_mode:
+            # Add default indicator if showing default column
+            if show_default_column:
                 row.append(is_default)
 
             table.add_row(*row)
