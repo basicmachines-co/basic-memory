@@ -17,7 +17,7 @@ from basic_memory.cli.commands.cloud.cloud_utils import (
     fetch_cloud_projects,
 )
 from basic_memory.cli.commands.cloud.rclone_config import (
-    add_tenant_to_rclone_config,
+    configure_rclone_remote,
 )
 from basic_memory.cli.commands.cloud.rclone_installer import RcloneInstallError, install_rclone
 from basic_memory.config import ConfigManager
@@ -343,9 +343,7 @@ def setup_cloud_bisync(sync_dir: Optional[str] = None) -> None:
 
         # Step 4: Configure rclone
         console.print("\n[blue]Step 4: Configuring rclone...[/blue]")
-        add_tenant_to_rclone_config(
-            tenant_id=tenant_id,
-            bucket_name=bucket_name,
+        configure_rclone_remote(
             access_key=access_key,
             secret_key=secret_key,
         )

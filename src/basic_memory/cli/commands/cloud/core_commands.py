@@ -27,9 +27,8 @@ from basic_memory.cli.commands.cloud.bisync_commands import (
     run_check,
     setup_cloud_bisync,
     show_bisync_status,
+    BISYNC_PROFILES,
 )
-from basic_memory.cli.commands.cloud.rclone_config import MOUNT_PROFILES
-from basic_memory.cli.commands.cloud.bisync_commands import BISYNC_PROFILES
 
 console = Console()
 
@@ -192,7 +191,7 @@ def setup(
 @cloud_app.command("mount")
 def mount(
     profile: str = typer.Option(
-        "balanced", help=f"Mount profile: {', '.join(MOUNT_PROFILES.keys())}"
+        "balanced", help="Mount profile: balanced, safe, or fast"
     ),
     path: Optional[str] = typer.Option(
         None, help="Custom mount path (default: ~/basic-memory-{tenant-id})"
