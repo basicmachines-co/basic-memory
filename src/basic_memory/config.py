@@ -176,14 +176,6 @@ class BasicMemoryConfig(BaseSettings):
         # Fall back to config file value
         return self.cloud_mode
 
-    bisync_config: Dict[str, Any] = Field(
-        default_factory=lambda: {
-            "profile": "balanced",
-            "sync_dir": str(Path.home() / "basic-memory-cloud-sync"),
-        },
-        description="Bisync configuration for cloud sync",
-    )
-
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
