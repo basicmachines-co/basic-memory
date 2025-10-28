@@ -985,11 +985,11 @@ rm -rf ~/basic-memory-cloud-sync/
 
 ## Implementation Checklist
 
-### Phase 1: Config Schema (1-2 days)
-- [ ] Add `CloudProjectConfig` model to `basic_memory/config.py`
-- [ ] Add `cloud_projects: dict[str, CloudProjectConfig]` to Config model
-- [ ] Test config loading/saving with new schema
-- [ ] Handle migration from old config format
+### Phase 1: Config Schema (1-2 days) ✅
+- [x] Add `CloudProjectConfig` model to `basic_memory/config.py`
+- [x] Add `cloud_projects: dict[str, CloudProjectConfig]` to Config model
+- [x] Test config loading/saving with new schema
+- [x] Handle migration from old config format
 
 ### Phase 2: Rclone Config Simplification (1 day)
 - [ ] Update `configure_rclone_remote()` to use `basic-memory-cloud` as remote name

@@ -116,6 +116,53 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
     console.print(f"[dim]Updated rclone config: {config_path}[/dim]")
 
 
+def configure_rclone_remote(
+    access_key: str,
+    secret_key: str,
+    endpoint: str = "https://fly.storage.tigris.dev",
+    region: str = "auto",
+) -> str:
+    """Configure single rclone remote named 'basic-memory-cloud'.
+
+    This is the simplified approach from SPEC-20 that uses one remote
+    for all Basic Memory cloud operations (not tenant-specific).
+
+    Args:
+        access_key: S3 access key ID
+        secret_key: S3 secret access key
+        endpoint: S3-compatible endpoint URL
+        region: S3 region (default: auto)
+
+    Returns:
+        The remote name: "basic-memory-cloud"
+    """
+    # Backup existing config
+    backup_rclone_config()
+
+    # Load existing config
+    config = load_rclone_config()
+
+    # Single remote name (not tenant-specific)
+    REMOTE_NAME = "basic-memory-cloud"
+
+    # Add/update the remote section
+    if not config.has_section(REMOTE_NAME):
+        config.add_section(REMOTE_NAME)
+
+    config.set(REMOTE_NAME, "type", "s3")
+    config.set(REMOTE_NAME, "provider", "Other")
+    config.set(REMOTE_NAME, "access_key_id", access_key)
+    config.set(REMOTE_NAME, "secret_access_key", secret_key)
+    config.set(REMOTE_NAME, "endpoint", endpoint)
+    config.set(REMOTE_NAME, "region", region)
+
+    # Save updated config
+    save_rclone_config(config)
+
+    console.print(f"[green]✓ Configured rclone remote: {REMOTE_NAME}[/green]")
+    return REMOTE_NAME
+
+
 def add_tenant_to_rclone_config(
     tenant_id: str,
     bucket_name: str,

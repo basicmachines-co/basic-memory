@@ -296,16 +296,18 @@ class TestConfigManager:
                     "research": CloudProjectConfig(
                         local_path=str(temp_path / "research-local"),
                         last_sync=now,
-                        bisync_initialized=True
+                        bisync_initialized=True,
                     )
-                }
+                },
             )
             config_manager.save_config(test_config)
 
             # Load and verify
             loaded_config = config_manager.load_config()
             assert "research" in loaded_config.cloud_projects
-            assert loaded_config.cloud_projects["research"].local_path == str(temp_path / "research-local")
+            assert loaded_config.cloud_projects["research"].local_path == str(
+                temp_path / "research-local"
+            )
             assert loaded_config.cloud_projects["research"].bisync_initialized is True
             assert loaded_config.cloud_projects["research"].last_sync == now
 
@@ -320,9 +322,7 @@ class TestConfigManager:
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
             # Create initial config without cloud projects
-            initial_config = BasicMemoryConfig(
-                projects={"main": str(temp_path / "main")}
-            )
+            initial_config = BasicMemoryConfig(projects={"main": str(temp_path / "main")})
             config_manager.save_config(initial_config)
 
             # Load, modify, and save
@@ -337,7 +337,9 @@ class TestConfigManager:
             # Reload and verify persistence
             reloaded_config = config_manager.load_config()
             assert "work" in reloaded_config.cloud_projects
-            assert reloaded_config.cloud_projects["work"].local_path == str(temp_path / "work-local")
+            assert reloaded_config.cloud_projects["work"].local_path == str(
+                temp_path / "work-local"
+            )
             assert reloaded_config.cloud_projects["work"].bisync_initialized is False
 
     def test_backward_compatibility_loading_config_without_cloud_projects(self):
@@ -352,11 +354,12 @@ class TestConfigManager:
 
             # Manually write old-style config without cloud_projects
             import json
+
             old_config_data = {
                 "env": "dev",
                 "projects": {"main": str(temp_path / "main")},
                 "default_project": "main",
-                "log_level": "INFO"
+                "log_level": "INFO",
             }
             config_manager.config_file.write_text(json.dumps(old_config_data, indent=2))
 

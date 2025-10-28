@@ -1703,9 +1703,11 @@ Content 3
 
     with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
         # Fail 3 times for file1 and file2 (file3 succeeds each time)
+        await force_full_scan(sync_service)
         await sync_service.sync(project_dir)  # Fail count: file1=1, file2=1
         await touch_file(project_dir / "file1.md")  # Touch to trigger incremental scan
         await touch_file(project_dir / "file2.md")  # Touch to trigger incremental scan
+        await force_full_scan(sync_service)
         await sync_service.sync(project_dir)  # Fail count: file1=2, file2=2
         await touch_file(project_dir / "file1.md")  # Touch to trigger incremental scan
         await touch_file(project_dir / "file2.md")  # Touch to trigger incremental scan

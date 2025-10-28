@@ -47,16 +47,12 @@ class CloudProjectConfig(BaseModel):
     that is synced with Basic Memory Cloud.
     """
 
-    local_path: str = Field(
-        description="Local working directory path for this cloud project"
-    )
+    local_path: str = Field(description="Local working directory path for this cloud project")
     last_sync: Optional[datetime] = Field(
-        default=None,
-        description="Timestamp of last successful sync operation"
+        default=None, description="Timestamp of last successful sync operation"
     )
     bisync_initialized: bool = Field(
-        default=False,
-        description="Whether rclone bisync baseline has been established"
+        default=False, description="Whether rclone bisync baseline has been established"
     )
 
 
@@ -454,7 +450,7 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
     """Save configuration to file."""
     try:
         # Use model_dump with mode='json' to serialize datetime objects properly
-        config_dict = config.model_dump(mode='json')
+        config_dict = config.model_dump(mode="json")
         file_path.write_text(json.dumps(config_dict, indent=2))
     except Exception as e:  # pragma: no cover
         logger.error(f"Failed to save config: {e}")
