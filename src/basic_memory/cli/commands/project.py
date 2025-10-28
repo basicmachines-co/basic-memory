@@ -25,6 +25,17 @@ from basic_memory.mcp.tools.utils import call_put
 from basic_memory.utils import generate_permalink
 from basic_memory.mcp.tools.utils import call_patch
 
+# Import rclone commands for project sync
+from basic_memory.cli.commands.cloud.rclone_commands import (
+    SyncProject,
+    RcloneError,
+    project_sync,
+    project_bisync,
+    project_check,
+    project_ls,
+)
+from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
+
 console = Console()
 
 # Create a project subcommand
@@ -73,20 +84,34 @@ def add_project(
     path: str = typer.Argument(
         None, help="Path to the project directory (required for local mode)"
     ),
+    local_path: str = typer.Option(None, "--local-path", help="Local sync path for cloud mode (optional)"),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
 ) -> None:
     """Add a new project.
 
-    For cloud mode: only name is required
-    For local mode: both name and path are required
+    Cloud mode examples:
+      bm project add research                           # No local sync
+      bm project add research --local-path ~/docs       # With local sync
+
+    Local mode example:
+      bm project add research ~/Documents/research
     """
     config = ConfigManager().config
 
     if config.cloud_mode_enabled:
-        # Cloud mode: path not needed (auto-generated from name)
+        # Cloud mode: path auto-generated from name, local sync is optional
+        local_sync_path = None
+        if local_path:
+            local_sync_path = Path(os.path.abspath(os.path.expanduser(local_path))).as_posix()
+
         async def _add_project():
             async with get_client() as client:
-                data = {"name": name, "path": generate_permalink(name), "set_default": set_default}
+                data = {
+                    "name": name,
+                    "path": generate_permalink(name),
+                    "local_sync_path": local_sync_path,
+                    "set_default": set_default,
+                }
                 response = await call_post(client, "/projects/projects", json=data)
                 return ProjectStatusResponse.model_validate(response.json())
     else:
@@ -107,13 +132,53 @@ def add_project(
     try:
         result = asyncio.run(_add_project())
         console.print(f"[green]{result.message}[/green]")
+
+        # Show sync setup hint if in cloud mode and local sync configured
+        if config.cloud_mode_enabled and local_path:
+            console.print("\nTo sync this project:")
+            console.print(f"  bm project bisync --name {name} --resync")
     except Exception as e:
         console.print(f"[red]Error adding project: {str(e)}[/red]")
         raise typer.Exit(1)
 
-    # Display usage hint
-    console.print("\nTo use this project:")
-    console.print(f"  basic-memory --project={name} <command>")
+
+@project_app.command("sync-setup")
+def setup_project_sync(
+    name: str = typer.Argument(..., help="Project name"),
+    local_path: str = typer.Argument(..., help="Local sync directory"),
+) -> None:
+    """Configure local sync for an existing cloud project.
+
+    Example:
+      bm project sync-setup research ~/Documents/research
+    """
+    config = ConfigManager().config
+
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: sync-setup only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    resolved_path = Path(os.path.abspath(os.path.expanduser(local_path))).as_posix()
+
+    async def _update_project():
+        async with get_client() as client:
+            data = {"local_sync_path": resolved_path}
+            project_permalink = generate_permalink(name)
+            response = await call_patch(
+                client,
+                f"/projects/{project_permalink}",
+                json=data,
+            )
+            return ProjectStatusResponse.model_validate(response.json())
+
+    try:
+        result = asyncio.run(_update_project())
+        console.print(f"[green]{result.message}[/green]")
+        console.print(f"\nLocal sync configured: {resolved_path}")
+        console.print(f"\nTo sync: bm project bisync --name {name} --resync")
+    except Exception as e:
+        console.print(f"[red]Error configuring sync: {str(e)}[/red]")
+        raise typer.Exit(1)
 
 
 @project_app.command("remove")
@@ -245,6 +310,281 @@ def move_project(
 
     except Exception as e:
         console.print(f"[red]Error moving project: {str(e)}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("sync")
+def sync_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to sync"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """One-way sync: local → cloud (make cloud identical to local).
+
+    Example:
+      bm project sync --name research
+      bm project sync --name research --dry-run
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: sync only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Get local_sync_path from cloud_projects config
+        local_sync_path = None
+        if name in config.cloud_projects:
+            local_sync_path = config.cloud_projects[name].local_path
+
+        if not local_sync_path:
+            console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
+            console.print(f"\nConfigure sync with: bm project sync-setup {name} ~/path/to/local")
+            raise typer.Exit(1)
+
+        # Create SyncProject
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=project_data.path,
+            local_sync_path=local_sync_path,
+        )
+
+        # Run sync
+        console.print(f"[blue]Syncing {name} (local → cloud)...[/blue]")
+        success = project_sync(sync_project, bucket_name, dry_run=dry_run, verbose=verbose)
+
+        if success:
+            console.print(f"[green]✓ {name} synced successfully[/green]")
+        else:
+            console.print(f"[red]✗ {name} sync failed[/red]")
+            raise typer.Exit(1)
+
+    except RcloneError as e:
+        console.print(f"[red]Sync error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("bisync")
+def bisync_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to bisync"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
+    resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """Two-way sync: local ↔ cloud (bidirectional sync).
+
+    Examples:
+      bm project bisync --name research --resync  # First time
+      bm project bisync --name research           # Subsequent syncs
+      bm project bisync --name research --dry-run # Preview changes
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: bisync only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Get local_sync_path from cloud_projects config
+        local_sync_path = None
+        if name in config.cloud_projects:
+            local_sync_path = config.cloud_projects[name].local_path
+
+        if not local_sync_path:
+            console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
+            console.print(f"\nConfigure sync with: bm project sync-setup {name} ~/path/to/local")
+            raise typer.Exit(1)
+
+        # Create SyncProject
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=project_data.path,
+            local_sync_path=local_sync_path,
+        )
+
+        # Run bisync
+        console.print(f"[blue]Bisync {name} (local ↔ cloud)...[/blue]")
+        success = project_bisync(
+            sync_project, bucket_name, dry_run=dry_run, resync=resync, verbose=verbose
+        )
+
+        if success:
+            console.print(f"[green]✓ {name} bisync completed successfully[/green]")
+        else:
+            console.print(f"[red]✗ {name} bisync failed[/red]")
+            raise typer.Exit(1)
+
+    except RcloneError as e:
+        console.print(f"[red]Bisync error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("check")
+def check_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to check"),
+    one_way: bool = typer.Option(False, "--one-way", help="Check one direction only (faster)"),
+) -> None:
+    """Verify file integrity between local and cloud.
+
+    Example:
+      bm project check --name research
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: check only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Get local_sync_path from cloud_projects config
+        local_sync_path = None
+        if name in config.cloud_projects:
+            local_sync_path = config.cloud_projects[name].local_path
+
+        if not local_sync_path:
+            console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
+            console.print(f"\nConfigure sync with: bm project sync-setup {name} ~/path/to/local")
+            raise typer.Exit(1)
+
+        # Create SyncProject
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=project_data.path,
+            local_sync_path=local_sync_path,
+        )
+
+        # Run check
+        console.print(f"[blue]Checking {name} integrity...[/blue]")
+        match = project_check(sync_project, bucket_name, one_way=one_way)
+
+        if match:
+            console.print(f"[green]✓ {name} files match[/green]")
+        else:
+            console.print(f"[yellow]⚠ {name} has differences[/yellow]")
+
+    except RcloneError as e:
+        console.print(f"[red]Check error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("ls")
+def ls_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to list files from"),
+    path: str = typer.Argument(None, help="Path within project (optional)"),
+) -> None:
+    """List files in remote project.
+
+    Examples:
+      bm project ls --name research
+      bm project ls --name research subfolder
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: ls only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Create SyncProject (local_sync_path not needed for ls)
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=project_data.path,
+        )
+
+        # List files
+        files = project_ls(sync_project, bucket_name, path=path)
+
+        if files:
+            console.print(f"\n[bold]Files in {name}" + (f"/{path}" if path else "") + ":[/bold]")
+            for file in files:
+                console.print(f"  {file}")
+            console.print(f"\n[dim]Total: {len(files)} files[/dim]")
+        else:
+            console.print(f"[yellow]No files found in {name}" + (f"/{path}" if path else "") + "[/yellow]")
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 
