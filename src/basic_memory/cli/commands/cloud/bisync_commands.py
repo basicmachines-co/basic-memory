@@ -1,10 +1,5 @@
-"""Cloud bisync utility functions for Basic Memory CLI.
+"""Cloud bisync utility functions for Basic Memory CLI."""
 
-SPEC-20: Simplified to project-scoped operations only.
-Tenant-wide bisync functions have been removed in favor of project-scoped commands.
-"""
-
-import asyncio
 from pathlib import Path
 
 from basic_memory.cli.commands.cloud.api_client import make_api_request

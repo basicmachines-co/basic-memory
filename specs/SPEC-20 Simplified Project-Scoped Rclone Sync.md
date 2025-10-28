@@ -991,14 +991,14 @@ rm -rf ~/basic-memory-cloud-sync/
 - [x] Test config loading/saving with new schema
 - [x] Handle migration from old config format
 
-### Phase 2: Rclone Config Simplification (1 day) ✅
+### Phase 2: Rclone Config Simplification ✅
 - [x] Update `configure_rclone_remote()` to use `basic-memory-cloud` as remote name
 - [x] Remove `add_tenant_to_rclone_config()` (replaced by configure_rclone_remote)
 - [x] Remove tenant_id from remote naming
 - [x] Test rclone config generation
 - [x] Clean up deprecated import references in bisync_commands.py and core_commands.py
 
-### Phase 3: Project-Scoped Rclone Commands (2-3 days) ✅
+### Phase 3: Project-Scoped Rclone Commands ✅
 - [x] Create `src/basic_memory/cli/commands/cloud/rclone_commands.py`
 - [x] Implement `get_project_remote(project, bucket_name)`
 - [x] Implement `project_sync()` (one-way: local → cloud)
@@ -1012,7 +1012,7 @@ rm -rf ~/basic-memory-cloud-sync/
 - [x] Write unit tests for rclone commands (22 tests, 99% coverage)
 - [x] Temporarily disable mount commands in core_commands.py
 
-### Phase 4: CLI Integration (2-3 days) ✅
+### Phase 4: CLI Integration ✅
 - [x] Update `project.py`: Add `--local-path` flag to `project add` command
 - [x] Update `project.py`: Create `project sync-setup` command
 - [x] Create `project.py`: Add `project sync` command
@@ -1025,7 +1025,7 @@ rm -rf ~/basic-memory-cloud-sync/
 - [ ] Add helper functions: `get_all_sync_projects()`, `get_project_by_name()` (optional)
 - [ ] Write integration tests for new commands (deferred)
 
-### Phase 5: Cleanup (1 day) ✅
+### Phase 5: Cleanup ✅
 - [x] Remove `mount_commands.py` (entire file)
 - [x] Remove mount-related functions from `rclone_config.py`:
   - [x] `MOUNT_PROFILES`
@@ -1053,7 +1053,7 @@ rm -rf ~/basic-memory-cloud-sync/
 - [x] Update tests to remove references to deprecated functionality
 - [x] All typecheck errors resolved
 
-### Phase 6: Documentation (1 day)
+### Phase 6: Documentation
 - [ ] Update `docs/cloud-cli.md` with new workflow
 - [ ] Add migration guide for existing users
 - [ ] Update command reference
@@ -1061,7 +1061,7 @@ rm -rf ~/basic-memory-cloud-sync/
 - [ ] Update SPEC-8 with "Superseded by SPEC-20" note
 - [ ] Add examples for common workflows
 
-### Testing & Validation (1 day)
+### Testing & Validation 
 - [ ] Test Scenario 1: New user setup
 - [ ] Test Scenario 2: Multiple projects
 - [ ] Test Scenario 3: Project without sync
@@ -1070,16 +1070,6 @@ rm -rf ~/basic-memory-cloud-sync/
 - [ ] Verify performance targets (setup < 30s, sync < 5s)
 - [ ] Test migration from SPEC-8 implementation
 
-## Implementation Timeline
-
-**Total: ~10-12 days**
-- Phase 1 (Config Schema): 1-2 days
-- Phase 2 (Rclone Config): 1 day
-- Phase 3 (Rclone Commands): 2-3 days
-- Phase 4 (CLI Integration): 2-3 days
-- Phase 5 (Cleanup): 1 day
-- Phase 6 (Documentation): 1 day
-- Testing & Validation: 1 day
 
 ## Future Enhancements (Out of Scope)
 

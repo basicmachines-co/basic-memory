@@ -1,6 +1,5 @@
 """Test project-scoped rclone commands."""
 
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +9,6 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     RcloneError,
     SyncProject,
     bisync_initialized,
-    get_bmignore_filter_path,
     get_project_bisync_state,
     get_project_remote,
     project_bisync,
@@ -326,9 +324,7 @@ def test_project_check_no_local_path():
 @patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
 def test_project_ls_success(mock_run):
     """Test successful project ls."""
-    mock_run.return_value = MagicMock(
-        returncode=0, stdout="file1.md\nfile2.md\nsubdir/file3.md\n"
-    )
+    mock_run.return_value = MagicMock(returncode=0, stdout="file1.md\nfile2.md\nsubdir/file3.md\n")
 
     project = SyncProject(name="research", path="app/data/research")
 

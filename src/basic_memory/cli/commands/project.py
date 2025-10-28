@@ -84,7 +84,9 @@ def add_project(
     path: str = typer.Argument(
         None, help="Path to the project directory (required for local mode)"
     ),
-    local_path: str = typer.Option(None, "--local-path", help="Local sync path for cloud mode (optional)"),
+    local_path: str = typer.Option(
+        None, "--local-path", help="Local sync path for cloud mode (optional)"
+    ),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
 ) -> None:
     """Add a new project.
@@ -581,7 +583,9 @@ def ls_project_command(
                 console.print(f"  {file}")
             console.print(f"\n[dim]Total: {len(files)} files[/dim]")
         else:
-            console.print(f"[yellow]No files found in {name}" + (f"/{path}" if path else "") + "[/yellow]")
+            console.print(
+                f"[yellow]No files found in {name}" + (f"/{path}" if path else "") + "[/yellow]"
+            )
 
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
