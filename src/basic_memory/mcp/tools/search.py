@@ -205,8 +205,8 @@ async def search_notes(
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
-    types: Optional[List[str]] = None,
-    entity_types: Optional[List[str]] = None,
+    types: List[str] = [],
+    entity_types: List[str] = [],
     after_date: Optional[str] = None,
     context: Context | None = None,
 ) -> SearchResponse | str:
@@ -345,7 +345,7 @@ async def search_notes(
     else:
         search_query.text = query  # Default to text search
 
-    # Add optional filters if provided
+    # Add optional filters if provided (empty lists are treated as no filter)
     if entity_types:
         search_query.entity_types = [SearchItemType(t) for t in entity_types]
     if types:
