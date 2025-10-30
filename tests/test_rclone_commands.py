@@ -130,7 +130,8 @@ def test_project_sync_success(mock_run):
     cmd = mock_run.call_args[0][0]
     assert cmd[0] == "rclone"
     assert cmd[1] == "sync"
-    assert cmd[2] == "/tmp/research"
+    # Use Path for cross-platform comparison (Windows uses backslashes)
+    assert Path(cmd[2]) == Path("/tmp/research")
     assert cmd[3] == "basic-memory-cloud:my-bucket/research"
     assert "--dry-run" in cmd
 
