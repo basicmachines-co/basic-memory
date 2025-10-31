@@ -145,6 +145,9 @@ def add_tenant_to_rclone_config(
     config.set(section_name, "secret_access_key", secret_key)
     config.set(section_name, "endpoint", endpoint)
     config.set(section_name, "region", region)
+    # Prevent unnecessary encoding of filenames (only encode slashes and invalid UTF-8)
+    # This prevents files with spaces like "Hello World.md" from being quoted
+    config.set(section_name, "encoding", "Slash,InvalidUtf8")
 
     # Save updated config
     save_rclone_config(config)
