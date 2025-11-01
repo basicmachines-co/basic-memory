@@ -13,6 +13,39 @@ from loguru import logger
 from unidecode import unidecode
 
 
+def normalize_project_path(path: str) -> str:
+    """Normalize project path by stripping mount point prefix.
+
+    In cloud deployments, the S3 bucket is mounted at /app/data. We strip this
+    prefix from project paths to avoid leaking implementation details and to
+    ensure paths match the actual S3 bucket structure.
+
+    Args:
+        path: Project path (e.g., "/app/data/basic-memory-llc")
+
+    Returns:
+        Normalized path (e.g., "/basic-memory-llc")
+
+    Examples:
+        >>> normalize_project_path("/app/data/my-project")
+        '/my-project'
+        >>> normalize_project_path("/my-project")
+        '/my-project'
+        >>> normalize_project_path("app/data/my-project")
+        '/my-project'
+    """
+    # Handle both absolute and relative paths
+    normalized = path.lstrip("/")
+    if normalized.startswith("app/data/"):
+        normalized = normalized.removeprefix("app/data/")
+
+    # Ensure leading slash for absolute paths
+    if not normalized.startswith("/"):
+        normalized = "/" + normalized
+
+    return normalized
+
+
 @runtime_checkable
 class PathLike(Protocol):
     """Protocol for objects that can be used as paths."""

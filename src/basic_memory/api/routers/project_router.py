@@ -18,6 +18,7 @@ from basic_memory.schemas.project_info import (
     ProjectInfoRequest,
     ProjectStatusResponse,
 )
+from basic_memory.utils import normalize_project_path
 
 # Router for resources in a specific project
 # The ProjectPathDep is used in the path as a prefix, so the request path is like /{project}/project/info
@@ -25,24 +26,6 @@ project_router = APIRouter(prefix="/project", tags=["project"])
 
 # Router for managing project resources
 project_resource_router = APIRouter(prefix="/projects", tags=["project_management"])
-
-
-def normalize_project_path(path: str) -> str:
-    """Normalize project path by stripping mount point prefix.
-
-    In cloud deployments, the S3 bucket is mounted at /app/data. We strip this
-    prefix from project paths to avoid leaking implementation details and to
-    ensure paths match the actual S3 bucket structure.
-
-    Args:
-        path: Project path (e.g., "/app/data/basic-memory-llc")
-
-    Returns:
-        Normalized path (e.g., "/basic-memory-llc")
-    """
-    if path.startswith("/app/data/"):
-        return path.removeprefix("/app/data")
-    return path
 
 
 @project_router.get("/info", response_model=ProjectInfoResponse)
@@ -127,7 +110,9 @@ async def sync_project(
     background_tasks: BackgroundTasks,
     sync_service: SyncServiceDep,
     project_config: ProjectConfigDep,
-    force_full: bool = Query(False, description="Force full scan, bypassing watermark optimization"),
+    force_full: bool = Query(
+        False, description="Force full scan, bypassing watermark optimization"
+    ),
 ):
     """Force project filesystem sync to database.
 
@@ -146,8 +131,7 @@ async def sync_project(
         sync_service.sync, project_config.home, project_config.name, force_full=force_full
     )
     logger.info(
-        f"Filesystem sync initiated for project: {project_config.name} "
-        f"(force_full={force_full})"
+        f"Filesystem sync initiated for project: {project_config.name} (force_full={force_full})"
     )
 
     return {

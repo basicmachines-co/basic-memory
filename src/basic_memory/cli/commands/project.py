@@ -22,7 +22,7 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.project_info import ProjectStatusResponse
 from basic_memory.mcp.tools.utils import call_delete
 from basic_memory.mcp.tools.utils import call_put
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, normalize_project_path
 from basic_memory.mcp.tools.utils import call_patch
 
 # Import rclone commands for project sync
@@ -41,23 +41,6 @@ console = Console()
 # Create a project subcommand
 project_app = typer.Typer(help="Manage multiple Basic Memory projects")
 app.add_typer(project_app, name="project")
-
-
-def normalize_project_path(path: str) -> str:
-    """Normalize project path by stripping mount point prefix.
-
-    In cloud deployments, the S3 bucket is mounted at /app/data. We strip this
-    prefix to get the actual S3 bucket path and avoid leaking implementation details.
-
-    Args:
-        path: Project path (e.g., "/app/data/basic-memory-llc")
-
-    Returns:
-        Normalized path (e.g., "/basic-memory-llc")
-    """
-    if path.startswith("/app/data/"):
-        return path.removeprefix("/app/data")
-    return path
 
 
 def format_path(path: str) -> str:

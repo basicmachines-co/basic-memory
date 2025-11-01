@@ -16,6 +16,8 @@ from typing import Optional
 
 from rich.console import Console
 
+from basic_memory.utils import normalize_project_path
+
 console = Console()
 
 
@@ -97,10 +99,8 @@ def get_project_remote(project: SyncProject, bucket_name: str) -> str:
         is mounted at /app/data on the fly machine. We need to strip the /app/data/
         prefix to get the actual S3 path within the bucket.
     """
-    # Strip /app/data/ prefix from cloud path (mount point on fly machine)
-    cloud_path = project.path.lstrip("/")
-    if cloud_path.startswith("app/data/"):
-        cloud_path = cloud_path.removeprefix("app/data/")
+    # Normalize path to strip /app/data/ mount point prefix
+    cloud_path = normalize_project_path(project.path).lstrip("/")
     return f"basic-memory-cloud:{bucket_name}/{cloud_path}"
 
 
