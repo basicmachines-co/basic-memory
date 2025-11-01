@@ -2,8 +2,9 @@
 
 import tempfile
 import pytest
+from datetime import datetime
 
-from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig, CloudProjectConfig, ConfigManager
 from pathlib import Path
 
 
@@ -268,3 +269,101 @@ class TestConfigManager:
         # Try to remove the default project
         with pytest.raises(ValueError, match="Cannot remove the default project"):
             config_manager.remove_project("main")
+
+    def test_config_with_cloud_projects_empty_by_default(self, temp_config_manager):
+        """Test that cloud_projects field exists and defaults to empty dict."""
+        config_manager = temp_config_manager
+        config = config_manager.load_config()
+
+        assert hasattr(config, "cloud_projects")
+        assert config.cloud_projects == {}
+
+    def test_save_and_load_config_with_cloud_projects(self):
+        """Test that config with cloud_projects can be saved and loaded."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create config with cloud_projects
+            now = datetime.now()
+            test_config = BasicMemoryConfig(
+                projects={"main": str(temp_path / "main")},
+                cloud_projects={
+                    "research": CloudProjectConfig(
+                        local_path=str(temp_path / "research-local"),
+                        last_sync=now,
+                        bisync_initialized=True,
+                    )
+                },
+            )
+            config_manager.save_config(test_config)
+
+            # Load and verify
+            loaded_config = config_manager.load_config()
+            assert "research" in loaded_config.cloud_projects
+            assert loaded_config.cloud_projects["research"].local_path == str(
+                temp_path / "research-local"
+            )
+            assert loaded_config.cloud_projects["research"].bisync_initialized is True
+            assert loaded_config.cloud_projects["research"].last_sync == now
+
+    def test_add_cloud_project_to_existing_config(self):
+        """Test adding cloud projects to an existing config file."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create initial config without cloud projects
+            initial_config = BasicMemoryConfig(projects={"main": str(temp_path / "main")})
+            config_manager.save_config(initial_config)
+
+            # Load, modify, and save
+            config = config_manager.load_config()
+            assert config.cloud_projects == {}
+
+            config.cloud_projects["work"] = CloudProjectConfig(
+                local_path=str(temp_path / "work-local")
+            )
+            config_manager.save_config(config)
+
+            # Reload and verify persistence
+            reloaded_config = config_manager.load_config()
+            assert "work" in reloaded_config.cloud_projects
+            assert reloaded_config.cloud_projects["work"].local_path == str(
+                temp_path / "work-local"
+            )
+            assert reloaded_config.cloud_projects["work"].bisync_initialized is False
+
+    def test_backward_compatibility_loading_config_without_cloud_projects(self):
+        """Test that old config files without cloud_projects field can be loaded."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Manually write old-style config without cloud_projects
+            import json
+
+            old_config_data = {
+                "env": "dev",
+                "projects": {"main": str(temp_path / "main")},
+                "default_project": "main",
+                "log_level": "INFO",
+            }
+            config_manager.config_file.write_text(json.dumps(old_config_data, indent=2))
+
+            # Should load successfully with cloud_projects defaulting to empty dict
+            config = config_manager.load_config()
+            assert config.cloud_projects == {}
+            assert config.projects == {"main": str(temp_path / "main")}

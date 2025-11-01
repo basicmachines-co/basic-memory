@@ -1,7 +1,6 @@
 """Core cloud commands for Basic Memory CLI."""
 
 import asyncio
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -15,21 +14,16 @@ from basic_memory.cli.commands.cloud.api_client import (
     get_cloud_config,
     make_api_request,
 )
-from basic_memory.cli.commands.cloud.mount_commands import (
-    mount_cloud_files,
-    setup_cloud_mount,
-    show_mount_status,
-    unmount_cloud_files,
-)
 from basic_memory.cli.commands.cloud.bisync_commands import (
-    run_bisync,
-    run_bisync_watch,
-    run_check,
-    setup_cloud_bisync,
-    show_bisync_status,
+    BisyncError,
+    generate_mount_credentials,
+    get_mount_info,
 )
-from basic_memory.cli.commands.cloud.rclone_config import MOUNT_PROFILES
-from basic_memory.cli.commands.cloud.bisync_commands import BISYNC_PROFILES
+from basic_memory.cli.commands.cloud.rclone_config import configure_rclone_remote
+from basic_memory.cli.commands.cloud.rclone_installer import (
+    RcloneInstallError,
+    install_rclone,
+)
 
 console = Console()
 
@@ -88,18 +82,8 @@ def logout():
 
 
 @cloud_app.command("status")
-def status(
-    bisync: bool = typer.Option(
-        True,
-        "--bisync/--mount",
-        help="Show bisync status (default) or mount status",
-    ),
-) -> None:
-    """Check cloud mode status and cloud instance health.
-
-    Shows cloud mode status, instance health, and sync/mount status.
-    Use --bisync (default) to show bisync status or --mount for mount status.
-    """
+def status() -> None:
+    """Check cloud mode status and cloud instance health."""
     # Check cloud mode
     config_manager = ConfigManager()
     config = config_manager.load_config()
@@ -142,12 +126,7 @@ def status(
         if "timestamp" in health_data:
             console.print(f"  Timestamp: {health_data['timestamp']}")
 
-        # Show sync/mount status based on flag
-        console.print()
-        if bisync:
-            show_bisync_status()
-        else:
-            show_mount_status()
+        console.print("\n[dim]To sync projects, use: bm project bisync --name <project>[/dim]")
 
     except CloudAPIError as e:
         console.print(f"[red]Error checking cloud health: {e}[/red]")
@@ -157,132 +136,60 @@ def status(
         raise typer.Exit(1)
 
 
-# Mount commands
-
-
 @cloud_app.command("setup")
-def setup(
-    bisync: bool = typer.Option(
-        True,
-        "--bisync/--mount",
-        help="Use bidirectional sync (recommended) or mount as network drive",
-    ),
-    sync_dir: Optional[str] = typer.Option(
-        None,
-        "--dir",
-        help="Custom sync directory for bisync (default: ~/basic-memory-cloud-sync)",
-    ),
-) -> None:
-    """Set up cloud file access with automatic rclone installation and configuration.
+def setup() -> None:
+    """Set up cloud sync by installing rclone and configuring credentials.
 
-    Default: Sets up bidirectional sync (recommended).\n
-    Use --mount: Sets up mount as network drive (alternative workflow).\n
-
-    Examples:\n
-      bm cloud setup              # Setup bisync (default)\n
-      bm cloud setup --mount      # Setup mount instead\n
-      bm cloud setup --dir ~/sync # Custom bisync directory\n
+    SPEC-20: Simplified to project-scoped workflow.
+    After setup, use project commands for syncing:
+      bm project add <name> <path> --local-path ~/projects/<name>
+      bm project bisync --name <name> --resync  # First time
+      bm project bisync --name <name>            # Subsequent syncs
     """
-    if bisync:
-        setup_cloud_bisync(sync_dir=sync_dir)
-    else:
-        setup_cloud_mount()
+    console.print("[bold blue]Basic Memory Cloud Setup[/bold blue]")
+    console.print("Setting up cloud sync with rclone...\n")
 
-
-@cloud_app.command("mount")
-def mount(
-    profile: str = typer.Option(
-        "balanced", help=f"Mount profile: {', '.join(MOUNT_PROFILES.keys())}"
-    ),
-    path: Optional[str] = typer.Option(
-        None, help="Custom mount path (default: ~/basic-memory-{tenant-id})"
-    ),
-) -> None:
-    """Mount cloud files locally for editing."""
     try:
-        mount_cloud_files(profile_name=profile)
-    except Exception as e:
-        console.print(f"[red]Mount failed: {e}[/red]")
+        # Step 1: Install rclone
+        console.print("[blue]Step 1: Installing rclone...[/blue]")
+        install_rclone()
+
+        # Step 2: Get tenant info
+        console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
+        tenant_info = asyncio.run(get_mount_info())
+        console.print(f"[green]✓ Found tenant: {tenant_info.tenant_id}[/green]")
+
+        # Step 3: Generate credentials
+        console.print("\n[blue]Step 3: Generating sync credentials...[/blue]")
+        creds = asyncio.run(generate_mount_credentials(tenant_info.tenant_id))
+        console.print("[green]✓ Generated secure credentials[/green]")
+
+        # Step 4: Configure rclone remote
+        console.print("\n[blue]Step 4: Configuring rclone remote...[/blue]")
+        configure_rclone_remote(
+            access_key=creds.access_key,
+            secret_key=creds.secret_key,
+        )
+
+        console.print("\n[bold green]✓ Cloud setup completed successfully![/bold green]")
+        console.print("\n[bold]Next steps:[/bold]")
+        console.print("1. Add a project with local sync path:")
+        console.print("   bm project add research --local-path ~/Documents/research")
+        console.print("\n   Or configure sync for an existing project:")
+        console.print("   bm project sync-setup research ~/Documents/research")
+        console.print("\n2. Preview the initial sync (recommended):")
+        console.print("   bm project bisync --name research --resync --dry-run")
+        console.print("\n3. If all looks good, run the actual sync:")
+        console.print("   bm project bisync --name research --resync")
+        console.print("\n4. Subsequent syncs (no --resync needed):")
+        console.print("   bm project bisync --name research")
+        console.print(
+            "\n[dim]Tip: Always use --dry-run first to preview changes before syncing[/dim]"
+        )
+
+    except (RcloneInstallError, BisyncError, CloudAPIError) as e:
+        console.print(f"\n[red]Setup failed: {e}[/red]")
         raise typer.Exit(1)
-
-
-@cloud_app.command("unmount")
-def unmount() -> None:
-    """Unmount cloud files."""
-    try:
-        unmount_cloud_files()
     except Exception as e:
-        console.print(f"[red]Unmount failed: {e}[/red]")
-        raise typer.Exit(1)
-
-
-# Bisync commands
-
-
-@cloud_app.command("bisync")
-def bisync(
-    profile: str = typer.Option(
-        "balanced", help=f"Bisync profile: {', '.join(BISYNC_PROFILES.keys())}"
-    ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
-    resync: bool = typer.Option(False, "--resync", help="Force resync to establish new baseline"),
-    watch: bool = typer.Option(False, "--watch", help="Run continuous sync in watch mode"),
-    interval: int = typer.Option(60, "--interval", help="Sync interval in seconds for watch mode"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed sync output"),
-) -> None:
-    """Run bidirectional sync between local files and cloud storage.
-
-    Examples:
-      basic-memory cloud bisync                    # Manual sync with balanced profile
-      basic-memory cloud bisync --dry-run          # Preview what would be synced
-      basic-memory cloud bisync --resync           # Establish new baseline
-      basic-memory cloud bisync --watch            # Continuous sync every 60s
-      basic-memory cloud bisync --watch --interval 30  # Continuous sync every 30s
-      basic-memory cloud bisync --profile safe     # Use safe profile (keep conflicts)
-      basic-memory cloud bisync --verbose          # Show detailed file sync output
-    """
-    try:
-        if watch:
-            run_bisync_watch(profile_name=profile, interval_seconds=interval)
-        else:
-            run_bisync(profile_name=profile, dry_run=dry_run, resync=resync, verbose=verbose)
-    except Exception as e:
-        console.print(f"[red]Bisync failed: {e}[/red]")
-        raise typer.Exit(1)
-
-
-@cloud_app.command("bisync-status")
-def bisync_status() -> None:
-    """Show current bisync status and configuration.
-
-    DEPRECATED: Use 'bm cloud status' instead (bisync is now the default).
-    """
-    console.print(
-        "[yellow]Note: 'bisync-status' is deprecated. Use 'bm cloud status' instead.[/yellow]"
-    )
-    console.print("[dim]Showing bisync status...[/dim]\n")
-    show_bisync_status()
-
-
-@cloud_app.command("check")
-def check(
-    one_way: bool = typer.Option(
-        False,
-        "--one-way",
-        help="Only check for missing files on destination (faster)",
-    ),
-) -> None:
-    """Check file integrity between local and cloud storage using rclone check.
-
-    Verifies that files match between your local bisync directory and cloud storage
-    without transferring any data. This is useful for validating sync integrity.
-
-    Examples:
-      bm cloud check              # Full integrity check
-      bm cloud check --one-way    # Faster check (missing files only)
-    """
-    try:
-        run_check(one_way=one_way)
-    except Exception as e:
-        console.print(f"[red]Check failed: {e}[/red]")
+        console.print(f"\n[red]Unexpected error during setup: {e}[/red]")
         raise typer.Exit(1)

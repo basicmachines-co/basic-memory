@@ -27,6 +27,24 @@ project_router = APIRouter(prefix="/project", tags=["project"])
 project_resource_router = APIRouter(prefix="/projects", tags=["project_management"])
 
 
+def normalize_project_path(path: str) -> str:
+    """Normalize project path by stripping mount point prefix.
+
+    In cloud deployments, the S3 bucket is mounted at /app/data. We strip this
+    prefix from project paths to avoid leaking implementation details and to
+    ensure paths match the actual S3 bucket structure.
+
+    Args:
+        path: Project path (e.g., "/app/data/basic-memory-llc")
+
+    Returns:
+        Normalized path (e.g., "/basic-memory-llc")
+    """
+    if path.startswith("/app/data/"):
+        return path.removeprefix("/app/data")
+    return path
+
+
 @project_router.get("/info", response_model=ProjectInfoResponse)
 async def get_project_info(
     project_service: ProjectServiceDep,
@@ -50,7 +68,7 @@ async def get_project(
 
     return ProjectItem(
         name=found_project.name,
-        path=found_project.path,
+        path=normalize_project_path(found_project.path),
         is_default=found_project.is_default or False,
     )
 
@@ -167,7 +185,7 @@ async def list_projects(
     project_items = [
         ProjectItem(
             name=project.name,
-            path=project.path,
+            path=normalize_project_path(project.path),
             is_default=project.is_default or False,
         )
         for project in projects

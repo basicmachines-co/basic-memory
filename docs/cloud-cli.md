@@ -1,17 +1,15 @@
 # Basic Memory Cloud CLI Guide
 
-The Basic Memory Cloud CLI provides seamless integration between local and cloud knowledge bases using a **cloud mode toggle**. When cloud mode is enabled, all your regular `bm` commands work transparently with the cloud instead of locally.
+The Basic Memory Cloud CLI provides seamless integration between local and cloud knowledge bases using **project-scoped synchronization**. Each project can optionally sync with the cloud, giving you fine-grained control over what syncs and where.
 
 ## Overview
 
 The cloud CLI enables you to:
-- **Toggle cloud mode** with `bm cloud login` / `bm cloud logout`
-- **Use regular commands in cloud mode**: `bm project`, `bm sync`, `bm tool` all work with cloud
-- **Upload local files** directly to cloud projects via `bm cloud upload`
-- **Bidirectional sync** with rclone bisync (recommended for most users)
-- **Direct file access** via rclone mount (alternative workflow)
-- **Integrity verification** with `bm cloud check`
-- **Automatic project creation** from local directories
+- **Toggle cloud mode** - All regular `bm` commands work with cloud when enabled
+- **Project-scoped sync** - Each project independently manages its sync configuration
+- **Explicit operations** - Sync only what you want, when you want
+- **Bidirectional sync** - Keep local and cloud in sync with rclone bisync
+- **Offline access** - Work locally, sync when ready
 
 ## Prerequisites
 
@@ -22,58 +20,159 @@ Before using Basic Memory Cloud, you need:
 
 If you attempt to log in without an active subscription, you'll receive a "Subscription Required" error with a link to subscribe.
 
-## The Cloud Mode Paradigm
+## Architecture: Project-Scoped Sync
 
-Basic Memory Cloud follows the **Dropbox/iCloud model** - a single cloud space containing all your projects, not per-project connections.
+### The Problem
 
-**How it works:**
-- One login per machine: `bm cloud login`
-- One sync directory: `~/basic-memory-cloud-sync/` (all projects)
-- Projects are folders within your cloud space
-- All regular commands work in cloud mode
+**Old approach (SPEC-8):** All projects lived in a single `~/basic-memory-cloud-sync/` directory. This caused:
+- ❌ Directory conflicts between mount and bisync
+- ❌ Auto-discovery creating phantom projects
+- ❌ Confusion about what syncs and when
+- ❌ All-or-nothing sync (couldn't sync just one project)
 
-**Why this model:**
-- ✅ Single set of credentials (not N per project)
-- ✅ One rclone process (not N processes)
-- ✅ Familiar pattern (like Dropbox)
-- ✅ Simple operations (setup once, sync anytime)
-- ✅ Natural scaling (add projects = add folders)
+**New approach (SPEC-20):** Each project independently configures sync.
+
+### How It Works
+
+**Projects can exist in three states:**
+
+1. **Cloud-only** - Project exists on cloud, no local copy
+2. **Cloud + Local (synced)** - Project has a local working directory that syncs
+3. **Local-only** - Project exists locally (when cloud mode is disabled)
+
+**Example:**
+
+```bash
+# You have 3 projects on cloud:
+# - research: wants local sync at ~/Documents/research
+# - work: wants local sync at ~/work-notes
+# - temp: cloud-only, no local sync needed
+
+bm project add research --local-path ~/Documents/research
+bm project add work --local-path ~/work-notes
+bm project add temp  # No local sync
+
+# Now you can sync individually (after initial --resync):
+bm project bisync --name research
+bm project bisync --name work
+# temp stays cloud-only
+```
+
+**What happens under the covers:**
+- Config stores `cloud_projects` dict mapping project names to local paths
+- Each project gets its own bisync state in `~/.basic-memory/bisync-state/{project}/`
+- Rclone syncs using single remote: `basic-memory-cloud`
+- Projects can live anywhere on your filesystem, not forced into sync directory
 
 ## Quick Start
 
 ### 1. Enable Cloud Mode
 
-Authenticate and enable cloud mode for all commands:
+Authenticate and enable cloud mode:
 
 ```bash
 bm cloud login
 ```
 
-This command will:
-1. Open your browser to the Basic Memory Cloud authentication page
-2. Prompt you to authorize the CLI application
-3. Store your authentication token locally
-4. **Enable cloud mode** - all CLI commands now work against cloud
+**What this does:**
+1. Opens browser to Basic Memory Cloud authentication page
+2. Stores authentication token in `~/.basic-memory/auth/token`
+3. **Enables cloud mode** - all CLI commands now work against cloud
+4. Validates your subscription status
+
+**Result:** All `bm project`, `bm tools` commands now work with cloud.
 
 ### 2. Set Up Sync
 
-Set up bidirectional file synchronization:
+Install rclone and configure credentials:
 
 ```bash
 bm cloud setup
 ```
 
-This will:
-1. Install rclone automatically (if needed)
-2. Configure sync credentials
-3. Create `~/basic-memory-cloud-sync/` directory
-4. Establish initial sync baseline
+**What this does:**
+1. Installs rclone automatically (if needed)
+2. Fetches your tenant information from cloud
+3. Generates scoped S3 credentials for sync
+4. Configures single rclone remote: `basic-memory-cloud`
 
-**Alternative:** Use `bm cloud setup --mount` to set up mount instead of sync.
+**Result:** You're ready to sync projects. No sync directories created yet - those come with project setup.
 
-### 3. Verify Setup
+### 3. Add Projects with Sync
 
-Check that everything is working:
+Create projects with optional local sync paths:
+
+```bash
+# Create cloud project without local sync
+bm project add research
+
+# Create cloud project WITH local sync
+bm project add research --local-path ~/Documents/research
+
+# Or configure sync for existing project
+bm project sync-setup research ~/Documents/research
+```
+
+**What happens under the covers:**
+
+When you add a project with `--local-path`:
+1. Project created on cloud at `/app/data/research`
+2. Local path stored in config: `cloud_projects.research.local_path = "~/Documents/research"`
+3. Local directory created if it doesn't exist
+4. Bisync state directory created at `~/.basic-memory/bisync-state/research/`
+
+**Result:** Project is ready to sync, but no files synced yet.
+
+### 4. Sync Your Project
+
+Establish the initial sync baseline. **Best practice:** Always preview with `--dry-run` first:
+
+```bash
+# Step 1: Preview the initial sync (recommended)
+bm project bisync --name research --resync --dry-run
+
+# Step 2: If all looks good, run the actual sync
+bm project bisync --name research --resync
+```
+
+**What happens under the covers:**
+1. Rclone reads from `~/Documents/research` (local)
+2. Connects to `basic-memory-cloud:bucket-name/app/data/research` (remote)
+3. Creates bisync state files in `~/.basic-memory/bisync-state/research/`
+4. Syncs files bidirectionally with settings:
+   - `conflict_resolve=newer` (most recent wins)
+   - `max_delete=25` (safety limit)
+   - Respects `.bmignore` patterns
+
+**Result:** Local and cloud are in sync. Baseline established.
+
+**Why `--resync`?** This is an rclone requirement for the first bisync run. It establishes the initial state that future syncs will compare against. After the first sync, never use `--resync` unless you need to force a new baseline.
+
+See: https://rclone.org/bisync/#resync
+```
+--resync
+This will effectively make both Path1 and Path2 filesystems contain a matching superset of all files. By default, Path2 files that do not exist in Path1 will be copied to Path1, and the process will then copy the Path1 tree to Path2.
+```
+
+### 5. Subsequent Syncs
+
+After the first sync, just run bisync without `--resync`:
+
+```bash
+bm project bisync --name research
+```
+
+**What happens:**
+1. Rclone compares local and cloud states
+2. Syncs changes in both directions
+3. Auto-resolves conflicts (newer file wins)
+4. Updates `last_sync` timestamp in config
+
+**Result:** Changes flow both ways - edit locally or in cloud, both stay in sync.
+
+### 6. Verify Setup
+
+Check status:
 
 ```bash
 bm cloud status
@@ -82,30 +181,259 @@ bm cloud status
 You should see:
 - `Mode: Cloud (enabled)`
 - `Cloud instance is healthy`
-- Bisync status showing `✓ Initialized`
+- Instructions for project sync commands
 
-### 4. Start Using Cloud
+## Working with Projects
 
-Now all your regular commands work with the cloud:
+### Understanding Project Commands
+
+**Key concept:** When cloud mode is enabled, use regular `bm project` commands (not `bm cloud project`).
 
 ```bash
-# List cloud projects
-bm project list
+# In cloud mode:
+bm project list              # Lists cloud projects
+bm project add research      # Creates cloud project
 
-# Create cloud project
-bm project add "my-research"
-
-# Use MCP tools on cloud
-bm tool write-note --title "Hello" --folder "my-research" --content "Test"
-
-# Sync with cloud
-bm sync
-
-# Watch mode for continuous sync
-bm sync --watch
+# In local mode:
+bm project list              # Lists local projects
+bm project add research ~/Documents/research  # Creates local project
 ```
 
-### 5. Disable Cloud Mode
+### Creating Projects
+
+**Use case 1: Cloud-only project (no local sync)**
+
+```bash
+bm project add temp-notes
+```
+
+**What this does:**
+- Creates project on cloud at `/app/data/temp-notes`
+- No local directory created
+- No sync configuration
+
+**Result:** Project exists on cloud, accessible via MCP tools, but no local copy.
+
+**Use case 2: Cloud project with local sync**
+
+```bash
+bm project add research --local-path ~/Documents/research
+```
+
+**What this does:**
+- Creates project on cloud at `/app/data/research`
+- Creates local directory `~/Documents/research`
+- Stores sync config in `~/.basic-memory/config.json`
+- Prepares for bisync (but doesn't sync yet)
+
+**Result:** Project ready to sync. Run `bm project bisync --name research --resync` to establish baseline.
+
+**Use case 3: Add sync to existing cloud project**
+
+```bash
+# Project already exists on cloud
+bm project sync-setup research ~/Documents/research
+```
+
+**What this does:**
+- Updates existing project's sync configuration
+- Creates local directory
+- Prepares for bisync
+
+**Result:** Existing cloud project now has local sync path. Run bisync to pull files down.
+
+### Listing Projects
+
+View all projects:
+
+```bash
+bm project list
+```
+
+**What you see:**
+- All projects in cloud (when cloud mode enabled)
+- Default project marked
+- Project paths shown
+
+**Future:** Will show sync status (synced/not synced, last sync time).
+
+## File Synchronization
+
+### Understanding the Sync Commands
+
+**There are three sync-related commands:**
+
+1. `bm project sync` - One-way: local → cloud (make cloud match local)
+2. `bm project bisync` - Two-way: local ↔ cloud (recommended)
+3. `bm project check` - Verify files match (no changes)
+
+### One-Way Sync: Local → Cloud
+
+**Use case:** You made changes locally and want to push to cloud (overwrite cloud).
+
+```bash
+bm project sync --name research
+```
+
+**What happens:**
+1. Reads files from `~/Documents/research` (local)
+2. Uses rclone sync to make cloud identical to local
+3. Respects `.bmignore` patterns
+4. Shows progress bar
+
+**Result:** Cloud now matches local exactly. Any cloud-only changes are overwritten.
+
+**When to use:**
+- You know local is the source of truth
+- You want to force cloud to match local
+- You don't care about cloud changes
+
+### Two-Way Sync: Local ↔ Cloud (Recommended)
+
+**Use case:** You edit files both locally and in cloud UI, want both to stay in sync.
+
+```bash
+# First time - establish baseline
+bm project bisync --name research --resync
+
+# Subsequent syncs
+bm project bisync --name research
+```
+
+**What happens:**
+1. Compares local and cloud states using bisync metadata
+2. Syncs changes in both directions
+3. Auto-resolves conflicts (newer file wins)
+4. Detects excessive deletes and fails safely (max 25 files)
+
+**Conflict resolution example:**
+
+```bash
+# Edit locally
+echo "Local change" > ~/Documents/research/notes.md
+
+# Edit same file in cloud UI
+# Cloud now has: "Cloud change"
+
+# Run bisync
+bm project bisync --name research
+
+# Result: Newer file wins (based on modification time)
+# If cloud was more recent, cloud version kept
+# If local was more recent, local version kept
+```
+
+**When to use:**
+- Default workflow for most users
+- You edit in multiple places
+- You want automatic conflict resolution
+
+### Verify Sync Integrity
+
+**Use case:** Check if local and cloud match without making changes.
+
+```bash
+bm project check --name research
+```
+
+**What happens:**
+1. Compares file checksums between local and cloud
+2. Reports differences
+3. No files transferred
+
+**Result:** Shows which files differ. Run bisync to sync them.
+
+```bash
+# One-way check (faster)
+bm project check --name research --one-way
+```
+
+### Preview Changes (Dry Run)
+
+**Use case:** See what would change without actually syncing.
+
+```bash
+bm project bisync --name research --dry-run
+```
+
+**What happens:**
+1. Runs bisync logic
+2. Shows what would be transferred/deleted
+3. No actual changes made
+
+**Result:** Safe preview of sync operations.
+
+### Advanced: List Remote Files
+
+**Use case:** See what files exist on cloud without syncing.
+
+```bash
+# List all files in project
+bm project ls --name research
+
+# List files in subdirectory
+bm project ls --name research --path subfolder
+```
+
+**What happens:**
+1. Connects to cloud via rclone
+2. Lists files in remote project path
+3. No files transferred
+
+**Result:** See cloud file listing.
+
+## Multiple Projects
+
+### Syncing Multiple Projects
+
+**Use case:** You have several projects with local sync, want to sync all at once.
+
+```bash
+# Setup multiple projects
+bm project add research --local-path ~/Documents/research
+bm project add work --local-path ~/work-notes
+bm project add personal --local-path ~/personal
+
+# Establish baselines
+bm project bisync --name research --resync
+bm project bisync --name work --resync
+bm project bisync --name personal --resync
+
+# Daily workflow: sync everything
+bm project bisync --name research
+bm project bisync --name work
+bm project bisync --name personal
+```
+
+**Future:** `--all` flag will sync all configured projects:
+
+```bash
+bm project bisync --all  # Coming soon
+```
+
+### Mixed Usage
+
+**Use case:** Some projects sync, some stay cloud-only.
+
+```bash
+# Projects with sync
+bm project add research --local-path ~/Documents/research
+bm project add work --local-path ~/work
+
+# Cloud-only projects
+bm project add archive
+bm project add temp-notes
+
+# Sync only the configured ones
+bm project bisync --name research
+bm project bisync --name work
+
+# Archive and temp-notes stay cloud-only
+```
+
+**Result:** Fine-grained control over what syncs.
+
+## Disable Cloud Mode
 
 Return to local mode:
 
@@ -113,434 +441,81 @@ Return to local mode:
 bm cloud logout
 ```
 
-All commands now work locally again.
+**What this does:**
+1. Disables cloud mode in config
+2. All commands now work locally
+3. Auth token remains (can re-enable with login)
 
-## Working with Cloud Projects
+**Result:** All `bm` commands work with local projects again.
 
-**Important:** When cloud mode is enabled, use regular `bm project` commands (not `bm cloud project`).
+## Filter Configuration
 
-### Listing Projects
+### Understanding .bmignore
 
-View all projects (cloud projects when cloud mode is enabled):
+**The problem:** You don't want to sync everything (e.g., `.git`, `node_modules`, database files).
 
-```bash
-# In cloud mode - lists cloud projects
-bm project list
+**The solution:** `.bmignore` file with gitignore-style patterns.
 
-# In local mode - lists local projects
-bm project list
-```
+**Location:** `~/.basic-memory/.bmignore`
 
-### Creating Projects
-
-Create a new project (creates on cloud when cloud mode is enabled):
-
-```bash
-# In cloud mode - creates cloud project
-bm project add my-new-project
-
-# Create and set as default
-bm project add my-new-project --default
-```
-
-### Automatic Project Creation
-
-**New in SPEC-9:** Projects are automatically created when you create local directories!
-
-```bash
-# Create a local directory in your sync folder
-mkdir ~/basic-memory-cloud-sync/new-project
-echo "# Notes" > ~/basic-memory-cloud-sync/new-project/readme.md
-
-# Sync - automatically creates cloud project
-bm sync
-
-# Verify - project now exists on cloud
-bm project list
-```
-
-This Dropbox-like workflow means you don't need to manually coordinate projects between local and cloud.
-
-### Uploading Local Files
-
-You can directly upload local files or directories to cloud projects using `bm cloud upload`. This is useful for:
-- Migrating existing local projects to the cloud
-- Quickly uploading specific files or directories
-- One-time bulk uploads without setting up sync
-
-**Basic Usage:**
-
-```bash
-# Upload a directory to existing project
-bm cloud upload ~/my-notes --project research
-
-# Upload a single file
-bm cloud upload important-doc.md --project research
-```
-
-**Create Project On-the-Fly:**
-
-If the target project doesn't exist yet, use `--create-project`:
-
-```bash
-# Upload and create project in one step
-bm cloud upload ~/local-project --project new-research --create-project
-```
-
-**Skip Automatic Sync:**
-
-By default, the command syncs the project after upload to index the files. To skip this:
-
-```bash
-# Upload without triggering sync
-bm cloud upload ~/bulk-data --project archives --no-sync
-```
-
-**File Filtering:**
-
-The upload command respects `.bmignore` and `.gitignore` patterns, automatically excluding:
-- Hidden files (`.git`, `.DS_Store`)
-- Build artifacts (`node_modules`, `__pycache__`)
-- Database files (`*.db`, `*.db-wal`)
-- Environment files (`.env`)
-
-To customize what gets uploaded, edit `~/.basic-memory/.bmignore`.
-
-**Complete Example:**
-
-```bash
-# 1. Login to cloud
-bm cloud login
-
-# 2. Upload local project (creates project if needed)
-bm cloud upload ~/Documents/research-notes --project research --create-project
-
-# 3. Verify upload
-bm project list
-```
-
-**Notes:**
-- Files are uploaded directly via WebDAV (no sync setup required)
-- Uploads are immediate and don't require bisync or mount
-- Use this for migration or one-time uploads; use `bm sync` for ongoing synchronization
-
-## File Synchronization
-
-### The `bm sync` Command (Cloud Mode Aware)
-
-The `bm sync` command automatically adapts based on cloud mode:
-
-**In local mode:**
-```bash
-bm sync              # Indexes local files into database
-```
-
-**In cloud mode:**
-```bash
-bm sync              # Runs bisync + indexes files
-bm sync --watch      # Continuous sync every 60 seconds
-bm sync --interval 30  # Custom interval
-```
-
-The same command works everywhere - no need to remember different commands for local vs cloud!
-
-## Bidirectional Sync (bisync) - Recommended
-
-Bidirectional sync is the **recommended approach** for most users. It provides:
-- ✅ Offline access to all files
-- ✅ Automatic bidirectional synchronization
-- ✅ Conflict detection and resolution
-- ✅ Works with any editor or tool
-- ✅ Background watch mode
-
-### Setup
-
-Set up bisync (runs automatically if you used `bm cloud setup`):
-
-```bash
-bm cloud setup
-```
-
-Or set up with custom directory:
-
-```bash
-bm cloud setup --dir ~/my-sync-folder
-```
-
-### Running Sync
-
-Use the cloud-aware `bm sync` command:
-
-```bash
-# Manual sync
-bm sync
-
-# Watch mode (continuous sync)
-bm sync --watch
-
-# Custom interval (30 seconds)
-bm sync --watch --interval 30
-```
-
-### Bisync Profiles
-
-Bisync supports three conflict resolution strategies with different safety levels:
-
-| Profile | Conflict Resolution | Max Deletes | Use Case |
-|---------|-------------------|-------------|----------|
-| **balanced** | newer | 25 | Default, recommended for most users |
-| **safe** | none | 10 | Keep both versions on conflict |
-| **fast** | newer | 50 | Rapid iteration, higher delete tolerance |
-
-**Profile Details:**
-
-- **safe**:
-  - Conflict resolution: `none` (creates `.conflict` files for both versions)
-  - Max delete: 10 files per sync
-  - Best for: Critical data where you want manual conflict resolution
-
-- **balanced** (default):
-  - Conflict resolution: `newer` (auto-resolve to most recent file)
-  - Max delete: 25 files per sync
-  - Best for: General use with automatic conflict handling
-
-- **fast**:
-  - Conflict resolution: `newer` (auto-resolve to most recent file)
-  - Max delete: 50 files per sync
-  - Best for: Rapid development iteration with less restrictive safety checks
-
-**How to Select a Profile:**
-
-The default profile (`balanced`) is used automatically with `bm sync`:
-
-```bash
-# Uses balanced profile (default)
-bm sync
-```
-
-For advanced control, use `bm cloud bisync` with the `--profile` flag:
-
-```bash
-# Use safe mode
-bm cloud bisync --profile safe
-
-# Use fast mode
-bm cloud bisync --profile fast
-
-# Preview changes with specific profile
-bm cloud bisync --profile safe --dry-run
-```
-
-**Check Available Profiles:**
-
-```bash
-bm cloud status
-```
-
-This shows all available profiles with their settings.
-
-**Current Limitations:**
-
-- Profiles are hardcoded and cannot be customized
-- No config file option to change default profile
-- Profile settings (max_delete, conflict_resolve) cannot be modified without code changes
-- Profile selection only available via `bm cloud bisync --profile` (advanced command)
-
-### Establishing New Baseline
-
-If you need to force a complete resync:
-
-```bash
-bm cloud bisync --resync
-```
-
-**Warning:** This overwrites the sync state. Use only when recovering from errors.
-
-### Checking Sync Status
-
-View current sync status:
-
-```bash
-bm cloud status
-```
-
-This shows:
-- Cloud mode status
-- Instance health
-- Sync directory location
-- Last sync time
-- Available bisync profiles
-
-### Verifying Sync Integrity
-
-Check that local and cloud files match:
-
-```bash
-# Full integrity check
-bm cloud check
-
-# Faster one-way check
-bm cloud check --one-way
-```
-
-This uses `rclone check` to verify files match without transferring data.
-
-### Working with Bisync
-
-Create and edit files in `~/basic-memory-cloud-sync/`:
-
-```bash
-# Create a new note
-echo "# My Research" > ~/basic-memory-cloud-sync/my-project/notes.md
-
-# Edit with your favorite editor
-code ~/basic-memory-cloud-sync/my-project/
-
-# Sync changes to cloud
-bm sync
-```
-
-In watch mode, changes sync automatically:
-
-```bash
-# Start watch mode
-bm sync --watch
-
-# Edit files - they sync automatically every 60 seconds
-code ~/basic-memory-cloud-sync/my-project/
-```
-
-### Filter Configuration
-
-Bisync uses `.bmignore` patterns from `~/.basic-memory/.bmignore`:
-
-```bash
-# View current ignore patterns
-cat ~/.basic-memory/.bmignore
-
-# Edit ignore patterns
-code ~/.basic-memory/.bmignore
-```
-
-Example `.bmignore`:
+**Default patterns:**
 
 ```gitignore
-# This file is used by 'bm cloud bisync' and file sync
-# Patterns use standard gitignore-style syntax
-
-# Hidden files (files starting with dot)
-- .*
-
-# Basic Memory internal files
-- memory.db/**
-- memory.db-shm/**
-- memory.db-wal/**
-- config.json/**
-
 # Version control
-- .git/**
+.git/**
 
 # Python
-- __pycache__/**
-- *.pyc
-- .venv/**
+__pycache__/**
+*.pyc
+.venv/**
+venv/**
 
 # Node.js
-- node_modules/**
+node_modules/**
+
+# Basic Memory internals
+memory.db/**
+memory.db-shm/**
+memory.db-wal/**
+config.json/**
+watch-status.json/**
+.bmignore.rclone/**
+
+# OS files
+.DS_Store/**
+Thumbs.db/**
+
+# Environment files
+.env/**
+.env.local/**
 ```
 
-**Key points:**
-- ✅ **Global configuration** - One ignore file for all projects
-- ✅ **rclone filter syntax** - Patterns with `- ` prefix
-- ✅ **Automatic creation** - Created with defaults on first use
-- ✅ **Shared patterns** - Same patterns used by sync service
+**How it works:**
+1. On first sync, `.bmignore` created with defaults
+2. Patterns converted to rclone filter format (`.bmignore.rclone`)
+3. Rclone uses filters during sync
+4. Same patterns used by all projects
 
-## NFS Mount (Direct Access) - Alternative
-
-NFS mount provides direct file system access as an alternative to bisync. Use this if you prefer mounting files like a network drive.
-
-### Setup
-
-Set up mount instead of bisync:
+**Customizing:**
 
 ```bash
-bm cloud setup --mount
+# Edit patterns
+code ~/.basic-memory/.bmignore
+
+# Add custom patterns
+echo "*.tmp/**" >> ~/.basic-memory/.bmignore
+
+# Next sync uses updated patterns
+bm project bisync --name research
 ```
-
-### Mounting Files
-
-Mount your cloud files:
-
-```bash
-# Mount with default settings
-bm cloud mount
-
-# Mount with specific profile
-bm cloud mount --profile fast
-```
-
-#### Mount Profiles
-
-- **balanced** (default): Balanced caching for general use
-- **streaming**: Optimized for large files
-- **fast**: Minimal verification for rapid access
-
-### Checking Mount Status
-
-View current mount status:
-
-```bash
-bm cloud status --mount
-```
-
-### Unmounting Files
-
-Unmount when done:
-
-```bash
-bm cloud unmount
-```
-
-### Working with Mounted Files
-
-Once mounted, files appear at `~/basic-memory-cloud/`:
-
-```bash
-# List cloud files
-ls ~/basic-memory-cloud/
-
-# Edit with your favorite editor
-code ~/basic-memory-cloud/my-project/
-
-# Changes are immediately synced to cloud
-echo "# Notes" > ~/basic-memory-cloud/my-project/readme.md
-```
-
-**Note:** Changes are written through to cloud immediately. There's no "sync" step needed.
-
-## Instance Management
-
-### Health Check
-
-Check if your cloud instance is healthy:
-
-```bash
-bm cloud status
-```
-
-This shows:
-- Cloud mode enabled/disabled
-- Instance health status
-- Instance version
-- Sync or mount status
 
 ## Troubleshooting
 
 ### Authentication Issues
 
-**Problem**: "Authentication failed" or "Invalid token"
+**Problem:** "Authentication failed" or "Invalid token"
 
-**Solution**: Re-authenticate:
+**Solution:** Re-authenticate:
 
 ```bash
 bm cloud logout
@@ -549,182 +524,203 @@ bm cloud login
 
 ### Subscription Issues
 
-**Problem**: "Subscription Required" error when logging in
+**Problem:** "Subscription Required" error
 
-**Solution**: You need an active Basic Memory Cloud subscription to use cloud features.
-
-1. Visit the subscribe URL shown in the error message
-2. Sign up for a subscription
-3. Once your subscription is active, run `bm cloud login` again
-
-**Problem**: "Subscription Required" error for existing user
-
-**Solution**: Your subscription may have expired or been cancelled.
-
-1. Check your subscription status at [https://basicmemory.com/account](https://basicmemory.com/account)
-2. Renew your subscription if needed
+**Solution:**
+1. Visit subscribe URL shown in error
+2. Sign up for subscription
 3. Run `bm cloud login` again
 
-Note: Access is immediately restored when your subscription becomes active.
+**Note:** Access is immediate when subscription becomes active.
 
-### Sync Issues
+### Bisync Initialization
 
-**Problem**: "Bisync not initialized"
+**Problem:** "First bisync requires --resync"
 
-**Solution**: Run setup or initialize with resync:
+**Explanation:** Bisync needs a baseline state before it can sync changes.
 
-```bash
-bm cloud setup
-# or
-bm cloud bisync --resync
-```
-
-**Problem**: "Too many deletes" error
-
-**Solution**: Bisync detected many deletions (safety check). Review changes and use a higher delete limit profile or force resync:
+**Solution:**
 
 ```bash
-bm cloud bisync --profile fast  # Higher delete limit
-# or
-bm cloud bisync --resync        # Force baseline
+bm project bisync --name research --resync
 ```
 
-**Problem**: Conflicts detected
+**What this does:**
+- Establishes initial sync state
+- Creates baseline in `~/.basic-memory/bisync-state/research/`
+- Syncs all files bidirectionally
 
-**Solution**: Bisync found files changed in both locations. Check sync directory for `.conflict` files:
+**Result:** Future syncs work without `--resync`.
+
+### Empty Directory Issues
+
+**Problem:** "Empty prior Path1 listing. Cannot sync to an empty directory"
+
+**Explanation:** Rclone bisync doesn't work well with completely empty directories. It needs at least one file to establish a baseline.
+
+**Solution:** Add at least one file before running `--resync`:
 
 ```bash
-ls ~/basic-memory-cloud-sync/**/*.conflict
+# Create a placeholder file
+echo "# Research Notes" > ~/Documents/research/README.md
+
+# Now run bisync
+bm project bisync --name research --resync
 ```
 
-Resolve conflicts manually, then sync again.
+**Why this happens:** Bisync creates listing files that track the state of each side. When both directories are completely empty, these listing files are considered invalid by rclone.
+
+**Best practice:** Always have at least one file (like a README.md) in your project directory before setting up sync.
+
+### Bisync State Corruption
+
+**Problem:** Bisync fails with errors about corrupted state or listing files
+
+**Explanation:** Sometimes bisync state can become inconsistent (e.g., after mixing dry-run and actual runs, or after manual file operations).
+
+**Solution:** Clear bisync state and re-establish baseline:
+
+```bash
+# Clear bisync state
+bm project bisync-reset research
+
+# Re-establish baseline
+bm project bisync --name research --resync
+```
+
+**What this does:**
+- Removes all bisync metadata from `~/.basic-memory/bisync-state/research/`
+- Forces fresh baseline on next `--resync`
+- Safe operation (doesn't touch your files)
+
+**Note:** This command also runs automatically when you remove a project to clean up state directories.
+
+### Too Many Deletes
+
+**Problem:** "Error: max delete limit (25) exceeded"
+
+**Explanation:** Bisync detected you're about to delete more than 25 files. This is a safety check to prevent accidents.
+
+**Solution 1:** Review what you're deleting, then force resync:
+
+```bash
+# Check what would be deleted
+bm project bisync --name research --dry-run
+
+# If correct, establish new baseline
+bm project bisync --name research --resync
+```
+
+**Solution 2:** Use one-way sync if you know local is correct:
+
+```bash
+bm project sync --name research
+```
+
+### Project Not Configured for Sync
+
+**Problem:** "Project research has no local_sync_path configured"
+
+**Explanation:** Project exists on cloud but has no local sync path.
+
+**Solution:**
+
+```bash
+bm project sync-setup research ~/Documents/research
+bm project bisync --name research --resync
+```
 
 ### Connection Issues
 
-**Problem**: "Cannot connect to cloud instance"
+**Problem:** "Cannot connect to cloud instance"
 
-**Solution**: Check cloud status:
+**Solution:** Check status:
 
 ```bash
 bm cloud status
 ```
 
-If instance is down, wait a few minutes and retry. If problem persists, contact support.
-
-### Mount Issues
-
-**Problem**: "Mount point is busy"
-
-**Solution**: Unmount and remount:
-
-```bash
-bm cloud unmount
-bm cloud mount
-```
-
-**Problem**: "Permission denied" when accessing mounted files
-
-**Solution**: Check mount status and remount:
-
-```bash
-bm cloud status --mount
-bm cloud unmount
-bm cloud mount
-```
+If instance is down, wait a few minutes and retry.
 
 ## Security
 
 - **Authentication**: OAuth 2.1 with PKCE flow
-- **Tokens**: Stored securely in `~/.basic-memory/auth/token`
+- **Tokens**: Stored securely in `~/.basic-memory/basic-memory-cloud.json`
 - **Transport**: All data encrypted in transit (HTTPS)
-- **Credentials**: Scoped S3 credentials for sync/mount (read-write access to your tenant only)
-- **Isolation**: Your data is isolated from other tenants
-- **Ignore patterns**: Sensitive files (`.env`, credentials) automatically excluded
+- **Credentials**: Scoped S3 credentials (read-write to your tenant only)
+- **Isolation**: Your data isolated from other tenants
+- **Ignore patterns**: Sensitive files automatically excluded via `.bmignore`
 
 ## Command Reference
 
 ### Cloud Mode Management
 
 ```bash
-bm cloud login                   # Authenticate and enable cloud mode
-bm cloud logout                  # Disable cloud mode
-bm cloud status                  # Check cloud mode and sync status
-bm cloud status --mount          # Check cloud mode and mount status
+bm cloud login              # Authenticate and enable cloud mode
+bm cloud logout             # Disable cloud mode
+bm cloud status             # Check cloud mode and instance health
 ```
 
 ### Setup
 
 ```bash
-bm cloud setup                   # Setup bisync (default, recommended)
-bm cloud setup --mount           # Setup mount (alternative)
-bm cloud setup --dir ~/sync      # Custom sync directory
+bm cloud setup              # Install rclone and configure credentials
 ```
 
-### Project Management (Cloud Mode Aware)
+### Project Management
 
-When cloud mode is enabled, these commands work with cloud:
+When cloud mode is enabled:
 
 ```bash
-bm project list                  # List projects
-bm project add <name>            # Create project
-bm project add <name> --default  # Create and set as default
-bm project rm <name>             # Delete project
-bm project set-default <name>    # Set default project
+bm project list                           # List cloud projects
+bm project add <name>                     # Create cloud project (no sync)
+bm project add <name> --local-path <path> # Create with local sync
+bm project sync-setup <name> <path>       # Add sync to existing project
+bm project rm <name>                      # Delete project
 ```
 
 ### File Synchronization
 
 ```bash
-bm sync                          # Sync files (local or cloud depending on mode)
-bm sync --watch                  # Continuous sync (cloud mode only)
-bm sync --interval 30            # Custom interval for watch mode
+# One-way sync (local → cloud)
+bm project sync --name <project>
+bm project sync --name <project> --dry-run
+bm project sync --name <project> --verbose
 
-# Advanced bisync commands
-bm cloud bisync                  # Run bisync manually
-bm cloud bisync --profile safe   # Use specific profile
-bm cloud bisync --dry-run        # Preview changes
-bm cloud bisync --resync         # Force new baseline
-bm cloud bisync --watch          # Continuous sync
-bm cloud bisync --verbose        # Show detailed output
+# Two-way sync (local ↔ cloud) - Recommended
+bm project bisync --name <project>          # After first --resync
+bm project bisync --name <project> --resync # First time / force baseline
+bm project bisync --name <project> --dry-run
+bm project bisync --name <project> --verbose
 
-# Integrity verification
-bm cloud check                   # Full integrity check
-bm cloud check --one-way         # Faster one-way check
-```
+# Integrity check
+bm project check --name <project>
+bm project check --name <project> --one-way
 
-### File Upload
-
-```bash
-# Upload files/directories to cloud projects
-bm cloud upload <path> --project <name>              # Upload to existing project
-bm cloud upload <path> -p <name> --create-project    # Upload and create project
-bm cloud upload <path> -p <name> --no-sync           # Upload without syncing
-```
-
-### Direct File Access (Mount)
-
-```bash
-bm cloud mount                   # Mount cloud files
-bm cloud mount --profile fast    # Use specific profile
-bm cloud unmount                 # Unmount files
+# List remote files
+bm project ls --name <project>
+bm project ls --name <project> --path <subpath>
 ```
 
 ## Summary
 
-Basic Memory Cloud provides two workflows:
+**Basic Memory Cloud uses project-scoped sync:**
 
-### Recommended: Bidirectional Sync (bisync)
-1. `bm cloud login` - Authenticate once
-2. `bm cloud setup` - Configure sync once
-3. `bm sync` - Sync anytime (or use `--watch`)
-4. Work in `~/basic-memory-cloud-sync/`
-5. Changes sync bidirectionally
+1. **Enable cloud mode** - `bm cloud login`
+2. **Install rclone** - `bm cloud setup`
+3. **Add projects with sync** - `bm project add research --local-path ~/Documents/research`
+4. **Preview first sync** - `bm project bisync --name research --resync --dry-run`
+5. **Establish baseline** - `bm project bisync --name research --resync`
+6. **Daily workflow** - `bm project bisync --name research`
 
-### Alternative: Direct Mount
-1. `bm cloud login` - Authenticate once
-2. `bm cloud setup --mount` - Configure mount once
-3. `bm cloud mount` - Mount when needed
-4. Work in `~/basic-memory-cloud/`
-5. Changes write through immediately
+**Key benefits:**
+- ✅ Each project independently syncs (or doesn't)
+- ✅ Projects can live anywhere on disk
+- ✅ Explicit sync operations (no magic)
+- ✅ Safe by design (max delete limits, conflict resolution)
+- ✅ Full offline access (work locally, sync when ready)
 
-Both approaches work seamlessly with cloud mode - all your regular `bm` commands work with either workflow!
+**Future enhancements:**
+- `--all` flag to sync all configured projects
+- Project list showing sync status
+- Watch mode for automatic sync
