@@ -147,6 +147,66 @@ async def test_file_count_increased_uses_incremental_scan(
     assert "file3.md" in report.new
 
 
+@pytest.mark.asyncio
+async def test_force_full_bypasses_watermark_optimization(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that force_full=True bypasses watermark optimization and scans all files.
+
+    This is critical for detecting changes made by external tools like rclone bisync
+    that don't update mtimes detectably. See issue #407.
+    """
+    project_dir = project_config.home
+
+    # Create initial files
+    await create_test_file(project_dir / "file1.md", "# File 1\nOriginal")
+    await create_test_file(project_dir / "file2.md", "# File 2\nOriginal")
+
+    # First sync - establishes watermark
+    report = await sync_service.sync(project_dir)
+    assert len(report.new) == 2
+
+    # Verify watermark was set
+    project = await sync_service.project_repository.find_by_id(
+        sync_service.entity_repository.project_id
+    )
+    assert project.last_scan_timestamp is not None
+    initial_timestamp = project.last_scan_timestamp
+
+    # Sleep to ensure time passes
+    await sleep_past_watermark()
+
+    # Modify a file WITHOUT updating mtime (simulates external tool like rclone)
+    # We set mtime to be BEFORE the watermark to ensure incremental scan won't detect it
+    file_path = project_dir / "file1.md"
+    original_stat = file_path.stat()
+    await create_test_file(file_path, "# File 1\nModified by external tool")
+
+    # Set mtime to be before the watermark (use time from before first sync)
+    # This simulates rclone bisync which may preserve original timestamps
+    import os
+    old_time = initial_timestamp - 10  # 10 seconds before watermark
+    os.utime(file_path, (old_time, old_time))
+
+    # Normal incremental sync should NOT detect the change (mtime before watermark)
+    report = await sync_service.sync(project_dir)
+    assert len(report.modified) == 0, (
+        "Incremental scan should not detect changes with mtime older than watermark"
+    )
+
+    # Force full scan should detect the change via checksum comparison
+    report = await sync_service.sync(project_dir, force_full=True)
+    assert len(report.modified) == 1, "Force full scan should detect changes via checksum"
+    assert "file1.md" in report.modified
+
+    # Verify watermark was still updated after force_full
+    project = await sync_service.project_repository.find_by_id(
+        sync_service.entity_repository.project_id
+    )
+    assert project.last_scan_timestamp is not None
+    assert project.last_scan_timestamp > initial_timestamp
+
+
 # ==============================================================================
 # Incremental Scan Base Cases
 # ==============================================================================

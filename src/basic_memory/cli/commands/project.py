@@ -22,8 +22,19 @@ from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.project_info import ProjectStatusResponse
 from basic_memory.mcp.tools.utils import call_delete
 from basic_memory.mcp.tools.utils import call_put
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, normalize_project_path
 from basic_memory.mcp.tools.utils import call_patch
+
+# Import rclone commands for project sync
+from basic_memory.cli.commands.cloud.rclone_commands import (
+    SyncProject,
+    RcloneError,
+    project_sync,
+    project_bisync,
+    project_check,
+    project_ls,
+)
+from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
 
 console = Console()
 
@@ -51,15 +62,41 @@ def list_projects() -> None:
 
     try:
         result = asyncio.run(_list_projects())
+        config = ConfigManager().config
 
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
         table.add_column("Path", style="green")
-        table.add_column("Default", style="magenta")
+
+        # Add Local Path column if in cloud mode
+        if config.cloud_mode_enabled:
+            table.add_column("Local Path", style="yellow", no_wrap=True, overflow="fold")
+
+        # Show Default column in local mode or if default_project_mode is enabled in cloud mode
+        show_default_column = not config.cloud_mode_enabled or config.default_project_mode
+        if show_default_column:
+            table.add_column("Default", style="magenta")
 
         for project in result.projects:
             is_default = "✓" if project.is_default else ""
-            table.add_row(project.name, format_path(project.path), is_default)
+            normalized_path = normalize_project_path(project.path)
+
+            # Build row based on mode
+            row = [project.name, format_path(normalized_path)]
+
+            # Add local path if in cloud mode
+            if config.cloud_mode_enabled:
+                local_path = ""
+                if project.name in config.cloud_projects:
+                    local_path = config.cloud_projects[project.name].local_path or ""
+                    local_path = format_path(local_path)
+                row.append(local_path)
+
+            # Add default indicator if showing default column
+            if show_default_column:
+                row.append(is_default)
+
+            table.add_row(*row)
 
         console.print(table)
     except Exception as e:
@@ -73,20 +110,38 @@ def add_project(
     path: str = typer.Argument(
         None, help="Path to the project directory (required for local mode)"
     ),
+    local_path: str = typer.Option(
+        None, "--local-path", help="Local sync path for cloud mode (optional)"
+    ),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
 ) -> None:
     """Add a new project.
 
-    For cloud mode: only name is required
-    For local mode: both name and path are required
+    Cloud mode examples:\n
+        bm project add research                           # No local sync\n
+        bm project add research --local-path ~/docs       # With local sync\n
+
+    Local mode example:\n
+        bm project add research ~/Documents/research
     """
     config = ConfigManager().config
 
+    # Resolve local sync path early (needed for both cloud and local mode)
+    local_sync_path: str | None = None
+    if local_path:
+        local_sync_path = Path(os.path.abspath(os.path.expanduser(local_path))).as_posix()
+
     if config.cloud_mode_enabled:
-        # Cloud mode: path not needed (auto-generated from name)
+        # Cloud mode: path auto-generated from name, local sync is optional
+
         async def _add_project():
             async with get_client() as client:
-                data = {"name": name, "path": generate_permalink(name), "set_default": set_default}
+                data = {
+                    "name": name,
+                    "path": generate_permalink(name),
+                    "local_sync_path": local_sync_path,
+                    "set_default": set_default,
+                }
                 response = await call_post(client, "/projects/projects", json=data)
                 return ProjectStatusResponse.model_validate(response.json())
     else:
@@ -107,13 +162,85 @@ def add_project(
     try:
         result = asyncio.run(_add_project())
         console.print(f"[green]{result.message}[/green]")
+
+        # Save local sync path to config if in cloud mode
+        if config.cloud_mode_enabled and local_sync_path:
+            from basic_memory.config import CloudProjectConfig
+
+            # Create local directory if it doesn't exist
+            local_dir = Path(local_sync_path)
+            local_dir.mkdir(parents=True, exist_ok=True)
+
+            # Update config with sync path
+            config.cloud_projects[name] = CloudProjectConfig(
+                local_path=local_sync_path,
+                last_sync=None,
+                bisync_initialized=False,
+            )
+            ConfigManager().save_config(config)
+
+            console.print(f"\n[green]✓ Local sync path configured: {local_sync_path}[/green]")
+            console.print("\nNext steps:")
+            console.print(f"  1. Preview: bm project bisync --name {name} --resync --dry-run")
+            console.print(f"  2. Sync: bm project bisync --name {name} --resync")
     except Exception as e:
         console.print(f"[red]Error adding project: {str(e)}[/red]")
         raise typer.Exit(1)
 
-    # Display usage hint
-    console.print("\nTo use this project:")
-    console.print(f"  basic-memory --project={name} <command>")
+
+@project_app.command("sync-setup")
+def setup_project_sync(
+    name: str = typer.Argument(..., help="Project name"),
+    local_path: str = typer.Argument(..., help="Local sync directory"),
+) -> None:
+    """Configure local sync for an existing cloud project.
+
+    Example:
+      bm project sync-setup research ~/Documents/research
+    """
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: sync-setup only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    async def _verify_project_exists():
+        """Verify the project exists on cloud by listing all projects."""
+        async with get_client() as client:
+            response = await call_get(client, "/projects/projects")
+            project_list = response.json()
+            project_names = [p["name"] for p in project_list["projects"]]
+            if name not in project_names:
+                raise ValueError(f"Project '{name}' not found on cloud")
+            return True
+
+    try:
+        # Verify project exists on cloud
+        asyncio.run(_verify_project_exists())
+
+        # Resolve and create local path
+        resolved_path = Path(os.path.abspath(os.path.expanduser(local_path)))
+        resolved_path.mkdir(parents=True, exist_ok=True)
+
+        # Update local config with sync path
+        from basic_memory.config import CloudProjectConfig
+
+        config.cloud_projects[name] = CloudProjectConfig(
+            local_path=resolved_path.as_posix(),
+            last_sync=None,
+            bisync_initialized=False,
+        )
+        config_manager.save_config(config)
+
+        console.print(f"[green]✓ Sync configured for project '{name}'[/green]")
+        console.print(f"\nLocal sync path: {resolved_path}")
+        console.print("\nNext steps:")
+        console.print(f"  1. Preview: bm project bisync --name {name} --resync --dry-run")
+        console.print(f"  2. Sync: bm project bisync --name {name} --resync")
+    except Exception as e:
+        console.print(f"[red]Error configuring sync: {str(e)}[/red]")
+        raise typer.Exit(1)
 
 
 @project_app.command("remove")
@@ -134,15 +261,58 @@ def remove_project(
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
+        # Get config to check for local sync path and bisync state
+        config = ConfigManager().config
+        local_path = None
+        has_bisync_state = False
+
+        if config.cloud_mode_enabled and name in config.cloud_projects:
+            local_path = config.cloud_projects[name].local_path
+
+            # Check for bisync state
+            from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
+
+            bisync_state_path = get_project_bisync_state(name)
+            has_bisync_state = bisync_state_path.exists()
+
+        # Remove project from cloud/API
         result = asyncio.run(_remove_project())
         console.print(f"[green]{result.message}[/green]")
+
+        # Clean up local sync directory if it exists and delete_notes is True
+        if delete_notes and local_path:
+            local_dir = Path(local_path)
+            if local_dir.exists():
+                import shutil
+
+                shutil.rmtree(local_dir)
+                console.print(f"[green]✓ Removed local sync directory: {local_path}[/green]")
+
+        # Clean up bisync state if it exists
+        if has_bisync_state:
+            from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
+            import shutil
+
+            bisync_state_path = get_project_bisync_state(name)
+            if bisync_state_path.exists():
+                shutil.rmtree(bisync_state_path)
+                console.print("[green]✓ Removed bisync state[/green]")
+
+        # Clean up cloud_projects config entry
+        if config.cloud_mode_enabled and name in config.cloud_projects:
+            del config.cloud_projects[name]
+            ConfigManager().save_config(config)
+
+        # Show informative message if files were not deleted
+        if not delete_notes:
+            if local_path:
+                console.print(f"[yellow]Note: Local files remain at {local_path}[/yellow]")
+            else:
+                console.print("[yellow]Note: Cloud project files have not been deleted.[/yellow]")
+
     except Exception as e:
         console.print(f"[red]Error removing project: {str(e)}[/red]")
         raise typer.Exit(1)
-
-    # Show this message only if files were not deleted
-    if not delete_notes:
-        console.print("[yellow]Note: The project files have not been deleted from disk.[/yellow]")
 
 
 @project_app.command("default")
@@ -245,6 +415,349 @@ def move_project(
 
     except Exception as e:
         console.print(f"[red]Error moving project: {str(e)}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("sync")
+def sync_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to sync"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """One-way sync: local → cloud (make cloud identical to local).
+
+    Example:
+      bm project sync --name research
+      bm project sync --name research --dry-run
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: sync only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Get local_sync_path from cloud_projects config
+        local_sync_path = None
+        if name in config.cloud_projects:
+            local_sync_path = config.cloud_projects[name].local_path
+
+        if not local_sync_path:
+            console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
+            console.print(f"\nConfigure sync with: bm project sync-setup {name} ~/path/to/local")
+            raise typer.Exit(1)
+
+        # Create SyncProject
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=normalize_project_path(project_data.path),
+            local_sync_path=local_sync_path,
+        )
+
+        # Run sync
+        console.print(f"[blue]Syncing {name} (local → cloud)...[/blue]")
+        success = project_sync(sync_project, bucket_name, dry_run=dry_run, verbose=verbose)
+
+        if success:
+            console.print(f"[green]✓ {name} synced successfully[/green]")
+
+            # Trigger database sync if not a dry run
+            if not dry_run:
+
+                async def _trigger_db_sync():
+                    async with get_client() as client:
+                        permalink = generate_permalink(name)
+                        response = await call_post(client, f"/{permalink}/project/sync", json={})
+                        return response.json()
+
+                try:
+                    result = asyncio.run(_trigger_db_sync())
+                    console.print(f"[dim]Database sync initiated: {result.get('message')}[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
+        else:
+            console.print(f"[red]✗ {name} sync failed[/red]")
+            raise typer.Exit(1)
+
+    except RcloneError as e:
+        console.print(f"[red]Sync error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("bisync")
+def bisync_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to bisync"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
+    resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
+) -> None:
+    """Two-way sync: local ↔ cloud (bidirectional sync).
+
+    Examples:
+      bm project bisync --name research --resync  # First time
+      bm project bisync --name research           # Subsequent syncs
+      bm project bisync --name research --dry-run # Preview changes
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: bisync only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Get local_sync_path from cloud_projects config
+        local_sync_path = None
+        if name in config.cloud_projects:
+            local_sync_path = config.cloud_projects[name].local_path
+
+        if not local_sync_path:
+            console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
+            console.print(f"\nConfigure sync with: bm project sync-setup {name} ~/path/to/local")
+            raise typer.Exit(1)
+
+        # Create SyncProject
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=normalize_project_path(project_data.path),
+            local_sync_path=local_sync_path,
+        )
+
+        # Run bisync
+        console.print(f"[blue]Bisync {name} (local ↔ cloud)...[/blue]")
+        success = project_bisync(
+            sync_project, bucket_name, dry_run=dry_run, resync=resync, verbose=verbose
+        )
+
+        if success:
+            console.print(f"[green]✓ {name} bisync completed successfully[/green]")
+
+            # Update config
+            config.cloud_projects[name].last_sync = datetime.now()
+            config.cloud_projects[name].bisync_initialized = True
+            ConfigManager().save_config(config)
+
+            # Trigger database sync if not a dry run
+            if not dry_run:
+
+                async def _trigger_db_sync():
+                    async with get_client() as client:
+                        permalink = generate_permalink(name)
+                        response = await call_post(client, f"/{permalink}/project/sync", json={})
+                        return response.json()
+
+                try:
+                    result = asyncio.run(_trigger_db_sync())
+                    console.print(f"[dim]Database sync initiated: {result.get('message')}[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
+        else:
+            console.print(f"[red]✗ {name} bisync failed[/red]")
+            raise typer.Exit(1)
+
+    except RcloneError as e:
+        console.print(f"[red]Bisync error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("check")
+def check_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to check"),
+    one_way: bool = typer.Option(False, "--one-way", help="Check one direction only (faster)"),
+) -> None:
+    """Verify file integrity between local and cloud.
+
+    Example:
+      bm project check --name research
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: check only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Get local_sync_path from cloud_projects config
+        local_sync_path = None
+        if name in config.cloud_projects:
+            local_sync_path = config.cloud_projects[name].local_path
+
+        if not local_sync_path:
+            console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
+            console.print(f"\nConfigure sync with: bm project sync-setup {name} ~/path/to/local")
+            raise typer.Exit(1)
+
+        # Create SyncProject
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=normalize_project_path(project_data.path),
+            local_sync_path=local_sync_path,
+        )
+
+        # Run check
+        console.print(f"[blue]Checking {name} integrity...[/blue]")
+        match = project_check(sync_project, bucket_name, one_way=one_way)
+
+        if match:
+            console.print(f"[green]✓ {name} files match[/green]")
+        else:
+            console.print(f"[yellow]⚠ {name} has differences[/yellow]")
+
+    except RcloneError as e:
+        console.print(f"[red]Check error: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("bisync-reset")
+def bisync_reset(
+    name: str = typer.Argument(..., help="Project name to reset bisync state for"),
+) -> None:
+    """Clear bisync state for a project.
+
+    This removes the bisync metadata files, forcing a fresh --resync on next bisync.
+    Useful when bisync gets into an inconsistent state or when remote path changes.
+    """
+    from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
+    import shutil
+
+    try:
+        state_path = get_project_bisync_state(name)
+
+        if not state_path.exists():
+            console.print(f"[yellow]No bisync state found for project '{name}'[/yellow]")
+            return
+
+        # Remove the entire state directory
+        shutil.rmtree(state_path)
+        console.print(f"[green]✓ Cleared bisync state for project '{name}'[/green]")
+        console.print("\nNext steps:")
+        console.print(f"  1. Preview: bm project bisync --name {name} --resync --dry-run")
+        console.print(f"  2. Sync: bm project bisync --name {name} --resync")
+
+    except Exception as e:
+        console.print(f"[red]Error clearing bisync state: {str(e)}[/red]")
+        raise typer.Exit(1)
+
+
+@project_app.command("ls")
+def ls_project_command(
+    name: str = typer.Option(..., "--name", help="Project name to list files from"),
+    path: str = typer.Argument(None, help="Path within project (optional)"),
+) -> None:
+    """List files in remote project.
+
+    Examples:
+      bm project ls --name research
+      bm project ls --name research subfolder
+    """
+    config = ConfigManager().config
+    if not config.cloud_mode_enabled:
+        console.print("[red]Error: ls only available in cloud mode[/red]")
+        raise typer.Exit(1)
+
+    try:
+        # Get tenant info for bucket name
+        tenant_info = asyncio.run(get_mount_info())
+        bucket_name = tenant_info.bucket_name
+
+        # Get project info
+        async def _get_project():
+            async with get_client() as client:
+                response = await call_get(client, "/projects/projects")
+                projects_list = ProjectList.model_validate(response.json())
+                for proj in projects_list.projects:
+                    if generate_permalink(proj.name) == generate_permalink(name):
+                        return proj
+                return None
+
+        project_data = asyncio.run(_get_project())
+        if not project_data:
+            console.print(f"[red]Error: Project '{name}' not found[/red]")
+            raise typer.Exit(1)
+
+        # Create SyncProject (local_sync_path not needed for ls)
+        sync_project = SyncProject(
+            name=project_data.name,
+            path=normalize_project_path(project_data.path),
+        )
+
+        # List files
+        files = project_ls(sync_project, bucket_name, path=path)
+
+        if files:
+            console.print(f"\n[bold]Files in {name}" + (f"/{path}" if path else "") + ":[/bold]")
+            for file in files:
+                console.print(f"  {file}")
+            console.print(f"\n[dim]Total: {len(files)} files[/dim]")
+        else:
+            console.print(
+                f"[yellow]No files found in {name}" + (f"/{path}" if path else "") + "[/yellow]"
+            )
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 

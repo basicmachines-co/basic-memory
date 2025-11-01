@@ -37,8 +37,8 @@ def reset(
         logger.info("Database reset complete")
 
         if reindex:
-            # Import and run sync
-            from basic_memory.cli.commands.sync import sync
+            # Run database sync directly
+            from basic_memory.cli.commands.command_utils import run_sync
 
             logger.info("Rebuilding search index from filesystem...")
-            sync(watch=False)  # pyright: ignore
+            asyncio.run(run_sync(project=None))

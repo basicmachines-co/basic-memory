@@ -69,16 +69,17 @@ async def create_cloud_project(project_name: str) -> CloudProjectCreateResponse:
         raise CloudUtilsError(f"Failed to create cloud project '{project_name}': {e}") from e
 
 
-async def sync_project(project_name: str) -> None:
+async def sync_project(project_name: str, force_full: bool = False) -> None:
     """Trigger sync for a specific project on cloud.
 
     Args:
         project_name: Name of project to sync
+        force_full: If True, force a full scan bypassing watermark optimization
     """
     try:
         from basic_memory.cli.commands.command_utils import run_sync
 
-        await run_sync(project=project_name)
+        await run_sync(project=project_name, force_full=force_full)
     except Exception as e:
         raise CloudUtilsError(f"Failed to sync project '{project_name}': {e}") from e
 

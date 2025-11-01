@@ -467,6 +467,40 @@ async def test_sync_project_endpoint(test_graph, client, project_url):
 
 
 @pytest.mark.asyncio
+async def test_sync_project_endpoint_with_force_full(test_graph, client, project_url):
+    """Test the project sync endpoint with force_full parameter."""
+    # Call the sync endpoint with force_full=true
+    response = await client.post(f"{project_url}/project/sync?force_full=true")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_with_force_full_false(test_graph, client, project_url):
+    """Test the project sync endpoint with force_full=false."""
+    # Call the sync endpoint with force_full=false
+    response = await client.post(f"{project_url}/project/sync?force_full=false")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
 async def test_sync_project_endpoint_not_found(client):
     """Test the project sync endpoint with nonexistent project."""
     # Call the sync endpoint for a project that doesn't exist

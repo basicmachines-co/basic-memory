@@ -3,11 +3,12 @@
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, List, Tuple
 
 from loguru import logger
-from pydantic import Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import basic_memory
@@ -37,6 +38,22 @@ class ProjectConfig:
     @property
     def project_url(self) -> str:  # pragma: no cover
         return f"/{generate_permalink(self.name)}"
+
+
+class CloudProjectConfig(BaseModel):
+    """Sync configuration for a cloud project.
+
+    This tracks the local working directory and sync state for a project
+    that is synced with Basic Memory Cloud.
+    """
+
+    local_path: str = Field(description="Local working directory path for this cloud project")
+    last_sync: Optional[datetime] = Field(
+        default=None, description="Timestamp of last successful sync operation"
+    )
+    bisync_initialized: bool = Field(
+        default=False, description="Whether rclone bisync baseline has been established"
+    )
 
 
 class BasicMemoryConfig(BaseSettings):
@@ -138,6 +155,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Enable cloud mode - all requests go to cloud instead of local (config file value)",
     )
 
+    cloud_projects: Dict[str, CloudProjectConfig] = Field(
+        default_factory=dict,
+        description="Cloud project sync configuration mapping project names to their local paths and sync state",
+    )
+
     @property
     def cloud_mode_enabled(self) -> bool:
         """Check if cloud mode is enabled.
@@ -153,14 +175,6 @@ class BasicMemoryConfig(BaseSettings):
             return False
         # Fall back to config file value
         return self.cloud_mode
-
-    bisync_config: Dict[str, Any] = Field(
-        default_factory=lambda: {
-            "profile": "balanced",
-            "sync_dir": str(Path.home() / "basic-memory-cloud-sync"),
-        },
-        description="Bisync configuration for cloud sync",
-    )
 
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
@@ -427,7 +441,9 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
 def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None:
     """Save configuration to file."""
     try:
-        file_path.write_text(json.dumps(config.model_dump(), indent=2))
+        # Use model_dump with mode='json' to serialize datetime objects properly
+        config_dict = config.model_dump(mode="json")
+        file_path.write_text(json.dumps(config_dict, indent=2))
     except Exception as e:  # pragma: no cover
         logger.error(f"Failed to save config: {e}")
 

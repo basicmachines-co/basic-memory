@@ -2,7 +2,7 @@
 
 # Install dependencies
 install:
-    pip install -e ".[dev]"
+    uv pip install -e ".[dev]"
     uv sync
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
