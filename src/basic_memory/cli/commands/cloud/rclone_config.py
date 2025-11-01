@@ -100,7 +100,9 @@ def configure_rclone_remote(
     config.set(REMOTE_NAME, "secret_access_key", secret_key)
     config.set(REMOTE_NAME, "endpoint", endpoint)
     config.set(REMOTE_NAME, "region", region)
-
+    # Prevent unnecessary encoding of filenames (only encode slashes and invalid UTF-8)
+    # This prevents files with spaces like "Hello World.md" from being quoted
+    config.set(REMOTE_NAME, "encoding", "Slash,InvalidUtf8")
     # Save updated config
     save_rclone_config(config)
 
