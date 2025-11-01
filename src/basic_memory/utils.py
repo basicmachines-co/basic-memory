@@ -20,11 +20,13 @@ def normalize_project_path(path: str) -> str:
     prefix from project paths to avoid leaking implementation details and to
     ensure paths match the actual S3 bucket structure.
 
+    For local paths (including Windows paths), returns the path unchanged.
+
     Args:
-        path: Project path (e.g., "/app/data/basic-memory-llc")
+        path: Project path (e.g., "/app/data/basic-memory-llc" or "C:\\Users\\...")
 
     Returns:
-        Normalized path (e.g., "/basic-memory-llc")
+        Normalized path (e.g., "/basic-memory-llc" or "C:\\Users\\...")
 
     Examples:
         >>> normalize_project_path("/app/data/my-project")
@@ -33,13 +35,21 @@ def normalize_project_path(path: str) -> str:
         '/my-project'
         >>> normalize_project_path("app/data/my-project")
         '/my-project'
+        >>> normalize_project_path("C:\\\\Users\\\\project")
+        'C:\\\\Users\\\\project'
     """
-    # Handle both absolute and relative paths
+    # Check if this is a Windows absolute path (e.g., C:\Users\...)
+    # Windows paths have a drive letter followed by a colon
+    if len(path) >= 2 and path[1] == ":":
+        # Windows absolute path - return unchanged
+        return path
+
+    # Handle both absolute and relative Unix paths
     normalized = path.lstrip("/")
     if normalized.startswith("app/data/"):
         normalized = normalized.removeprefix("app/data/")
 
-    # Ensure leading slash for absolute paths
+    # Ensure leading slash for Unix absolute paths
     if not normalized.startswith("/"):
         normalized = "/" + normalized
 
