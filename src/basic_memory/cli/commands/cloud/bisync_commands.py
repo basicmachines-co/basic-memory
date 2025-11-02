@@ -1,6 +1,7 @@
 """Cloud bisync commands for Basic Memory CLI."""
 
 import asyncio
+import platform
 import subprocess
 import time
 from datetime import datetime
@@ -167,16 +168,40 @@ def validate_bisync_directory(bisync_dir: Path) -> None:
             f"  2. Specify different directory: --dir ~/my-sync-folder"
         )
 
-    # Check if mount is active at this location
-    result = subprocess.run(["mount"], capture_output=True, text=True)
-    if str(bisync_dir) in result.stdout and "rclone" in result.stdout:
-        raise BisyncError(
-            f"{bisync_dir} is currently mounted via 'bm cloud mount'\n"
-            f"Cannot use mounted directory for bisync.\n\n"
-            f"Either:\n"
-            f"  1. Unmount first: bm cloud unmount\n"
-            f"  2. Use different directory for bisync"
-        )
+    system = platform.system()
+    if system.lower() != "windows":
+        # Unix: check with mount command
+        result = subprocess.run(["mount"], capture_output=True, text=True)
+        if str(bisync_dir) in result.stdout and "rclone" in result.stdout:
+            raise BisyncError(
+                f"{bisync_dir} is currently mounted via 'bm cloud mount'\n"
+                f"Cannot use mounted directory for bisync.\n\n"
+                f"Either:\n"
+                f"  1. Unmount first: bm cloud unmount\n"
+                f"  2. Use different directory for bisync"
+            )
+    else:
+        # Windows: check for rclone mount process using this directory
+        try:
+            # Use 'wmic' to get running processes and their command lines
+            result = subprocess.run(
+                ["wmic", "process", "where", "name='rclone.exe'", "get", "CommandLine"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "mount" in line.lower() and str(bisync_dir) in line:
+                        raise BisyncError(
+                            f"{bisync_dir} appears to be mounted via 'bm cloud mount' (rclone process detected)\n"
+                            f"Cannot use mounted directory for bisync.\n\n"
+                            f"Either:\n"
+                            f"  1. Unmount first: bm cloud unmount\n"
+                            f"  2. Use different directory for bisync"
+                        )
+        except Exception:
+            # If wmic is not available, skip the check (or optionally warn)
+            pass
 
 
 def convert_bmignore_to_rclone_filters() -> Path:

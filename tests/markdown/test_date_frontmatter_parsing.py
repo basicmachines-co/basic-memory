@@ -6,7 +6,6 @@ but later code expects strings and calls .strip() on them, causing AttributeErro
 """
 
 import pytest
-from pathlib import Path
 from basic_memory.markdown.entity_parser import EntityParser
 
 
@@ -225,11 +224,13 @@ This file has datetime values in frontmatter that PyYAML will parse as datetime 
     created_at = entity_markdown.frontmatter.metadata.get("created_at")
     assert isinstance(created_at, str), "Datetime should be converted to string"
     # PyYAML parses "2025-10-24 14:30:00" as datetime, which we normalize to ISO
-    assert "2025-10-24" in created_at and "14:30:00" in created_at, \
+    assert "2025-10-24" in created_at and "14:30:00" in created_at, (
         f"Datetime with time should be normalized to ISO format, got: {created_at}"
+    )
 
     updated_at = entity_markdown.frontmatter.metadata.get("updated_at")
     assert isinstance(updated_at, str), "Datetime should be converted to string"
     # PyYAML parses "2025-10-24T00:00:00" as datetime, which we normalize to ISO
-    assert "2025-10-24" in updated_at and "00:00:00" in updated_at, \
+    assert "2025-10-24" in updated_at and "00:00:00" in updated_at, (
         f"Datetime at midnight should be normalized to ISO format, got: {updated_at}"
+    )
