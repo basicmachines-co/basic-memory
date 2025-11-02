@@ -108,7 +108,7 @@ async def upload_path(
         if dry_run:
             print(f"\nTotal: {len(files_to_upload)} file(s) ({size_str})")
         else:
-            print(f"✓ Upload complete: {len(files_to_upload)} file(s) ({size_str})")
+            print(f"Upload complete: {len(files_to_upload)} file(s) ({size_str})")
 
         return True
 

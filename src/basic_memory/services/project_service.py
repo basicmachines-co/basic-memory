@@ -234,16 +234,26 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for remove_project")
 
-        # Get project path before removing from config
+        # Get project from database first
         project = await self.get_project(name)
-        project_path = project.path if project else None
+        if not project:
+            raise ValueError(f"Project '{name}' not found")
 
-        # First remove from config (this will validate the project exists and is not default)
-        self.config_manager.remove_project(name)
+        project_path = project.path
 
-        # Then remove from database using robust lookup
-        if project:
-            await self.repository.delete(project.id)
+        # Check if project is default (in cloud mode, check database; in local mode, check config)
+        if project.is_default or name == self.config_manager.config.default_project:
+            raise ValueError(f"Cannot remove the default project '{name}'")
+
+        # Remove from config if it exists there (may not exist in cloud mode)
+        try:
+            self.config_manager.remove_project(name)
+        except ValueError:
+            # Project not in config - that's OK in cloud mode, continue with database deletion
+            logger.debug(f"Project '{name}' not found in config, removing from database only")
+
+        # Remove from database
+        await self.repository.delete(project.id)
 
         logger.info(f"Project '{name}' removed from configuration and database")
 

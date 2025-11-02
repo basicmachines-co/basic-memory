@@ -1,11 +1,14 @@
-"""rclone configuration management for Basic Memory Cloud."""
+"""rclone configuration management for Basic Memory Cloud.
+
+This module provides simplified rclone configuration for SPEC-20.
+Uses a single "basic-memory-cloud" remote for all operations.
+"""
 
 import configparser
 import os
 import shutil
-import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 from rich.console import Console
 
@@ -16,64 +19,6 @@ class RcloneConfigError(Exception):
     """Exception raised for rclone configuration errors."""
 
     pass
-
-
-class RcloneMountProfile:
-    """Mount profile with optimized settings."""
-
-    def __init__(
-        self,
-        name: str,
-        cache_time: str,
-        poll_interval: str,
-        attr_timeout: str,
-        write_back: str,
-        description: str,
-        extra_args: Optional[List[str]] = None,
-    ):
-        self.name = name
-        self.cache_time = cache_time
-        self.poll_interval = poll_interval
-        self.attr_timeout = attr_timeout
-        self.write_back = write_back
-        self.description = description
-        self.extra_args = extra_args or []
-
-
-# Mount profiles based on SPEC-7 Phase 4 testing
-MOUNT_PROFILES = {
-    "fast": RcloneMountProfile(
-        name="fast",
-        cache_time="5s",
-        poll_interval="3s",
-        attr_timeout="3s",
-        write_back="1s",
-        description="Ultra-fast development (5s sync, higher bandwidth)",
-    ),
-    "balanced": RcloneMountProfile(
-        name="balanced",
-        cache_time="10s",
-        poll_interval="5s",
-        attr_timeout="5s",
-        write_back="2s",
-        description="Fast development (10-15s sync, recommended)",
-    ),
-    "safe": RcloneMountProfile(
-        name="safe",
-        cache_time="15s",
-        poll_interval="10s",
-        attr_timeout="10s",
-        write_back="5s",
-        description="Conflict-aware mount with backup",
-        extra_args=[
-            "--conflict-suffix",
-            ".conflict-{DateTimeExt}",
-            "--backup-dir",
-            "~/.basic-memory/conflicts",
-            "--track-renames",
-        ],
-    ),
-}
 
 
 def get_rclone_config_path() -> Path:
@@ -116,173 +61,50 @@ def save_rclone_config(config: configparser.ConfigParser) -> None:
     console.print(f"[dim]Updated rclone config: {config_path}[/dim]")
 
 
-def add_tenant_to_rclone_config(
-    tenant_id: str,
-    bucket_name: str,
+def configure_rclone_remote(
     access_key: str,
     secret_key: str,
     endpoint: str = "https://fly.storage.tigris.dev",
     region: str = "auto",
 ) -> str:
-    """Add tenant configuration to rclone config file."""
+    """Configure single rclone remote named 'basic-memory-cloud'.
 
+    This is the simplified approach from SPEC-20 that uses one remote
+    for all Basic Memory cloud operations (not tenant-specific).
+
+    Args:
+        access_key: S3 access key ID
+        secret_key: S3 secret access key
+        endpoint: S3-compatible endpoint URL
+        region: S3 region (default: auto)
+
+    Returns:
+        The remote name: "basic-memory-cloud"
+    """
     # Backup existing config
     backup_rclone_config()
 
     # Load existing config
     config = load_rclone_config()
 
-    # Create section name
-    section_name = f"basic-memory-{tenant_id}"
+    # Single remote name (not tenant-specific)
+    REMOTE_NAME = "basic-memory-cloud"
 
-    # Add/update the tenant section
-    if not config.has_section(section_name):
-        config.add_section(section_name)
+    # Add/update the remote section
+    if not config.has_section(REMOTE_NAME):
+        config.add_section(REMOTE_NAME)
 
-    config.set(section_name, "type", "s3")
-    config.set(section_name, "provider", "Other")
-    config.set(section_name, "access_key_id", access_key)
-    config.set(section_name, "secret_access_key", secret_key)
-    config.set(section_name, "endpoint", endpoint)
-    config.set(section_name, "region", region)
-
+    config.set(REMOTE_NAME, "type", "s3")
+    config.set(REMOTE_NAME, "provider", "Other")
+    config.set(REMOTE_NAME, "access_key_id", access_key)
+    config.set(REMOTE_NAME, "secret_access_key", secret_key)
+    config.set(REMOTE_NAME, "endpoint", endpoint)
+    config.set(REMOTE_NAME, "region", region)
+    # Prevent unnecessary encoding of filenames (only encode slashes and invalid UTF-8)
+    # This prevents files with spaces like "Hello World.md" from being quoted
+    config.set(REMOTE_NAME, "encoding", "Slash,InvalidUtf8")
     # Save updated config
     save_rclone_config(config)
 
-    console.print(f"[green]✓ Added tenant {tenant_id} to rclone config[/green]")
-    return section_name
-
-
-def remove_tenant_from_rclone_config(tenant_id: str) -> bool:
-    """Remove tenant configuration from rclone config."""
-    config = load_rclone_config()
-    section_name = f"basic-memory-{tenant_id}"
-
-    if config.has_section(section_name):
-        backup_rclone_config()
-        config.remove_section(section_name)
-        save_rclone_config(config)
-        console.print(f"[green]✓ Removed tenant {tenant_id} from rclone config[/green]")
-        return True
-
-    return False
-
-
-def get_default_mount_path() -> Path:
-    """Get default mount path (fixed location per SPEC-9).
-
-    Returns:
-        Fixed mount path: ~/basic-memory-cloud/
-    """
-    return Path.home() / "basic-memory-cloud"
-
-
-def build_mount_command(
-    tenant_id: str, bucket_name: str, mount_path: Path, profile: RcloneMountProfile
-) -> List[str]:
-    """Build rclone mount command with optimized settings."""
-
-    rclone_remote = f"basic-memory-{tenant_id}:{bucket_name}"
-
-    cmd = [
-        "rclone",
-        "nfsmount",
-        rclone_remote,
-        str(mount_path),
-        "--vfs-cache-mode",
-        "writes",
-        "--dir-cache-time",
-        profile.cache_time,
-        "--vfs-cache-poll-interval",
-        profile.poll_interval,
-        "--attr-timeout",
-        profile.attr_timeout,
-        "--vfs-write-back",
-        profile.write_back,
-        "--daemon",
-    ]
-
-    # Add profile-specific extra arguments
-    cmd.extend(profile.extra_args)
-
-    return cmd
-
-
-def is_path_mounted(mount_path: Path) -> bool:
-    """Check if a path is currently mounted."""
-    if not mount_path.exists():
-        return False
-
-    try:
-        # Check if mount point is actually mounted by looking for mount table entry
-        result = subprocess.run(["mount"], capture_output=True, text=True, check=False)
-
-        if result.returncode == 0:
-            # Look for our mount path in mount output
-            mount_str = str(mount_path.resolve())
-            return mount_str in result.stdout
-
-        return False
-    except Exception:
-        return False
-
-
-def get_rclone_processes() -> List[Dict[str, str]]:
-    """Get list of running rclone processes."""
-    try:
-        # Use ps to find rclone processes
-        result = subprocess.run(
-            ["ps", "-eo", "pid,args"], capture_output=True, text=True, check=False
-        )
-
-        processes = []
-        if result.returncode == 0:
-            for line in result.stdout.split("\n"):
-                if "rclone" in line and "basic-memory" in line:
-                    parts = line.strip().split(None, 1)
-                    if len(parts) >= 2:
-                        processes.append({"pid": parts[0], "command": parts[1]})
-
-        return processes
-    except Exception:
-        return []
-
-
-def kill_rclone_process(pid: str) -> bool:
-    """Kill a specific rclone process."""
-    try:
-        subprocess.run(["kill", pid], check=True)
-        console.print(f"[green]✓ Killed rclone process {pid}[/green]")
-        return True
-    except subprocess.CalledProcessError:
-        console.print(f"[red]✗ Failed to kill rclone process {pid}[/red]")
-        return False
-
-
-def unmount_path(mount_path: Path) -> bool:
-    """Unmount a mounted path."""
-    if not is_path_mounted(mount_path):
-        return True
-
-    try:
-        subprocess.run(["umount", str(mount_path)], check=True)
-        console.print(f"[green]✓ Unmounted {mount_path}[/green]")
-        return True
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]✗ Failed to unmount {mount_path}: {e}[/red]")
-        return False
-
-
-def cleanup_orphaned_rclone_processes() -> int:
-    """Clean up orphaned rclone processes for basic-memory."""
-    processes = get_rclone_processes()
-    killed_count = 0
-
-    for proc in processes:
-        console.print(
-            f"[yellow]Found rclone process: {proc['pid']} - {proc['command'][:80]}...[/yellow]"
-        )
-        if kill_rclone_process(proc["pid"]):
-            killed_count += 1
-
-    return killed_count
+    console.print(f"[green]Configured rclone remote: {REMOTE_NAME}[/green]")
+    return REMOTE_NAME

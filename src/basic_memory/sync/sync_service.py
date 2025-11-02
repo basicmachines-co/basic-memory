@@ -256,16 +256,24 @@ class SyncService:
             del self._file_failures[path]
 
     @logfire.instrument()
-    async def sync(self, directory: Path, project_name: Optional[str] = None) -> SyncReport:
-        """Sync all files with database and update scan watermark."""
+    async def sync(
+        self, directory: Path, project_name: Optional[str] = None, force_full: bool = False
+    ) -> SyncReport:
+        """Sync all files with database and update scan watermark.
+
+        Args:
+            directory: Directory to sync
+            project_name: Optional project name
+            force_full: If True, force a full scan bypassing watermark optimization
+        """
 
         start_time = time.time()
         sync_start_timestamp = time.time()  # Capture at start for watermark
-        logger.info(f"Sync operation started for directory: {directory}")
+        logger.info(f"Sync operation started for directory: {directory} (force_full={force_full})")
 
         # initial paths from db to sync
         # path -> checksum
-        report = await self.scan(directory)
+        report = await self.scan(directory, force_full=force_full)
 
         # order of sync matters to resolve relations effectively
         logger.info(
@@ -383,7 +391,7 @@ class SyncService:
         return report
 
     @logfire.instrument()
-    async def scan(self, directory):
+    async def scan(self, directory, force_full: bool = False):
         """Smart scan using watermark and file count for large project optimization.
 
         Uses scan watermark tracking to dramatically reduce scan time for large projects:
@@ -401,6 +409,10 @@ class SyncService:
         - Compare with last_file_count to detect deletions
         - If no deletions: incremental scan with find -newermt (0.2s)
         - Process changed files with mtime-based comparison
+
+        Args:
+            directory: Directory to scan
+            force_full: If True, bypass watermark optimization and force full scan
         """
         scan_start_time = time.time()
 
@@ -420,7 +432,13 @@ class SyncService:
         logger.debug(f"Found {current_count} files in directory")
 
         # Step 2: Determine scan strategy based on watermark and file count
-        if project.last_file_count is None:
+        if force_full:
+            # User explicitly requested full scan → bypass watermark optimization
+            scan_type = "full_forced"
+            logger.info("Force full scan requested, bypassing watermark optimization")
+            file_paths_to_scan = await self._scan_directory_full(directory)
+
+        elif project.last_file_count is None:
             # First sync ever → full scan
             scan_type = "full_initial"
             logger.info("First sync for this project, performing full scan")
@@ -550,7 +568,7 @@ class SyncService:
 
         # Step 5: Detect deletions (only for full scans)
         # Incremental scans can't reliably detect deletions since they only see modified files
-        if scan_type in ("full_initial", "full_deletions", "full_fallback"):
+        if scan_type in ("full_initial", "full_deletions", "full_fallback", "full_forced"):
             # Use optimized query for just file paths (not full entities)
             db_file_paths = await self.entity_repository.get_all_file_paths()
             logger.debug(f"Found {len(db_file_paths)} db paths for deletion detection")

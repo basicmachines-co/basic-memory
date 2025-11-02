@@ -16,17 +16,25 @@ from basic_memory.schemas import ProjectInfoResponse
 console = Console()
 
 
-async def run_sync(project: Optional[str] = None):
-    """Run sync operation via API endpoint."""
+async def run_sync(project: Optional[str] = None, force_full: bool = False):
+    """Run sync operation via API endpoint.
+
+    Args:
+        project: Optional project name
+        force_full: If True, force a full scan bypassing watermark optimization
+    """
 
     try:
         async with get_client() as client:
             project_item = await get_active_project(client, project, None)
-            response = await call_post(client, f"{project_item.project_url}/project/sync")
+            url = f"{project_item.project_url}/project/sync"
+            if force_full:
+                url += "?force_full=true"
+            response = await call_post(client, url)
             data = response.json()
-            console.print(f"[green]✓ {data['message']}[/green]")
+            console.print(f"[green]{data['message']}[/green]")
     except (ToolError, ValueError) as e:
-        console.print(f"[red]✗ Sync failed: {e}[/red]")
+        console.print(f"[red]Sync failed: {e}[/red]")
         raise typer.Exit(1)
 
 
@@ -39,5 +47,5 @@ async def get_project_info(project: str):
             response = await call_get(client, f"{project_item.project_url}/project/info")
             return ProjectInfoResponse.model_validate(response.json())
     except (ToolError, ValueError) as e:
-        console.print(f"[red]✗ Sync failed: {e}[/red]")
+        console.print(f"[red]Sync failed: {e}[/red]")
         raise typer.Exit(1)

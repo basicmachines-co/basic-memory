@@ -115,7 +115,7 @@ def display_changes(
             del_branch = tree.add("[red]Deleted[/red]")
             add_files_to_tree(del_branch, changes.deleted, "red")
         if changes.skipped_files:
-            skip_branch = tree.add("[red]⚠️  Skipped (Circuit Breaker)[/red]")
+            skip_branch = tree.add("[red]! Skipped (Circuit Breaker)[/red]")
             for skipped in sorted(changes.skipped_files, key=lambda x: x.path):
                 skip_branch.add(
                     f"[red]{skipped.path}[/red] "
@@ -133,7 +133,7 @@ def display_changes(
         if changes.skipped_files:
             skip_count = len(changes.skipped_files)
             tree.add(
-                f"[red]⚠️  {skip_count} file{'s' if skip_count != 1 else ''} "
+                f"[red]! {skip_count} file{'s' if skip_count != 1 else ''} "
                 f"skipped due to repeated failures[/red]"
             )
 
@@ -152,7 +152,7 @@ async def run_status(project: Optional[str] = None, verbose: bool = False):  # p
             display_changes(project_item.name, "Status", sync_report, verbose)
 
     except (ValueError, ToolError) as e:
-        console.print(f"[red]✗ Error: {e}[/red]")
+        console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 

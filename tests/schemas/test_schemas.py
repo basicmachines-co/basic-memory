@@ -348,7 +348,7 @@ class TestTimeframeParsing:
         result_1d = parse_timeframe("1d")
         expected_1d = now - timedelta(days=1)
         diff = abs((result_1d - expected_1d).total_seconds())
-        assert diff < 60  # Within 1 minute tolerance
+        assert diff < 3600  # Within 1 hour tolerance (accounts for DST transitions)
         assert result_1d.tzinfo is not None
 
         # Test yesterday - should be yesterday at same time
