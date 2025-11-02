@@ -512,7 +512,7 @@ def bisync_project_command(
     resync: bool = typer.Option(False, "--resync", help="Force new baseline"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """Two-way sync: local ↔ cloud (bidirectional sync).
+    """Two-way sync: local <-> cloud (bidirectional sync).
 
     Examples:
       bm project bisync --name research --resync  # First time
@@ -562,7 +562,7 @@ def bisync_project_command(
         )
 
         # Run bisync
-        console.print(f"[blue]Bisync {name} (local ↔ cloud)...[/blue]")
+        console.print(f"[blue]Bisync {name} (local <-> cloud)...[/blue]")
         success = project_bisync(
             sync_project, bucket_name, dry_run=dry_run, resync=resync, verbose=verbose
         )
