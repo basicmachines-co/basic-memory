@@ -59,7 +59,7 @@ def install_rclone_macos() -> None:
         try:
             console.print("[blue]Installing rclone via Homebrew...[/blue]")
             run_command(["brew", "install", "rclone"])
-            console.print("[green]✓ rclone installed via Homebrew[/green]")
+            console.print("[green]rclone installed via Homebrew[/green]")
             return
         except RcloneInstallError:
             console.print(
@@ -70,7 +70,7 @@ def install_rclone_macos() -> None:
     console.print("[blue]Installing rclone via official script...[/blue]")
     try:
         run_command(["sh", "-c", "curl https://rclone.org/install.sh | sudo bash"])
-        console.print("[green]✓ rclone installed via official script[/green]")
+        console.print("[green]rclone installed via official script[/green]")
     except RcloneInstallError:
         raise RcloneInstallError(
             "Failed to install rclone. Please install manually: brew install rclone"
@@ -84,7 +84,7 @@ def install_rclone_linux() -> None:
         try:
             console.print("[blue]Installing rclone via snap...[/blue]")
             run_command(["sudo", "snap", "install", "rclone"])
-            console.print("[green]✓ rclone installed via snap[/green]")
+            console.print("[green]rclone installed via snap[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]Snap installation failed, trying apt...[/yellow]")
@@ -95,7 +95,7 @@ def install_rclone_linux() -> None:
             console.print("[blue]Installing rclone via apt...[/blue]")
             run_command(["sudo", "apt", "update"])
             run_command(["sudo", "apt", "install", "-y", "rclone"])
-            console.print("[green]✓ rclone installed via apt[/green]")
+            console.print("[green]rclone installed via apt[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]apt installation failed, trying official script...[/yellow]")
@@ -104,7 +104,7 @@ def install_rclone_linux() -> None:
     console.print("[blue]Installing rclone via official script...[/blue]")
     try:
         run_command(["sh", "-c", "curl https://rclone.org/install.sh | sudo bash"])
-        console.print("[green]✓ rclone installed via official script[/green]")
+        console.print("[green]rclone installed via official script[/green]")
     except RcloneInstallError:
         raise RcloneInstallError(
             "Failed to install rclone. Please install manually: sudo snap install rclone"
@@ -136,7 +136,7 @@ def install_rclone_windows() -> None:
         try:
             console.print("[blue]Installing rclone via chocolatey...[/blue]")
             run_command(["choco", "install", "rclone", "-y"])
-            console.print("[green]✓ rclone installed via chocolatey[/green]")
+            console.print("[green]rclone installed via chocolatey[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]chocolatey installation failed, trying scoop...[/yellow]")
@@ -146,7 +146,7 @@ def install_rclone_windows() -> None:
         try:
             console.print("[blue]Installing rclone via scoop...[/blue]")
             run_command(["scoop", "install", "rclone"])
-            console.print("[green]✓ rclone installed via scoop[/green]")
+            console.print("[green]rclone installed via scoop[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]scoop installation failed[/yellow]")
@@ -182,7 +182,7 @@ def install_rclone(platform_override: Optional[str] = None) -> None:
         if not is_rclone_installed():
             raise RcloneInstallError("rclone installation completed but command not found in PATH")
 
-        console.print("[green]✓ rclone installation completed successfully[/green]")
+        console.print("[green]rclone installation completed successfully[/green]")
 
     except RcloneInstallError:
         raise

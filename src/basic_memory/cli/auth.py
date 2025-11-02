@@ -77,7 +77,7 @@ class CLIAuth:
         verification_uri = device_response["verification_uri"]
         verification_uri_complete = device_response.get("verification_uri_complete")
 
-        console.print("\n[bold blue]🔐 Authentication Required[/bold blue]")
+        console.print("\n[bold blue]Authentication Required[/bold blue]")
         console.print("\nTo authenticate, please visit:")
         console.print(f"[bold cyan]{verification_uri}[/bold cyan]")
         console.print(f"\nAnd enter this code: [bold yellow]{user_code}[/bold yellow]")
@@ -171,7 +171,7 @@ class CLIAuth:
         # Secure the token file
         os.chmod(self.token_file, 0o600)
 
-        console.print(f"[green]✓ Tokens saved to {self.token_file}[/green]")
+        console.print(f"[green]Tokens saved to {self.token_file}[/green]")
 
     def load_tokens(self) -> dict | None:
         """Load tokens from .bm-auth.json file."""
@@ -233,7 +233,7 @@ class CLIAuth:
             if new_tokens:
                 # Save new tokens (may include rotated refresh token)
                 self.save_tokens(new_tokens)
-                console.print("[green]✓ Token refreshed successfully[/green]")
+                console.print("[green]Token refreshed successfully[/green]")
                 return new_tokens["access_token"]
             else:
                 console.print("[yellow]Token refresh failed. Please run 'login' again.[/yellow]")
@@ -265,13 +265,13 @@ class CLIAuth:
         # Step 4: Save tokens
         self.save_tokens(tokens)
 
-        console.print("\n[green]✅ Successfully authenticated with Basic Memory Cloud![/green]")
+        console.print("\n[green]Successfully authenticated with Basic Memory Cloud![/green]")
         return True
 
     def logout(self) -> None:
         """Remove stored authentication tokens."""
         if self.token_file.exists():
             self.token_file.unlink()
-            console.print("[green]✓ Logged out successfully[/green]")
+            console.print("[green]Logged out successfully[/green]")
         else:
             console.print("[yellow]No stored authentication found[/yellow]")
