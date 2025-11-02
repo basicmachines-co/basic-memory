@@ -106,5 +106,5 @@ def configure_rclone_remote(
     # Save updated config
     save_rclone_config(config)
 
-    console.print(f"[green]✓ Configured rclone remote: {REMOTE_NAME}[/green]")
+    console.print(f"[green]Configured rclone remote: {REMOTE_NAME}[/green]")
     return REMOTE_NAME

@@ -52,11 +52,11 @@ def login():
             config.cloud_mode = True
             config_manager.save_config(config)
 
-            console.print("[green]✓ Cloud mode enabled[/green]")
+            console.print("[green]Cloud mode enabled[/green]")
             console.print(f"[dim]All CLI commands now work against {host_url}[/dim]")
 
         except SubscriptionRequiredError as e:
-            console.print("\n[red]✗ Subscription Required[/red]\n")
+            console.print("\n[red]Subscription Required[/red]\n")
             console.print(f"[yellow]{e.args[0]}[/yellow]\n")
             console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
             console.print(
@@ -77,7 +77,7 @@ def logout():
     config.cloud_mode = False
     config_manager.save_config(config)
 
-    console.print("[green]✓ Cloud mode disabled[/green]")
+    console.print("[green]Cloud mode disabled[/green]")
     console.print("[dim]All CLI commands now work locally[/dim]")
 
 
@@ -157,12 +157,12 @@ def setup() -> None:
         # Step 2: Get tenant info
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
         tenant_info = asyncio.run(get_mount_info())
-        console.print(f"[green]✓ Found tenant: {tenant_info.tenant_id}[/green]")
+        console.print(f"[green]Found tenant: {tenant_info.tenant_id}[/green]")
 
         # Step 3: Generate credentials
         console.print("\n[blue]Step 3: Generating sync credentials...[/blue]")
         creds = asyncio.run(generate_mount_credentials(tenant_info.tenant_id))
-        console.print("[green]✓ Generated secure credentials[/green]")
+        console.print("[green]Generated secure credentials[/green]")
 
         # Step 4: Configure rclone remote
         console.print("\n[blue]Step 4: Configuring rclone remote...[/blue]")
@@ -171,7 +171,7 @@ def setup() -> None:
             secret_key=creds.secret_key,
         )
 
-        console.print("\n[bold green]✓ Cloud setup completed successfully![/bold green]")
+        console.print("\n[bold green]Cloud setup completed successfully![/bold green]")
         console.print("\n[bold]Next steps:[/bold]")
         console.print("1. Add a project with local sync path:")
         console.print("   bm project add research --local-path ~/Documents/research")

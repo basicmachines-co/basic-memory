@@ -32,9 +32,9 @@ async def run_sync(project: Optional[str] = None, force_full: bool = False):
                 url += "?force_full=true"
             response = await call_post(client, url)
             data = response.json()
-            console.print(f"[green]✓ {data['message']}[/green]")
+            console.print(f"[green]{data['message']}[/green]")
     except (ToolError, ValueError) as e:
-        console.print(f"[red]✗ Sync failed: {e}[/red]")
+        console.print(f"[red]Sync failed: {e}[/red]")
         raise typer.Exit(1)
 
 
@@ -47,5 +47,5 @@ async def get_project_info(project: str):
             response = await call_get(client, f"{project_item.project_url}/project/info")
             return ProjectInfoResponse.model_validate(response.json())
     except (ToolError, ValueError) as e:
-        console.print(f"[red]✗ Sync failed: {e}[/red]")
+        console.print(f"[red]Sync failed: {e}[/red]")
         raise typer.Exit(1)

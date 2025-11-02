@@ -78,7 +78,7 @@ def list_projects() -> None:
             table.add_column("Default", style="magenta")
 
         for project in result.projects:
-            is_default = "✓" if project.is_default else ""
+            is_default = "[X]" if project.is_default else ""
             normalized_path = normalize_project_path(project.path)
 
             # Build row based on mode
@@ -179,7 +179,7 @@ def add_project(
             )
             ConfigManager().save_config(config)
 
-            console.print(f"\n[green]✓ Local sync path configured: {local_sync_path}[/green]")
+            console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
             console.print("\nNext steps:")
             console.print(f"  1. Preview: bm project bisync --name {name} --resync --dry-run")
             console.print(f"  2. Sync: bm project bisync --name {name} --resync")
@@ -233,7 +233,7 @@ def setup_project_sync(
         )
         config_manager.save_config(config)
 
-        console.print(f"[green]✓ Sync configured for project '{name}'[/green]")
+        console.print(f"[green]Sync configured for project '{name}'[/green]")
         console.print(f"\nLocal sync path: {resolved_path}")
         console.print("\nNext steps:")
         console.print(f"  1. Preview: bm project bisync --name {name} --resync --dry-run")
@@ -286,7 +286,7 @@ def remove_project(
                 import shutil
 
                 shutil.rmtree(local_dir)
-                console.print(f"[green]✓ Removed local sync directory: {local_path}[/green]")
+                console.print(f"[green]Removed local sync directory: {local_path}[/green]")
 
         # Clean up bisync state if it exists
         if has_bisync_state:
@@ -296,7 +296,7 @@ def remove_project(
             bisync_state_path = get_project_bisync_state(name)
             if bisync_state_path.exists():
                 shutil.rmtree(bisync_state_path)
-                console.print("[green]✓ Removed bisync state[/green]")
+                console.print("[green]Removed bisync state[/green]")
 
         # Clean up cloud_projects config entry
         if config.cloud_mode_enabled and name in config.cloud_projects:
@@ -407,7 +407,7 @@ def move_project(
                 "[yellow]You must manually move your project files from the old location to:[/yellow]\n"
                 f"[cyan]{resolved_path}[/cyan]\n\n"
                 "[dim]Basic Memory has only updated the configuration - your files remain in their original location.[/dim]",
-                title="⚠️  Manual File Movement Required",
+                title="Manual File Movement Required",
                 border_style="yellow",
                 expand=False,
             )
@@ -477,7 +477,7 @@ def sync_project_command(
         success = project_sync(sync_project, bucket_name, dry_run=dry_run, verbose=verbose)
 
         if success:
-            console.print(f"[green]✓ {name} synced successfully[/green]")
+            console.print(f"[green]{name} synced successfully[/green]")
 
             # Trigger database sync if not a dry run
             if not dry_run:
@@ -494,7 +494,7 @@ def sync_project_command(
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
         else:
-            console.print(f"[red]✗ {name} sync failed[/red]")
+            console.print(f"[red]{name} sync failed[/red]")
             raise typer.Exit(1)
 
     except RcloneError as e:
@@ -568,7 +568,7 @@ def bisync_project_command(
         )
 
         if success:
-            console.print(f"[green]✓ {name} bisync completed successfully[/green]")
+            console.print(f"[green]{name} bisync completed successfully[/green]")
 
             # Update config
             config.cloud_projects[name].last_sync = datetime.now()
@@ -590,7 +590,7 @@ def bisync_project_command(
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
         else:
-            console.print(f"[red]✗ {name} bisync failed[/red]")
+            console.print(f"[red]{name} bisync failed[/red]")
             raise typer.Exit(1)
 
     except RcloneError as e:
@@ -658,9 +658,9 @@ def check_project_command(
         match = project_check(sync_project, bucket_name, one_way=one_way)
 
         if match:
-            console.print(f"[green]✓ {name} files match[/green]")
+            console.print(f"[green]{name} files match[/green]")
         else:
-            console.print(f"[yellow]⚠ {name} has differences[/yellow]")
+            console.print(f"[yellow]!{name} has differences[/yellow]")
 
     except RcloneError as e:
         console.print(f"[red]Check error: {e}[/red]")
@@ -691,7 +691,7 @@ def bisync_reset(
 
         # Remove the entire state directory
         shutil.rmtree(state_path)
-        console.print(f"[green]✓ Cleared bisync state for project '{name}'[/green]")
+        console.print(f"[green]Cleared bisync state for project '{name}'[/green]")
         console.print("\nNext steps:")
         console.print(f"  1. Preview: bm project bisync --name {name} --resync --dry-run")
         console.print(f"  2. Sync: bm project bisync --name {name} --resync")
@@ -782,13 +782,13 @@ def display_project_info(
                     f"[bold]Project:[/bold] {info.project_name}\n"
                     f"[bold]Path:[/bold] {info.project_path}\n"
                     f"[bold]Default Project:[/bold] {info.default_project}\n",
-                    title="📊 Basic Memory Project Info",
+                    title="Basic Memory Project Info",
                     expand=False,
                 )
             )
 
             # Statistics section
-            stats_table = Table(title="📈 Statistics")
+            stats_table = Table(title="Statistics")
             stats_table.add_column("Metric", style="cyan")
             stats_table.add_column("Count", style="green")
 
@@ -804,7 +804,7 @@ def display_project_info(
 
             # Entity types
             if info.statistics.entity_types:
-                entity_types_table = Table(title="📑 Entity Types")
+                entity_types_table = Table(title="Entity Types")
                 entity_types_table.add_column("Type", style="blue")
                 entity_types_table.add_column("Count", style="green")
 
@@ -815,7 +815,7 @@ def display_project_info(
 
             # Most connected entities
             if info.statistics.most_connected_entities:  # pragma: no cover
-                connected_table = Table(title="🔗 Most Connected Entities")
+                connected_table = Table(title="Most Connected Entities")
                 connected_table.add_column("Title", style="blue")
                 connected_table.add_column("Permalink", style="cyan")
                 connected_table.add_column("Relations", style="green")
@@ -829,7 +829,7 @@ def display_project_info(
 
             # Recent activity
             if info.activity.recently_updated:  # pragma: no cover
-                recent_table = Table(title="🕒 Recent Activity")
+                recent_table = Table(title="Recent Activity")
                 recent_table.add_column("Title", style="blue")
                 recent_table.add_column("Type", style="cyan")
                 recent_table.add_column("Last Updated", style="green")
@@ -849,7 +849,7 @@ def display_project_info(
                 console.print(recent_table)
 
             # Available projects
-            projects_table = Table(title="📁 Available Projects")
+            projects_table = Table(title="Available Projects")
             projects_table.add_column("Name", style="blue")
             projects_table.add_column("Path", style="cyan")
             projects_table.add_column("Default", style="green")
@@ -857,7 +857,7 @@ def display_project_info(
             for name, proj_info in info.available_projects.items():
                 is_default = name == info.default_project
                 project_path = proj_info["path"]
-                projects_table.add_row(name, project_path, "✓" if is_default else "")
+                projects_table.add_row(name, project_path, "[X]" if is_default else "")
 
             console.print(projects_table)
 
