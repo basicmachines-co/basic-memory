@@ -179,12 +179,13 @@ async def test_force_full_bypasses_watermark_optimization(
     # Modify a file WITHOUT updating mtime (simulates external tool like rclone)
     # We set mtime to be BEFORE the watermark to ensure incremental scan won't detect it
     file_path = project_dir / "file1.md"
-    original_stat = file_path.stat()
+    file_path.stat()
     await create_test_file(file_path, "# File 1\nModified by external tool")
 
     # Set mtime to be before the watermark (use time from before first sync)
     # This simulates rclone bisync which may preserve original timestamps
     import os
+
     old_time = initial_timestamp - 10  # 10 seconds before watermark
     os.utime(file_path, (old_time, old_time))
 
