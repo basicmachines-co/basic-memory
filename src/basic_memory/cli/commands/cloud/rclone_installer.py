@@ -1,5 +1,6 @@
 """Cross-platform rclone installation utilities."""
 
+import os
 import platform
 import shutil
 import subprocess
@@ -116,7 +117,15 @@ def install_rclone_windows() -> None:
     if shutil.which("winget"):
         try:
             console.print("[blue]Installing rclone via winget...[/blue]")
-            run_command(["winget", "install", "Rclone.Rclone"])
+            run_command(
+                [
+                    "winget",
+                    "install",
+                    "Rclone.Rclone",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ]
+            )
             console.print("[green]✓ rclone installed via winget[/green]")
             return
         except RcloneInstallError:
@@ -165,6 +174,7 @@ def install_rclone(platform_override: Optional[str] = None) -> None:
             install_rclone_linux()
         elif platform_name == "windows":
             install_rclone_windows()
+            refresh_windows_path()
         else:
             raise RcloneInstallError(f"Unsupported platform: {platform_name}")
 
@@ -178,6 +188,47 @@ def install_rclone(platform_override: Optional[str] = None) -> None:
         raise
     except Exception as e:
         raise RcloneInstallError(f"Unexpected error during installation: {e}") from e
+
+
+def refresh_windows_path() -> None:
+    """Refresh the Windows PATH environment variable for the current session."""
+    if platform.system().lower() != "windows":
+        return
+
+    # Importing here after performing platform detection. Also note that we have to ignore pylance/pyright
+    # warnings about winreg attributes so that "errors" don't appear on non-Windows platforms.
+    import winreg
+
+    user_key_path = r"Environment"
+    system_key_path = r"System\CurrentControlSet\Control\Session Manager\Environment"
+    new_path = ""
+
+    # Read user PATH
+    try:
+        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, user_key_path, 0, winreg.KEY_READ)  # type: ignore[reportAttributeAccessIssue]
+        user_path, _ = winreg.QueryValueEx(reg_key, "PATH")  # type: ignore[reportAttributeAccessIssue]
+        winreg.CloseKey(reg_key)  # type: ignore[reportAttributeAccessIssue]
+    except Exception:
+        user_path = ""
+
+    # Read system PATH
+    try:
+        reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, system_key_path, 0, winreg.KEY_READ)  # type: ignore[reportAttributeAccessIssue]
+        system_path, _ = winreg.QueryValueEx(reg_key, "PATH")  # type: ignore[reportAttributeAccessIssue]
+        winreg.CloseKey(reg_key)  # type: ignore[reportAttributeAccessIssue]
+    except Exception:
+        system_path = ""
+
+    # Merge user and system PATHs (system first, then user)
+    if system_path and user_path:
+        new_path = system_path + ";" + user_path
+    elif system_path:
+        new_path = system_path
+    elif user_path:
+        new_path = user_path
+
+    if new_path:
+        os.environ["PATH"] = new_path
 
 
 def get_rclone_version() -> Optional[str]:
