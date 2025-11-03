@@ -11,7 +11,7 @@ from typing import Dict, Optional, Sequence
 from loguru import logger
 from sqlalchemy import text
 
-from basic_memory.models import Project
+from basic_memory.models import Project, ProjectManagementType
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.schemas import (
     ActivityMetrics,
@@ -203,11 +203,14 @@ class ProjectService:
         project_config = self.config_manager.add_project(name, resolved_path)
 
         # Then add to database
+        # Set managed_by to USER for API-created projects
+        # Config-managed projects are created during synchronization
         project_data = {
             "name": name,
             "path": resolved_path,
             "permalink": generate_permalink(project_config.name),
             "is_active": True,
+            "managed_by": ProjectManagementType.USER.value,
             # Don't set is_default=False to avoid UNIQUE constraint issues
             # Let it default to NULL, only set to True when explicitly making default
         }
@@ -386,19 +389,27 @@ class ProjectService:
                     "path": path,
                     "permalink": generate_permalink(name),
                     "is_active": True,
+                    "managed_by": ProjectManagementType.CONFIG.value,
                     # Don't set is_default here - let the enforcement logic handle it
                 }
                 await self.repository.create(project_data)
 
-        # Remove projects that exist in DB but not in config
-        # Config is the source of truth - if a project was deleted from config,
-        # it should be deleted from DB too (fixes issue #193)
+        # Remove CONFIG-managed projects that exist in DB but not in config
+        # Config is the source of truth for CONFIG-managed projects - if a CONFIG project
+        # was deleted from config, it should be deleted from DB too (fixes issue #193)
+        # NEVER delete USER-managed projects - they are intentionally not in config (fixes issue #413)
         for name, project in db_projects_by_permalink.items():
             if name not in config_projects:
-                logger.info(
-                    f"Removing project '{name}' from database (deleted from config, source of truth)"
-                )
-                await self.repository.delete(project.id)
+                # Only delete if it's a CONFIG-managed project
+                if project.managed_by == ProjectManagementType.CONFIG.value:
+                    logger.info(
+                        f"Removing CONFIG-managed project '{name}' from database (deleted from config)"
+                    )
+                    await self.repository.delete(project.id)
+                else:
+                    logger.debug(
+                        f"Keeping USER-managed project '{name}' in database (not in config, but user-created)"
+                    )
 
         # Ensure database default project state is consistent
         await self._ensure_single_default_project()

@@ -1201,13 +1201,14 @@ async def test_add_project_nested_validation_with_project_root(
 
 
 @pytest.mark.asyncio
-async def test_synchronize_projects_removes_db_only_projects(project_service: ProjectService):
-    """Test that synchronize_projects removes projects that exist in DB but not in config.
+async def test_synchronize_projects_removes_config_managed_db_only_projects(
+    project_service: ProjectService,
+):
+    """Test that synchronize_projects removes CONFIG-managed projects that exist in DB but not in config.
 
-    This is a regression test for issue #193 where deleted projects would be re-added
-    to config during synchronization, causing them to reappear after deletion.
-    Config is the source of truth - if a project is deleted from config, it should be
-    removed from the database during synchronization.
+    This is a regression test for issue #193 where deleted CONFIG-managed projects
+    would be re-added to config during synchronization, causing them to reappear after deletion.
+    Config is the source of truth for CONFIG-managed projects only.
     """
     test_project_name = f"test-db-only-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1218,28 +1219,30 @@ async def test_synchronize_projects_removes_db_only_projects(project_service: Pr
         os.makedirs(test_project_path, exist_ok=True)
 
         try:
-            # Add project to database only (not to config) - simulating orphaned DB entry
+            # Add CONFIG-managed project to database only (not to config) - simulating orphaned DB entry
             project_data = {
                 "name": test_project_name,
                 "path": test_project_path,
                 "permalink": test_project_name.lower().replace(" ", "-"),
                 "is_active": True,
+                "managed_by": "config",  # CONFIG-managed project
             }
             await project_service.repository.create(project_data)
 
             # Verify it exists in DB but not in config
             db_project = await project_service.repository.get_by_name(test_project_name)
             assert db_project is not None
+            assert db_project.managed_by == "config"
             assert test_project_name not in project_service.projects
 
-            # Call synchronize_projects - this should remove the orphaned DB entry
-            # because config is the source of truth
+            # Call synchronize_projects - this should remove the orphaned CONFIG-managed DB entry
+            # because config is the source of truth for CONFIG-managed projects
             await project_service.synchronize_projects()
 
             # Verify project was removed from database
             db_project_after = await project_service.repository.get_by_name(test_project_name)
             assert db_project_after is None, (
-                "Project should be removed from DB when not in config (config is source of truth)"
+                "CONFIG-managed project should be removed from DB when not in config"
             )
 
             # Verify it's still not in config
@@ -1247,6 +1250,60 @@ async def test_synchronize_projects_removes_db_only_projects(project_service: Pr
 
         finally:
             # Clean up if needed
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            if db_project:
+                await project_service.repository.delete(db_project.id)
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_keeps_user_managed_projects(project_service: ProjectService):
+    """Test that synchronize_projects NEVER deletes USER-managed projects.
+
+    This is a regression test for issue #413 where user-created projects were being
+    deleted during synchronization because they weren't in the config file.
+    USER-managed projects are intentionally not in config and should never be auto-deleted.
+    """
+    test_project_name = f"test-user-project-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        test_project_path = str(test_root / "test-user-project")
+
+        # Make sure the test directory exists
+        os.makedirs(test_project_path, exist_ok=True)
+
+        try:
+            # Add USER-managed project to database only (not to config) - simulating user-created project
+            project_data = {
+                "name": test_project_name,
+                "path": test_project_path,
+                "permalink": test_project_name.lower().replace(" ", "-"),
+                "is_active": True,
+                "managed_by": "user",  # USER-managed project
+            }
+            await project_service.repository.create(project_data)
+
+            # Verify it exists in DB but not in config
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            assert db_project is not None
+            assert db_project.managed_by == "user"
+            assert test_project_name not in project_service.projects
+
+            # Call synchronize_projects - this should KEEP the USER-managed project
+            # USER projects are not in config by design and should never be auto-deleted
+            await project_service.synchronize_projects()
+
+            # Verify project still exists in database (NOT deleted)
+            db_project_after = await project_service.repository.get_by_name(test_project_name)
+            assert db_project_after is not None, (
+                "USER-managed project should NEVER be removed from DB during synchronization"
+            )
+            assert db_project_after.managed_by == "user"
+
+            # Verify it's still not in config (as expected for USER projects)
+            assert test_project_name not in project_service.projects
+
+        finally:
+            # Clean up
             db_project = await project_service.repository.get_by_name(test_project_name)
             if db_project:
                 await project_service.repository.delete(db_project.id)

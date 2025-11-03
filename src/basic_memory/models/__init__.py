@@ -3,7 +3,7 @@
 import basic_memory
 from basic_memory.models.base import Base
 from basic_memory.models.knowledge import Entity, Observation, Relation
-from basic_memory.models.project import Project
+from basic_memory.models.project import Project, ProjectManagementType
 
 __all__ = [
     "Base",
@@ -11,5 +11,6 @@ __all__ = [
     "Observation",
     "Relation",
     "Project",
+    "ProjectManagementType",
     "basic_memory",
 ]

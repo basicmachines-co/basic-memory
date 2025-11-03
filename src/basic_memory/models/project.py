@@ -1,6 +1,7 @@
 """Project model for Basic Memory."""
 
 from datetime import datetime, UTC
+from enum import Enum
 from typing import Optional
 
 from sqlalchemy import (
@@ -17,6 +18,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from basic_memory.models.base import Base
 from basic_memory.utils import generate_permalink
+
+
+class ProjectManagementType(str, Enum):
+    """Enum for project management types.
+
+    - CONFIG: Project is managed by config file (system/default projects)
+    - USER: Project is user-created via API/MCP (never auto-deleted)
+    """
+    CONFIG = "config"
+    USER = "user"
 
 
 class Project(Base):
@@ -51,6 +62,16 @@ class Project(Base):
     # Status flags
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_default: Mapped[Optional[bool]] = mapped_column(Boolean, default=None, nullable=True)
+
+    # Management type - distinguishes config-managed vs user-created projects
+    # CONFIG: synced from config file, can be auto-deleted if removed from config
+    # USER: user-created via API/MCP, never auto-deleted during reconciliation
+    # Defaults to CONFIG for backward compatibility with existing projects
+    managed_by: Mapped[str] = mapped_column(
+        String,
+        default=ProjectManagementType.CONFIG.value,
+        nullable=False
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
