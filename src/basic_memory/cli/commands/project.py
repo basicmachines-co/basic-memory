@@ -422,7 +422,7 @@ def sync_project_command(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes without syncing"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed output"),
 ) -> None:
-    """One-way sync: local → cloud (make cloud identical to local).
+    """One-way sync: local -> cloud (make cloud identical to local).
 
     Example:
       bm project sync --name research
@@ -471,7 +471,7 @@ def sync_project_command(
         )
 
         # Run sync
-        console.print(f"[blue]Syncing {name} (local → cloud)...[/blue]")
+        console.print(f"[blue]Syncing {name} (local -> cloud)...[/blue]")
         success = project_sync(sync_project, bucket_name, dry_run=dry_run, verbose=verbose)
 
         if success:
