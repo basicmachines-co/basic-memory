@@ -124,9 +124,10 @@ async def sync_project(
         sync_service: Sync service for this project
         project_config: Project configuration
         force_full: If True, force a full scan even if watermark exists
+        run_in_background: If True, run sync in background and return immediately
 
     Returns:
-        Response confirming sync was initiated
+        Response confirming sync was initiated (background) or SyncReportResponse (foreground)
     """
     if run_in_background:
         background_tasks.add_task(
@@ -141,13 +142,11 @@ async def sync_project(
             "message": f"Filesystem sync initiated for project '{project_config.name}'",
         }
     else:
-        print("running in foreground")
         report = await sync_service.sync(project_config.home, project_config.name, force_full=force_full)
-        print(report.__dict__)
         logger.info(
             f"Filesystem sync completed for project: {project_config.name} (force_full={force_full})"
         )
-        return report
+        return SyncReportResponse.from_sync_report(report)
 
 
 @project_router.post("/status", response_model=SyncReportResponse)
