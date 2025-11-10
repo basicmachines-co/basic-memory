@@ -356,3 +356,91 @@ async def test_duplicate_title_handling_in_strict_mode(link_resolver, test_entit
     assert result is not None
     # Should return the first match (components/core-service based on test fixture order)
     assert result.permalink == "components/core-service"
+
+
+@pytest.mark.asyncio
+async def test_underscored_folder_resolution(entity_service, entity_repository, search_service):
+    """Test resolving permalinks from files in underscored folders.
+
+    This tests the fix for issue #416 where read_note fails to find notes
+    when given permalinks from underscored folder names (e.g., _archive/, _drafts/).
+    The permalink normalization strips underscores, but link resolution should
+    still be able to find the original files.
+    """
+    # Create an entity in an underscored folder
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Example Note",
+            entity_type="note",
+            folder="_archive/articles",
+            project=entity_service.repository.project_id,
+        )
+    )
+
+    # The entity's file path should have the underscore
+    assert entity.file_path == "_archive/articles/Example Note.md"
+
+    # The permalink should have the underscore stripped (normalized)
+    assert entity.permalink == "archive/articles/example-note"
+
+    # Index the entity for search
+    await search_service.index_entity(entity)
+
+    # Create link resolver
+    link_resolver = LinkResolver(entity_repository, search_service)
+
+    # Test 1: Using the normalized permalink (what the user would copy from YAML frontmatter)
+    # This should now work with our fix
+    result = await link_resolver.resolve_link("archive/articles/example-note")
+    assert result is not None
+    assert result.file_path == "_archive/articles/Example Note.md"
+    assert result.permalink == "archive/articles/example-note"
+
+    # Test 2: Using the title
+    result = await link_resolver.resolve_link("Example Note")
+    assert result is not None
+    assert result.file_path == "_archive/articles/Example Note.md"
+
+    # Test 3: Using the actual file path (with underscore)
+    result = await link_resolver.resolve_link("_archive/articles/Example Note.md")
+    assert result is not None
+    assert result.file_path == "_archive/articles/Example Note.md"
+
+    # Test 4: Multiple underscored folders
+    entity2, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Draft Post",
+            entity_type="note",
+            folder="_drafts/_private",
+            project=entity_service.repository.project_id,
+        )
+    )
+    await search_service.index_entity(entity2)
+
+    result = await link_resolver.resolve_link("drafts/private/draft-post")
+    assert result is not None
+    assert result.file_path == "_drafts/_private/Draft Post.md"
+    assert result.permalink == "drafts/private/draft-post"
+
+
+@pytest.mark.asyncio
+async def test_underscored_variants_generation(entity_repository, search_service):
+    """Test the _generate_underscored_variants helper method."""
+    link_resolver = LinkResolver(entity_repository, search_service)
+
+    # Test single segment
+    variants = link_resolver._generate_underscored_variants("archive")
+    assert "_archive" in variants
+
+    # Test two segments
+    variants = link_resolver._generate_underscored_variants("archive/articles")
+    assert "_archive/articles" in variants
+    assert "archive/_articles" in variants
+    assert "_archive/_articles" in variants
+
+    # Test three segments
+    variants = link_resolver._generate_underscored_variants("archive/articles/note")
+    assert "_archive/articles/note" in variants
+    assert "archive/_articles/note" in variants
+    assert "archive/articles/_note" in variants
+    assert "_archive/_articles/note" in variants  # First two underscored

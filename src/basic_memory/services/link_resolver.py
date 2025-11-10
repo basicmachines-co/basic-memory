@@ -69,11 +69,26 @@ class LinkResolver:
                 logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
                 return found_path_md
 
+        # 5. Try permalink variations with underscored folders (fixes #416)
+        # This handles cases where the permalink was generated from a path like
+        # "_archive/note.md" which becomes "archive/note" in the permalink,
+        # but the user provides "archive/note" and we need to find the original file
+        underscored_variants = self._generate_underscored_variants(clean_text)
+        for variant in underscored_variants:
+            logger.trace(f"Trying underscored variant: {variant}")
+
+            # Try as file path with .md extension
+            variant_with_md = f"{variant}.md"
+            found_variant = await self.entity_repository.get_by_file_path(variant_with_md)
+            if found_variant:
+                logger.debug(f"Found entity with underscored path variant: {found_variant.file_path}")
+                return found_variant
+
         # In strict mode, don't try fuzzy search - return None if no exact match found
         if strict:
             return None
 
-        # 5. Fall back to search for fuzzy matching (only if not in strict mode)
+        # 6. Fall back to search for fuzzy matching (only if not in strict mode)
         if use_search and "*" not in clean_text:
             results = await self.search_service.search(
                 query=SearchQuery(text=clean_text, entity_types=[SearchItemType.ENTITY]),
@@ -90,6 +105,47 @@ class LinkResolver:
 
         # if we couldn't find anything then return None
         return None
+
+    def _generate_underscored_variants(self, path: str) -> list[str]:
+        """Generate permalink variants with underscored folder prefixes.
+
+        This handles cases where folder names start with underscores (e.g., _archive, _drafts)
+        but the permalink has them stripped. We generate variants to try and find the original file.
+
+        Args:
+            path: The permalink path (e.g., "archive/articles/example-note")
+
+        Returns:
+            List of path variants with underscores prepended to various segments
+            (e.g., ["_archive/articles/example-note", "archive/_articles/example-note", etc.])
+        """
+        if "/" not in path:
+            # Single segment, just try with underscore prefix
+            return [f"_{path}"]
+
+        segments = path.split("/")
+        variants = []
+
+        # Generate variants by prepending underscore to each segment
+        # For path "archive/articles/note", generate:
+        # - "_archive/articles/note"
+        # - "archive/_articles/note"
+        # - "_archive/_articles/note"
+        for i in range(len(segments)):
+            # Try prepending underscore to this segment
+            variant_segments = segments.copy()
+            variant_segments[i] = f"_{segments[i]}"
+            variants.append("/".join(variant_segments))
+
+        # For paths with 2+ folders, also try combinations of underscored first segments
+        if len(segments) >= 2:
+            # Try first two segments underscored
+            variant_segments = segments.copy()
+            variant_segments[0] = f"_{segments[0]}"
+            variant_segments[1] = f"_{segments[1]}"
+            variants.append("/".join(variant_segments))
+
+        return variants
 
     def _normalize_link_text(self, link_text: str) -> Tuple[str, Optional[str]]:
         """Normalize link text and extract alias if present.
