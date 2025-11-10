@@ -402,7 +402,7 @@ class TestReadNoteSecurityValidation:
                 Additional content with various formatting.
             """).strip(),
             tags=["security", "test", "full-feature"],
-            entity_type="guide",
+            note_type="guide",
         )
 
         # Test reading by permalink
