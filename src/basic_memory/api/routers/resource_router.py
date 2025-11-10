@@ -151,6 +151,20 @@ async def write_resource(
     try:
         # Get content from request body
 
+        # Defensive type checking: ensure content is a string
+        # FastAPI should validate this, but if a dict somehow gets through
+        # (e.g., via JSON body parsing), we need to catch it here
+        if isinstance(content, dict):
+            logger.error(
+                f"Error writing resource {file_path}: "
+                f"content is a dict, expected string. Keys: {list(content.keys())}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="content must be a string, not a dict. "
+                "Ensure request body is sent as raw string content, not JSON object.",
+            )
+
         # Ensure it's UTF-8 string content
         if isinstance(content, bytes):  # pragma: no cover
             content_str = content.decode("utf-8")

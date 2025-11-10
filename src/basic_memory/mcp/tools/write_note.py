@@ -28,7 +28,7 @@ async def write_note(
     content: str,
     folder: str,
     project: Optional[str] = None,
-    tags=None,
+    tags: list[str] | str | None = None,
     entity_type: str = "note",
     context: Context | None = None,
 ) -> str:

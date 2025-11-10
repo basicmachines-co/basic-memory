@@ -110,7 +110,14 @@ async def canvas(
 
         # Write the file using the resource API
         logger.info(f"Creating canvas file: {file_path} in project {project}")
-        response = await call_put(client, f"{project_url}/resource/{file_path}", json=canvas_json)
+        # Send canvas_json as content string, not as json parameter
+        # The resource endpoint expects Body() string content, not JSON-encoded data
+        response = await call_put(
+            client,
+            f"{project_url}/resource/{file_path}",
+            content=canvas_json,
+            headers={"Content-Type": "text/plain"},
+        )
 
         # Parse response
         result = response.json()

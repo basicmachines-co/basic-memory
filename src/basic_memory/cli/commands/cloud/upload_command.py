@@ -78,7 +78,7 @@ def upload(
                 console.print(f"[blue]Creating cloud project '{project}'...[/blue]")
                 try:
                     await create_cloud_project(project)
-                    console.print(f"[green]✓ Created project '{project}'[/green]")
+                    console.print(f"[green]Created project '{project}'[/green]")
                 except Exception as e:
                     console.print(f"[red]Failed to create project: {e}[/red]")
                     raise typer.Exit(1)
@@ -109,13 +109,14 @@ def upload(
         if dry_run:
             console.print("[yellow]DRY RUN complete - no files were uploaded[/yellow]")
         else:
-            console.print(f"[green]✅ Successfully uploaded to '{project}'[/green]")
+            console.print(f"[green]Successfully uploaded to '{project}'[/green]")
 
         # Sync project if requested (skip on dry run)
+        # Force full scan after bisync to ensure database is up-to-date with synced files
         if sync and not dry_run:
             console.print(f"[blue]Syncing project '{project}'...[/blue]")
             try:
-                await sync_project(project)
+                await sync_project(project, force_full=True)
             except Exception as e:
                 console.print(f"[yellow]Warning: Sync failed: {e}[/yellow]")
                 console.print("[dim]Files uploaded but may not be indexed yet[/dim]")
