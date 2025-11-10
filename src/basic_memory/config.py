@@ -192,15 +192,16 @@ class BasicMemoryConfig(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
-        # Ensure main project exists
-        if "main" not in self.projects:  # pragma: no cover
+        # Ensure at least one project exists
+        if not self.projects:  # pragma: no cover
             self.projects["main"] = (
                 Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory"))
             ).as_posix()
 
-        # Ensure default project is valid
+        # Ensure default project is valid (points to an existing project)
         if self.default_project not in self.projects:  # pragma: no cover
-            self.default_project = "main"
+            # Set default to first available project
+            self.default_project = next(iter(self.projects.keys()))
 
     @property
     def app_database_path(self) -> Path:

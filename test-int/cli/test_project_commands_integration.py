@@ -119,3 +119,50 @@ def test_project_set_default(app_config, config_manager):
         for line in lines:
             if "another-project" in line:
                 assert "[X]" in line
+
+
+def test_remove_default_project_issue_397(app_config, test_project, config_manager):
+    """Test that a removed project does not reappear in project list (issue #397).
+
+    Reproduces the bug where removing a project would cause it to be
+    recreated on the next config load.
+    """
+    runner = CliRunner()
+
+    # Use a separate temporary directory to avoid nested path conflicts
+    with tempfile.TemporaryDirectory() as temp_dir:
+        new_project_path = Path(temp_dir) / "newmain"
+        new_project_path.mkdir()
+
+        # Step 1: Add a new project
+        result = runner.invoke(app, ["project", "add", "newmain", str(new_project_path)])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
+
+        # Step 2: Set the new project as default
+        result = runner.invoke(app, ["project", "default", "newmain"])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
+
+        # Step 3: Remove the original default project
+        result = runner.invoke(app, ["project", "remove", "test-project"])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
+
+        # Step 4: Verify removed project does NOT appear in list
+        result = runner.invoke(app, ["project", "list"])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
+        assert result.exit_code == 0
+
+        # The removed project should NOT be in the list
+        assert "test-project" not in result.stdout
+        # The new project should be there and marked as default
+        assert "newmain" in result.stdout
