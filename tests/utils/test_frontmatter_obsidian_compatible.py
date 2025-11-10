@@ -191,8 +191,8 @@ def test_title_with_colon():
 
     result = dump_frontmatter(post)
 
-    # Should have quoted title to handle the colon
-    assert 'title: "L2 Governance Core (Split: Core)"' in result
+    # PyYAML uses single quotes for values with special characters
+    assert "title: 'L2 Governance Core (Split: Core)'" in result
 
     # Should be parseable back
     parsed_post = frontmatter.loads(result)
@@ -207,8 +207,8 @@ def test_title_starting_with_word_and_colon():
 
     result = dump_frontmatter(post)
 
-    # Should have quoted title to handle the colon
-    assert 'title: "Governance: Rootkeeper Manifest-Diff Prompt"' in result
+    # PyYAML auto-quotes values with colons (uses single quotes by default)
+    assert "title: 'Governance: Rootkeeper Manifest-Diff Prompt'" in result
 
     # Should be parseable back
     parsed_post = frontmatter.loads(result)
@@ -223,8 +223,8 @@ def test_multiple_colons_in_title():
 
     result = dump_frontmatter(post)
 
-    # Should have quoted title
-    assert 'title: "API: HTTP: Response Codes: Overview"' in result
+    # PyYAML auto-quotes values with colons
+    assert "title: 'API: HTTP: Response Codes: Overview'" in result
 
     # Should be parseable back
     parsed_post = frontmatter.loads(result)
@@ -257,7 +257,7 @@ def test_other_special_characters_in_title():
 
 
 def test_all_string_values_quoted():
-    """Test that all string values in frontmatter are properly quoted."""
+    """Test that string values with special characters are automatically quoted."""
     post = frontmatter.Post("Test content")
     post.metadata["title"] = "Test: Title"
     post.metadata["permalink"] = "test-permalink"
@@ -266,11 +266,11 @@ def test_all_string_values_quoted():
 
     result = dump_frontmatter(post)
 
-    # All string values should be quoted
-    assert 'title: "Test: Title"' in result
-    assert 'permalink: "test-permalink"' in result
-    assert 'type: "note"' in result
-    assert 'custom_field: "value: with colon"' in result
+    # PyYAML auto-quotes values with special chars, leaves simple values unquoted
+    assert "title: 'Test: Title'" in result  # Has colon, gets quoted
+    assert "permalink: test-permalink" in result  # Simple value, no quotes
+    assert "type: note" in result  # Simple value, no quotes
+    assert "custom_field: 'value: with colon'" in result  # Has colon, gets quoted
 
     # Should be parseable back correctly
     parsed_post = frontmatter.loads(result)

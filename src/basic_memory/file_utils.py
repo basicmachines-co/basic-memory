@@ -206,26 +206,14 @@ def dump_frontmatter(post: frontmatter.Post) -> str:
         # No frontmatter, just return content
         return post.content
 
-    # Create a custom Dumper that quotes all string values for safety
-    class QuotedDumper(yaml.SafeDumper):
-        pass
-
-    def quoted_string_representer(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
-        """Always use double-quoted style for strings to handle special characters."""
-        # Use double-quoted style ('"') for all strings
-        # This ensures colons, special chars, etc. are properly escaped
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='"')
-
-    # Register the custom representer for strings
-    QuotedDumper.add_representer(str, quoted_string_representer)
-
-    # Serialize YAML with block style for lists and quoted strings
+    # Serialize YAML with block style for lists
+    # SafeDumper automatically quotes values with special characters (colons, etc.)
     yaml_str = yaml.dump(
         post.metadata,
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
-        Dumper=QuotedDumper
+        Dumper=yaml.SafeDumper
     )
 
     # Construct the final markdown with frontmatter
