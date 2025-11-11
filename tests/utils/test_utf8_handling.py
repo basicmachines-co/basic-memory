@@ -2,7 +2,6 @@
 
 import pytest
 
-from basic_memory import file_utils
 from basic_memory.file_utils import compute_checksum, write_file_atomic
 
 
@@ -56,8 +55,11 @@ async def test_write_utf8_characters(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_frontmatter_with_utf8(tmp_path):
+async def test_frontmatter_with_utf8(tmp_path, sync_service):
     """Test handling of frontmatter with UTF-8 characters."""
+    # Use FileService from sync_service
+    file_service = sync_service.file_service
+
     # Create a test file with frontmatter containing UTF-8
     test_path = tmp_path / "frontmatter_utf8.md"
 
@@ -65,7 +67,7 @@ async def test_frontmatter_with_utf8(tmp_path):
     content = """---
 title: UTF-8 测试文件 (Test File)
 author: José García
-keywords: 
+keywords:
   - тестирование
   - 테스트
   - 测试
@@ -79,8 +81,8 @@ This file has UTF-8 characters in the frontmatter.
     # Write the file
     await write_file_atomic(test_path, content)
 
-    # Update frontmatter with more UTF-8
-    await file_utils.update_frontmatter(
+    # Update frontmatter with more UTF-8 using FileService
+    await file_service.update_frontmatter(
         test_path,
         {
             "description": "这是一个测试文件 (This is a test file)",

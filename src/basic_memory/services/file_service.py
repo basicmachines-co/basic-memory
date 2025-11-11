@@ -1,12 +1,17 @@
 """Service for file operations with checksum tracking."""
 
+import asyncio
+import hashlib
 import mimetypes
 from os import stat_result
 from pathlib import Path
 from typing import Any, Dict, Tuple, Union
 
+import aiofiles
+import yaml
+
 from basic_memory import file_utils
-from basic_memory.file_utils import FileError
+from basic_memory.file_utils import FileError, ParseError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Entity as EntityModel
 from basic_memory.schemas import Entity as EntitySchema
@@ -16,13 +21,15 @@ from loguru import logger
 
 
 class FileService:
-    """Service for handling file operations.
+    """Service for handling file operations with concurrency control.
 
     All paths are handled as Path objects internally. Strings are converted to
     Path objects when passed in. Relative paths are assumed to be relative to
     base_path.
 
     Features:
+    - True async I/O with aiofiles (non-blocking)
+    - Built-in concurrency limits (semaphore)
     - Consistent file writing with checksums
     - Frontmatter management
     - Atomic operations
@@ -33,9 +40,13 @@ class FileService:
         self,
         base_path: Path,
         markdown_processor: MarkdownProcessor,
+        max_concurrent_files: int = 10,
     ):
         self.base_path = base_path.resolve()  # Get absolute path
         self.markdown_processor = markdown_processor
+        # Semaphore to limit concurrent file operations
+        # Prevents OOM on large projects by processing files in batches
+        self._file_semaphore = asyncio.Semaphore(max_concurrent_files)
 
     def get_entity_path(self, entity: Union[EntityModel, EntitySchema]) -> Path:
         """Generate absolute filesystem path for entity.
@@ -104,6 +115,33 @@ class FileService:
             logger.error("Failed to check file existence", path=str(path), error=str(e))
             raise FileOperationError(f"Failed to check file existence: {e}")
 
+    async def ensure_directory(self, path: FilePath) -> None:
+        """Ensure directory exists, creating if necessary.
+
+        Uses semaphore to control concurrency for directory creation operations.
+
+        Args:
+            path: Directory path to ensure (Path or string)
+
+        Raises:
+            FileOperationError: If directory creation fails
+        """
+        try:
+            # Convert string to Path if needed
+            path_obj = self.base_path / path if isinstance(path, str) else path
+            full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
+
+            # Use semaphore for concurrency control
+            async with self._file_semaphore:
+                # Run blocking mkdir in thread pool
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, lambda: full_path.mkdir(parents=True, exist_ok=True)
+                )
+        except Exception as e:  # pragma: no cover
+            logger.error("Failed to create directory", path=str(path), error=str(e))
+            raise FileOperationError(f"Failed to create directory {path}: {e}")
+
     async def write_file(self, path: FilePath, content: str) -> str:
         """Write content to file and return checksum.
 
@@ -126,7 +164,7 @@ class FileService:
 
         try:
             # Ensure parent directory exists
-            await file_utils.ensure_directory(full_path.parent)
+            await self.ensure_directory(full_path.parent)
 
             # Write content atomically
             logger.info(
@@ -147,9 +185,45 @@ class FileService:
             logger.exception("File write error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to write file: {e}")
 
-    # TODO remove read_file
+    async def read_file_content(self, path: FilePath) -> str:
+        """Read file content using true async I/O with aiofiles.
+
+        Handles both absolute and relative paths. Relative paths are resolved
+        against base_path.
+
+        Args:
+            path: Path to read (Path or string)
+
+        Returns:
+            File content as string
+
+        Raises:
+            FileOperationError: If read fails
+        """
+        # Convert string to Path if needed
+        path_obj = self.base_path / path if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
+
+        try:
+            logger.debug("Reading file content", operation="read_file_content", path=str(full_path))
+            async with aiofiles.open(full_path, mode="r", encoding="utf-8") as f:
+                content = await f.read()
+
+            logger.debug(
+                "File read completed",
+                path=str(full_path),
+                content_length=len(content),
+            )
+            return content
+
+        except Exception as e:
+            logger.exception("File read error", path=str(full_path), error=str(e))
+            raise FileOperationError(f"Failed to read file: {e}")
+
     async def read_file(self, path: FilePath) -> Tuple[str, str]:
-        """Read file and compute checksum.
+        """Read file and compute checksum using true async I/O.
+
+        Uses aiofiles for non-blocking file reads.
 
         Handles both absolute and relative paths. Relative paths are resolved
         against base_path.
@@ -169,7 +243,11 @@ class FileService:
 
         try:
             logger.debug("Reading file", operation="read_file", path=str(full_path))
-            content = full_path.read_text(encoding="utf-8")
+
+            # Use aiofiles for non-blocking read
+            async with aiofiles.open(full_path, mode="r", encoding="utf-8") as f:
+                content = await f.read()
+
             checksum = await file_utils.compute_checksum(content)
 
             logger.debug(
@@ -199,29 +277,85 @@ class FileService:
         full_path.unlink(missing_ok=True)
 
     async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
-        """
-        Update frontmatter fields in a file while preserving all content.
+        """Update frontmatter fields in a file while preserving all content.
+
+        Only modifies the frontmatter section, leaving all content untouched.
+        Creates frontmatter section if none exists.
+        Returns checksum of updated file.
+
+        Uses aiofiles for true async I/O (non-blocking).
 
         Args:
-            path: Path to the file (Path or string)
-            updates: Dictionary of frontmatter fields to update
+            path: Path to markdown file (Path or string)
+            updates: Dict of frontmatter fields to update
 
         Returns:
             Checksum of updated file
+
+        Raises:
+            FileOperationError: If file operations fail
+            ParseError: If frontmatter parsing fails
         """
         # Convert string to Path if needed
         path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
-        return await file_utils.update_frontmatter(full_path, updates)
+
+        try:
+            # Read current content using aiofiles
+            async with aiofiles.open(full_path, mode="r", encoding="utf-8") as f:
+                content = await f.read()
+
+            # Parse current frontmatter with proper error handling for malformed YAML
+            current_fm = {}
+            if file_utils.has_frontmatter(content):
+                try:
+                    current_fm = file_utils.parse_frontmatter(content)
+                    content = file_utils.remove_frontmatter(content)
+                except (ParseError, yaml.YAMLError) as e:
+                    # Log warning and treat as plain markdown without frontmatter
+                    logger.warning(
+                        f"Failed to parse YAML frontmatter in {full_path}: {e}. "
+                        "Treating file as plain markdown without frontmatter."
+                    )
+                    # Keep full content, treat as having no frontmatter
+                    current_fm = {}
+
+            # Update frontmatter
+            new_fm = {**current_fm, **updates}
+
+            # Write new file with updated frontmatter
+            yaml_fm = yaml.dump(new_fm, sort_keys=False, allow_unicode=True)
+            final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
+
+            logger.debug(
+                "Updating frontmatter", path=str(full_path), update_keys=list(updates.keys())
+            )
+
+            await file_utils.write_file_atomic(full_path, final_content)
+            return await file_utils.compute_checksum(final_content)
+
+        except Exception as e:
+            # Only log real errors (not YAML parsing, which is handled above)
+            if not isinstance(e, (ParseError, yaml.YAMLError)):
+                logger.error(
+                    "Failed to update frontmatter",
+                    path=str(full_path),
+                    error=str(e),
+                )
+            raise FileOperationError(f"Failed to update frontmatter: {e}")
 
     async def compute_checksum(self, path: FilePath) -> str:
-        """Compute checksum for a file.
+        """Compute checksum for a file using true async I/O.
+
+        Uses aiofiles for non-blocking I/O with 64KB chunked reading.
+        Semaphore limits concurrent file operations to prevent OOM.
+        Memory usage is constant regardless of file size.
 
         Args:
             path: Path to the file (Path or string)
 
         Returns:
-            Checksum of the file content
+            SHA256 checksum hex string
 
         Raises:
             FileError: If checksum computation fails
@@ -230,18 +364,22 @@ class FileService:
         path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
-        try:
-            if self.is_markdown(path):
-                # read str
-                content = full_path.read_text(encoding="utf-8")
-            else:
-                # read bytes
-                content = full_path.read_bytes()
-            return await file_utils.compute_checksum(content)
+        # Semaphore controls concurrency - max N files processed at once
+        async with self._file_semaphore:
+            try:
+                hasher = hashlib.sha256()
+                chunk_size = 65536  # 64KB chunks
 
-        except Exception as e:  # pragma: no cover
-            logger.error("Failed to compute checksum", path=str(full_path), error=str(e))
-            raise FileError(f"Failed to compute checksum for {path}: {e}")
+                # async I/O with aiofiles
+                async with aiofiles.open(full_path, mode="rb") as f:
+                    while chunk := await f.read(chunk_size):
+                        hasher.update(chunk)
+
+                return hasher.hexdigest()
+
+            except Exception as e:  # pragma: no cover
+                logger.error("Failed to compute checksum", path=str(full_path), error=str(e))
+                raise FileError(f"Failed to compute checksum for {path}: {e}")
 
     def file_stats(self, path: FilePath) -> stat_result:
         """Return file stats for a given path.

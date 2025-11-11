@@ -1,6 +1,6 @@
 """Tests for MCP tool utilities."""
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient, HTTPStatusError
@@ -12,8 +12,6 @@ from basic_memory.mcp.tools.utils import (
     call_put,
     call_delete,
     get_error_message,
-    check_migration_status,
-    wait_for_migration_or_return_status,
 )
 
 
@@ -184,82 +182,3 @@ async def test_call_post_with_json(mock_response):
     mock_post.assert_called_once()
     call_kwargs = mock_post.call_args[1]
     assert call_kwargs["json"] == json_data
-
-
-class TestMigrationStatus:
-    """Test migration status checking functions."""
-
-    def test_check_migration_status_ready(self):
-        """Test check_migration_status when system is ready."""
-        mock_tracker = MagicMock()
-        mock_tracker.is_ready = True
-
-        with patch("basic_memory.services.sync_status_service.sync_status_tracker", mock_tracker):
-            result = check_migration_status()
-            assert result is None
-
-    def test_check_migration_status_not_ready(self):
-        """Test check_migration_status when sync is in progress."""
-        mock_tracker = MagicMock()
-        mock_tracker.is_ready = False
-        mock_tracker.get_summary.return_value = "Sync in progress..."
-
-        with patch("basic_memory.services.sync_status_service.sync_status_tracker", mock_tracker):
-            result = check_migration_status()
-            assert result == "Sync in progress..."
-            mock_tracker.get_summary.assert_called_once()
-
-    def test_check_migration_status_exception(self):
-        """Test check_migration_status with import/other exception."""
-        # Mock the import itself to raise an exception
-        with patch("builtins.__import__", side_effect=ImportError("Module not found")):
-            result = check_migration_status()
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_wait_for_migration_ready(self):
-        """Test wait_for_migration when system is already ready."""
-        mock_tracker = MagicMock()
-        mock_tracker.is_ready = True
-
-        with patch("basic_memory.services.sync_status_service.sync_status_tracker", mock_tracker):
-            result = await wait_for_migration_or_return_status()
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_wait_for_migration_becomes_ready(self):
-        """Test wait_for_migration when system becomes ready during wait."""
-        mock_tracker = MagicMock()
-        mock_tracker.is_ready = False
-
-        with patch("basic_memory.services.sync_status_service.sync_status_tracker", mock_tracker):
-            # Mock asyncio.sleep to make tracker ready after first check
-            async def mock_sleep(delay):
-                mock_tracker.is_ready = True
-
-            with patch("asyncio.sleep", side_effect=mock_sleep):
-                result = await wait_for_migration_or_return_status(timeout=1.0)
-                assert result is None
-
-    @pytest.mark.asyncio
-    async def test_wait_for_migration_timeout(self):
-        """Test wait_for_migration when timeout occurs."""
-        mock_tracker = MagicMock()
-        mock_tracker.is_ready = False
-        mock_tracker.get_summary.return_value = "Still syncing..."
-
-        with patch("basic_memory.services.sync_status_service.sync_status_tracker", mock_tracker):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = await wait_for_migration_or_return_status(timeout=0.1)
-                assert result == "Still syncing..."
-                mock_tracker.get_summary.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_wait_for_migration_exception(self):
-        """Test wait_for_migration with exception during checking."""
-        with patch(
-            "basic_memory.services.sync_status_service.sync_status_tracker",
-            side_effect=Exception("Test error"),
-        ):
-            result = await wait_for_migration_or_return_status()
-            assert result is None

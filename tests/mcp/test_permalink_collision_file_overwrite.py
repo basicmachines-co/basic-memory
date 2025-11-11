@@ -24,6 +24,22 @@ from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
 
 
+async def force_full_scan(sync_service: SyncService) -> None:
+    """Force next sync to do a full scan by clearing watermark (for testing moves/deletions)."""
+    if sync_service.entity_repository.project_id is not None:
+        project = await sync_service.project_repository.find_by_id(
+            sync_service.entity_repository.project_id
+        )
+        if project:
+            await sync_service.project_repository.update(
+                project.id,
+                {
+                    "last_scan_timestamp": None,
+                    "last_file_count": None,
+                },
+            )
+
+
 @pytest.mark.asyncio
 async def test_permalink_collision_should_not_overwrite_different_file(app, test_project):
     """Test that creating notes with different titles doesn't overwrite existing files.
@@ -299,6 +315,10 @@ async def test_sync_permalink_collision_file_overwrite_bug(
     node_b_file = edge_cases_dir / "Node B.md"
     node_b_file.write_text(node_b_content)
 
+    # Force full scan to detect the new file
+    # (file just created may not be newer than watermark due to timing precision)
+    await force_full_scan(sync_service)
+
     # Sync to create Node B
     await sync_service.sync(project_dir)
 
@@ -322,6 +342,10 @@ async def test_sync_permalink_collision_file_overwrite_bug(
 
     node_c_file = edge_cases_dir / "Node C.md"
     node_c_file.write_text(node_c_content)
+
+    # Force full scan to detect the new file
+    # (file just created may not be newer than watermark due to timing precision)
+    await force_full_scan(sync_service)
 
     # Sync to create Node C - THIS IS WHERE THE BUG OCCURS
     await sync_service.sync(project_dir)

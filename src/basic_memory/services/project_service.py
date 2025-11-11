@@ -1,7 +1,9 @@
 """Project management service for Basic Memory."""
 
+import asyncio
 import json
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Sequence
@@ -219,11 +221,12 @@ class ProjectService:
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 
-    async def remove_project(self, name: str) -> None:
+    async def remove_project(self, name: str, delete_notes: bool = False) -> None:
         """Remove a project from configuration and database.
 
         Args:
             name: The name of the project to remove
+            delete_notes: If True, delete the project directory from filesystem
 
         Raises:
             ValueError: If the project doesn't exist or is the default project
@@ -231,15 +234,42 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for remove_project")
 
-        # First remove from config (this will validate the project exists and is not default)
-        self.config_manager.remove_project(name)
-
-        # Then remove from database using robust lookup
+        # Get project from database first
         project = await self.get_project(name)
-        if project:
-            await self.repository.delete(project.id)
+        if not project:
+            raise ValueError(f"Project '{name}' not found")
+
+        project_path = project.path
+
+        # Check if project is default (in cloud mode, check database; in local mode, check config)
+        if project.is_default or name == self.config_manager.config.default_project:
+            raise ValueError(f"Cannot remove the default project '{name}'")
+
+        # Remove from config if it exists there (may not exist in cloud mode)
+        try:
+            self.config_manager.remove_project(name)
+        except ValueError:
+            # Project not in config - that's OK in cloud mode, continue with database deletion
+            logger.debug(f"Project '{name}' not found in config, removing from database only")
+
+        # Remove from database
+        await self.repository.delete(project.id)
 
         logger.info(f"Project '{name}' removed from configuration and database")
+
+        # Optionally delete the project directory
+        if delete_notes and project_path:
+            try:
+                path_obj = Path(project_path)
+                if path_obj.exists() and path_obj.is_dir():
+                    await asyncio.to_thread(shutil.rmtree, project_path)
+                    logger.info(f"Deleted project directory: {project_path}")
+                else:
+                    logger.warning(
+                        f"Project directory not found or not a directory: {project_path}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to delete project directory {project_path}: {e}")
 
     async def set_default_project(self, name: str) -> None:
         """Set the default project in configuration and database.
@@ -360,11 +390,15 @@ class ProjectService:
                 }
                 await self.repository.create(project_data)
 
-        # Add projects that exist in DB but not in config to config
+        # Remove projects that exist in DB but not in config
+        # Config is the source of truth - if a project was deleted from config,
+        # it should be deleted from DB too (fixes issue #193)
         for name, project in db_projects_by_permalink.items():
             if name not in config_projects:
-                logger.info(f"Adding project '{name}' to configuration")
-                self.config_manager.add_project(name, project.path)
+                logger.info(
+                    f"Removing project '{name}' from database (deleted from config, source of truth)"
+                )
+                await self.repository.delete(project.id)
 
         # Ensure database default project state is consistent
         await self._ensure_single_default_project()

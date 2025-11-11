@@ -448,3 +448,85 @@ def test_is_project_path(watch_service, tmp_path):
 
     # Test the project path itself
     assert watch_service.is_project_path(project, project_path) is False
+
+
+@pytest.mark.asyncio
+async def test_handle_changes_skips_deleted_project(
+    watch_service, project_config, test_project, sync_service, project_service, tmp_path
+):
+    """Test that handle_changes skips processing changes for projects that have been deleted.
+
+    This is a regression test for issue #193 where deleted projects were being recreated
+    by background sync because the directory still existed on disk.
+    """
+    from textwrap import dedent
+
+    project_dir = project_config.home
+
+    # Create a test file in the project
+    test_file = project_dir / "test_note.md"
+    content = dedent("""
+        ---
+        type: knowledge
+        ---
+        # Test Note
+        Test content
+    """).strip()
+    await create_test_file(test_file, content)
+
+    # Initial sync to create the entity
+    await sync_service.sync(project_dir)
+
+    # Verify entity was created
+    entity_before = await sync_service.entity_repository.get_by_file_path("test_note.md")
+    assert entity_before is not None
+
+    # Create a second project directly in the database and set it as default
+    # so we can remove the first one (cannot remove default project)
+    other_project_path = str(tmp_path.parent / "other-project-for-test")
+    project_data = {
+        "name": "other-project",
+        "path": other_project_path,
+        "permalink": "other-project",
+        "is_active": True,
+    }
+    other_project = await project_service.repository.create(project_data)
+    await project_service.repository.set_as_default(other_project.id)
+
+    # Also add to config
+    config = project_service.config_manager.load_config()
+    config.projects["other-project"] = other_project_path
+    config.default_project = "other-project"
+    project_service.config_manager.save_config(config)
+
+    # Remove the test project from configuration (simulating project deletion)
+    # This should prevent background sync from processing changes
+    await project_service.remove_project(test_project.name)
+
+    # Simulate file changes after project deletion
+    # These changes should be ignored by the watch service
+    modified_content = dedent("""
+        ---
+        type: knowledge
+        ---
+        # Test Note
+        Modified content after project deletion
+    """).strip()
+    await create_test_file(test_file, modified_content)
+
+    changes = {(Change.modified, str(test_file))}
+
+    # Handle changes - should skip processing since project is deleted
+    await watch_service.handle_changes(test_project, changes)
+
+    # Verify that the entity was NOT re-created or updated
+    # Since the project was deleted, the database should still have the old state
+    # or the entity should be gone entirely if cleanup happened
+    entity_after = await sync_service.entity_repository.get_by_file_path("test_note.md")
+
+    # The entity might be deleted or unchanged, but it should not be updated with new content
+    if entity_after is not None:
+        # If the entity still exists, it should have the old content, not the new content
+        assert entity_after.checksum == entity_before.checksum, (
+            "Entity should not be updated for deleted project"
+        )

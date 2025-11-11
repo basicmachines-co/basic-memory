@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     JSON,
+    Float,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -72,6 +73,12 @@ class Entity(Base):
     file_path: Mapped[str] = mapped_column(String, index=True)
     # checksum of file
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # File metadata for sync
+    # mtime: file modification timestamp (Unix epoch float) for change detection
+    mtime: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # size: file size in bytes for quick change detection
+    size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Metadata and tracking
     created_at: Mapped[datetime] = mapped_column(

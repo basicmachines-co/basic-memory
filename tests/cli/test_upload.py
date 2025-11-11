@@ -20,7 +20,7 @@ class TestGetFilesToUpload:
         (tmp_path / "subdir" / "file3.py").write_text("content3")
 
         # Call with real ignore utils (no mocking)
-        result = _get_files_to_upload(tmp_path)
+        result = _get_files_to_upload(tmp_path, verbose=False, use_gitignore=True)
 
         # Should find all 3 files
         assert len(result) == 3
@@ -375,3 +375,138 @@ class TestUploadPath:
         assert "Skipping archive file" in captured.out
         assert "backup.zip" in captured.out
         assert "Skipped 2 archive file(s)" in captured.out
+
+    def test_no_gitignore_skips_gitignore_patterns(self, tmp_path):
+        """Test that --no-gitignore flag skips .gitignore patterns."""
+        # Create test files
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / "secret.bak").write_text("secret")  # Use .bak instead of .pyc
+
+        # Create .gitignore file that ignores .bak files
+        gitignore_file = tmp_path / ".gitignore"
+        gitignore_file.write_text("*.bak\n")
+
+        # With use_gitignore=False, should include .bak files
+        result = _get_files_to_upload(tmp_path, verbose=False, use_gitignore=False)
+
+        # Extract relative paths
+        relative_paths = [rel_path for _, rel_path in result]
+
+        # Both files should be included when gitignore is disabled
+        assert "keep.txt" in relative_paths
+        assert "secret.bak" in relative_paths
+
+    def test_no_gitignore_still_respects_bmignore(self, tmp_path):
+        """Test that --no-gitignore still respects .bmignore patterns."""
+        # Create test files
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / ".hidden").write_text(
+            "hidden"
+        )  # Should be ignored by .bmignore default pattern
+
+        # Create .gitignore that would allow .hidden
+        gitignore_file = tmp_path / ".gitignore"
+        gitignore_file.write_text("# Allow all\n")
+
+        # With use_gitignore=False, should still filter hidden files via .bmignore
+        result = _get_files_to_upload(tmp_path, verbose=False, use_gitignore=False)
+
+        # Extract relative paths
+        relative_paths = [rel_path for _, rel_path in result]
+
+        # keep.txt should be included, .hidden should be filtered by .bmignore
+        assert "keep.txt" in relative_paths
+        assert ".hidden" not in relative_paths
+
+    def test_verbose_shows_filtering_info(self, tmp_path, capsys):
+        """Test that verbose mode shows filtering information."""
+        # Create test files
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / "ignore.pyc").write_text("ignore")
+
+        # Create .gitignore
+        gitignore_file = tmp_path / ".gitignore"
+        gitignore_file.write_text("*.pyc\n")
+
+        # Run with verbose=True
+        _get_files_to_upload(tmp_path, verbose=True, use_gitignore=True)
+
+        # Capture output
+        captured = capsys.readouterr()
+
+        # Should show scanning information
+        assert "Scanning directory:" in captured.out
+        assert "Using .bmignore: Yes" in captured.out
+        assert "Using .gitignore:" in captured.out
+        assert "Ignore patterns loaded:" in captured.out
+
+        # Should show file status
+        assert "[INCLUDE]" in captured.out or "[IGNORED]" in captured.out
+
+        # Should show summary
+        assert "Summary:" in captured.out
+        assert "Files to upload:" in captured.out
+        assert "Files ignored:" in captured.out
+
+    def test_wildcard_gitignore_filters_all_files(self, tmp_path):
+        """Test that a wildcard * in .gitignore filters all files."""
+        # Create test files
+        (tmp_path / "file1.txt").write_text("content1")
+        (tmp_path / "file2.md").write_text("content2")
+
+        # Create .gitignore with wildcard
+        gitignore_file = tmp_path / ".gitignore"
+        gitignore_file.write_text("*\n")
+
+        # Should filter all files
+        result = _get_files_to_upload(tmp_path, verbose=False, use_gitignore=True)
+        assert len(result) == 0
+
+        # With use_gitignore=False, should include files
+        result = _get_files_to_upload(tmp_path, verbose=False, use_gitignore=False)
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_dry_run_shows_files_without_uploading(self, tmp_path, capsys):
+        """Test that --dry-run shows what would be uploaded without uploading."""
+        # Create test files
+        (tmp_path / "file1.txt").write_text("content1")
+        (tmp_path / "file2.txt").write_text("content2")
+
+        # Don't mock anything - we want to verify no actual upload happens
+        result = await upload_path(tmp_path, "test-project", dry_run=True)
+
+        # Should return success
+        assert result is True
+
+        # Check output shows dry run info
+        captured = capsys.readouterr()
+        assert "Found 2 file(s) to upload" in captured.out
+        assert "Files that would be uploaded:" in captured.out
+        assert "file1.txt" in captured.out
+        assert "file2.txt" in captured.out
+        assert "Total:" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_dry_run_with_verbose(self, tmp_path, capsys):
+        """Test that --dry-run works with --verbose."""
+        # Create test files
+        (tmp_path / "keep.txt").write_text("keep")
+        (tmp_path / "ignore.pyc").write_text("ignore")
+
+        # Create .gitignore
+        gitignore_file = tmp_path / ".gitignore"
+        gitignore_file.write_text("*.pyc\n")
+
+        result = await upload_path(tmp_path, "test-project", verbose=True, dry_run=True)
+
+        # Should return success
+        assert result is True
+
+        # Check output shows both verbose and dry run info
+        captured = capsys.readouterr()
+        assert "Scanning directory:" in captured.out
+        assert "[INCLUDE] keep.txt" in captured.out
+        assert "[IGNORED] ignore.pyc" in captured.out
+        assert "Files that would be uploaded:" in captured.out
+        assert "keep.txt" in captured.out

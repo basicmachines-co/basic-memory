@@ -321,6 +321,7 @@ async def get_sync_service(
     entity_parser: EntityParserDep,
     entity_repository: EntityRepositoryDep,
     relation_repository: RelationRepositoryDep,
+    project_repository: ProjectRepositoryDep,
     search_service: SearchServiceDep,
     file_service: FileServiceDep,
 ) -> SyncService:  # pragma: no cover
@@ -334,6 +335,7 @@ async def get_sync_service(
         entity_parser=entity_parser,
         entity_repository=entity_repository,
         relation_repository=relation_repository,
+        project_repository=project_repository,
         search_service=search_service,
         file_service=file_service,
     )

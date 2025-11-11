@@ -7,6 +7,16 @@
 ![](https://badge.mcpx.dev?type=dev 'MCP Dev')
 [![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
 
+## 🚀 Basic Memory Cloud is Live!
+
+- **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile - seamlessly synced across all your AI tools (Claude, ChatGPT, Gemini, Claude Code, and Codex) 
+- **Early Supporter Pricing:** Early users get 25% off forever. 
+The open source project continues as always. Cloud just makes it work everywhere.
+
+[Sign up now →](https://basicmemory.com/beta)
+
+with a 7 day free trial
+
 # Basic Memory
 
 Basic Memory lets you build persistent knowledge through natural conversations with Large Language Models (LLMs) like

@@ -1,5 +1,6 @@
 """Cross-platform rclone installation utilities."""
 
+import os
 import platform
 import shutil
 import subprocess
@@ -58,7 +59,7 @@ def install_rclone_macos() -> None:
         try:
             console.print("[blue]Installing rclone via Homebrew...[/blue]")
             run_command(["brew", "install", "rclone"])
-            console.print("[green]✓ rclone installed via Homebrew[/green]")
+            console.print("[green]rclone installed via Homebrew[/green]")
             return
         except RcloneInstallError:
             console.print(
@@ -69,7 +70,7 @@ def install_rclone_macos() -> None:
     console.print("[blue]Installing rclone via official script...[/blue]")
     try:
         run_command(["sh", "-c", "curl https://rclone.org/install.sh | sudo bash"])
-        console.print("[green]✓ rclone installed via official script[/green]")
+        console.print("[green]rclone installed via official script[/green]")
     except RcloneInstallError:
         raise RcloneInstallError(
             "Failed to install rclone. Please install manually: brew install rclone"
@@ -83,7 +84,7 @@ def install_rclone_linux() -> None:
         try:
             console.print("[blue]Installing rclone via snap...[/blue]")
             run_command(["sudo", "snap", "install", "rclone"])
-            console.print("[green]✓ rclone installed via snap[/green]")
+            console.print("[green]rclone installed via snap[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]Snap installation failed, trying apt...[/yellow]")
@@ -94,7 +95,7 @@ def install_rclone_linux() -> None:
             console.print("[blue]Installing rclone via apt...[/blue]")
             run_command(["sudo", "apt", "update"])
             run_command(["sudo", "apt", "install", "-y", "rclone"])
-            console.print("[green]✓ rclone installed via apt[/green]")
+            console.print("[green]rclone installed via apt[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]apt installation failed, trying official script...[/yellow]")
@@ -103,7 +104,7 @@ def install_rclone_linux() -> None:
     console.print("[blue]Installing rclone via official script...[/blue]")
     try:
         run_command(["sh", "-c", "curl https://rclone.org/install.sh | sudo bash"])
-        console.print("[green]✓ rclone installed via official script[/green]")
+        console.print("[green]rclone installed via official script[/green]")
     except RcloneInstallError:
         raise RcloneInstallError(
             "Failed to install rclone. Please install manually: sudo snap install rclone"
@@ -116,8 +117,16 @@ def install_rclone_windows() -> None:
     if shutil.which("winget"):
         try:
             console.print("[blue]Installing rclone via winget...[/blue]")
-            run_command(["winget", "install", "Rclone.Rclone"])
-            console.print("[green]✓ rclone installed via winget[/green]")
+            run_command(
+                [
+                    "winget",
+                    "install",
+                    "Rclone.Rclone",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ]
+            )
+            console.print("[green]rclone installed via winget[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]winget installation failed, trying chocolatey...[/yellow]")
@@ -127,7 +136,7 @@ def install_rclone_windows() -> None:
         try:
             console.print("[blue]Installing rclone via chocolatey...[/blue]")
             run_command(["choco", "install", "rclone", "-y"])
-            console.print("[green]✓ rclone installed via chocolatey[/green]")
+            console.print("[green]rclone installed via chocolatey[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]chocolatey installation failed, trying scoop...[/yellow]")
@@ -137,7 +146,7 @@ def install_rclone_windows() -> None:
         try:
             console.print("[blue]Installing rclone via scoop...[/blue]")
             run_command(["scoop", "install", "rclone"])
-            console.print("[green]✓ rclone installed via scoop[/green]")
+            console.print("[green]rclone installed via scoop[/green]")
             return
         except RcloneInstallError:
             console.print("[yellow]scoop installation failed[/yellow]")
@@ -165,6 +174,7 @@ def install_rclone(platform_override: Optional[str] = None) -> None:
             install_rclone_linux()
         elif platform_name == "windows":
             install_rclone_windows()
+            refresh_windows_path()
         else:
             raise RcloneInstallError(f"Unsupported platform: {platform_name}")
 
@@ -172,12 +182,53 @@ def install_rclone(platform_override: Optional[str] = None) -> None:
         if not is_rclone_installed():
             raise RcloneInstallError("rclone installation completed but command not found in PATH")
 
-        console.print("[green]✓ rclone installation completed successfully[/green]")
+        console.print("[green]rclone installation completed successfully[/green]")
 
     except RcloneInstallError:
         raise
     except Exception as e:
         raise RcloneInstallError(f"Unexpected error during installation: {e}") from e
+
+
+def refresh_windows_path() -> None:
+    """Refresh the Windows PATH environment variable for the current session."""
+    if platform.system().lower() != "windows":
+        return
+
+    # Importing here after performing platform detection. Also note that we have to ignore pylance/pyright
+    # warnings about winreg attributes so that "errors" don't appear on non-Windows platforms.
+    import winreg
+
+    user_key_path = r"Environment"
+    system_key_path = r"System\CurrentControlSet\Control\Session Manager\Environment"
+    new_path = ""
+
+    # Read user PATH
+    try:
+        reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, user_key_path, 0, winreg.KEY_READ)  # type: ignore[reportAttributeAccessIssue]
+        user_path, _ = winreg.QueryValueEx(reg_key, "PATH")  # type: ignore[reportAttributeAccessIssue]
+        winreg.CloseKey(reg_key)  # type: ignore[reportAttributeAccessIssue]
+    except Exception:
+        user_path = ""
+
+    # Read system PATH
+    try:
+        reg_key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, system_key_path, 0, winreg.KEY_READ)  # type: ignore[reportAttributeAccessIssue]
+        system_path, _ = winreg.QueryValueEx(reg_key, "PATH")  # type: ignore[reportAttributeAccessIssue]
+        winreg.CloseKey(reg_key)  # type: ignore[reportAttributeAccessIssue]
+    except Exception:
+        system_path = ""
+
+    # Merge user and system PATHs (system first, then user)
+    if system_path and user_path:
+        new_path = system_path + ";" + user_path
+    elif system_path:
+        new_path = system_path
+    elif user_path:
+        new_path = user_path
+
+    if new_path:
+        os.environ["PATH"] = new_path
 
 
 def get_rclone_version() -> Optional[str]:

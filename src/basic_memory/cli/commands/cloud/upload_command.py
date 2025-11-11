@@ -43,6 +43,22 @@ def upload(
         "--sync/--no-sync",
         help="Sync project after upload (default: true)",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show detailed information about file filtering and upload",
+    ),
+    no_gitignore: bool = typer.Option(
+        False,
+        "--no-gitignore",
+        help="Skip .gitignore patterns (still respects .bmignore)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show what would be uploaded without actually uploading",
+    ),
 ) -> None:
     """Upload local files or directories to cloud project via WebDAV.
 
@@ -50,6 +66,9 @@ def upload(
       bm cloud upload ~/my-notes --project research
       bm cloud upload notes.md --project research --create-project
       bm cloud upload ~/docs --project work --no-sync
+      bm cloud upload ./history --project proto --verbose
+      bm cloud upload ./notes --project work --no-gitignore
+      bm cloud upload ./files --project test --dry-run
     """
 
     async def _upload():
@@ -59,7 +78,7 @@ def upload(
                 console.print(f"[blue]Creating cloud project '{project}'...[/blue]")
                 try:
                     await create_cloud_project(project)
-                    console.print(f"[green]✓ Created project '{project}'[/green]")
+                    console.print(f"[green]Created project '{project}'[/green]")
                 except Exception as e:
                     console.print(f"[red]Failed to create project: {e}[/red]")
                     raise typer.Exit(1)
@@ -72,20 +91,32 @@ def upload(
                 )
                 raise typer.Exit(1)
 
-        # Perform upload
-        console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
-        success = await upload_path(path, project)
+        # Perform upload (or dry run)
+        if dry_run:
+            console.print(
+                f"[yellow]DRY RUN: Showing what would be uploaded to '{project}'[/yellow]"
+            )
+        else:
+            console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
+
+        success = await upload_path(
+            path, project, verbose=verbose, use_gitignore=not no_gitignore, dry_run=dry_run
+        )
         if not success:
             console.print("[red]Upload failed[/red]")
             raise typer.Exit(1)
 
-        console.print(f"[green]✅ Successfully uploaded to '{project}'[/green]")
+        if dry_run:
+            console.print("[yellow]DRY RUN complete - no files were uploaded[/yellow]")
+        else:
+            console.print(f"[green]Successfully uploaded to '{project}'[/green]")
 
-        # Sync project if requested
-        if sync:
+        # Sync project if requested (skip on dry run)
+        # Force full scan after bisync to ensure database is up-to-date with synced files
+        if sync and not dry_run:
             console.print(f"[blue]Syncing project '{project}'...[/blue]")
             try:
-                await sync_project(project)
+                await sync_project(project, force_full=True)
             except Exception as e:
                 console.print(f"[yellow]Warning: Sync failed: {e}[/yellow]")
                 console.print("[dim]Files uploaded but may not be indexed yet[/dim]")

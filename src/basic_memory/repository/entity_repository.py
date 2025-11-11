@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -61,6 +62,23 @@ class EntityRepository(Repository[Entity]):
             .options(*self.get_load_options())
         )
         return await self.find_one(query)
+
+    async def find_by_checksum(self, checksum: str) -> Sequence[Entity]:
+        """Find entities with the given checksum.
+
+        Used for move detection - finds entities that may have been moved to a new path.
+        Multiple entities may have the same checksum if files were copied.
+
+        Args:
+            checksum: File content checksum to search for
+
+        Returns:
+            Sequence of entities with matching checksum (may be empty)
+        """
+        query = self.select().where(Entity.checksum == checksum)
+        # Don't load relationships for move detection - we only need file_path and checksum
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
 
     async def delete_by_file_path(self, file_path: Union[Path, str]) -> bool:
         """Delete entity with the provided file_path.
@@ -135,7 +153,20 @@ class EntityRepository(Repository[Entity]):
                     )
                 return found
 
-            except IntegrityError:
+            except IntegrityError as e:
+                # Check if this is a FOREIGN KEY constraint failure
+                error_str = str(e)
+                if "FOREIGN KEY constraint failed" in error_str:
+                    # Import locally to avoid circular dependency (repository -> services -> repository)
+                    from basic_memory.services.exceptions import SyncFatalError
+
+                    # Project doesn't exist in database - this is a fatal sync error
+                    raise SyncFatalError(
+                        f"Cannot sync file '{entity.file_path}': "
+                        f"project_id={entity.project_id} does not exist in database. "
+                        f"The project may have been deleted. This sync will be terminated."
+                    ) from e
+
                 await session.rollback()
 
                 # Re-query after rollback to get a fresh, attached entity
@@ -150,31 +181,53 @@ class EntityRepository(Repository[Entity]):
 
                 if existing_entity:
                     # File path conflict - update the existing entity
-                    for key, value in {
-                        "title": entity.title,
-                        "entity_type": entity.entity_type,
-                        "entity_metadata": entity.entity_metadata,
-                        "content_type": entity.content_type,
-                        "permalink": entity.permalink,
-                        "checksum": entity.checksum,
-                        "updated_at": entity.updated_at,
-                    }.items():
-                        setattr(existing_entity, key, value)
+                    logger.debug(
+                        f"Resolving file_path conflict for {entity.file_path}, "
+                        f"entity_id={existing_entity.id}, observations={len(entity.observations)}"
+                    )
+                    # Use merge to avoid session state conflicts
+                    # Set the ID to update existing entity
+                    entity.id = existing_entity.id
 
-                    # Clear and re-add observations
-                    existing_entity.observations.clear()
+                    # Ensure observations reference the correct entity_id
                     for obs in entity.observations:
                         obs.entity_id = existing_entity.id
-                        existing_entity.observations.append(obs)
+                        # Clear any existing ID to force INSERT as new observation
+                        obs.id = None
+
+                    # Merge the entity which will update the existing one
+                    merged_entity = await session.merge(entity)
 
                     await session.commit()
-                    return existing_entity
+
+                    # Re-query to get proper relationships loaded
+                    final_result = await session.execute(
+                        select(Entity)
+                        .where(Entity.id == merged_entity.id)
+                        .options(*self.get_load_options())
+                    )
+                    return final_result.scalar_one()
 
                 else:
                     # No file_path conflict - must be permalink conflict
                     # Generate unique permalink and retry
                     entity = await self._handle_permalink_conflict(entity, session)
                     return entity
+
+    async def get_all_file_paths(self) -> List[str]:
+        """Get all file paths for this project - optimized for deletion detection.
+
+        Returns only file_path strings without loading entities or relationships.
+        Used by streaming sync to detect deleted files efficiently.
+
+        Returns:
+            List of file_path strings for all entities in the project
+        """
+        query = select(Entity.file_path)
+        query = self._add_project_filter(query)
+
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
 
     async def get_distinct_directories(self) -> List[str]:
         """Extract unique directory paths from file_path column.

@@ -644,3 +644,169 @@ async def test_find_by_directory_prefix_basic_fields_only(
     assert entity.entity_type == "test"
     assert entity.content_type == "text/markdown"
     assert entity.updated_at is not None
+
+
+@pytest.mark.asyncio
+async def test_get_all_file_paths(entity_repository: EntityRepository, session_maker):
+    """Test getting all file paths for deletion detection during sync."""
+    # Create test entities with various file paths
+    async with db.scoped_session(session_maker) as session:
+        entities = [
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 1",
+                entity_type="test",
+                permalink="docs/file1",
+                file_path="docs/file1.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 2",
+                entity_type="test",
+                permalink="specs/file2",
+                file_path="specs/file2.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="File 3",
+                entity_type="test",
+                permalink="notes/file3",
+                file_path="notes/file3.md",
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        ]
+        session.add_all(entities)
+        await session.flush()
+
+    # Get all file paths
+    file_paths = await entity_repository.get_all_file_paths()
+
+    # Verify results
+    assert isinstance(file_paths, list)
+    assert len(file_paths) == 3
+    assert set(file_paths) == {"docs/file1.md", "specs/file2.md", "notes/file3.md"}
+
+
+@pytest.mark.asyncio
+async def test_get_all_file_paths_empty_db(entity_repository: EntityRepository):
+    """Test getting all file paths when database is empty."""
+    file_paths = await entity_repository.get_all_file_paths()
+    assert file_paths == []
+
+
+@pytest.mark.asyncio
+async def test_get_all_file_paths_performance(entity_repository: EntityRepository, session_maker):
+    """Test that get_all_file_paths doesn't load entities or relationships.
+
+    This method is optimized for deletion detection during streaming sync.
+    It should only query file_path strings, not full entity objects.
+    """
+    # Create test entity with observations and relations
+    async with db.scoped_session(session_maker) as session:
+        # Create entities
+        entity1 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 1",
+            entity_type="test",
+            permalink="test/entity1",
+            file_path="test/entity1.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        entity2 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 2",
+            entity_type="test",
+            permalink="test/entity2",
+            file_path="test/entity2.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add_all([entity1, entity2])
+        await session.flush()
+
+        # Add observations to entity1
+        observation = Observation(
+            entity_id=entity1.id,
+            content="Test observation",
+            category="note",
+        )
+        session.add(observation)
+
+        # Add relation between entities
+        relation = Relation(
+            from_id=entity1.id,
+            to_id=entity2.id,
+            to_name=entity2.title,
+            relation_type="relates_to",
+        )
+        session.add(relation)
+        await session.flush()
+
+    # Get all file paths - should be fast and not load relationships
+    file_paths = await entity_repository.get_all_file_paths()
+
+    # Verify results - just file paths, no entities or relationships loaded
+    assert len(file_paths) == 2
+    assert set(file_paths) == {"test/entity1.md", "test/entity2.md"}
+
+    # Result should be list of strings, not entity objects
+    for path in file_paths:
+        assert isinstance(path, str)
+
+
+@pytest.mark.asyncio
+async def test_get_all_file_paths_project_isolation(
+    entity_repository: EntityRepository, session_maker
+):
+    """Test that get_all_file_paths only returns paths from the current project."""
+    # Create entities in the repository's project
+    async with db.scoped_session(session_maker) as session:
+        entity1 = Entity(
+            project_id=entity_repository.project_id,
+            title="Project 1 File",
+            entity_type="test",
+            permalink="test/file1",
+            file_path="test/file1.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity1)
+        await session.flush()
+
+        # Create a second project
+        project2 = Project(name="other-project", path="/tmp/other")
+        session.add(project2)
+        await session.flush()
+
+        # Create entity in different project
+        entity2 = Entity(
+            project_id=project2.id,
+            title="Project 2 File",
+            entity_type="test",
+            permalink="test/file2",
+            file_path="test/file2.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity2)
+        await session.flush()
+
+    # Get all file paths for project 1
+    file_paths = await entity_repository.get_all_file_paths()
+
+    # Should only include files from project 1
+    assert len(file_paths) == 1
+    assert file_paths == ["test/file1.md"]

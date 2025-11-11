@@ -1198,3 +1198,160 @@ async def test_add_project_nested_validation_with_project_root(
             # Clean up
             if parent_project_name in project_service.projects:
                 await project_service.remove_project(parent_project_name)
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_removes_db_only_projects(project_service: ProjectService):
+    """Test that synchronize_projects removes projects that exist in DB but not in config.
+
+    This is a regression test for issue #193 where deleted projects would be re-added
+    to config during synchronization, causing them to reappear after deletion.
+    Config is the source of truth - if a project is deleted from config, it should be
+    removed from the database during synchronization.
+    """
+    test_project_name = f"test-db-only-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        test_project_path = str(test_root / "test-db-only")
+
+        # Make sure the test directory exists
+        os.makedirs(test_project_path, exist_ok=True)
+
+        try:
+            # Add project to database only (not to config) - simulating orphaned DB entry
+            project_data = {
+                "name": test_project_name,
+                "path": test_project_path,
+                "permalink": test_project_name.lower().replace(" ", "-"),
+                "is_active": True,
+            }
+            await project_service.repository.create(project_data)
+
+            # Verify it exists in DB but not in config
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            assert db_project is not None
+            assert test_project_name not in project_service.projects
+
+            # Call synchronize_projects - this should remove the orphaned DB entry
+            # because config is the source of truth
+            await project_service.synchronize_projects()
+
+            # Verify project was removed from database
+            db_project_after = await project_service.repository.get_by_name(test_project_name)
+            assert db_project_after is None, (
+                "Project should be removed from DB when not in config (config is source of truth)"
+            )
+
+            # Verify it's still not in config
+            assert test_project_name not in project_service.projects
+
+        finally:
+            # Clean up if needed
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            if db_project:
+                await project_service.repository.delete(db_project.id)
+
+
+@pytest.mark.asyncio
+async def test_remove_project_with_delete_notes_false(project_service: ProjectService):
+    """Test that remove_project with delete_notes=False keeps directory intact."""
+    test_project_name = f"test-remove-keep-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        test_project_path = test_root / "test-project"
+        test_project_path.mkdir()
+        test_file = test_project_path / "test.md"
+        test_file.write_text("# Test Note")
+
+        try:
+            # Add project
+            await project_service.add_project(test_project_name, str(test_project_path))
+
+            # Verify project exists
+            assert test_project_name in project_service.projects
+            assert test_project_path.exists()
+            assert test_file.exists()
+
+            # Remove project without deleting notes (default behavior)
+            await project_service.remove_project(test_project_name, delete_notes=False)
+
+            # Verify project is removed from config/db
+            assert test_project_name not in project_service.projects
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            assert db_project is None
+
+            # Verify directory and files still exist
+            assert test_project_path.exists()
+            assert test_file.exists()
+
+        finally:
+            # Cleanup happens automatically with temp_dir context manager
+            pass
+
+
+@pytest.mark.asyncio
+async def test_remove_project_with_delete_notes_true(project_service: ProjectService):
+    """Test that remove_project with delete_notes=True deletes directory."""
+    test_project_name = f"test-remove-delete-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_root = Path(temp_dir)
+        test_project_path = test_root / "test-project"
+        test_project_path.mkdir()
+        test_file = test_project_path / "test.md"
+        test_file.write_text("# Test Note")
+
+        try:
+            # Add project
+            await project_service.add_project(test_project_name, str(test_project_path))
+
+            # Verify project exists
+            assert test_project_name in project_service.projects
+            assert test_project_path.exists()
+            assert test_file.exists()
+
+            # Remove project with delete_notes=True
+            await project_service.remove_project(test_project_name, delete_notes=True)
+
+            # Verify project is removed from config/db
+            assert test_project_name not in project_service.projects
+            db_project = await project_service.repository.get_by_name(test_project_name)
+            assert db_project is None
+
+            # Verify directory and files are deleted
+            assert not test_project_path.exists()
+
+        finally:
+            # Cleanup happens automatically with temp_dir context manager
+            pass
+
+
+@pytest.mark.asyncio
+async def test_remove_project_delete_notes_missing_directory(project_service: ProjectService):
+    """Test that remove_project with delete_notes=True handles missing directory gracefully."""
+    test_project_name = f"test-remove-missing-{os.urandom(4).hex()}"
+    test_project_path = f"/tmp/nonexistent-directory-{os.urandom(8).hex()}"
+
+    try:
+        # Add project pointing to non-existent path
+        await project_service.add_project(test_project_name, test_project_path)
+
+        # Verify project exists in config/db
+        assert test_project_name in project_service.projects
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is not None
+
+        # Remove project with delete_notes=True (should not fail even if dir doesn't exist)
+        await project_service.remove_project(test_project_name, delete_notes=True)
+
+        # Verify project is removed from config/db
+        assert test_project_name not in project_service.projects
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is None
+
+    finally:
+        # Ensure cleanup
+        if test_project_name in project_service.projects:
+            try:
+                project_service.config_manager.remove_project(test_project_name)
+            except Exception:
+                pass

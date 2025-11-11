@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.services.exceptions import SyncFatalError
 
 
 @pytest.mark.asyncio
@@ -436,3 +437,32 @@ async def test_upsert_entity_permalink_conflict_within_project_only(session_make
     assert result1.project_id == project1.id
     assert result2.project_id == project2.id
     assert result3.project_id == project1.id
+
+
+@pytest.mark.asyncio
+async def test_upsert_entity_with_invalid_project_id(entity_repository: EntityRepository):
+    """Test that upserting with non-existent project_id raises clear error.
+
+    This tests the fix for issue #188 where sync fails with FOREIGN KEY constraint
+    violations when a project is deleted during sync operations.
+    """
+    # Create entity with non-existent project_id
+    entity = Entity(
+        title="Test Entity",
+        entity_type="note",
+        file_path="test.md",
+        permalink="test",
+        project_id=99999,  # This project doesn't exist
+        content_type="text/markdown",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    # Should raise SyncFatalError with clear message about missing project
+    with pytest.raises(SyncFatalError) as exc_info:
+        await entity_repository.upsert_entity(entity)
+
+    error_msg = str(exc_info.value)
+    assert "project_id=99999 does not exist" in error_msg
+    assert "project may have been deleted" in error_msg.lower()
+    assert "sync will be terminated" in error_msg.lower()

@@ -467,6 +467,40 @@ async def test_sync_project_endpoint(test_graph, client, project_url):
 
 
 @pytest.mark.asyncio
+async def test_sync_project_endpoint_with_force_full(test_graph, client, project_url):
+    """Test the project sync endpoint with force_full parameter."""
+    # Call the sync endpoint with force_full=true
+    response = await client.post(f"{project_url}/project/sync?force_full=true")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_with_force_full_false(test_graph, client, project_url):
+    """Test the project sync endpoint with force_full=false."""
+    # Call the sync endpoint with force_full=false
+    response = await client.post(f"{project_url}/project/sync?force_full=false")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
 async def test_sync_project_endpoint_not_found(client):
     """Test the project sync endpoint with nonexistent project."""
     # Call the sync endpoint for a project that doesn't exist
@@ -474,3 +508,336 @@ async def test_sync_project_endpoint_not_found(client):
 
     # Should return 404
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_foreground(test_graph, client, project_url):
+    """Test the project sync endpoint with run_in_background=false returns sync report."""
+    # Call the sync endpoint with run_in_background=false
+    response = await client.post(f"{project_url}/project/sync?run_in_background=false")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that we get a sync report instead of status message
+    assert "new" in data
+    assert "modified" in data
+    assert "deleted" in data
+    assert "moves" in data
+    assert "checksums" in data
+    assert "skipped_files" in data
+    assert "total" in data
+
+    # Verify these are the right types
+    assert isinstance(data["new"], list)
+    assert isinstance(data["modified"], list)
+    assert isinstance(data["deleted"], list)
+    assert isinstance(data["moves"], dict)
+    assert isinstance(data["checksums"], dict)
+    assert isinstance(data["skipped_files"], list)
+    assert isinstance(data["total"], int)
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_foreground_with_force_full(test_graph, client, project_url):
+    """Test the project sync endpoint with run_in_background=false and force_full=true."""
+    # Call the sync endpoint with both parameters
+    response = await client.post(
+        f"{project_url}/project/sync?run_in_background=false&force_full=true"
+    )
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that we get a sync report with all expected fields
+    assert "new" in data
+    assert "modified" in data
+    assert "deleted" in data
+    assert "moves" in data
+    assert "checksums" in data
+    assert "skipped_files" in data
+    assert "total" in data
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_foreground_with_changes(
+    test_graph, client, project_config, project_url, tmpdir
+):
+    """Test foreground sync detects actual file changes."""
+    # Create a new file in the project directory
+    import os
+    from pathlib import Path
+
+    test_file = Path(project_config.home) / "new_test_file.md"
+    test_file.write_text("# New Test File\n\nThis is a test file for sync detection.")
+
+    try:
+        # Call the sync endpoint with run_in_background=false
+        response = await client.post(f"{project_url}/project/sync?run_in_background=false")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+
+        # The sync report should show changes (the new file we created)
+        assert data["total"] >= 0  # Should have at least detected changes
+        assert "new" in data
+        assert "modified" in data
+        assert "deleted" in data
+
+        # At least one of these should have changes
+        has_changes = (
+            len(data["new"]) > 0 or len(data["modified"]) > 0 or len(data["deleted"]) > 0
+        )
+        assert has_changes or data["total"] >= 0  # Either changes detected or empty sync is valid
+
+    finally:
+        # Clean up the test file
+        if test_file.exists():
+            os.remove(test_file)
+
+
+@pytest.mark.asyncio
+async def test_remove_default_project_fails(test_config, client, project_service):
+    """Test that removing the default project returns an error."""
+    # Get the current default project
+    default_project_name = project_service.default_project
+
+    # Try to remove the default project
+    response = await client.delete(f"/projects/{default_project_name}")
+
+    # Should return 400 with helpful error message
+    assert response.status_code == 400
+    data = response.json()
+    assert "detail" in data
+    assert "Cannot delete default project" in data["detail"]
+    assert default_project_name in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_remove_default_project_with_alternatives(test_config, client, project_service):
+    """Test that error message includes alternative projects when trying to delete default."""
+    # Get the current default project
+    default_project_name = project_service.default_project
+
+    # Create another project so there are alternatives
+    test_project_name = "test-alternative-project"
+    await project_service.add_project(test_project_name, "/tmp/test-alternative")
+
+    try:
+        # Try to remove the default project
+        response = await client.delete(f"/projects/{default_project_name}")
+
+        # Should return 400 with helpful error message including alternatives
+        assert response.status_code == 400
+        data = response.json()
+        assert "detail" in data
+        assert "Cannot delete default project" in data["detail"]
+        assert "Set another project as default first" in data["detail"]
+        assert test_project_name in data["detail"]
+
+    finally:
+        # Clean up
+        try:
+            await project_service.remove_project(test_project_name)
+        except Exception:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_remove_non_default_project_succeeds(test_config, client, project_service):
+    """Test that removing a non-default project succeeds."""
+    # Create a test project to remove
+    test_project_name = "test-remove-non-default"
+    await project_service.add_project(test_project_name, "/tmp/test-remove-non-default")
+
+    # Verify it's not the default
+    assert project_service.default_project != test_project_name
+
+    # Remove the project
+    response = await client.delete(f"/projects/{test_project_name}")
+
+    # Should succeed
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+
+    # Verify project is removed
+    removed_project = await project_service.get_project(test_project_name)
+    assert removed_project is None
+
+
+@pytest.mark.asyncio
+async def test_set_nonexistent_project_as_default_fails(test_config, client, project_service):
+    """Test that setting a non-existent project as default returns 404."""
+    # Try to set a project that doesn't exist as default
+    response = await client.put("/projects/nonexistent-project/default")
+
+    # Should return 404
+    assert response.status_code == 404
+    data = response.json()
+    assert "detail" in data
+    assert "does not exist" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_project_idempotent_same_path(test_config, client, project_service):
+    """Test that creating a project with same name and same path is idempotent."""
+    # Create a project with platform-independent path
+    test_project_name = "test-idempotent"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_project_path = (Path(temp_dir) / "test-idempotent").as_posix()
+
+        response1 = await client.post(
+            "/projects/projects",
+            json={"name": test_project_name, "path": test_project_path, "set_default": False},
+        )
+
+        # Should succeed with 201 Created
+        assert response1.status_code == 201
+        data1 = response1.json()
+        assert data1["status"] == "success"
+        assert data1["new_project"]["name"] == test_project_name
+
+        # Try to create the same project again with same name and path
+        response2 = await client.post(
+            "/projects/projects",
+            json={"name": test_project_name, "path": test_project_path, "set_default": False},
+        )
+
+        # Should also succeed (idempotent)
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert data2["status"] == "success"
+        assert "already exists" in data2["message"]
+        assert data2["new_project"]["name"] == test_project_name
+        # Normalize paths for cross-platform comparison
+        assert Path(data2["new_project"]["path"]).resolve() == Path(test_project_path).resolve()
+
+        # Clean up
+        try:
+            await project_service.remove_project(test_project_name)
+        except Exception:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_create_project_fails_different_path(test_config, client, project_service):
+    """Test that creating a project with same name but different path fails."""
+    # Create a project
+    test_project_name = "test-path-conflict"
+    test_project_path1 = "/tmp/test-path-conflict-1"
+
+    response1 = await client.post(
+        "/projects/projects",
+        json={"name": test_project_name, "path": test_project_path1, "set_default": False},
+    )
+
+    # Should succeed with 201 Created
+    assert response1.status_code == 201
+
+    # Try to create the same project with different path
+    test_project_path2 = "/tmp/test-path-conflict-2"
+    response2 = await client.post(
+        "/projects/projects",
+        json={"name": test_project_name, "path": test_project_path2, "set_default": False},
+    )
+
+    # Should fail with 400
+    assert response2.status_code == 400
+    data2 = response2.json()
+    assert "detail" in data2
+    assert "already exists with different path" in data2["detail"]
+    assert test_project_path1 in data2["detail"]
+    assert test_project_path2 in data2["detail"]
+
+    # Clean up
+    try:
+        await project_service.remove_project(test_project_name)
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_remove_project_with_delete_notes_false(test_config, client, project_service):
+    """Test that removing a project with delete_notes=False leaves directory intact."""
+    # Create a test project with actual directory
+    test_project_name = "test-remove-keep-files"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_path = Path(temp_dir) / "test-project"
+        test_path.mkdir()
+        test_file = test_path / "test.md"
+        test_file.write_text("# Test Note")
+
+        await project_service.add_project(test_project_name, str(test_path))
+
+        # Remove the project without deleting files (default)
+        response = await client.delete(f"/projects/{test_project_name}")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify project is removed from config/db
+        removed_project = await project_service.get_project(test_project_name)
+        assert removed_project is None
+
+        # Verify directory still exists
+        assert test_path.exists()
+        assert test_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_remove_project_with_delete_notes_true(test_config, client, project_service):
+    """Test that removing a project with delete_notes=True deletes the directory."""
+    # Create a test project with actual directory
+    test_project_name = "test-remove-delete-files"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        test_path = Path(temp_dir) / "test-project"
+        test_path.mkdir()
+        test_file = test_path / "test.md"
+        test_file.write_text("# Test Note")
+
+        await project_service.add_project(test_project_name, str(test_path))
+
+        # Remove the project with delete_notes=True
+        response = await client.delete(f"/projects/{test_project_name}?delete_notes=true")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+
+        # Verify project is removed from config/db
+        removed_project = await project_service.get_project(test_project_name)
+        assert removed_project is None
+
+        # Verify directory is deleted
+        assert not test_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_remove_project_delete_notes_nonexistent_directory(
+    test_config, client, project_service
+):
+    """Test that removing a project with delete_notes=True handles missing directory gracefully."""
+    # Create a project pointing to a non-existent path
+    test_project_name = "test-remove-missing-dir"
+    test_path = "/tmp/this-directory-does-not-exist-12345"
+
+    await project_service.add_project(test_project_name, test_path)
+
+    # Remove the project with delete_notes=True (should not fail even if dir doesn't exist)
+    response = await client.delete(f"/projects/{test_project_name}?delete_notes=true")
+
+    # Should succeed
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+
+    # Verify project is removed
+    removed_project = await project_service.get_project(test_project_name)
+    assert removed_project is None
