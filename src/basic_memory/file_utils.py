@@ -177,18 +177,22 @@ def dump_frontmatter(post: frontmatter.Post) -> str:
     """
     Serialize frontmatter.Post to markdown with Obsidian-compatible YAML format.
 
-    This function ensures that tags are formatted as YAML lists instead of JSON arrays:
+    This function ensures that:
+    1. Tags are formatted as YAML lists instead of JSON arrays
+    2. String values are properly quoted to handle special characters (colons, etc.)
 
     Good (Obsidian compatible):
     ---
+    title: "L2 Governance Core (Split: Core)"
     tags:
     - system
     - overview
     - reference
     ---
 
-    Bad (current behavior):
+    Bad (causes parsing errors):
     ---
+    title: L2 Governance Core (Split: Core)  # Unquoted colon breaks YAML
     tags: ["system", "overview", "reference"]
     ---
 
@@ -203,8 +207,13 @@ def dump_frontmatter(post: frontmatter.Post) -> str:
         return post.content
 
     # Serialize YAML with block style for lists
+    # SafeDumper automatically quotes values with special characters (colons, etc.)
     yaml_str = yaml.dump(
-        post.metadata, sort_keys=False, allow_unicode=True, default_flow_style=False
+        post.metadata,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        Dumper=yaml.SafeDumper
     )
 
     # Construct the final markdown with frontmatter

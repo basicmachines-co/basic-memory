@@ -77,25 +77,6 @@ SQLite Database (Index)
 3. Files are parsed and indexed in SQLite
 4. MCP server exposes indexed data to AI
 5. AI can query, traverse, and update knowledge graph
-
-### Version 0.15.0 Changes
-
-**Breaking Change: Stateless Architecture**
-- All MCP tools now require explicit `project` parameter
-- No implicit project context carried between calls
-- Exception: `default_project_mode` config option enables fallback
-
-**Three-Tier Project Resolution**:
-1. CLI constraint: `--project name` flag (highest priority)
-2. Explicit parameter: `project="name"` in tool calls
-3. Default mode: `default_project_mode=true` in config (fallback)
-
-**Why This Matters**:
-- More predictable behavior across sessions
-- Explicit project selection prevents errors
-- Multi-project workflows more reliable
-- Single-project users can enable default mode for convenience
-
 ---
 
 ## Project Management

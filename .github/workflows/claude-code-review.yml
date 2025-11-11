@@ -71,9 +71,12 @@ jobs:
             - [ ] Proper error handling and logging
             - [ ] Performance considerations addressed
             - [ ] No sensitive data in logs or commits
+            
+            ## Compatability
+            - [ ] File path comparisons must be windows compatible
+            - [ ] Avoid using emojis and unicode characters in console and log output
 
             Read the CLAUDE.md file for detailed project context. For each checklist item, verify if it's satisfied and comment on any that need attention. Use inline comments for specific code issues and post a summary with checklist results.
 
           # Allow broader tool access for thorough code review
           claude_args: '--allowed-tools "Bash(gh pr:*),Bash(gh issue:*),Bash(gh api:*),Bash(git log:*),Bash(git show:*),Read,Grep,Glob"'
-

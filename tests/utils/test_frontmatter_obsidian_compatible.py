@@ -181,3 +181,100 @@ def test_roundtrip_compatibility():
     assert parsed_post.metadata["title"] == original_post.metadata["title"]
     assert parsed_post.metadata["tags"] == original_post.metadata["tags"]
     assert parsed_post.metadata["type"] == original_post.metadata["type"]
+
+
+def test_title_with_colon():
+    """Test that titles with colons are properly quoted and don't break YAML parsing."""
+    post = frontmatter.Post("Test content")
+    post.metadata["title"] = "L2 Governance Core (Split: Core)"
+    post.metadata["type"] = "note"
+
+    result = dump_frontmatter(post)
+
+    # PyYAML uses single quotes for values with special characters
+    assert "title: 'L2 Governance Core (Split: Core)'" in result
+
+    # Should be parseable back
+    parsed_post = frontmatter.loads(result)
+    assert parsed_post.metadata["title"] == "L2 Governance Core (Split: Core)"
+
+
+def test_title_starting_with_word_and_colon():
+    """Test that titles starting with word and colon are properly quoted."""
+    post = frontmatter.Post("Test content")
+    post.metadata["title"] = "Governance: Rootkeeper Manifest-Diff Prompt"
+    post.metadata["type"] = "note"
+
+    result = dump_frontmatter(post)
+
+    # PyYAML auto-quotes values with colons (uses single quotes by default)
+    assert "title: 'Governance: Rootkeeper Manifest-Diff Prompt'" in result
+
+    # Should be parseable back
+    parsed_post = frontmatter.loads(result)
+    assert parsed_post.metadata["title"] == "Governance: Rootkeeper Manifest-Diff Prompt"
+
+
+def test_multiple_colons_in_title():
+    """Test that titles with multiple colons are properly quoted."""
+    post = frontmatter.Post("Test content")
+    post.metadata["title"] = "API: HTTP: Response Codes: Overview"
+    post.metadata["type"] = "note"
+
+    result = dump_frontmatter(post)
+
+    # PyYAML auto-quotes values with colons
+    assert "title: 'API: HTTP: Response Codes: Overview'" in result
+
+    # Should be parseable back
+    parsed_post = frontmatter.loads(result)
+    assert parsed_post.metadata["title"] == "API: HTTP: Response Codes: Overview"
+
+
+def test_other_special_characters_in_title():
+    """Test that titles with other special YAML characters are properly quoted."""
+    special_chars_titles = [
+        "Title with @ symbol",
+        "Title with # hashtag",
+        "Title with & ampersand",
+        "Title with * asterisk",
+        "Title [with brackets]",
+        "Title {with braces}",
+        "Title with | pipe",
+        "Title with > greater",
+    ]
+
+    for title in special_chars_titles:
+        post = frontmatter.Post("Test content")
+        post.metadata["title"] = title
+        post.metadata["type"] = "note"
+
+        result = dump_frontmatter(post)
+
+        # Should be parseable without errors
+        parsed_post = frontmatter.loads(result)
+        assert parsed_post.metadata["title"] == title
+
+
+def test_all_string_values_quoted():
+    """Test that string values with special characters are automatically quoted."""
+    post = frontmatter.Post("Test content")
+    post.metadata["title"] = "Test: Title"
+    post.metadata["permalink"] = "test-permalink"
+    post.metadata["type"] = "note"
+    post.metadata["custom_field"] = "value: with colon"
+
+    result = dump_frontmatter(post)
+
+    # PyYAML auto-quotes values with special chars, leaves simple values unquoted
+    assert "title: 'Test: Title'" in result  # Has colon, gets quoted
+    assert "permalink: test-permalink" in result  # Simple value, no quotes
+    assert "type: note" in result  # Simple value, no quotes
+    assert "custom_field: 'value: with colon'" in result  # Has colon, gets quoted
+
+    # Should be parseable back correctly
+    parsed_post = frontmatter.loads(result)
+    assert parsed_post.metadata["title"] == "Test: Title"
+    assert parsed_post.metadata["permalink"] == "test-permalink"
+    assert parsed_post.metadata["type"] == "note"
+    assert parsed_post.metadata["custom_field"] == "value: with colon"

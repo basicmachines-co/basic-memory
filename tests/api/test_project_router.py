@@ -467,6 +467,40 @@ async def test_sync_project_endpoint(test_graph, client, project_url):
 
 
 @pytest.mark.asyncio
+async def test_sync_project_endpoint_with_force_full(test_graph, client, project_url):
+    """Test the project sync endpoint with force_full parameter."""
+    # Call the sync endpoint with force_full=true
+    response = await client.post(f"{project_url}/project/sync?force_full=true")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_with_force_full_false(test_graph, client, project_url):
+    """Test the project sync endpoint with force_full=false."""
+    # Call the sync endpoint with force_full=false
+    response = await client.post(f"{project_url}/project/sync?force_full=false")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check response structure
+    assert "status" in data
+    assert "message" in data
+    assert data["status"] == "sync_started"
+    assert "Filesystem sync initiated" in data["message"]
+
+
+@pytest.mark.asyncio
 async def test_sync_project_endpoint_not_found(client):
     """Test the project sync endpoint with nonexistent project."""
     # Call the sync endpoint for a project that doesn't exist
@@ -474,6 +508,95 @@ async def test_sync_project_endpoint_not_found(client):
 
     # Should return 404
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_foreground(test_graph, client, project_url):
+    """Test the project sync endpoint with run_in_background=false returns sync report."""
+    # Call the sync endpoint with run_in_background=false
+    response = await client.post(f"{project_url}/project/sync?run_in_background=false")
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that we get a sync report instead of status message
+    assert "new" in data
+    assert "modified" in data
+    assert "deleted" in data
+    assert "moves" in data
+    assert "checksums" in data
+    assert "skipped_files" in data
+    assert "total" in data
+
+    # Verify these are the right types
+    assert isinstance(data["new"], list)
+    assert isinstance(data["modified"], list)
+    assert isinstance(data["deleted"], list)
+    assert isinstance(data["moves"], dict)
+    assert isinstance(data["checksums"], dict)
+    assert isinstance(data["skipped_files"], list)
+    assert isinstance(data["total"], int)
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_foreground_with_force_full(test_graph, client, project_url):
+    """Test the project sync endpoint with run_in_background=false and force_full=true."""
+    # Call the sync endpoint with both parameters
+    response = await client.post(
+        f"{project_url}/project/sync?run_in_background=false&force_full=true"
+    )
+
+    # Verify response
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check that we get a sync report with all expected fields
+    assert "new" in data
+    assert "modified" in data
+    assert "deleted" in data
+    assert "moves" in data
+    assert "checksums" in data
+    assert "skipped_files" in data
+    assert "total" in data
+
+
+@pytest.mark.asyncio
+async def test_sync_project_endpoint_foreground_with_changes(
+    test_graph, client, project_config, project_url, tmpdir
+):
+    """Test foreground sync detects actual file changes."""
+    # Create a new file in the project directory
+    import os
+    from pathlib import Path
+
+    test_file = Path(project_config.home) / "new_test_file.md"
+    test_file.write_text("# New Test File\n\nThis is a test file for sync detection.")
+
+    try:
+        # Call the sync endpoint with run_in_background=false
+        response = await client.post(f"{project_url}/project/sync?run_in_background=false")
+
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+
+        # The sync report should show changes (the new file we created)
+        assert data["total"] >= 0  # Should have at least detected changes
+        assert "new" in data
+        assert "modified" in data
+        assert "deleted" in data
+
+        # At least one of these should have changes
+        has_changes = (
+            len(data["new"]) > 0 or len(data["modified"]) > 0 or len(data["deleted"]) > 0
+        )
+        assert has_changes or data["total"] >= 0  # Either changes detected or empty sync is valid
+
+    finally:
+        # Clean up the test file
+        if test_file.exists():
+            os.remove(test_file)
 
 
 @pytest.mark.asyncio

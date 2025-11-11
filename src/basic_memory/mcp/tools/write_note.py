@@ -28,8 +28,8 @@ async def write_note(
     content: str,
     folder: str,
     project: Optional[str] = None,
-    tags=None,
-    note_type: str = "note",
+    tags: list[str] | str | None = None,
+    entity_type: str = "note",
     context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.

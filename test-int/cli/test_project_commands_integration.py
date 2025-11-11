@@ -19,7 +19,7 @@ def test_project_list(app_config, test_project, config_manager):
         print(f"Exception: {result.exception}")
     assert result.exit_code == 0
     assert "test-project" in result.stdout
-    assert "✓" in result.stdout  # default marker
+    assert "[X]" in result.stdout  # default marker
 
 
 def test_project_info(app_config, test_project, config_manager):
@@ -114,8 +114,8 @@ def test_project_set_default(app_config, config_manager):
         # Verify in list
         result = runner.invoke(app, ["project", "list"])
         assert result.exit_code == 0
-        # The new project should have the checkmark now
+        # The new project should have the [X] marker now
         lines = result.stdout.split("\n")
         for line in lines:
             if "another-project" in line:
-                assert "✓" in line
+                assert "[X]" in line

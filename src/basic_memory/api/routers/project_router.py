@@ -18,6 +18,7 @@ from basic_memory.schemas.project_info import (
     ProjectInfoRequest,
     ProjectStatusResponse,
 )
+from basic_memory.utils import normalize_project_path
 
 # Router for resources in a specific project
 # The ProjectPathDep is used in the path as a prefix, so the request path is like /{project}/project/info
@@ -50,7 +51,7 @@ async def get_project(
 
     return ProjectItem(
         name=found_project.name,
-        path=found_project.path,
+        path=normalize_project_path(found_project.path),
         is_default=found_project.is_default or False,
     )
 
@@ -109,6 +110,10 @@ async def sync_project(
     background_tasks: BackgroundTasks,
     sync_service: SyncServiceDep,
     project_config: ProjectConfigDep,
+    force_full: bool = Query(
+        False, description="Force full scan, bypassing watermark optimization"
+    ),
+    run_in_background: bool = Query(True, description="Run in background")
 ):
     """Force project filesystem sync to database.
 
@@ -118,17 +123,30 @@ async def sync_project(
         background_tasks: FastAPI background tasks
         sync_service: Sync service for this project
         project_config: Project configuration
+        force_full: If True, force a full scan even if watermark exists
+        run_in_background: If True, run sync in background and return immediately
 
     Returns:
-        Response confirming sync was initiated
+        Response confirming sync was initiated (background) or SyncReportResponse (foreground)
     """
-    background_tasks.add_task(sync_service.sync, project_config.home, project_config.name)
-    logger.info(f"Filesystem sync initiated for project: {project_config.name}")
+    if run_in_background:
+        background_tasks.add_task(
+            sync_service.sync, project_config.home, project_config.name, force_full=force_full
+        )
+        logger.info(
+            f"Filesystem sync initiated for project: {project_config.name} (force_full={force_full})"
+        )
 
-    return {
-        "status": "sync_started",
-        "message": f"Filesystem sync initiated for project '{project_config.name}'",
-    }
+        return {
+            "status": "sync_started",
+            "message": f"Filesystem sync initiated for project '{project_config.name}'",
+        }
+    else:
+        report = await sync_service.sync(project_config.home, project_config.name, force_full=force_full)
+        logger.info(
+            f"Filesystem sync completed for project: {project_config.name} (force_full={force_full})"
+        )
+        return SyncReportResponse.from_sync_report(report)
 
 
 @project_router.post("/status", response_model=SyncReportResponse)
@@ -167,7 +185,7 @@ async def list_projects(
     project_items = [
         ProjectItem(
             name=project.name,
-            path=project.path,
+            path=normalize_project_path(project.path),
             is_default=project.is_default or False,
         )
         for project in projects
