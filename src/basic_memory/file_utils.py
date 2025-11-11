@@ -213,7 +213,7 @@ def dump_frontmatter(post: frontmatter.Post) -> str:
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
-        Dumper=yaml.SafeDumper
+        Dumper=yaml.SafeDumper,
     )
 
     # Construct the final markdown with frontmatter

@@ -113,7 +113,7 @@ async def sync_project(
     force_full: bool = Query(
         False, description="Force full scan, bypassing watermark optimization"
     ),
-    run_in_background: bool = Query(True, description="Run in background")
+    run_in_background: bool = Query(True, description="Run in background"),
 ):
     """Force project filesystem sync to database.
 
@@ -142,7 +142,9 @@ async def sync_project(
             "message": f"Filesystem sync initiated for project '{project_config.name}'",
         }
     else:
-        report = await sync_service.sync(project_config.home, project_config.name, force_full=force_full)
+        report = await sync_service.sync(
+            project_config.home, project_config.name, force_full=force_full
+        )
         logger.info(
             f"Filesystem sync completed for project: {project_config.name} (force_full={force_full})"
         )

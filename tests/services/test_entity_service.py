@@ -1315,7 +1315,9 @@ async def test_edit_entity_replace_section_strips_duplicate_header(
 
     # Count occurrences of "## Testing" - should only be 1
     testing_header_count = file_content.count("## Testing")
-    assert testing_header_count == 1, f"Expected 1 '## Testing' header, found {testing_header_count}"
+    assert testing_header_count == 1, (
+        f"Expected 1 '## Testing' header, found {testing_header_count}"
+    )
 
     assert "New content for testing section" in file_content
     assert "Original content" not in file_content

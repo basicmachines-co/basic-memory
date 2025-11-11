@@ -588,9 +588,7 @@ async def test_sync_project_endpoint_foreground_with_changes(
         assert "deleted" in data
 
         # At least one of these should have changes
-        has_changes = (
-            len(data["new"]) > 0 or len(data["modified"]) > 0 or len(data["deleted"]) > 0
-        )
+        has_changes = len(data["new"]) > 0 or len(data["modified"]) > 0 or len(data["deleted"]) > 0
         assert has_changes or data["total"] >= 0  # Either changes detected or empty sync is valid
 
     finally:
