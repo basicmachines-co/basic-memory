@@ -166,6 +166,7 @@ def project_bisync(
     Uses rclone bisync with balanced defaults:
     - conflict_resolve: newer (auto-resolve to most recent)
     - max_delete: 25 (safety limit)
+    - compare: modtime (ignore size differences from line ending conversions)
     - check_access: false (skip for performance)
 
     Args:
@@ -201,6 +202,7 @@ def project_bisync(
         "--resilient",
         "--conflict-resolve=newer",
         "--max-delete=25",
+        "--compare=modtime",  # Ignore size differences from line ending conversions
         "--filter-from",
         str(filter_path),
         "--workdir",
