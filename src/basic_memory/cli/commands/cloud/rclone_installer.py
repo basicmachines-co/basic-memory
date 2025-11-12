@@ -151,11 +151,25 @@ def install_rclone_windows() -> None:
         except RcloneInstallError:
             console.print("[yellow]scoop installation failed[/yellow]")
 
-    # No package manager available
-    raise RcloneInstallError(
-        "Could not install rclone automatically. Please install a package manager "
-        "(winget, chocolatey, or scoop) or install rclone manually from https://rclone.org/downloads/"
+    # No package manager available - provide detailed instructions
+    error_msg = (
+        "Could not install rclone automatically.\n\n"
+        "Windows requires a package manager to install rclone. Options:\n\n"
+        "1. Install winget (recommended, built into Windows 11):\n"
+        "   - Windows 11: Already installed\n"
+        "   - Windows 10: Install 'App Installer' from Microsoft Store\n"
+        "   - Then run: bm cloud setup\n\n"
+        "2. Install chocolatey:\n"
+        "   - Visit: https://chocolatey.org/install\n"
+        "   - Then run: bm cloud setup\n\n"
+        "3. Install scoop:\n"
+        "   - Visit: https://scoop.sh\n"
+        "   - Then run: bm cloud setup\n\n"
+        "4. Manual installation:\n"
+        "   - Download from: https://rclone.org/downloads/\n"
+        "   - Extract and add to PATH\n"
     )
+    raise RcloneInstallError(error_msg)
 
 
 def install_rclone(platform_override: Optional[str] = None) -> None:

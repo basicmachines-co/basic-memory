@@ -16,6 +16,7 @@ from typing import Optional
 
 from rich.console import Console
 
+from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
 from basic_memory.utils import normalize_project_path
 
 console = Console()
@@ -25,6 +26,21 @@ class RcloneError(Exception):
     """Exception raised for rclone command errors."""
 
     pass
+
+
+def check_rclone_installed() -> None:
+    """Check if rclone is installed and raise helpful error if not.
+
+    Raises:
+        RcloneError: If rclone is not installed with installation instructions
+    """
+    if not is_rclone_installed():
+        raise RcloneError(
+            "rclone is not installed.\n\n"
+            "Install rclone by running: bm cloud setup\n"
+            "Or install manually from: https://rclone.org/downloads/\n\n"
+            "Windows users: Ensure you have a package manager installed (winget, chocolatey, or scoop)"
+        )
 
 
 @dataclass
@@ -124,8 +140,10 @@ def project_sync(
         True if sync succeeded, False otherwise
 
     Raises:
-        RcloneError: If project has no local_sync_path configured
+        RcloneError: If project has no local_sync_path configured or rclone not installed
     """
+    check_rclone_installed()
+
     if not project.local_sync_path:
         raise RcloneError(f"Project {project.name} has no local_sync_path configured")
 
@@ -180,8 +198,10 @@ def project_bisync(
         True if bisync succeeded, False otherwise
 
     Raises:
-        RcloneError: If project has no local_sync_path or needs --resync
+        RcloneError: If project has no local_sync_path, needs --resync, or rclone not installed
     """
+    check_rclone_installed()
+
     if not project.local_sync_path:
         raise RcloneError(f"Project {project.name} has no local_sync_path configured")
 
@@ -249,8 +269,10 @@ def project_check(
         True if files match, False if differences found
 
     Raises:
-        RcloneError: If project has no local_sync_path configured
+        RcloneError: If project has no local_sync_path configured or rclone not installed
     """
+    check_rclone_installed()
+
     if not project.local_sync_path:
         raise RcloneError(f"Project {project.name} has no local_sync_path configured")
 
@@ -291,7 +313,10 @@ def project_ls(
 
     Raises:
         subprocess.CalledProcessError: If rclone command fails
+        RcloneError: If rclone is not installed
     """
+    check_rclone_installed()
+
     remote_path = get_project_remote(project, bucket_name)
     if path:
         remote_path = f"{remote_path}/{path}"
