@@ -63,7 +63,7 @@ class BasicMemoryConfig(BaseSettings):
 
     projects: Dict[str, str] = Field(
         default_factory=lambda: {
-            "main": Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")).as_posix()
+            "main": str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
         }
         if os.getenv("BASIC_MEMORY_HOME")
         else {},
@@ -196,9 +196,9 @@ class BasicMemoryConfig(BaseSettings):
         """Ensure configuration is valid after initialization."""
         # Ensure at least one project exists; if none exist then create main
         if not self.projects:  # pragma: no cover
-            self.projects["main"] = (
+            self.projects["main"] = str(
                 Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory"))
-            ).as_posix()
+            )
 
         # Ensure default project is valid (i.e. points to an existing project)
         if self.default_project not in self.projects:  # pragma: no cover
@@ -361,7 +361,7 @@ class ConfigManager:
 
         # Load config, modify it, and save it
         config = self.load_config()
-        config.projects[name] = project_path.as_posix()
+        config.projects[name] = str(project_path)
         self.save_config(config)
         return ProjectConfig(name=name, home=project_path)
 
