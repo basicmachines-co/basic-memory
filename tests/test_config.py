@@ -81,8 +81,8 @@ class TestBasicMemoryConfig:
 
         config = BasicMemoryConfig()
 
-        # Should use the exact value from environment variable
-        assert config.projects["main"] == relative_path
+        # Should normalize to platform-native path format
+        assert Path(config.projects["main"]) == Path(relative_path)
 
     def test_basic_memory_home_overrides_existing_main_project(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME is not used when a map is passed in the constructor."""
