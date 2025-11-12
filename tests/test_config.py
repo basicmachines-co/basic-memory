@@ -55,7 +55,7 @@ class TestBasicMemoryConfig:
 
         # Create config without main project
         other_path = str(config_home / "some" / "path")
-        config = BasicMemoryConfig(projects={"other": other_path})
+        config = BasicMemoryConfig(projects={"other": Path(other_path).as_posix()})
 
         # model_post_init should not add main project with BASIC_MEMORY_HOME
         assert "main" not in config.projects
