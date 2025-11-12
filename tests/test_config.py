@@ -382,3 +382,100 @@ class TestConfigManager:
             config = config_manager.load_config()
             assert config.cloud_projects == {}
             assert config.projects == {"main": str(temp_path / "main")}
+
+
+class TestPlatformNativePathSeparators:
+    """Test that config uses platform-native path separators."""
+
+    def test_project_paths_use_platform_native_separators_in_config(self, monkeypatch):
+        """Test that project paths use platform-native separators when created."""
+        import platform
+        import os
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Set up ConfigManager with temp directory
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create a project path
+            project_path = temp_path / "my" / "project"
+            project_path.mkdir(parents=True, exist_ok=True)
+
+            # Add project via ConfigManager
+            config = BasicMemoryConfig(projects={})
+            config.projects["test-project"] = str(project_path)
+            config_manager.save_config(config)
+
+            # Read the raw JSON file
+            import json
+
+            config_data = json.loads(config_manager.config_file.read_text())
+
+            # Verify path uses platform-native separators
+            saved_path = config_data["projects"]["test-project"]
+
+            # On Windows, should have backslashes; on Unix, forward slashes
+            if platform.system() == "Windows":
+                # Windows paths should contain backslashes
+                assert "\\" in saved_path or ":" in saved_path  # C:\\ or \\UNC
+                assert "/" not in saved_path.replace(":/", "")  # Exclude drive letter
+            else:
+                # Unix paths should use forward slashes
+                assert "/" in saved_path
+                # Should not force POSIX on non-Windows
+                assert saved_path == str(project_path)
+
+    def test_add_project_uses_platform_native_separators(self, monkeypatch):
+        """Test that ConfigManager.add_project() uses platform-native separators."""
+        import platform
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Set up ConfigManager
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Initialize with empty projects
+            initial_config = BasicMemoryConfig(projects={})
+            config_manager.save_config(initial_config)
+
+            # Add project
+            project_path = temp_path / "new" / "project"
+            config_manager.add_project("new-project", str(project_path))
+
+            # Load and verify
+            config = config_manager.load_config()
+            saved_path = config.projects["new-project"]
+
+            # Verify platform-native separators
+            if platform.system() == "Windows":
+                assert "\\" in saved_path or ":" in saved_path
+            else:
+                assert "/" in saved_path
+                assert saved_path == str(project_path)
+
+    def test_model_post_init_uses_platform_native_separators(self, config_home, monkeypatch):
+        """Test that model_post_init uses platform-native separators."""
+        import platform
+
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+
+        # Create config without projects (triggers model_post_init to add main)
+        config = BasicMemoryConfig(projects={})
+
+        # Verify main project path uses platform-native separators
+        main_path = config.projects["main"]
+
+        if platform.system() == "Windows":
+            # Windows: should have backslashes or drive letter
+            assert "\\" in main_path or ":" in main_path
+        else:
+            # Unix: should have forward slashes
+            assert "/" in main_path
