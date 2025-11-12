@@ -32,8 +32,24 @@ class TestBasicMemoryConfig:
         # Should use the custom path from environment variable
         assert config.projects["main"] == custom_path
 
-    def test_model_post_init_respects_basic_memory_home(self, config_home, monkeypatch):
-        """Test that model_post_init creates main project with BASIC_MEMORY_HOME when missing."""
+    def test_model_post_init_respects_basic_memory_home_creates_main(
+        self, config_home, monkeypatch
+    ):
+        """Test that model_post_init creates main project with BASIC_MEMORY_HOME when missing and no other projects."""
+        custom_path = str(config_home / "custom" / "memory" / "path")
+        monkeypatch.setenv("BASIC_MEMORY_HOME", custom_path)
+
+        # Create config without main project
+        config = BasicMemoryConfig()
+
+        # model_post_init should have added main project with BASIC_MEMORY_HOME
+        assert "main" in config.projects
+        assert config.projects["main"] == Path(custom_path).as_posix()
+
+    def test_model_post_init_respects_basic_memory_home_sets_non_main_default(
+        self, config_home, monkeypatch
+    ):
+        """Test that model_post_init does not create main project with BASIC_MEMORY_HOME when another project exists."""
         custom_path = str(config_home / "custom" / "memory" / "path")
         monkeypatch.setenv("BASIC_MEMORY_HOME", custom_path)
 
@@ -41,12 +57,12 @@ class TestBasicMemoryConfig:
         other_path = str(config_home / "some" / "path")
         config = BasicMemoryConfig(projects={"other": other_path})
 
-        # model_post_init should have added main project with BASIC_MEMORY_HOME
-        assert "main" in config.projects
-        assert config.projects["main"] == Path(custom_path).as_posix()
+        # model_post_init should not add main project with BASIC_MEMORY_HOME
+        assert "main" not in config.projects
+        assert config.projects["other"] == Path(other_path).as_posix()
 
     def test_model_post_init_fallback_without_basic_memory_home(self, config_home, monkeypatch):
-        """Test that model_post_init falls back to default when BASIC_MEMORY_HOME is not set."""
+        """Test that model_post_init can set a non-main default when BASIC_MEMORY_HOME is not set."""
         # Ensure BASIC_MEMORY_HOME is not set
         monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
 
@@ -54,10 +70,9 @@ class TestBasicMemoryConfig:
         other_path = (config_home / "some" / "path").as_posix()
         config = BasicMemoryConfig(projects={"other": other_path})
 
-        # model_post_init should have added main project with default path
-        expected_path = (config_home / "basic-memory").as_posix()
-        assert "main" in config.projects
-        assert config.projects["main"] == Path(expected_path).as_posix()
+        # model_post_init should not add main project, but "other" should now be the default
+        assert "main" not in config.projects
+        assert config.projects["other"] == Path(other_path).as_posix()
 
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""

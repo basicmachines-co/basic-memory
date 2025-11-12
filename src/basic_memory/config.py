@@ -64,7 +64,9 @@ class BasicMemoryConfig(BaseSettings):
     projects: Dict[str, str] = Field(
         default_factory=lambda: {
             "main": Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")).as_posix()
-        },
+        }
+        if os.getenv("BASIC_MEMORY_HOME")
+        else {},
         description="Mapping of project names to their filesystem paths",
     )
     default_project: str = Field(
