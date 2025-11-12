@@ -53,18 +53,18 @@ async def test_add_project_to_config(project_service: ProjectService, config_man
     test_project_name = f"config-project-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        test_path = (test_root / "config-project").as_posix()
+        test_path = test_root / "config-project"
 
         # Make sure directory exists
-        os.makedirs(test_path, exist_ok=True)
+        test_path.mkdir(parents=True, exist_ok=True)
 
         try:
             # Add a project to config only (using ConfigManager directly)
-            config_manager.add_project(test_project_name, test_path)
+            config_manager.add_project(test_project_name, str(test_path))
 
             # Verify it's in the config
             assert test_project_name in project_service.projects
-            assert project_service.projects[test_project_name] == test_path
+            assert Path(project_service.projects[test_project_name]) == test_path
 
         finally:
             # Clean up
@@ -79,23 +79,23 @@ async def test_update_project_path(project_service: ProjectService, config_manag
     test_project = f"path-update-test-project-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        original_path = (test_root / "original-path").as_posix()
-        new_path = (test_root / "new-path").as_posix()
+        original_path = test_root / "original-path"
+        new_path = test_root / "new-path"
 
         # Make sure directories exist
-        os.makedirs(original_path, exist_ok=True)
-        os.makedirs(new_path, exist_ok=True)
+        original_path.mkdir(parents=True, exist_ok=True)
+        new_path.mkdir(parents=True, exist_ok=True)
 
         try:
             # Add the project
-            await project_service.add_project(test_project, original_path)
+            await project_service.add_project(test_project, str(original_path))
 
             # Mock the update_project method to avoid issues with complex DB updates
             with patch.object(project_service, "update_project"):
                 # Just check if the project exists
                 project = await project_service.repository.get_by_name(test_project)
                 assert project is not None
-                assert project.path == original_path
+                assert Path(project.path) == original_path
 
             # Since we mock the update_project method, we skip verifying path updates
 

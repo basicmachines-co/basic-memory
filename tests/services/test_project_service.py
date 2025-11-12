@@ -77,18 +77,18 @@ async def test_project_operations_sync_methods(
     test_project_name = f"test-project-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        test_project_path = (test_root / "test-project").as_posix()
+        test_project_path = test_root / "test-project"
 
         # Make sure the test directory exists
-        os.makedirs(test_project_path, exist_ok=True)
+        test_project_path.mkdir(parents=True, exist_ok=True)
 
         try:
             # Test adding a project (using ConfigManager directly)
-            config_manager.add_project(test_project_name, test_project_path)
+            config_manager.add_project(test_project_name, str(test_project_path))
 
             # Verify it was added
             assert test_project_name in project_service.projects
-            assert project_service.projects[test_project_name] == test_project_path
+            assert Path(project_service.projects[test_project_name]) == test_project_path
 
             # Test setting as default
             original_default = project_service.default_project
@@ -173,24 +173,24 @@ async def test_add_project_async(project_service: ProjectService):
     test_project_name = f"test-async-project-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        test_project_path = (test_root / "test-async-project").as_posix()
+        test_project_path = test_root / "test-async-project"
 
         # Make sure the test directory exists
-        os.makedirs(test_project_path, exist_ok=True)
+        test_project_path.mkdir(parents=True, exist_ok=True)
 
         try:
             # Test adding a project
-            await project_service.add_project(test_project_name, test_project_path)
+            await project_service.add_project(test_project_name, str(test_project_path))
 
             # Verify it was added to config
             assert test_project_name in project_service.projects
-            assert project_service.projects[test_project_name] == test_project_path
+            assert Path(project_service.projects[test_project_name]) == test_project_path
 
             # Verify it was added to the database
             project = await project_service.repository.get_by_name(test_project_name)
             assert project is not None
             assert project.name == test_project_name
-            assert project.path == test_project_path
+            assert Path(project.path) == test_project_path
 
         finally:
             # Clean up
@@ -569,34 +569,34 @@ async def test_move_project(project_service: ProjectService):
     test_project_name = f"test-move-project-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        old_path = (test_root / "old-location").as_posix()
-        new_path = (test_root / "new-location").as_posix()
+        old_path = test_root / "old-location"
+        new_path = test_root / "new-location"
 
         # Create old directory
-        os.makedirs(old_path, exist_ok=True)
+        old_path.mkdir(parents=True, exist_ok=True)
 
         try:
             # Add project with initial path
-            await project_service.add_project(test_project_name, old_path)
+            await project_service.add_project(test_project_name, str(old_path))
 
             # Verify initial state
             assert test_project_name in project_service.projects
-            assert project_service.projects[test_project_name] == old_path
+            assert Path(project_service.projects[test_project_name]) == old_path
 
             project = await project_service.repository.get_by_name(test_project_name)
             assert project is not None
-            assert project.path == old_path
+            assert Path(project.path) == old_path
 
             # Move project to new location
-            await project_service.move_project(test_project_name, new_path)
+            await project_service.move_project(test_project_name, str(new_path))
 
             # Verify config was updated
-            assert project_service.projects[test_project_name] == new_path
+            assert Path(project_service.projects[test_project_name]) == new_path
 
             # Verify database was updated
             updated_project = await project_service.repository.get_by_name(test_project_name)
             assert updated_project is not None
-            assert updated_project.path == new_path
+            assert Path(updated_project.path) == new_path
 
             # Verify new directory was created
             assert os.path.exists(new_path)
@@ -624,17 +624,17 @@ async def test_move_project_db_mismatch(project_service: ProjectService):
     test_project_name = f"test-move-mismatch-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        old_path = (test_root / "old-location").as_posix()
-        new_path = (test_root / "new-location").as_posix()
+        old_path = test_root / "old-location"
+        new_path = test_root / "new-location"
 
         # Create directories
-        os.makedirs(old_path, exist_ok=True)
+        old_path.mkdir(parents=True, exist_ok=True)
 
         config_manager = project_service.config_manager
 
         try:
             # Add project to config only (not to database)
-            config_manager.add_project(test_project_name, old_path)
+            config_manager.add_project(test_project_name, str(old_path))
 
             # Verify it's in config but not in database
             assert test_project_name in project_service.projects
@@ -643,10 +643,10 @@ async def test_move_project_db_mismatch(project_service: ProjectService):
 
             # Try to move project - should fail and restore config
             with pytest.raises(ValueError, match="not found in database"):
-                await project_service.move_project(test_project_name, new_path)
+                await project_service.move_project(test_project_name, str(new_path))
 
             # Verify config was restored to original path
-            assert project_service.projects[test_project_name] == old_path
+            assert Path(project_service.projects[test_project_name]) == old_path
 
         finally:
             # Clean up
