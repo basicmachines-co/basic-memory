@@ -137,7 +137,32 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
             return frontmatter
 
         except yaml.YAMLError as e:
-            raise ParseError(f"Invalid YAML in frontmatter: {e}")
+            # Provide helpful error messages for common YAML mistakes (issue #431)
+            error_msg = str(e)
+            suggestions = []
+
+            # Check for common formatting errors
+            yaml_content = parts[1]
+            if "could not find expected ':'" in error_msg:
+                suggestions.append(
+                    "Missing space after colon - YAML requires 'key: value' not 'key:value'"
+                )
+                # Show specific line with the problem if available
+                for line in yaml_content.split("\n"):
+                    if ":" in line and not ": " in line:
+                        # Found a line with colon but no space after
+                        suggestions.append(f"Problem line: '{line.strip()}'")
+                        fixed_line = line.replace(":", ": ", 1)
+                        suggestions.append(f"Try: '{fixed_line.strip()}'")
+                        break
+
+            if suggestions:
+                suggestion_text = "\n  ".join(suggestions)
+                raise ParseError(
+                    f"Invalid YAML in frontmatter: {error_msg}\n\nSuggestions:\n  {suggestion_text}"
+                )
+            else:
+                raise ParseError(f"Invalid YAML in frontmatter: {error_msg}")
 
     except Exception as e:  # pragma: no cover
         if not isinstance(e, ParseError):
@@ -239,6 +264,47 @@ def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     text = re.sub(f"{re.escape(replacement)}+", replacement, text)
 
     return text.strip(replacement)
+
+
+def normalize_path_separators(path: str) -> str:
+    """
+    Normalize path separators to prevent double slashes and database conflicts.
+
+    This function addresses issue #431 where double slashes in paths like
+    'L3_design/emotion//biorhythm.md' cause UNIQUE constraint violations
+    in the database.
+
+    Args:
+        path: File path that may contain double slashes or mixed separators
+
+    Returns:
+        Path with normalized separators (single forward slashes)
+
+    Examples:
+        >>> normalize_path_separators("folder//file.md")
+        'folder/file.md'
+        >>> normalize_path_separators("path\\\\to\\\\file.md")
+        'path/to/file.md'
+        >>> normalize_path_separators("./folder/./file.md")
+        'folder/file.md'
+    """
+    if not path:
+        return ""
+
+    # Replace backslashes with forward slashes
+    normalized = path.replace("\\", "/")
+
+    # Remove leading ./ if present
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+
+    # Compress multiple slashes into single slashes
+    normalized = re.sub(r"/+", "/", normalized)
+
+    # Remove trailing slashes
+    normalized = normalized.rstrip("/")
+
+    return normalized
 
 
 def sanitize_for_folder(folder: str) -> str:

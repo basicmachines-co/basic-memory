@@ -24,7 +24,11 @@ from dateparser import parse
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from basic_memory.config import ConfigManager
-from basic_memory.file_utils import sanitize_for_filename, sanitize_for_folder
+from basic_memory.file_utils import (
+    sanitize_for_filename,
+    sanitize_for_folder,
+    normalize_path_separators,
+)
 from basic_memory.utils import generate_permalink
 
 
@@ -238,14 +242,19 @@ class Entity(BaseModel):
 
     @property
     def file_path(self):
-        """Get the file path for this entity based on its permalink."""
+        """Get the file path for this entity based on its permalink.
+
+        Returns normalized path to prevent double slashes (issue #431).
+        """
         safe_title = self.safe_title
         if self.content_type == "text/markdown":
-            return (
+            path = (
                 os.path.join(self.folder, f"{safe_title}.md") if self.folder else f"{safe_title}.md"
             )
         else:
-            return os.path.join(self.folder, safe_title) if self.folder else safe_title
+            path = os.path.join(self.folder, safe_title) if self.folder else safe_title
+        # Normalize to prevent double slashes that cause DB conflicts (issue #431)
+        return normalize_path_separators(path)
 
     @property
     def permalink(self) -> Optional[Permalink]:

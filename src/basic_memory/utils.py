@@ -272,6 +272,17 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     if tags is None:
         return []
 
+    # Handle dict objects (issue #431) - PyYAML can produce dicts for malformed YAML
+    # e.g., `tags:{key:value}` gets parsed as dict instead of failing
+    if isinstance(tags, dict):
+        logger.warning(
+            f"Tags provided as dict instead of list/string. "
+            f"Converting dict keys to tag list: {tags}. "
+            f"Expected format: 'tags: [tag1, tag2]' or 'tags: tag1, tag2'"
+        )
+        # Use dict keys as tags, ignore values
+        return [str(key).strip().lstrip("#") for key in tags.keys() if key]
+
     # Process list of tags
     if isinstance(tags, list):
         # First strip whitespace, then strip leading '#' characters to prevent accumulation

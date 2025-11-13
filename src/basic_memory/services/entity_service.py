@@ -588,7 +588,17 @@ class EntityService(BaseService[EntityModel]):
             # Validate count matches expected
             if actual_count != expected_replacements:
                 if actual_count == 0:
-                    raise ValueError(f"Text to replace not found: '{find_text}'")
+                    # Provide helpful context for debugging (issue #431)
+                    # Show a snippet of the content to help diagnose the mismatch
+                    content_preview = current_content[:500]
+                    if len(current_content) > 500:
+                        content_preview += "..."
+
+                    raise ValueError(
+                        f"Text to replace not found: '{find_text}'\n\n"
+                        f"Content preview (first 500 chars):\n{content_preview}\n\n"
+                        f"Suggestion: Use read_note() to view the full content and verify the exact text to find."
+                    )
                 else:
                     raise ValueError(
                         f"Expected {expected_replacements} occurrences of '{find_text}', "

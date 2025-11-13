@@ -16,6 +16,7 @@ from basic_memory.deps import (
     FileServiceDep,
     EntityRepositoryDep,
 )
+from basic_memory.file_utils import normalize_path_separators
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import normalize_memory_url
 from basic_memory.schemas.search import SearchQuery, SearchItemType
@@ -149,6 +150,9 @@ async def write_resource(
         JSON response with file information
     """
     try:
+        # Normalize file_path to prevent double slashes that cause DB conflicts (issue #431)
+        file_path = normalize_path_separators(file_path)
+
         # Get content from request body
 
         # Defensive type checking: ensure content is a string

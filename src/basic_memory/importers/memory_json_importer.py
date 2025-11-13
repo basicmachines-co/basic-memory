@@ -42,6 +42,20 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
             # First pass - collect entities and relations
             for line in source_data:
                 data = line
+
+                # Validate data structure (issue #431)
+                if not isinstance(data, dict):
+                    logger.warning(f"Skipping invalid data (not a dict): {data}")
+                    skipped_entities += 1
+                    continue
+
+                if "type" not in data:
+                    logger.warning(
+                        f"Skipping data missing 'type' field. Available fields: {list(data.keys())}"
+                    )
+                    skipped_entities += 1
+                    continue
+
                 if data["type"] == "entity":
                     # Handle different possible name keys
                     entity_name = data.get("name") or data.get("entityName") or data.get("id")
