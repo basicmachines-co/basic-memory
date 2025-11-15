@@ -50,7 +50,7 @@ The `app` fixture ensures FastAPI dependency overrides are active, and
 `mcp_server` provides the MCP server with proper project session initialization.
 """
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 import pytest
 import pytest_asyncio
@@ -58,7 +58,7 @@ from pathlib import Path
 
 from httpx import AsyncClient, ASGITransport
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager, DatabaseBackend
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -71,19 +71,67 @@ from basic_memory.deps import get_project_config, get_engine_factory, get_app_co
 from basic_memory.mcp import tools  # noqa: F401
 
 
-@pytest_asyncio.fixture(scope="function")
-async def engine_factory(tmp_path):
-    """Create a SQLite file engine factory for integration testing."""
-    db_path = tmp_path / "test.db"
-    async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (
-        engine,
-        session_maker,
-    ):
-        # Initialize database schema
-        from basic_memory.models.base import Base
+@pytest.fixture(
+    params=[
+        pytest.param("sqlite", id="sqlite"),
+        pytest.param("postgres", id="postgres", marks=pytest.mark.postgres),
+    ]
+)
+def db_backend(request) -> Literal["sqlite", "postgres"]:
+    """Parametrize tests to run against both SQLite and Postgres.
 
+    Usage:
+        pytest                          # Runs tests against SQLite only (default)
+        pytest -m postgres              # Runs tests against Postgres only
+        pytest -m "not postgres"        # Runs tests against SQLite only
+        pytest --run-all-backends       # Runs tests against both backends
+
+    Note: Only tests that use database fixtures (engine_factory, session_maker, etc.)
+    will be parametrized. Tests that don't use the database won't be affected.
+    """
+    return request.param
+
+
+@pytest_asyncio.fixture(scope="function")
+async def engine_factory(
+    app_config,
+    db_backend: Literal["sqlite", "postgres"],
+    tmp_path,
+) -> AsyncGenerator[tuple, None]:
+    """Create engine and session factory for the configured database backend."""
+    from basic_memory.repository.search_repository import CREATE_SEARCH_INDEX
+    from basic_memory import db
+
+    # Determine database type based on backend
+    if db_backend == "postgres":
+        db_type = DatabaseType.FILESYSTEM
+    else:
+        db_type = DatabaseType.FILESYSTEM  # Integration tests use file-based SQLite
+
+    # Use tmp_path for SQLite, use config database_path for Postgres
+    if db_backend == "sqlite":
+        db_path = tmp_path / "test.db"
+    else:
+        db_path = app_config.database_path
+
+    async with engine_session_factory(db_path, db_type) as (engine, session_maker):
+        # For Postgres, clean up database before test (drop all tables)
+        if db_backend == "postgres":
+            from basic_memory.models.base import Base
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+
+        # Create all tables
+        from basic_memory.models.base import Base
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+        # Create search index table (SQLite only for now)
+        # TODO: Implement Postgres full-text search using tsvector
+        if db_backend == "sqlite":
+            async with db.scoped_session(session_maker) as session:
+                await session.execute(CREATE_SEARCH_INDEX)
+                await session.commit()
 
         yield engine, session_maker
 
@@ -113,14 +161,23 @@ def config_home(tmp_path, monkeypatch) -> Path:
     return tmp_path
 
 
-@pytest.fixture(scope="function", autouse=True)
-def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
+@pytest.fixture(scope="function")
+def app_config(config_home, db_backend: Literal["sqlite", "postgres"], tmp_path, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Disable cloud mode for CLI tests
     monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
 
     # Create a basic config with test-project like unit tests do
     projects = {"test-project": str(config_home)}
+
+    # Configure database backend based on test parameter
+    if db_backend == "postgres":
+        database_backend = DatabaseBackend.POSTGRES
+        database_url = "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+    else:
+        database_backend = DatabaseBackend.SQLITE
+        database_url = None
+
     app_config = BasicMemoryConfig(
         env="test",
         projects=projects,
@@ -128,11 +185,13 @@ def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
         default_project_mode=False,  # Match real-world usage - tools must pass explicit project
         update_permalinks_on_move=True,
         cloud_mode=False,  # Explicitly disable cloud mode
+        database_backend=database_backend,
+        database_url=database_url,
     )
     return app_config
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     config_manager = ConfigManager()
     # Update its paths to use the test directory
@@ -145,7 +204,7 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     return config_manager
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 def project_config(test_project):
     """Create test project configuration."""
 

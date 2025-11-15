@@ -433,6 +433,57 @@ See the [Documentation](https://memory.basicmachines.co/) for more info, includi
 - [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/#project)
 - [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/#import)
 
+## Development
+
+### Running Tests
+
+Basic Memory supports dual database backends (SQLite and Postgres). Tests are parametrized to run against both backends automatically.
+
+**Quick Start:**
+```bash
+# Run SQLite tests (default, no Docker needed)
+just test-sqlite
+
+# Run Postgres tests (requires Docker)
+just test-postgres
+```
+
+**Available Test Commands:**
+
+- `just test-sqlite` - Run tests against SQLite only (fastest, no Docker needed)
+- `just test-postgres` - Run tests against Postgres only (requires Docker)
+- `just test-windows` - Run Windows-specific tests (auto-skips on other platforms)
+- `just test-benchmark` - Run performance benchmark tests
+- `just test-all` - Run all tests including Windows, Postgres, and benchmarks
+
+**Postgres Testing Requirements:**
+
+To run Postgres tests, you need to start the test database:
+```bash
+docker-compose -f docker-compose-postgres.yml up -d
+```
+
+Tests will connect to `localhost:5433/basic_memory_test`.
+
+**Test Markers:**
+
+Tests use pytest markers for selective execution:
+- `postgres` - Tests that run against Postgres backend
+- `windows` - Windows-specific database optimizations
+- `benchmark` - Performance tests (excluded from default runs)
+
+**Other Development Commands:**
+```bash
+just install          # Install with dev dependencies
+just lint             # Run linting checks
+just typecheck        # Run type checking
+just format           # Format code with ruff
+just check            # Run all quality checks
+just migration "msg"  # Create database migration
+```
+
+See the [justfile](justfile) for the complete list of development commands.
+
 ## License
 
 AGPL-3.0

@@ -14,7 +14,7 @@ services:
       POSTGRES_USER: basic_memory_user
       POSTGRES_PASSWORD: dev_password
     ports:
-      - "5433:5433"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

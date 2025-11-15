@@ -7,6 +7,9 @@ install:
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
 
+# Run all tests with unified coverage report
+test: test-unit test-int
+
 # Run unit tests only (fast, no coverage)
 test-unit:
     uv run pytest -p pytest_mock -v --no-cov -n auto tests
@@ -15,16 +18,48 @@ test-unit:
 test-int:
     uv run pytest -p pytest_mock -v --no-cov -n auto test-int
 
-# Run all tests with unified coverage report
-test: test-unit test-int
+# ==============================================================================
+# DATABASE BACKEND TESTING
+# ==============================================================================
+# Basic Memory supports dual database backends (SQLite and Postgres).
+# Tests are parametrized to run against both backends automatically.
+#
+# Quick Start:
+#   just test-sqlite    # Run SQLite tests (default, no Docker needed)
+#   just test-postgres  # Run Postgres tests (requires Docker)
+#
+# For Postgres tests, first start the database:
+#   docker-compose -f docker-compose-postgres.yml up -d
+# ==============================================================================
 
-# Run tests against SQLite only (default backend)
+# Run tests against SQLite only (default backend, skip Windows/Postgres/Benchmark tests)
+# This is the fastest option and doesn't require any Docker setup.
+# Use this for local development and quick feedback.
 test-sqlite:
-    uv run pytest -p pytest_mock -v --no-cov -m "not postgres" tests test-int
+    uv run pytest -p pytest_mock -v --no-cov -m "not postgres and not windows and not benchmark" tests test-int
 
 # Run tests against Postgres only (requires docker-compose-postgres.yml up)
+# First start Postgres: docker-compose -f docker-compose-postgres.yml up -d
+# Tests will connect to localhost:5433/basic_memory_test
 test-postgres:
-    uv run pytest -p pytest_mock -v --no-cov -m postgres tests test-int
+    uv run pytest -p pytest_mock -v --no-cov -m "postgres and not benchmark" tests test-int
+
+# Run Windows-specific tests only (only works on Windows platform)
+# These tests verify Windows-specific database optimizations (locking mode, NullPool)
+# Will be skipped automatically on non-Windows platforms
+test-windows:
+    uv run pytest -p pytest_mock -v --no-cov -m windows tests test-int
+
+# Run benchmark tests only (performance testing)
+# These are slow tests that measure sync performance with various file counts
+# Excluded from default test runs to keep CI fast
+test-benchmark:
+    uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
+
+# Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
+# Use this before releasing to ensure everything works across all backends and platforms
+test-all:
+    uv run pytest -p pytest_mock -v --no-cov tests test-int
 
 # Generate HTML coverage report
 coverage:

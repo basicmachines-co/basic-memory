@@ -63,6 +63,7 @@ markers = [
     "benchmark: Performance benchmark tests (deselect with '-m \"not benchmark\"')",
     "slow: Slow-running tests (deselect with '-m \"not slow\"')",
     "postgres: Tests that run against Postgres backend (deselect with '-m \"not postgres\"')",
+    "windows: Windows-specific tests (deselect with '-m \"not windows\"')",
 ]
 
 [tool.ruff]

@@ -12,7 +12,7 @@ from basic_memory.schemas.search import SearchItemType, SearchResponse
 
 
 @pytest_asyncio.fixture
-async def indexed_entity(init_search_index, full_entity, search_service):
+async def indexed_entity(full_entity, search_service):
     """Create an entity and index it."""
     await search_service.index_entity(full_entity)
     return full_entity

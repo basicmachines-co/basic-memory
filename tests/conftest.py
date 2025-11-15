@@ -56,6 +56,9 @@ def db_backend(request) -> Literal["sqlite", "postgres"]:
         pytest -m postgres              # Runs tests against Postgres only
         pytest -m "not postgres"        # Runs tests against SQLite only
         pytest --run-all-backends       # Runs tests against both backends
+
+    Note: Only tests that use database fixtures (engine_factory, session_maker, etc.)
+    will be parametrized. Tests that don't use the database won't be affected.
     """
     return request.param
 
@@ -77,7 +80,7 @@ def config_home(tmp_path, monkeypatch) -> Path:
     return tmp_path
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Create a basic config without depending on test_project to avoid circular dependency
@@ -103,7 +106,7 @@ def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypat
     return app_config
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def config_manager(
     app_config: BasicMemoryConfig, project_config: ProjectConfig, config_home: Path, monkeypatch
 ) -> ConfigManager:
@@ -124,7 +127,7 @@ def config_manager(
     return config_manager
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 def project_config(test_project):
     """Create test project configuration."""
 
@@ -151,55 +154,39 @@ def test_config(config_home, project_config, app_config, config_manager) -> Test
 
 
 @pytest_asyncio.fixture(scope="function")
-async def sqlite_engine_factory(
+async def engine_factory(
     app_config,
+    db_backend: Literal["sqlite", "postgres"],
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
-    """Create SQLite in-memory engine and session factory."""
+    """Create engine and session factory for the configured database backend."""
+    from basic_memory.repository.search_repository import CREATE_SEARCH_INDEX
+
+    # Determine database type based on backend
+    if db_backend == "postgres":
+        db_type = DatabaseType.FILESYSTEM
+    else:
+        db_type = DatabaseType.MEMORY
+
     async with db.engine_session_factory(
-        db_path=app_config.database_path, db_type=DatabaseType.MEMORY
+        db_path=app_config.database_path, db_type=db_type
     ) as (engine, session_maker):
+        # For Postgres, clean up database before test (drop all tables)
+        if db_backend == "postgres":
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+
         # Create all tables
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-        yield engine, session_maker
-
-
-@pytest_asyncio.fixture(scope="function")
-async def postgres_engine_factory(
-    app_config,
-) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
-    """Create Postgres engine and session factory.
-
-    Assumes Postgres is running via docker-compose-postgres.yml on port 5433.
-    Cleans up database before each test to ensure clean state.
-    """
-    async with db.engine_session_factory(
-        db_path=app_config.database_path, db_type=DatabaseType.FILESYSTEM
-    ) as (engine, session_maker):
-        # Clean up database before test (drop all tables)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
-
-        # Create all tables fresh
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # Create search index table (SQLite only for now)
+        # TODO: Implement Postgres full-text search using tsvector
+        if db_backend == "sqlite":
+            async with db.scoped_session(session_maker) as session:
+                await session.execute(CREATE_SEARCH_INDEX)
+                await session.commit()
 
         yield engine, session_maker
-
-
-@pytest_asyncio.fixture(scope="function")
-async def engine_factory(
-    app_config,
-    db_backend: Literal["sqlite", "postgres"],
-    sqlite_engine_factory,
-    postgres_engine_factory,
-) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
-    """Delegate to backend-specific engine factory based on db_backend parameter."""
-    if db_backend == "postgres":
-        yield postgres_engine_factory
-    else:
-        yield sqlite_engine_factory
 
 
 @pytest_asyncio.fixture
@@ -347,11 +334,6 @@ async def directory_service(entity_repository, project_config) -> DirectoryServi
 async def search_repository(session_maker, test_project: Project):
     """Create SearchRepository instance with project context"""
     return SearchRepository(session_maker, project_id=test_project.id)
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def init_search_index(search_service):
-    await search_service.init_search_index()
 
 
 @pytest_asyncio.fixture
