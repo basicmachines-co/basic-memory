@@ -19,45 +19,60 @@ class TestBasicMemoryConfig:
         config = BasicMemoryConfig()
 
         # Should use the default path (home/basic-memory)
-        expected_path = (config_home / "basic-memory").as_posix()
-        assert config.projects["main"] == Path(expected_path).as_posix()
+        expected_path = config_home / "basic-memory"
+        assert Path(config.projects["main"]) == expected_path
 
     def test_respects_basic_memory_home_environment_variable(self, config_home, monkeypatch):
         """Test that config respects BASIC_MEMORY_HOME environment variable."""
-        custom_path = (config_home / "app" / "data").as_posix()
-        monkeypatch.setenv("BASIC_MEMORY_HOME", custom_path)
+        custom_path = config_home / "app" / "data"
+        monkeypatch.setenv("BASIC_MEMORY_HOME", str(custom_path))
 
         config = BasicMemoryConfig()
 
         # Should use the custom path from environment variable
-        assert config.projects["main"] == custom_path
+        assert Path(config.projects["main"]) == custom_path
 
-    def test_model_post_init_respects_basic_memory_home(self, config_home, monkeypatch):
-        """Test that model_post_init creates main project with BASIC_MEMORY_HOME when missing."""
-        custom_path = str(config_home / "custom" / "memory" / "path")
-        monkeypatch.setenv("BASIC_MEMORY_HOME", custom_path)
+    def test_model_post_init_respects_basic_memory_home_creates_main(
+        self, config_home, monkeypatch
+    ):
+        """Test that model_post_init creates main project with BASIC_MEMORY_HOME when missing and no other projects."""
+        custom_path = config_home / "custom" / "memory" / "path"
+        monkeypatch.setenv("BASIC_MEMORY_HOME", str(custom_path))
 
         # Create config without main project
-        other_path = str(config_home / "some" / "path")
-        config = BasicMemoryConfig(projects={"other": other_path})
+        config = BasicMemoryConfig()
 
         # model_post_init should have added main project with BASIC_MEMORY_HOME
         assert "main" in config.projects
-        assert config.projects["main"] == Path(custom_path).as_posix()
+        assert Path(config.projects["main"]) == custom_path
+
+    def test_model_post_init_respects_basic_memory_home_sets_non_main_default(
+        self, config_home, monkeypatch
+    ):
+        """Test that model_post_init does not create main project with BASIC_MEMORY_HOME when another project exists."""
+        custom_path = config_home / "custom" / "memory" / "path"
+        monkeypatch.setenv("BASIC_MEMORY_HOME", str(custom_path))
+
+        # Create config without main project
+        other_path = config_home / "some" / "path"
+        config = BasicMemoryConfig(projects={"other": str(other_path)})
+
+        # model_post_init should not add main project with BASIC_MEMORY_HOME
+        assert "main" not in config.projects
+        assert Path(config.projects["other"]) == other_path
 
     def test_model_post_init_fallback_without_basic_memory_home(self, config_home, monkeypatch):
-        """Test that model_post_init falls back to default when BASIC_MEMORY_HOME is not set."""
+        """Test that model_post_init can set a non-main default when BASIC_MEMORY_HOME is not set."""
         # Ensure BASIC_MEMORY_HOME is not set
         monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
 
         # Create config without main project
-        other_path = (config_home / "some" / "path").as_posix()
-        config = BasicMemoryConfig(projects={"other": other_path})
+        other_path = config_home / "some" / "path"
+        config = BasicMemoryConfig(projects={"other": str(other_path)})
 
-        # model_post_init should have added main project with default path
-        expected_path = (config_home / "basic-memory").as_posix()
-        assert "main" in config.projects
-        assert config.projects["main"] == Path(expected_path).as_posix()
+        # model_post_init should not add main project, but "other" should now be the default
+        assert "main" not in config.projects
+        assert Path(config.projects["other"]) == other_path
 
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""
@@ -66,8 +81,8 @@ class TestBasicMemoryConfig:
 
         config = BasicMemoryConfig()
 
-        # Should use the exact value from environment variable
-        assert config.projects["main"] == relative_path
+        # Should normalize to platform-native path format
+        assert Path(config.projects["main"]) == Path(relative_path)
 
     def test_basic_memory_home_overrides_existing_main_project(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME is not used when a map is passed in the constructor."""
@@ -367,3 +382,99 @@ class TestConfigManager:
             config = config_manager.load_config()
             assert config.cloud_projects == {}
             assert config.projects == {"main": str(temp_path / "main")}
+
+
+class TestPlatformNativePathSeparators:
+    """Test that config uses platform-native path separators."""
+
+    def test_project_paths_use_platform_native_separators_in_config(self, monkeypatch):
+        """Test that project paths use platform-native separators when created."""
+        import platform
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Set up ConfigManager with temp directory
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create a project path
+            project_path = temp_path / "my" / "project"
+            project_path.mkdir(parents=True, exist_ok=True)
+
+            # Add project via ConfigManager
+            config = BasicMemoryConfig(projects={})
+            config.projects["test-project"] = str(project_path)
+            config_manager.save_config(config)
+
+            # Read the raw JSON file
+            import json
+
+            config_data = json.loads(config_manager.config_file.read_text())
+
+            # Verify path uses platform-native separators
+            saved_path = config_data["projects"]["test-project"]
+
+            # On Windows, should have backslashes; on Unix, forward slashes
+            if platform.system() == "Windows":
+                # Windows paths should contain backslashes
+                assert "\\" in saved_path or ":" in saved_path  # C:\\ or \\UNC
+                assert "/" not in saved_path.replace(":/", "")  # Exclude drive letter
+            else:
+                # Unix paths should use forward slashes
+                assert "/" in saved_path
+                # Should not force POSIX on non-Windows
+                assert saved_path == str(project_path)
+
+    def test_add_project_uses_platform_native_separators(self, monkeypatch):
+        """Test that ConfigManager.add_project() uses platform-native separators."""
+        import platform
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Set up ConfigManager
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Initialize with empty projects
+            initial_config = BasicMemoryConfig(projects={})
+            config_manager.save_config(initial_config)
+
+            # Add project
+            project_path = temp_path / "new" / "project"
+            config_manager.add_project("new-project", str(project_path))
+
+            # Load and verify
+            config = config_manager.load_config()
+            saved_path = config.projects["new-project"]
+
+            # Verify platform-native separators
+            if platform.system() == "Windows":
+                assert "\\" in saved_path or ":" in saved_path
+            else:
+                assert "/" in saved_path
+                assert saved_path == str(project_path)
+
+    def test_model_post_init_uses_platform_native_separators(self, config_home, monkeypatch):
+        """Test that model_post_init uses platform-native separators."""
+        import platform
+
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+
+        # Create config without projects (triggers model_post_init to add main)
+        config = BasicMemoryConfig(projects={})
+
+        # Verify main project path uses platform-native separators
+        main_path = config.projects["main"]
+
+        if platform.system() == "Windows":
+            # Windows: should have backslashes or drive letter
+            assert "\\" in main_path or ":" in main_path
+        else:
+            # Unix: should have forward slashes
+            assert "/" in main_path

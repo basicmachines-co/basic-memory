@@ -219,20 +219,20 @@ async def test_update_project_path_endpoint(test_config, client, project_service
     test_project_name = "test-update-project"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
-        old_path = (test_root / "old-location").as_posix()
-        new_path = (test_root / "new-location").as_posix()
+        old_path = test_root / "old-location"
+        new_path = test_root / "new-location"
 
-        await project_service.add_project(test_project_name, old_path)
+        await project_service.add_project(test_project_name, str(old_path))
 
         try:
             # Verify initial state
             project = await project_service.get_project(test_project_name)
             assert project is not None
-            assert project.path == old_path
+            assert Path(project.path) == old_path
 
             # Update the project path
             response = await client.patch(
-                f"{project_url}/project/{test_project_name}", json={"path": new_path}
+                f"{project_url}/project/{test_project_name}", json={"path": str(new_path)}
             )
 
             # Verify response
@@ -248,16 +248,16 @@ async def test_update_project_path_endpoint(test_config, client, project_service
 
             # Check old project data
             assert data["old_project"]["name"] == test_project_name
-            assert data["old_project"]["path"] == old_path
+            assert Path(data["old_project"]["path"]) == old_path
 
             # Check new project data
             assert data["new_project"]["name"] == test_project_name
-            assert data["new_project"]["path"] == new_path
+            assert Path(data["new_project"]["path"]) == new_path
 
             # Verify project was actually updated in database
             updated_project = await project_service.get_project(test_project_name)
             assert updated_project is not None
-            assert updated_project.path == new_path
+            assert Path(updated_project.path) == new_path
 
         finally:
             # Clean up

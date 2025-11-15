@@ -119,3 +119,45 @@ def test_project_set_default(app_config, config_manager):
         for line in lines:
             if "another-project" in line:
                 assert "[X]" in line
+
+
+def test_remove_main_project(app_config, config_manager):
+    """Test that removing main project then listing projects prevents main from reappearing (issue #397)."""
+    runner = CliRunner()
+
+    # Create separate temp dirs for each project
+    with (
+        tempfile.TemporaryDirectory() as main_dir,
+        tempfile.TemporaryDirectory() as new_default_dir,
+    ):
+        main_path = Path(main_dir)
+        new_default_path = Path(new_default_dir)
+
+        # Ensure main exists
+        result = runner.invoke(app, ["project", "list"])
+        if "main" not in result.stdout:
+            result = runner.invoke(app, ["project", "add", "main", str(main_path)])
+            print(result.stdout)
+            assert result.exit_code == 0
+
+        # Confirm main is present
+        result = runner.invoke(app, ["project", "list"])
+        assert "main" in result.stdout
+
+        # Add a second project
+        result = runner.invoke(app, ["project", "add", "new_default", str(new_default_path)])
+        assert result.exit_code == 0
+
+        # Set new_default as default (if needed)
+        result = runner.invoke(app, ["project", "default", "new_default"])
+        assert result.exit_code == 0
+
+        # Remove main
+        result = runner.invoke(app, ["project", "remove", "main"])
+        assert result.exit_code == 0
+
+        # Confirm only new_default exists and main does not
+        result = runner.invoke(app, ["project", "list"])
+        assert result.exit_code == 0
+        assert "main" not in result.stdout
+        assert "new_default" in result.stdout
