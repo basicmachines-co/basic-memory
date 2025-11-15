@@ -18,6 +18,14 @@ test-int:
 # Run all tests with unified coverage report
 test: test-unit test-int
 
+# Run tests against SQLite only (default backend)
+test-sqlite:
+    uv run pytest -p pytest_mock -v --no-cov -m "not postgres" tests test-int
+
+# Run tests against Postgres only (requires docker-compose-postgres.yml up)
+test-postgres:
+    uv run pytest -p pytest_mock -v --no-cov -m postgres tests test-int
+
 # Generate HTML coverage report
 coverage:
     uv run pytest -p pytest_mock -v -n auto tests test-int --cov-report=html

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 import os
 import pytest
@@ -12,7 +12,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager
+from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager, DatabaseBackend
 from basic_memory.db import DatabaseType
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -42,6 +42,24 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(
+    params=[
+        pytest.param("sqlite", id="sqlite"),
+        pytest.param("postgres", id="postgres", marks=pytest.mark.postgres),
+    ]
+)
+def db_backend(request) -> Literal["sqlite", "postgres"]:
+    """Parametrize tests to run against both SQLite and Postgres.
+
+    Usage:
+        pytest                          # Runs tests against SQLite only (default)
+        pytest -m postgres              # Runs tests against Postgres only
+        pytest -m "not postgres"        # Runs tests against SQLite only
+        pytest --run-all-backends       # Runs tests against both backends
+    """
+    return request.param
+
+
 @pytest.fixture
 def project_root() -> Path:
     return Path(__file__).parent.parent
@@ -60,15 +78,26 @@ def config_home(tmp_path, monkeypatch) -> Path:
 
 
 @pytest.fixture(scope="function", autouse=True)
-def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
+def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Create a basic config without depending on test_project to avoid circular dependency
     projects = {"test-project": str(config_home)}
+
+    # Configure database backend based on test parameter
+    if db_backend == "postgres":
+        database_backend = DatabaseBackend.POSTGRES
+        database_url = "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+    else:
+        database_backend = DatabaseBackend.SQLITE
+        database_url = None
+
     app_config = BasicMemoryConfig(
         env="test",
         projects=projects,
         default_project="test-project",
         update_permalinks_on_move=True,
+        database_backend=database_backend,
+        database_url=database_url,
     )
 
     return app_config
@@ -122,18 +151,55 @@ def test_config(config_home, project_config, app_config, config_manager) -> Test
 
 
 @pytest_asyncio.fixture(scope="function")
-async def engine_factory(
+async def sqlite_engine_factory(
     app_config,
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
-    """Create an engine and session factory using an in-memory SQLite database."""
+    """Create SQLite in-memory engine and session factory."""
     async with db.engine_session_factory(
         db_path=app_config.database_path, db_type=DatabaseType.MEMORY
     ) as (engine, session_maker):
-        # Create all tables for the DB the engine is connected to
+        # Create all tables
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
         yield engine, session_maker
+
+
+@pytest_asyncio.fixture(scope="function")
+async def postgres_engine_factory(
+    app_config,
+) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
+    """Create Postgres engine and session factory.
+
+    Assumes Postgres is running via docker-compose-postgres.yml on port 5433.
+    Cleans up database before each test to ensure clean state.
+    """
+    async with db.engine_session_factory(
+        db_path=app_config.database_path, db_type=DatabaseType.FILESYSTEM
+    ) as (engine, session_maker):
+        # Clean up database before test (drop all tables)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+
+        # Create all tables fresh
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        yield engine, session_maker
+
+
+@pytest_asyncio.fixture(scope="function")
+async def engine_factory(
+    app_config,
+    db_backend: Literal["sqlite", "postgres"],
+    sqlite_engine_factory,
+    postgres_engine_factory,
+) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
+    """Delegate to backend-specific engine factory based on db_backend parameter."""
+    if db_backend == "postgres":
+        yield postgres_engine_factory
+    else:
+        yield sqlite_engine_factory
 
 
 @pytest_asyncio.fixture
