@@ -76,10 +76,14 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
 
     Args:
         file_path: Original file path (str, Path, or PathLike)
+        split_extension: Whether to split off and discard file extensions.
+                        When True, uses mimetypes to detect real extensions.
+                        When False, preserves all content including periods.
 
     Returns:
         Normalized permalink that matches validation rules. Converts spaces and underscores
         to hyphens for consistency. Preserves non-ASCII characters like Chinese.
+        Preserves periods in version numbers (e.g., "2.0.0") when they're not real file extensions.
 
     Examples:
         >>> generate_permalink("docs/My Feature.md")
@@ -90,12 +94,25 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
         'design/unified-model-refactor'
         >>> generate_permalink("中文/测试文档.md")
         '中文/测试文档'
+        >>> generate_permalink("Version 2.0.0")
+        'version-2.0.0'
     """
     # Convert Path to string if needed
     path_str = Path(str(file_path)).as_posix()
 
-    # Remove extension (for now, possibly)
-    (base, extension) = os.path.splitext(path_str)
+    # Only split extension if there's a real file extension
+    # Use mimetypes to detect real extensions, avoiding misinterpreting periods in version numbers
+    import mimetypes
+    mime_type, _ = mimetypes.guess_type(path_str)
+    has_real_extension = mime_type is not None
+
+    if has_real_extension and split_extension:
+        # Real file extension detected - split it off
+        (base, extension) = os.path.splitext(path_str)
+    else:
+        # No real extension or split_extension=False - process the whole string
+        base = path_str
+        extension = ""
 
     # Check if we have CJK characters that should be preserved
     # CJK ranges: \u4e00-\u9fff (CJK Unified Ideographs), \u3000-\u303f (CJK symbols),
@@ -147,9 +164,9 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
         # Remove apostrophes entirely (don't replace with hyphens)
         text_no_apostrophes = text_with_hyphens.replace("'", "")
 
-        # Replace unsafe chars with hyphens, but preserve CJK characters
+        # Replace unsafe chars with hyphens, but preserve CJK characters and periods
         clean_text = re.sub(
-            r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-]", "-", text_no_apostrophes
+            r"[^a-z0-9\u4e00-\u9fff\u3000-\u303f\u3400-\u4dbf/\-\.]", "-", text_no_apostrophes
         )
     else:
         # Original ASCII-only processing for backward compatibility
@@ -168,8 +185,8 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
         # Remove apostrophes entirely (don't replace with hyphens)
         text_no_apostrophes = text_with_hyphens.replace("'", "")
 
-        # Replace remaining invalid chars with hyphens
-        clean_text = re.sub(r"[^a-z0-9/\-]", "-", text_no_apostrophes)
+        # Replace remaining invalid chars with hyphens, preserving periods
+        clean_text = re.sub(r"[^a-z0-9/\-\.]", "-", text_no_apostrophes)
 
     # Collapse multiple hyphens
     clean_text = re.sub(r"-+", "-", clean_text)
