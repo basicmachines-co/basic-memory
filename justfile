@@ -12,7 +12,7 @@ test: test-unit test-int
 
 # Run unit tests only (fast, no coverage)
 test-unit:
-    uv run pytest -p pytest_mock -v --no-cov -n auto tests
+    uv run pytest -p pytest_mock -v --no-cov tests
 
 # Run integration tests only (fast, no coverage)
 test-int:

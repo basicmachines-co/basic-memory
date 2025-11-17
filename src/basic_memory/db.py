@@ -25,7 +25,6 @@ from basic_memory.repository.search_repository import SearchRepository
 # Module level state
 _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
-_migrations_completed: bool = False
 
 
 class DatabaseType(Enum):
@@ -253,13 +252,12 @@ async def get_or_create_db(
 
 async def shutdown_db() -> None:  # pragma: no cover
     """Clean up database connections."""
-    global _engine, _session_maker, _migrations_completed
+    global _engine, _session_maker
 
     if _engine:
         await _engine.dispose()
         _engine = None
         _session_maker = None
-        _migrations_completed = False
 
 
 @asynccontextmanager
@@ -273,7 +271,7 @@ async def engine_session_factory(
     for each test. For production use, use get_or_create_db() instead.
     """
 
-    global _engine, _session_maker, _migrations_completed
+    global _engine, _session_maker
 
     # Use the same helper function as production code
     _engine, _session_maker = _create_engine_and_session(db_path, db_type)
@@ -294,20 +292,16 @@ async def engine_session_factory(
             await _engine.dispose()
             _engine = None
             _session_maker = None
-            _migrations_completed = False
 
 
 async def run_migrations(
-    app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM, force: bool = False
+    app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM
 ):  # pragma: no cover
-    """Run any pending alembic migrations."""
-    global _migrations_completed
+    """Run any pending alembic migrations.
 
-    # Skip if migrations already completed unless forced
-    if _migrations_completed and not force:
-        logger.debug("Migrations already completed in this session, skipping")
-        return
-
+    Note: Alembic tracks which migrations have been applied via the alembic_version table,
+    so it's safe to call this multiple times - it will only run pending migrations.
+    """
     logger.info("Running database migrations...")
     try:
         # Get the absolute path to the alembic directory relative to this file
@@ -352,9 +346,6 @@ async def run_migrations(
         else:
             from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
             await SQLiteSearchRepository(session_maker, 1).init_search_index()
-
-        # Mark migrations as completed
-        _migrations_completed = True
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise

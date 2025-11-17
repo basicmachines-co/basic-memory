@@ -163,44 +163,46 @@ async def engine_factory(
     from basic_memory.models.search import CREATE_SEARCH_INDEX
     from basic_memory import db
 
-    # Determine database type based on backend
     if db_backend == "postgres":
-        db_type = DatabaseType.FILESYSTEM
-    else:
-        db_type = DatabaseType.MEMORY
-
-    if db_backend == "postgres":
-        # For Postgres, create engine directly (can't use context manager with Postgres URL)
-        from basic_memory.db import _create_engine_and_session
-
-        # Ensure ConfigManager uses our test config (required for _create_engine_and_session)
+        # Postgres: Create fresh engine for each test with full schema reset
         config_manager._config = app_config
+        db_type = DatabaseType.FILESYSTEM
 
-        engine, session_maker = _create_engine_and_session(app_config.database_url, db_type)
-
-        try:
-            # Clean up any existing data
+        # Use context manager to handle engine disposal properly
+        async with db.engine_session_factory(
+            db_path=app_config.database_path, db_type=db_type
+        ) as (engine, session_maker):
+            # Drop and recreate schema for complete isolation
             async with engine.begin() as conn:
-                result = await conn.execute(text(
-                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-                ))
-                tables = [row[0] for row in result.fetchall()]
-                for table in tables:
-                    await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+                await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+                await conn.execute(text("CREATE SCHEMA public"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO basic_memory_user"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
 
-            # Run migrations to set up schema
+            # Run migrations to create production tables (including search_index with correct schema)
+            # Alembic handles duplicate migration checks, so it's safe to call this for each test
             from basic_memory.db import run_migrations
             await run_migrations(app_config, db_type)
 
-            # Create all ORM tables (includes test-specific tables not in migrations)
+            # For Postgres, migrations create all production tables with correct schemas
+            # We only need to create test-specific tables (like ModelTest) that aren't in migrations
+            # Don't create search_index via ORM - it's already created by migration with composite PK
             async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
+                # List of tables created by migrations - don't recreate them via ORM
+                production_tables = {'entity', 'observation', 'relation', 'project', 'search_index', 'alembic_version'}
+
+                # Get test-specific tables that aren't created by migrations
+                test_tables = [
+                    table for table in Base.metadata.sorted_tables
+                    if table.name not in production_tables
+                ]
+                if test_tables:
+                    await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=test_tables))
 
             yield engine, session_maker
-        finally:
-            await engine.dispose()
     else:
-        # SQLite: Create fresh database (fast with in-memory)
+        # SQLite: Create fresh in-memory database for each test
+        db_type = DatabaseType.MEMORY
         async with db.engine_session_factory(
             db_path=app_config.database_path, db_type=db_type
         ) as (engine, session_maker):
