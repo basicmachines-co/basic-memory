@@ -5,6 +5,7 @@ These tests use real MCP tools with the test environment instead of mocks.
 
 # Import for testing
 
+import asyncio
 import io
 from datetime import datetime, timedelta
 import json
@@ -12,11 +13,16 @@ from textwrap import dedent
 from typing import AsyncGenerator
 from unittest.mock import patch
 
+import nest_asyncio
+import pytest
 import pytest_asyncio
 from typer.testing import CliRunner
 
 from basic_memory.cli.commands.tool import tool_app
 from basic_memory.schemas.base import Entity as EntitySchema
+
+# Allow nested asyncio.run() calls - needed for CLI tests with async fixtures
+nest_asyncio.apply()
 
 runner = CliRunner()
 
@@ -72,6 +78,7 @@ def test_write_note(cli_env, project_config, test_project):
             test_project.name,
         ],
     )
+
     assert result.exit_code == 0
 
     # Check for expected success message

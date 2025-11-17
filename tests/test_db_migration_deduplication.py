@@ -23,11 +23,27 @@ def mock_alembic_command():
 
 
 @pytest.fixture
-def mock_search_repository():
-    """Mock SearchRepository to avoid database dependencies."""
-    with patch("basic_memory.db.SearchRepository") as mock_repo_class:
+def mock_search_repository(app_config):
+    """Mock database-specific SearchRepository to avoid database dependencies."""
+    from basic_memory.config import DatabaseBackend
+
+    # Determine which repository class to mock based on database backend
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        patch_target = "basic_memory.repository.postgres_search_repository.PostgresSearchRepository"
+    else:
+        patch_target = "basic_memory.repository.sqlite_search_repository.SQLiteSearchRepository"
+
+    # Also need to patch ConfigManager to return our test app_config
+    with patch(patch_target) as mock_repo_class, \
+         patch("basic_memory.db.ConfigManager") as mock_config_manager:
         mock_repo = AsyncMock()
         mock_repo_class.return_value = mock_repo
+
+        # Make ConfigManager() return a mock that has our test app_config
+        mock_manager_instance = MagicMock()
+        mock_manager_instance.config = app_config
+        mock_config_manager.return_value = mock_manager_instance
+
         yield mock_repo
 
 

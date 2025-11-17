@@ -322,9 +322,16 @@ async def run_migrations(
         )
         config.set_main_option("timezone", "UTC")
         config.set_main_option("revision_environment", "false")
-        config.set_main_option(
-            "sqlalchemy.url", DatabaseType.get_db_url(app_config.database_path, database_type)
-        )
+
+        # Get the correct database URL based on backend configuration
+        db_url = DatabaseType.get_db_url(app_config.database_path, database_type, app_config)
+
+        # For Postgres, Alembic needs synchronous driver (psycopg2), not async (asyncpg)
+        if app_config.database_backend == DatabaseBackend.POSTGRES:
+            # Convert asyncpg URL to psycopg2 URL for Alembic
+            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+        config.set_main_option("sqlalchemy.url", db_url)
 
         command.upgrade(config, "head")
         logger.info("Migrations completed successfully")
@@ -335,9 +342,16 @@ async def run_migrations(
         else:
             session_maker = _session_maker
 
-        # initialize the search Index schema
-        # the project_id is not used for init_search_index, so we pass a dummy value
-        await SearchRepository(session_maker, 1).init_search_index()
+        # Initialize the search index schema
+        # For SQLite: Create FTS5 virtual table
+        # For Postgres: No-op (tsvector column added by migrations)
+        # The project_id is not used for init_search_index, so we pass a dummy value
+        if app_config.database_backend == DatabaseBackend.POSTGRES:
+            from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+            await PostgresSearchRepository(session_maker, 1).init_search_index()
+        else:
+            from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+            await SQLiteSearchRepository(session_maker, 1).init_search_index()
 
         # Mark migrations as completed
         _migrations_completed = True

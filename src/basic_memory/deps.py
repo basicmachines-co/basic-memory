@@ -25,7 +25,10 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
-from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.search_repository import SearchRepositoryBase
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.config import DatabaseBackend
 from basic_memory.services import EntityService, ProjectService
 from basic_memory.services.context_service import ContextService
 from basic_memory.services.directory_service import DirectoryService
@@ -213,12 +216,19 @@ RelationRepositoryDep = Annotated[RelationRepository, Depends(get_relation_repos
 async def get_search_repository(
     session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
-) -> SearchRepository:
-    """Create a SearchRepository instance for the current project."""
-    return SearchRepository(session_maker, project_id=project_id)
+    app_config: AppConfigDep,
+) -> SearchRepositoryBase:
+    """Create a backend-specific SearchRepository instance for the current project.
+
+    Returns SQLiteSearchRepository or PostgresSearchRepository based on app_config.database_backend.
+    """
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        return PostgresSearchRepository(session_maker, project_id=project_id)
+    else:
+        return SQLiteSearchRepository(session_maker, project_id=project_id)
 
 
-SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]
+SearchRepositoryDep = Annotated[SearchRepositoryBase, Depends(get_search_repository)]
 
 
 # ProjectInfoRepository is deprecated and will be removed in a future version.

@@ -55,6 +55,7 @@ from typing import AsyncGenerator, Literal
 import pytest
 import pytest_asyncio
 from pathlib import Path
+from sqlalchemy import text
 
 from httpx import AsyncClient, ASGITransport
 
@@ -92,15 +93,27 @@ def db_backend(request) -> Literal["sqlite", "postgres"]:
     return request.param
 
 
+# Module-level cache for Postgres schema setup (fast)
+_POSTGRES_SCHEMA_INITIALIZED = False
+_POSTGRES_ENGINE = None
+_POSTGRES_SESSION_MAKER = None
+
+
 @pytest_asyncio.fixture(scope="function")
 async def engine_factory(
     app_config,
+    config_manager,
     db_backend: Literal["sqlite", "postgres"],
     tmp_path,
 ) -> AsyncGenerator[tuple, None]:
-    """Create engine and session factory for the configured database backend."""
-    from basic_memory.repository.search_repository import CREATE_SEARCH_INDEX
+    """Create engine and session factory for the configured database backend.
+
+    For Postgres: Reuses cached schema, uses TRUNCATE for cleanup (fast - no migrations per test!)
+    For SQLite: Creates fresh database per test (already fast with tmp files)
+    """
+    from basic_memory.models.search import CREATE_SEARCH_INDEX
     from basic_memory import db
+    global _POSTGRES_SCHEMA_INITIALIZED, _POSTGRES_ENGINE, _POSTGRES_SESSION_MAKER
 
     # Determine database type based on backend
     if db_backend == "postgres":
@@ -114,26 +127,72 @@ async def engine_factory(
     else:
         db_path = app_config.database_path
 
-    async with engine_session_factory(db_path, db_type) as (engine, session_maker):
-        # For Postgres, clean up database before test (drop all tables)
-        if db_backend == "postgres":
+    if db_backend == "postgres":
+        # Initialize schema once (cached across all tests)
+        if not _POSTGRES_SCHEMA_INITIALIZED:
+            # Ensure ConfigManager uses our test config
+            config_manager._config = app_config
+
+            # Create engine directly without context manager (so it doesn't get disposed)
+            from basic_memory.db import _create_engine_and_session
+            engine, session_maker = _create_engine_and_session(db_path, db_type)
+
+            # Clean up any existing tables
+            async with engine.begin() as conn:
+                result = await conn.execute(text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                ))
+                tables = [row[0] for row in result.fetchall()]
+                for table in tables:
+                    await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+
+            # Run migrations once for entire session
+            from basic_memory.db import run_migrations
+            await run_migrations(app_config, db_type)
+
+            _POSTGRES_ENGINE = engine
+            _POSTGRES_SESSION_MAKER = session_maker
+            _POSTGRES_SCHEMA_INITIALIZED = True
+
+        # Reuse cached engine/session_maker
+        engine = _POSTGRES_ENGINE
+        session_maker = _POSTGRES_SESSION_MAKER
+
+        # Fast cleanup: TRUNCATE all tables (much faster than DROP/CREATE)
+        async with engine.begin() as conn:
+            # Disable foreign key checks temporarily
+            await conn.execute(text("SET session_replication_role = 'replica'"))
+
+            # Get all tables
+            result = await conn.execute(text(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            ))
+            tables = [row[0] for row in result.fetchall()]
+
+            # TRUNCATE is much faster than DELETE
+            for table in tables:
+                await conn.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
+
+            # Re-enable foreign key checks
+            await conn.execute(text("SET session_replication_role = 'origin'"))
+
+        yield engine, session_maker
+
+    else:
+        # SQLite: Create fresh database (fast with tmp files)
+        async with engine_session_factory(db_path, db_type) as (engine, session_maker):
+            # Create all tables via ORM
             from basic_memory.models.base import Base
             async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.drop_all)
+                await conn.run_sync(Base.metadata.create_all)
 
-        # Create all tables
-        from basic_memory.models.base import Base
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-        # Create search index table (SQLite only for now)
-        # TODO: Implement Postgres full-text search using tsvector
-        if db_backend == "sqlite":
+            # Drop any SearchIndex ORM table, then create FTS5 virtual table
             async with db.scoped_session(session_maker) as session:
+                await session.execute(text("DROP TABLE IF EXISTS search_index"))
                 await session.execute(CREATE_SEARCH_INDEX)
                 await session.commit()
 
-        yield engine, session_maker
+            yield engine, session_maker
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -232,9 +291,10 @@ def app(app_config, project_config, engine_factory, test_project, config_manager
 
 
 @pytest_asyncio.fixture(scope="function")
-async def search_service(engine_factory, test_project):
+async def search_service(engine_factory, test_project, app_config):
     """Create and initialize search service for integration tests."""
-    from basic_memory.repository.search_repository import SearchRepository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
     from basic_memory.repository.entity_repository import EntityRepository
     from basic_memory.services.file_service import FileService
     from basic_memory.services.search_service import SearchService
@@ -243,8 +303,12 @@ async def search_service(engine_factory, test_project):
 
     engine, session_maker = engine_factory
 
-    # Create repositories
-    search_repository = SearchRepository(session_maker, project_id=test_project.id)
+    # Create backend-appropriate search repository
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        search_repository = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    else:
+        search_repository = SQLiteSearchRepository(session_maker, project_id=test_project.id)
+
     entity_repository = EntityRepository(session_maker, project_id=test_project.id)
 
     # Create file service

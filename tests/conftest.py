@@ -9,6 +9,7 @@ from typing import AsyncGenerator, Literal
 import os
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -23,7 +24,6 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
-from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services import (
     EntityService,
@@ -108,7 +108,7 @@ def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypat
 
 @pytest.fixture
 def config_manager(
-    app_config: BasicMemoryConfig, project_config: ProjectConfig, config_home: Path, monkeypatch
+    app_config: BasicMemoryConfig, config_home: Path, monkeypatch
 ) -> ConfigManager:
     # Invalidate config cache to ensure clean state for each test
     from basic_memory import config as config_module
@@ -156,10 +156,12 @@ def test_config(config_home, project_config, app_config, config_manager) -> Test
 @pytest_asyncio.fixture(scope="function")
 async def engine_factory(
     app_config,
+    config_manager,
     db_backend: Literal["sqlite", "postgres"],
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
     """Create engine and session factory for the configured database backend."""
-    from basic_memory.repository.search_repository import CREATE_SEARCH_INDEX
+    from basic_memory.models.search import CREATE_SEARCH_INDEX
+    from basic_memory import db
 
     # Determine database type based on backend
     if db_backend == "postgres":
@@ -167,26 +169,53 @@ async def engine_factory(
     else:
         db_type = DatabaseType.MEMORY
 
-    async with db.engine_session_factory(
-        db_path=app_config.database_path, db_type=db_type
-    ) as (engine, session_maker):
-        # For Postgres, clean up database before test (drop all tables)
-        if db_backend == "postgres":
+    if db_backend == "postgres":
+        # For Postgres, create engine directly (can't use context manager with Postgres URL)
+        from basic_memory.db import _create_engine_and_session
+
+        # Ensure ConfigManager uses our test config (required for _create_engine_and_session)
+        config_manager._config = app_config
+
+        engine, session_maker = _create_engine_and_session(app_config.database_url, db_type)
+
+        try:
+            # Clean up any existing data
             async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.drop_all)
+                result = await conn.execute(text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+                ))
+                tables = [row[0] for row in result.fetchall()]
+                for table in tables:
+                    await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
 
-        # Create all tables
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+            # Run migrations to set up schema
+            from basic_memory.db import run_migrations
+            await run_migrations(app_config, db_type)
 
-        # Create search index table (SQLite only for now)
-        # TODO: Implement Postgres full-text search using tsvector
-        if db_backend == "sqlite":
+            # Create all ORM tables (includes test-specific tables not in migrations)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            yield engine, session_maker
+        finally:
+            await engine.dispose()
+    else:
+        # SQLite: Create fresh database (fast with in-memory)
+        async with db.engine_session_factory(
+            db_path=app_config.database_path, db_type=db_type
+        ) as (engine, session_maker):
+            # Create all tables via ORM
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            # Drop any SearchIndex ORM table, then create FTS5 virtual table
             async with db.scoped_session(session_maker) as session:
+                await session.execute(text("DROP TABLE IF EXISTS search_index"))
                 await session.execute(CREATE_SEARCH_INDEX)
                 await session.commit()
 
-        yield engine, session_maker
+            # Yield after setup is complete
+            yield engine, session_maker
 
 
 @pytest_asyncio.fixture
@@ -331,14 +360,20 @@ async def directory_service(entity_repository, project_config) -> DirectoryServi
 
 
 @pytest_asyncio.fixture
-async def search_repository(session_maker, test_project: Project):
-    """Create SearchRepository instance with project context"""
-    return SearchRepository(session_maker, project_id=test_project.id)
+async def search_repository(session_maker, test_project: Project, app_config: BasicMemoryConfig):
+    """Create backend-appropriate SearchRepository instance with project context"""
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        return PostgresSearchRepository(session_maker, project_id=test_project.id)
+    else:
+        return SQLiteSearchRepository(session_maker, project_id=test_project.id)
 
 
 @pytest_asyncio.fixture
 async def search_service(
-    search_repository: SearchRepository,
+    search_repository,
     entity_repository: EntityRepository,
     file_service: FileService,
 ) -> SearchService:

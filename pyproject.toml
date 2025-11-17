@@ -81,6 +81,8 @@ dev = [
     "pytest-xdist>=3.0.0",
     "ruff>=0.1.6",
     "freezegun>=1.5.5",
+    "nest-asyncio>=1.6.0",
+    "psycopg2-binary>=2.9.0",  # For Alembic migrations with Postgres
 ]
 
 [tool.hatch.version]

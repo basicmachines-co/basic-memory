@@ -41,8 +41,24 @@ test-sqlite:
 # Run tests against Postgres only (requires docker-compose-postgres.yml up)
 # First start Postgres: docker-compose -f docker-compose-postgres.yml up -d
 # Tests will connect to localhost:5433/basic_memory_test
+# To reset the database: just postgres-reset
 test-postgres:
     uv run pytest -p pytest_mock -v --no-cov -m "postgres and not benchmark" tests test-int
+
+# Reset Postgres test database (drops and recreates schema)
+# Useful when Alembic migration state gets out of sync during development
+postgres-reset:
+    docker exec basic-memory-postgres psql -U basic_memory_user -d basic_memory_test -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+    @echo "✅ Postgres test database reset"
+
+# Run Alembic migrations manually against Postgres test database
+# Useful for debugging migration issues
+postgres-migrate:
+    @cd src/basic_memory/alembic && \
+    BASIC_MEMORY_DATABASE_BACKEND=postgres \
+    BASIC_MEMORY_DATABASE_URL=postgresql://basic_memory_user:dev_password@localhost:5433/basic_memory_test \
+    uv run alembic upgrade head
+    @echo "✅ Migrations applied to Postgres test database"
 
 # Run Windows-specific tests only (only works on Windows platform)
 # These tests verify Windows-specific database optimizations (locking mode, NullPool)

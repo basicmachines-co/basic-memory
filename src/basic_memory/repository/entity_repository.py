@@ -155,8 +155,10 @@ class EntityRepository(Repository[Entity]):
 
             except IntegrityError as e:
                 # Check if this is a FOREIGN KEY constraint failure
+                # SQLite: "FOREIGN KEY constraint failed"
+                # Postgres: "violates foreign key constraint"
                 error_str = str(e)
-                if "FOREIGN KEY constraint failed" in error_str:
+                if "FOREIGN KEY constraint failed" in error_str or "violates foreign key constraint" in error_str:
                     # Import locally to avoid circular dependency (repository -> services -> repository)
                     from basic_memory.services.exceptions import SyncFatalError
 
@@ -310,5 +312,23 @@ class EntityRepository(Repository[Entity]):
 
         # Insert with unique permalink
         session.add(entity)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError as e:
+            # Check if this is a FOREIGN KEY constraint failure
+            # SQLite: "FOREIGN KEY constraint failed"
+            # Postgres: "violates foreign key constraint"
+            error_str = str(e)
+            if "FOREIGN KEY constraint failed" in error_str or "violates foreign key constraint" in error_str:
+                # Import locally to avoid circular dependency (repository -> services -> repository)
+                from basic_memory.services.exceptions import SyncFatalError
+
+                # Project doesn't exist in database - this is a fatal sync error
+                raise SyncFatalError(
+                    f"Cannot sync file '{entity.file_path}': "
+                    f"project_id={entity.project_id} does not exist in database. "
+                    f"The project may have been deleted. This sync will be terminated."
+                ) from e
+            # Re-raise if not a foreign key error
+            raise
         return entity

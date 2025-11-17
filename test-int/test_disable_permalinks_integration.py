@@ -2,7 +2,6 @@
 
 import pytest
 
-from basic_memory.config import BasicMemoryConfig
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.repository import (
     EntityRepository,
@@ -10,7 +9,8 @@ from basic_memory.repository import (
     RelationRepository,
     ProjectRepository,
 )
-from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services import FileService
 from basic_memory.services.entity_service import EntityService
@@ -20,18 +20,25 @@ from basic_memory.sync.sync_service import SyncService
 
 
 @pytest.mark.asyncio
-async def test_disable_permalinks_create_entity(tmp_path, engine_factory):
+async def test_disable_permalinks_create_entity(tmp_path, engine_factory, app_config, test_project):
     """Test that entities created with disable_permalinks=True don't have permalinks."""
+    from basic_memory.config import DatabaseBackend
+
     engine, session_maker = engine_factory
 
-    # Create app config with disable_permalinks=True
-    app_config = BasicMemoryConfig(disable_permalinks=True)
+    # Override app config to enable disable_permalinks
+    app_config.disable_permalinks = True
 
     # Setup repositories
-    entity_repository = EntityRepository(session_maker, project_id=1)
-    observation_repository = ObservationRepository(session_maker, project_id=1)
-    relation_repository = RelationRepository(session_maker, project_id=1)
-    search_repository = SearchRepository(session_maker, project_id=1)
+    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
+    observation_repository = ObservationRepository(session_maker, project_id=test_project.id)
+    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
+
+    # Use database-specific search repository
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        search_repository = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    else:
+        search_repository = SQLiteSearchRepository(session_maker, project_id=test_project.id)
 
     # Setup services
     entity_parser = EntityParser(tmp_path)
@@ -73,22 +80,30 @@ async def test_disable_permalinks_create_entity(tmp_path, engine_factory):
 
 
 @pytest.mark.asyncio
-async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory):
+async def test_disable_permalinks_sync_workflow(tmp_path, engine_factory, app_config, test_project):
     """Test full sync workflow with disable_permalinks enabled."""
+    from basic_memory.config import DatabaseBackend
+
     engine, session_maker = engine_factory
 
-    # Create app config with disable_permalinks=True
-    app_config = BasicMemoryConfig(disable_permalinks=True)
+    # Override app config to enable disable_permalinks
+    app_config.disable_permalinks = True
 
     # Create a test markdown file without frontmatter
     test_file = tmp_path / "test_note.md"
     test_file.write_text("# Test Note\nThis is test content.")
 
     # Setup repositories
-    entity_repository = EntityRepository(session_maker, project_id=1)
-    observation_repository = ObservationRepository(session_maker, project_id=1)
-    relation_repository = RelationRepository(session_maker, project_id=1)
-    search_repository = SearchRepository(session_maker, project_id=1)
+    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
+    observation_repository = ObservationRepository(session_maker, project_id=test_project.id)
+    relation_repository = RelationRepository(session_maker, project_id=test_project.id)
+
+    # Use database-specific search repository
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        search_repository = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    else:
+        search_repository = SQLiteSearchRepository(session_maker, project_id=test_project.id)
+
     project_repository = ProjectRepository(session_maker)
 
     # Setup services

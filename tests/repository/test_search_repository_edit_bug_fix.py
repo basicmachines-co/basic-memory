@@ -10,7 +10,8 @@ import pytest
 import pytest_asyncio
 
 from basic_memory.models.project import Project
-from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
+from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -30,7 +31,7 @@ async def second_test_project(project_repository):
 @pytest_asyncio.fixture
 async def second_search_repo(session_maker, second_test_project):
     """Create a search repository for the second project."""
-    return SearchRepository(session_maker, project_id=second_test_project.id)
+    return SQLiteSearchRepository(session_maker, project_id=second_test_project.id)
 
 
 @pytest.mark.asyncio
@@ -43,7 +44,7 @@ async def test_index_item_respects_project_isolation_during_edit():
     """
     from basic_memory import db
     from basic_memory.models.base import Base
-    from basic_memory.repository.search_repository import SearchRepository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
     # Create a separate in-memory database for this test
@@ -79,8 +80,8 @@ async def test_index_item_respects_project_isolation_during_edit():
         await session.commit()
 
     # Create search repositories for both projects
-    repo1 = SearchRepository(session_maker, project_id=project1_id)
-    repo2 = SearchRepository(session_maker, project_id=project2_id)
+    repo1 = SQLiteSearchRepository(session_maker, project_id=project1_id)
+    repo2 = SQLiteSearchRepository(session_maker, project_id=project2_id)
 
     # Initialize search index
     await repo1.init_search_index()
@@ -180,7 +181,7 @@ async def test_index_item_updates_existing_record_same_project():
     """Test that index_item() correctly updates existing records within the same project."""
     from basic_memory import db
     from basic_memory.models.base import Base
-    from basic_memory.repository.search_repository import SearchRepository
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
     # Create a separate in-memory database for this test
@@ -206,7 +207,7 @@ async def test_index_item_updates_existing_record_same_project():
         await session.commit()
 
     # Create search repository
-    repo = SearchRepository(session_maker, project_id=project_id)
+    repo = SQLiteSearchRepository(session_maker, project_id=project_id)
     await repo.init_search_index()
 
     permalink = "test/my-note"
