@@ -93,27 +93,16 @@ def db_backend(request) -> Literal["sqlite", "postgres"]:
     return request.param
 
 
-# Module-level cache for Postgres schema setup (fast)
-_POSTGRES_SCHEMA_INITIALIZED = False
-_POSTGRES_ENGINE = None
-_POSTGRES_SESSION_MAKER = None
-
-
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture
 async def engine_factory(
     app_config,
     config_manager,
     db_backend: Literal["sqlite", "postgres"],
     tmp_path,
 ) -> AsyncGenerator[tuple, None]:
-    """Create engine and session factory for the configured database backend.
-
-    For Postgres: Reuses cached schema, uses TRUNCATE for cleanup (fast - no migrations per test!)
-    For SQLite: Creates fresh database per test (already fast with tmp files)
-    """
+    """Create engine and session factory for the configured database backend."""
     from basic_memory.models.search import CREATE_SEARCH_INDEX
     from basic_memory import db
-    global _POSTGRES_SCHEMA_INITIALIZED, _POSTGRES_ENGINE, _POSTGRES_SESSION_MAKER
 
     # Determine database type based on backend
     if db_backend == "postgres":
@@ -128,55 +117,23 @@ async def engine_factory(
         db_path = app_config.database_path
 
     if db_backend == "postgres":
-        # Initialize schema once (cached across all tests)
-        if not _POSTGRES_SCHEMA_INITIALIZED:
-            # Ensure ConfigManager uses our test config
-            config_manager._config = app_config
+        # Postgres: Create fresh engine for each test with full schema reset
+        config_manager._config = app_config
 
-            # Create engine directly without context manager (so it doesn't get disposed)
-            from basic_memory.db import _create_engine_and_session
-            engine, session_maker = _create_engine_and_session(db_path, db_type)
-
-            # Clean up any existing tables
+        # Use context manager to handle engine disposal properly
+        async with engine_session_factory(db_path, db_type) as (engine, session_maker):
+            # Drop and recreate schema for complete isolation
             async with engine.begin() as conn:
-                result = await conn.execute(text(
-                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-                ))
-                tables = [row[0] for row in result.fetchall()]
-                for table in tables:
-                    await conn.execute(text(f"DROP TABLE IF EXISTS {table} CASCADE"))
+                await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+                await conn.execute(text("CREATE SCHEMA public"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO basic_memory_user"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
 
-            # Run migrations once for entire session
+            # Run migrations to create production tables
             from basic_memory.db import run_migrations
             await run_migrations(app_config, db_type)
 
-            _POSTGRES_ENGINE = engine
-            _POSTGRES_SESSION_MAKER = session_maker
-            _POSTGRES_SCHEMA_INITIALIZED = True
-
-        # Reuse cached engine/session_maker
-        engine = _POSTGRES_ENGINE
-        session_maker = _POSTGRES_SESSION_MAKER
-
-        # Fast cleanup: TRUNCATE all tables (much faster than DROP/CREATE)
-        async with engine.begin() as conn:
-            # Disable foreign key checks temporarily
-            await conn.execute(text("SET session_replication_role = 'replica'"))
-
-            # Get all tables
-            result = await conn.execute(text(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-            ))
-            tables = [row[0] for row in result.fetchall()]
-
-            # TRUNCATE is much faster than DELETE
-            for table in tables:
-                await conn.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
-
-            # Re-enable foreign key checks
-            await conn.execute(text("SET session_replication_role = 'origin'"))
-
-        yield engine, session_maker
+            yield engine, session_maker
 
     else:
         # SQLite: Create fresh database (fast with tmp files)
@@ -195,7 +152,7 @@ async def engine_factory(
             yield engine, session_maker
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture
 async def test_project(config_home, engine_factory) -> Project:
     """Create a test project."""
     project_data = {
@@ -220,7 +177,7 @@ def config_home(tmp_path, monkeypatch) -> Path:
     return tmp_path
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def app_config(config_home, db_backend: Literal["sqlite", "postgres"], tmp_path, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Disable cloud mode for CLI tests
@@ -250,8 +207,13 @@ def app_config(config_home, db_backend: Literal["sqlite", "postgres"], tmp_path,
     return app_config
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
+    # Invalidate config cache to ensure clean state for each test
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
     config_manager = ConfigManager()
     # Update its paths to use the test directory
     config_manager.config_dir = config_home / ".basic-memory"
@@ -263,7 +225,7 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     return config_manager
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def project_config(test_project):
     """Create test project configuration."""
 
@@ -275,7 +237,7 @@ def project_config(test_project):
     return project_config
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def app(app_config, project_config, engine_factory, test_project, config_manager) -> FastAPI:
     """Create test FastAPI application with single project."""
 
@@ -290,24 +252,24 @@ def app(app_config, project_config, engine_factory, test_project, config_manager
     return app
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture
 async def search_service(engine_factory, test_project, app_config):
-    """Create and initialize search service for integration tests."""
-    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+    """Create and initialize search service for integration tests.
+
+    Uses app_config fixture to determine database backend - no patching needed.
+    """
     from basic_memory.repository.entity_repository import EntityRepository
     from basic_memory.services.file_service import FileService
     from basic_memory.services.search_service import SearchService
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown import EntityParser
 
+    from basic_memory.repository.search_repository import create_search_repository
+
     engine, session_maker = engine_factory
 
-    # Create backend-appropriate search repository
-    if app_config.database_backend == DatabaseBackend.POSTGRES:
-        search_repository = PostgresSearchRepository(session_maker, project_id=test_project.id)
-    else:
-        search_repository = SQLiteSearchRepository(session_maker, project_id=test_project.id)
+    # Use factory function to create appropriate search repository
+    search_repository = create_search_repository(session_maker, project_id=test_project.id)
 
     entity_repository = EntityRepository(session_maker, project_id=test_project.id)
 
@@ -322,7 +284,7 @@ async def search_service(engine_factory, test_project, app_config):
     return service
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def mcp_server(config_manager, search_service):
     # Import mcp instance
     from basic_memory.mcp.server import mcp as server
@@ -336,7 +298,7 @@ def mcp_server(config_manager, search_service):
     return server
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Create test client that both MCP and tests will use."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

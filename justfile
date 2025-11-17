@@ -16,7 +16,7 @@ test-unit:
 
 # Run integration tests only (fast, no coverage)
 test-int:
-    uv run pytest -p pytest_mock -v --no-cov -n auto test-int
+    uv run pytest -p pytest_mock -v --no-cov test-int
 
 # ==============================================================================
 # DATABASE BACKEND TESTING

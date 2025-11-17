@@ -26,7 +26,7 @@ from basic_memory.repository import (
     ObservationRepository,
     ProjectRepository,
 )
-from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.services.link_resolver import LinkResolver
@@ -1213,7 +1213,7 @@ async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
     entity_repository = EntityRepository(session_maker, project_id=project.id)
     observation_repository = ObservationRepository(session_maker, project_id=project.id)
     relation_repository = RelationRepository(session_maker, project_id=project.id)
-    search_repository = SearchRepository(session_maker, project_id=project.id)
+    search_repository = create_search_repository(session_maker, project_id=project.id)
     project_repository = ProjectRepository(session_maker)
 
     # Initialize services

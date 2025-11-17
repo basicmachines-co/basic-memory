@@ -20,8 +20,6 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from basic_memory.repository.search_repository import SearchRepository
-
 # Module level state
 _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
@@ -85,8 +83,11 @@ async def scoped_session(
     session = factory()
     try:
         # Only enable foreign keys for SQLite (Postgres has them enabled by default)
-        config = ConfigManager().config
-        if config.database_backend == DatabaseBackend.SQLITE:
+        # Detect database type from session's bind (engine) dialect
+        engine = session.get_bind()
+        dialect_name = engine.dialect.name
+
+        if dialect_name == "sqlite":
             await session.execute(text("PRAGMA foreign_keys=ON"))
 
         yield session

@@ -82,7 +82,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         result = query
         result = re.sub(r'\bAND\b', '&', result)
         result = re.sub(r'\bOR\b', '|', result)
-        result = re.sub(r'\bNOT\b', '!', result)
+        # NOT must be converted to "& !" and the ! must be attached to the following term
+        # "Python NOT Django" -> "Python & !Django"
+        result = re.sub(r'\bNOT\s+', '& !', result)
 
         return result
 
