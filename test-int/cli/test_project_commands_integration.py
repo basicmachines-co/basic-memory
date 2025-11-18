@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 from basic_memory.cli.main import app as cli_app
 
 
-def test_project_list(app_config, test_project, config_manager):
+def test_project_list(app, app_config, test_project, config_manager):
     """Test 'bm project list' command shows projects."""
     runner = CliRunner()
     result = runner.invoke(cli_app, ["project", "list"])
@@ -22,7 +22,7 @@ def test_project_list(app_config, test_project, config_manager):
     assert "[X]" in result.stdout  # default marker
 
 
-def test_project_info(app_config, test_project, config_manager):
+def test_project_info(app, app_config, test_project, config_manager):
     """Test 'bm project info' command shows project details."""
     runner = CliRunner()
     result = runner.invoke(cli_app, ["project", "info", "test-project"])
@@ -36,7 +36,7 @@ def test_project_info(app_config, test_project, config_manager):
     assert "Statistics" in result.stdout
 
 
-def test_project_info_json(app_config, test_project, config_manager):
+def test_project_info_json(app, app_config, test_project, config_manager):
     """Test 'bm project info --json' command outputs valid JSON."""
     import json
 

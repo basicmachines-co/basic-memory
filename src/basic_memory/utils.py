@@ -103,6 +103,7 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
     # Only split extension if there's a real file extension
     # Use mimetypes to detect real extensions, avoiding misinterpreting periods in version numbers
     import mimetypes
+
     mime_type, _ = mimetypes.guess_type(path_str)
     has_real_extension = mime_type is not None
 

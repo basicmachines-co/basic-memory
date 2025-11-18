@@ -95,7 +95,7 @@ def app_config(
         # These are local test credentials only - NOT for production
         database_url = os.getenv(
             "POSTGRES_TEST_URL",
-            "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+            "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test",
         )
     else:
         database_backend = DatabaseBackend.SQLITE
