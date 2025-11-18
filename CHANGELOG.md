@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.16.2 (2025-11-16)
+
+### Bug Fixes
+
+- **#429**: Use platform-native path separators in config.json
+  ([`6517e98`](https://github.com/basicmachines-co/basic-memory/commit/6517e98))
+  - Fixes config.json path separator issues on Windows
+  - Uses os.path.join for platform-native path construction
+  - Ensures consistent path handling across platforms
+
+- **#427**: Add rclone installation checks for Windows bisync commands
+  ([`1af0539`](https://github.com/basicmachines-co/basic-memory/commit/1af0539))
+  - Validates rclone installation before running bisync commands
+  - Provides clear error messages when rclone is not installed
+  - Improves user experience on Windows
+
+- **#421**: Main project always recreated on project list command
+  ([`cad7019`](https://github.com/basicmachines-co/basic-memory/commit/cad7019))
+  - Fixes issue where main project was recreated unnecessarily
+  - Improves project list command reliability
+  - Reduces unnecessary file system operations
+
 ## v0.16.1 (2025-11-11)
 
 ### Bug Fixes

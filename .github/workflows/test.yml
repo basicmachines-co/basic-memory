@@ -21,6 +21,22 @@ jobs:
         python-version: [ "3.12", "3.13" ]
     runs-on: ${{ matrix.os }}
 
+    # Postgres service (only available on Linux runners)
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: basic_memory_test
+          POSTGRES_USER: basic_memory_user
+          POSTGRES_PASSWORD: dev_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,7 +80,13 @@ jobs:
         run: |
           just lint
 
-      - name: Run tests
+      - name: Run tests (SQLite)
         run: |
           uv pip install pytest pytest-cov
           just test
+
+      - name: Run tests (Postgres)
+        # Only run on Linux since Postgres service is only available there
+        if: runner.os == 'Linux'
+        run: |
+          just test-postgres

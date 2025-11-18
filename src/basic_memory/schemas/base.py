@@ -21,11 +21,36 @@ from typing import List, Optional, Annotated, Dict
 from annotated_types import MinLen, MaxLen
 from dateparser import parse
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator, computed_field
 
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import sanitize_for_filename, sanitize_for_folder
 from basic_memory.utils import generate_permalink
+
+
+def has_valid_file_extension(filename: str) -> bool:
+    """Check if a filename has a valid file extension recognized by mimetypes.
+
+    This is used to determine whether to split the extension when processing
+    titles in kebab_filenames mode. Prevents treating periods in version numbers
+    or decimals as file extensions.
+
+    Args:
+        filename: The filename to check
+
+    Returns:
+        True if the filename has a recognized file extension, False otherwise
+
+    Examples:
+        >>> has_valid_file_extension("document.md")
+        True
+        >>> has_valid_file_extension("Version 2.0.0")
+        False
+        >>> has_valid_file_extension("image.png")
+        True
+    """
+    mime_type, _ = mimetypes.guess_type(filename)
+    return mime_type is not None
 
 
 def to_snake_case(name: str) -> str:
@@ -232,12 +257,17 @@ class Entity(BaseModel):
         use_kebab_case = app_config.kebab_filenames
 
         if use_kebab_case:
-            fixed_title = generate_permalink(file_path=fixed_title, split_extension=False)
+            # Convert to kebab-case: lowercase with hyphens, preserving periods in version numbers
+            # generate_permalink() uses mimetypes to detect real file extensions and only splits
+            # them off, avoiding misinterpreting periods in version numbers as extensions
+            has_extension = has_valid_file_extension(fixed_title)
+            fixed_title = generate_permalink(file_path=fixed_title, split_extension=has_extension)
 
         return fixed_title
 
+    @computed_field
     @property
-    def file_path(self):
+    def file_path(self) -> str:
         """Get the file path for this entity based on its permalink."""
         safe_title = self.safe_title
         if self.content_type == "text/markdown":
