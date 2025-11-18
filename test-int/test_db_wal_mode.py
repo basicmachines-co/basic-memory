@@ -143,6 +143,9 @@ async def test_null_pool_on_windows(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    __import__("os").name == "nt", reason="Non-Windows test - cannot mock POSIX paths on Windows"
+)
 async def test_regular_pool_on_non_windows(tmp_path):
     """Test that regular pooling is used on non-Windows platforms."""
     from basic_memory.db import engine_session_factory, DatabaseType
