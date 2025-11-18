@@ -31,7 +31,10 @@ app_config = ConfigManager().config
 current_url = config.get_main_option("sqlalchemy.url")
 if not current_url or current_url == "driver://user:pass@localhost/dbname":
     from basic_memory.db import DatabaseType
-    sqlalchemy_url = DatabaseType.get_db_url(app_config.database_path, DatabaseType.FILESYSTEM, app_config)
+
+    sqlalchemy_url = DatabaseType.get_db_url(
+        app_config.database_path, DatabaseType.FILESYSTEM, app_config
+    )
 
     # For Postgres, Alembic needs synchronous driver (psycopg2), not async (asyncpg)
     if app_config.database_backend == DatabaseBackend.POSTGRES:

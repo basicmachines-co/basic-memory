@@ -93,8 +93,7 @@ async def test_temp_store_configured(engine_factory, db_backend):
 @pytest.mark.asyncio
 @pytest.mark.windows
 @pytest.mark.skipif(
-    __import__("os").name != "nt",
-    reason="Windows-specific test - only runs on Windows platform"
+    __import__("os").name != "nt", reason="Windows-specific test - only runs on Windows platform"
 )
 async def test_windows_locking_mode_when_on_windows(tmp_path, monkeypatch, config_manager):
     """Test that Windows-specific locking mode is set when running on Windows."""
@@ -125,8 +124,7 @@ async def test_windows_locking_mode_when_on_windows(tmp_path, monkeypatch, confi
 @pytest.mark.asyncio
 @pytest.mark.windows
 @pytest.mark.skipif(
-    __import__("os").name != "nt",
-    reason="Windows-specific test - only runs on Windows platform"
+    __import__("os").name != "nt", reason="Windows-specific test - only runs on Windows platform"
 )
 async def test_null_pool_on_windows(tmp_path, monkeypatch):
     """Test that NullPool is used on Windows to avoid connection pooling issues."""
@@ -161,8 +159,7 @@ async def test_regular_pool_on_non_windows(tmp_path):
 @pytest.mark.asyncio
 @pytest.mark.windows
 @pytest.mark.skipif(
-    __import__("os").name != "nt",
-    reason="Windows-specific test - only runs on Windows platform"
+    __import__("os").name != "nt", reason="Windows-specific test - only runs on Windows platform"
 )
 async def test_memory_database_no_null_pool_on_windows(tmp_path, monkeypatch):
     """Test that in-memory databases do NOT use NullPool even on Windows.

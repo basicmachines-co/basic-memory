@@ -5,7 +5,6 @@ These tests use real MCP tools with the test environment instead of mocks.
 
 # Import for testing
 
-import asyncio
 import io
 from datetime import datetime, timedelta
 import json
@@ -14,7 +13,6 @@ from typing import AsyncGenerator
 from unittest.mock import patch
 
 import nest_asyncio
-import pytest
 import pytest_asyncio
 from typer.testing import CliRunner
 

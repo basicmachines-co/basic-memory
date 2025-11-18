@@ -81,7 +81,9 @@ class SearchIndexRow:
             "permalink": self.permalink,
             "file_path": self.file_path,
             "type": self.type,
-            "metadata": json.dumps(self.metadata) if serialize_json and self.metadata else self.metadata,
+            "metadata": json.dumps(self.metadata)
+            if serialize_json and self.metadata
+            else self.metadata,
             "from_id": self.from_id,
             "to_id": self.to_id,
             "relation_type": self.relation_type,

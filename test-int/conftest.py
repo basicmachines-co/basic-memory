@@ -131,6 +131,7 @@ async def engine_factory(
 
             # Run migrations to create production tables
             from basic_memory.db import run_migrations
+
             await run_migrations(app_config, db_type)
 
             yield engine, session_maker
@@ -140,6 +141,7 @@ async def engine_factory(
         async with engine_session_factory(db_path, db_type) as (engine, session_maker):
             # Create all tables via ORM
             from basic_memory.models.base import Base
+
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
@@ -178,7 +180,9 @@ def config_home(tmp_path, monkeypatch) -> Path:
 
 
 @pytest.fixture
-def app_config(config_home, db_backend: Literal["sqlite", "postgres"], tmp_path, monkeypatch) -> BasicMemoryConfig:
+def app_config(
+    config_home, db_backend: Literal["sqlite", "postgres"], tmp_path, monkeypatch
+) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Disable cloud mode for CLI tests
     monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
@@ -189,7 +193,9 @@ def app_config(config_home, db_backend: Literal["sqlite", "postgres"], tmp_path,
     # Configure database backend based on test parameter
     if db_backend == "postgres":
         database_backend = DatabaseBackend.POSTGRES
-        database_url = "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+        database_url = (
+            "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+        )
     else:
         database_backend = DatabaseBackend.SQLITE
         database_url = None

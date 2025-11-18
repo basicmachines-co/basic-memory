@@ -47,16 +47,18 @@ test-postgres:
 
 # Reset Postgres test database (drops and recreates schema)
 # Useful when Alembic migration state gets out of sync during development
+# Uses credentials from docker-compose-postgres.yml
 postgres-reset:
-    docker exec basic-memory-postgres psql -U basic_memory_user -d basic_memory_test -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+    docker exec basic-memory-postgres psql -U ${POSTGRES_USER:-basic_memory_user} -d ${POSTGRES_TEST_DB:-basic_memory_test} -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
     @echo "✅ Postgres test database reset"
 
 # Run Alembic migrations manually against Postgres test database
 # Useful for debugging migration issues
+# Uses credentials from docker-compose-postgres.yml (can override with env vars)
 postgres-migrate:
     @cd src/basic_memory/alembic && \
     BASIC_MEMORY_DATABASE_BACKEND=postgres \
-    BASIC_MEMORY_DATABASE_URL=postgresql://basic_memory_user:dev_password@localhost:5433/basic_memory_test \
+    BASIC_MEMORY_DATABASE_URL=${POSTGRES_TEST_URL:-postgresql://basic_memory_user:dev_password@localhost:5433/basic_memory_test} \
     uv run alembic upgrade head
     @echo "✅ Migrations applied to Postgres test database"
 

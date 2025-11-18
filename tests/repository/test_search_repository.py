@@ -9,7 +9,7 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.models import Entity
 from basic_memory.models.project import Project
-from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
+from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.schemas.search import SearchItemType
 
@@ -365,7 +365,11 @@ class TestSearchTermPreparation:
             # Postgres converts AND/OR/NOT to &/|/!
             assert search_repository._prepare_search_term("hello AND world") == "hello & world"
             assert search_repository._prepare_search_term("cat OR dog") == "cat | dog"
-            assert search_repository._prepare_search_term("project NOT meeting") == "project ! meeting"
+            # NOT must be converted to "& !" for proper tsquery syntax
+            assert (
+                search_repository._prepare_search_term("project NOT meeting")
+                == "project & !meeting"
+            )
             assert (
                 search_repository._prepare_search_term("(hello AND world) OR test")
                 == "(hello & world) | test"
@@ -374,7 +378,8 @@ class TestSearchTermPreparation:
             assert search_repository._prepare_search_term("hello AND world") == "hello AND world"
             assert search_repository._prepare_search_term("cat OR dog") == "cat OR dog"
             assert (
-                search_repository._prepare_search_term("project NOT meeting") == "project NOT meeting"
+                search_repository._prepare_search_term("project NOT meeting")
+                == "project NOT meeting"
             )
             assert (
                 search_repository._prepare_search_term("(hello AND world) OR test")
@@ -417,7 +422,7 @@ class TestSearchTermPreparation:
     def test_programming_terms_should_work(self, search_repository):
         """Programming-related terms with special chars should be searchable."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # These should be quoted to handle special characters safely
         assert search_repository._prepare_search_term("C++") == '"C++"*'
@@ -429,7 +434,7 @@ class TestSearchTermPreparation:
     def test_malformed_fts5_syntax_quoted(self, search_repository):
         """Malformed FTS5 syntax should be quoted to prevent errors."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Multiple operators without proper syntax
         assert search_repository._prepare_search_term("+++invalid+++") == '"+++invalid+++"*'
@@ -439,7 +444,7 @@ class TestSearchTermPreparation:
     def test_quoted_strings_handled_properly(self, search_repository):
         """Strings with quotes should have quotes escaped."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         assert search_repository._prepare_search_term('say "hello"') == '"say ""hello"""*'
         assert search_repository._prepare_search_term("it's working") == '"it\'s working"*'
@@ -447,7 +452,7 @@ class TestSearchTermPreparation:
     def test_file_paths_no_prefix_wildcard(self, search_repository):
         """File paths should not get prefix wildcards."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         assert (
             search_repository._prepare_search_term("config.json", is_prefix=False)
@@ -461,7 +466,7 @@ class TestSearchTermPreparation:
     def test_spaces_handled_correctly(self, search_repository):
         """Terms with spaces should use boolean AND for word order independence."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         assert search_repository._prepare_search_term("hello world") == "hello* AND world*"
         assert (
@@ -471,7 +476,7 @@ class TestSearchTermPreparation:
     def test_version_strings_with_dots_handled_correctly(self, search_repository):
         """Version strings with dots should be quoted to prevent FTS5 syntax errors."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # This reproduces the bug where "Basic Memory v0.13.0b2" becomes "Basic* AND Memory* AND v0.13.0b2*"
         # which causes FTS5 syntax errors because v0.13.0b2* is not valid FTS5 syntax
@@ -482,7 +487,7 @@ class TestSearchTermPreparation:
     def test_mixed_special_characters_in_multi_word_queries(self, search_repository):
         """Multi-word queries with special characters in any word should be fully quoted."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Any word containing special characters should cause the entire phrase to be quoted
         assert search_repository._prepare_search_term("config.json file") == '"config.json file"*'
@@ -641,7 +646,7 @@ class TestSearchTermPreparation:
     def test_parenthetical_term_quote_escaping(self, search_repository):
         """Test quote escaping in parenthetical terms (lines 190-191 coverage)."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Test term with quotes that needs escaping
         result = search_repository._prepare_parenthetical_term('(say "hello" world)')
@@ -655,7 +660,7 @@ class TestSearchTermPreparation:
     def test_needs_quoting_empty_input(self, search_repository):
         """Test _needs_quoting with empty inputs (line 207 coverage)."""
         if is_postgres_backend(search_repository):
-            pytest.skip('This test is for SQLite FTS5-specific behavior')
+            pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Test empty string
         assert not search_repository._needs_quoting("")

@@ -768,8 +768,11 @@ class ProjectService:
         # Query for monthly entity creation (project filtered)
         # Use different date formatting for SQLite vs Postgres
         from basic_memory.config import DatabaseBackend
+
         is_postgres = self.config_manager.config.database_backend == DatabaseBackend.POSTGRES
-        date_format = "to_char(created_at, 'YYYY-MM')" if is_postgres else "strftime('%Y-%m', created_at)"
+        date_format = (
+            "to_char(created_at, 'YYYY-MM')" if is_postgres else "strftime('%Y-%m', created_at)"
+        )
 
         # Postgres needs datetime objects, SQLite needs ISO strings
         six_months_param = six_months_ago if is_postgres else six_months_ago.isoformat()
@@ -789,7 +792,11 @@ class ProjectService:
         entity_growth = {row[0]: row[1] for row in entity_growth_result.fetchall()}
 
         # Query for monthly observation creation (project filtered)
-        date_format_entity = "to_char(entity.created_at, 'YYYY-MM')" if is_postgres else "strftime('%Y-%m', entity.created_at)"
+        date_format_entity = (
+            "to_char(entity.created_at, 'YYYY-MM')"
+            if is_postgres
+            else "strftime('%Y-%m', entity.created_at)"
+        )
 
         observation_growth_result = await self.repository.execute_query(
             text(f"""

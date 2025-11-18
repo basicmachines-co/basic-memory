@@ -81,7 +81,9 @@ def config_home(tmp_path, monkeypatch) -> Path:
 
 
 @pytest.fixture(scope="function")
-def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypatch) -> BasicMemoryConfig:
+def app_config(
+    config_home, db_backend: Literal["sqlite", "postgres"], monkeypatch
+) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Create a basic config without depending on test_project to avoid circular dependency
     projects = {"test-project": str(config_home)}
@@ -89,7 +91,12 @@ def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypat
     # Configure database backend based on test parameter
     if db_backend == "postgres":
         database_backend = DatabaseBackend.POSTGRES
-        database_url = "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+        # Use env var if set, otherwise use default matching docker-compose-postgres.yml
+        # These are local test credentials only - NOT for production
+        database_url = os.getenv(
+            "POSTGRES_TEST_URL",
+            "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+        )
     else:
         database_backend = DatabaseBackend.SQLITE
         database_url = None
@@ -107,9 +114,7 @@ def app_config(config_home, db_backend: Literal["sqlite", "postgres"], monkeypat
 
 
 @pytest.fixture
-def config_manager(
-    app_config: BasicMemoryConfig, config_home: Path, monkeypatch
-) -> ConfigManager:
+def config_manager(app_config: BasicMemoryConfig, config_home: Path, monkeypatch) -> ConfigManager:
     # Invalidate config cache to ensure clean state for each test
     from basic_memory import config as config_module
 
@@ -161,7 +166,6 @@ async def engine_factory(
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
     """Create engine and session factory for the configured database backend."""
     from basic_memory.models.search import CREATE_SEARCH_INDEX
-    from basic_memory import db
 
     if db_backend == "postgres":
         # Postgres: Create fresh engine for each test with full schema reset
@@ -169,9 +173,10 @@ async def engine_factory(
         db_type = DatabaseType.FILESYSTEM
 
         # Use context manager to handle engine disposal properly
-        async with db.engine_session_factory(
-            db_path=app_config.database_path, db_type=db_type
-        ) as (engine, session_maker):
+        async with db.engine_session_factory(db_path=app_config.database_path, db_type=db_type) as (
+            engine,
+            session_maker,
+        ):
             # Drop and recreate schema for complete isolation
             async with engine.begin() as conn:
                 await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
@@ -182,6 +187,7 @@ async def engine_factory(
             # Run migrations to create production tables (including search_index with correct schema)
             # Alembic handles duplicate migration checks, so it's safe to call this for each test
             from basic_memory.db import run_migrations
+
             await run_migrations(app_config, db_type)
 
             # For Postgres, migrations create all production tables with correct schemas
@@ -189,23 +195,34 @@ async def engine_factory(
             # Don't create search_index via ORM - it's already created by migration with composite PK
             async with engine.begin() as conn:
                 # List of tables created by migrations - don't recreate them via ORM
-                production_tables = {'entity', 'observation', 'relation', 'project', 'search_index', 'alembic_version'}
+                production_tables = {
+                    "entity",
+                    "observation",
+                    "relation",
+                    "project",
+                    "search_index",
+                    "alembic_version",
+                }
 
                 # Get test-specific tables that aren't created by migrations
                 test_tables = [
-                    table for table in Base.metadata.sorted_tables
+                    table
+                    for table in Base.metadata.sorted_tables
                     if table.name not in production_tables
                 ]
                 if test_tables:
-                    await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=test_tables))
+                    await conn.run_sync(
+                        lambda sync_conn: Base.metadata.create_all(sync_conn, tables=test_tables)
+                    )
 
             yield engine, session_maker
     else:
         # SQLite: Create fresh in-memory database for each test
         db_type = DatabaseType.MEMORY
-        async with db.engine_session_factory(
-            db_path=app_config.database_path, db_type=db_type
-        ) as (engine, session_maker):
+        async with db.engine_session_factory(db_path=app_config.database_path, db_type=db_type) as (
+            engine,
+            session_maker,
+        ):
             # Create all tables via ORM
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)

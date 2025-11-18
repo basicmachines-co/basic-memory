@@ -158,7 +158,10 @@ class EntityRepository(Repository[Entity]):
                 # SQLite: "FOREIGN KEY constraint failed"
                 # Postgres: "violates foreign key constraint"
                 error_str = str(e)
-                if "FOREIGN KEY constraint failed" in error_str or "violates foreign key constraint" in error_str:
+                if (
+                    "FOREIGN KEY constraint failed" in error_str
+                    or "violates foreign key constraint" in error_str
+                ):
                     # Import locally to avoid circular dependency (repository -> services -> repository)
                     from basic_memory.services.exceptions import SyncFatalError
 
@@ -319,7 +322,10 @@ class EntityRepository(Repository[Entity]):
             # SQLite: "FOREIGN KEY constraint failed"
             # Postgres: "violates foreign key constraint"
             error_str = str(e)
-            if "FOREIGN KEY constraint failed" in error_str or "violates foreign key constraint" in error_str:
+            if (
+                "FOREIGN KEY constraint failed" in error_str
+                or "violates foreign key constraint" in error_str
+            ):
                 # Import locally to avoid circular dependency (repository -> services -> repository)
                 from basic_memory.services.exceptions import SyncFatalError
 

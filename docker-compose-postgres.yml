@@ -10,9 +10,11 @@ services:
     image: postgres:17
     container_name: basic-memory-postgres
     environment:
+      # Local development/test credentials - NOT for production
+      # These values are referenced by tests and justfile commands
       POSTGRES_DB: basic_memory
       POSTGRES_USER: basic_memory_user
-      POSTGRES_PASSWORD: dev_password
+      POSTGRES_PASSWORD: dev_password  # Simple password for local testing only
     ports:
       - "5433:5432"
     volumes:

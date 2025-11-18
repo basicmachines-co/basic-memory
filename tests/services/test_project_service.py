@@ -446,7 +446,9 @@ async def test_add_project_default_parameter_omitted(project_service: ProjectSer
 
 
 @pytest.mark.asyncio
-async def test_ensure_single_default_project_enforcement_logic(project_service: ProjectService, test_project):
+async def test_ensure_single_default_project_enforcement_logic(
+    project_service: ProjectService, test_project
+):
     """Test that _ensure_single_default_project logic works correctly."""
     # Test that the method exists and is callable
     assert hasattr(project_service, "_ensure_single_default_project")

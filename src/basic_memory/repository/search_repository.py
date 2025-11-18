@@ -13,7 +13,9 @@ from sqlalchemy import Result
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import ConfigManager, DatabaseBackend
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -77,9 +79,6 @@ def create_search_repository(
     Returns:
         SearchRepository: Backend-appropriate search repository instance
     """
-    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-
     config = ConfigManager().config
 
     if config.database_backend == DatabaseBackend.POSTGRES:

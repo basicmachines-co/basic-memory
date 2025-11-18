@@ -164,7 +164,11 @@ async def test_after_date(search_service, test_graph):
     )
     for r in results:
         # Handle both string (SQLite) and datetime (Postgres) formats
-        created_at = r.created_at if isinstance(r.created_at, datetime) else datetime.fromisoformat(r.created_at)
+        created_at = (
+            r.created_at
+            if isinstance(r.created_at, datetime)
+            else datetime.fromisoformat(r.created_at)
+        )
         assert created_at > past_date
 
     # Should not find with future date

@@ -421,7 +421,7 @@ async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, 
 
 
 @pytest.mark.asyncio
-async def test_write_note_project_path_validation(mcp_server,app,  test_project):
+async def test_write_note_project_path_validation(mcp_server, app, test_project):
     """Test that ProjectItem.home uses expanded path, not name (Issue #340).
 
     Regression test verifying that:

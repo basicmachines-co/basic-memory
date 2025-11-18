@@ -97,7 +97,9 @@ def test_project_set_default(app, app_config, config_manager):
         new_project_path.mkdir()
 
         # Add a second project
-        result = runner.invoke(cli_app, ["project", "add", "another-project", str(new_project_path)])
+        result = runner.invoke(
+            cli_app, ["project", "add", "another-project", str(new_project_path)]
+        )
         if result.exit_code != 0:
             print(f"STDOUT: {result.stdout}")
             print(f"STDERR: {result.stderr}")

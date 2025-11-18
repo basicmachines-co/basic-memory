@@ -5,6 +5,7 @@ Revises: e7e1f4367280
 Create Date: 2025-11-15 18:05:01.025405
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -12,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '314f1ea54dc4'
-down_revision: Union[str, None] = 'e7e1f4367280'
+revision: str = "314f1ea54dc4"
+down_revision: Union[str, None] = "e7e1f4367280"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -54,8 +55,15 @@ def upgrade() -> None:
             sa.Column("metadata", JSONB(), nullable=True),  # Use JSONB for Postgres
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
-            sa.PrimaryKeyConstraint("id", "type", "project_id"),  # Composite key: id can repeat across types
-            sa.ForeignKeyConstraint(["project_id"], ["project.id"], name="fk_search_index_project_id", ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint(
+                "id", "type", "project_id"
+            ),  # Composite key: id can repeat across types
+            sa.ForeignKeyConstraint(
+                ["project_id"],
+                ["project.id"],
+                name="fk_search_index_project_id",
+                ondelete="CASCADE",
+            ),
             if_not_exists=True,
         )
 

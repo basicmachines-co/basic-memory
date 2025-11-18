@@ -80,11 +80,11 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Replace Boolean operators with tsquery operators
         # Keep parentheses for grouping
         result = query
-        result = re.sub(r'\bAND\b', '&', result)
-        result = re.sub(r'\bOR\b', '|', result)
+        result = re.sub(r"\bAND\b", "&", result)
+        result = re.sub(r"\bOR\b", "|", result)
         # NOT must be converted to "& !" and the ! must be attached to the following term
         # "Python NOT Django" -> "Python & !Django"
-        result = re.sub(r'\bNOT\s+', '& !', result)
+        result = re.sub(r"\bNOT\s+", "& !", result)
 
         return result
 
@@ -116,10 +116,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Remove tsquery special characters from the search term
         # These characters have special meaning in tsquery and cause syntax errors
         # if not used as operators
-        special_chars = ['&', '|', '!', '(', ')', ':']
+        special_chars = ["&", "|", "!", "(", ")", ":"]
         cleaned_term = term
         for char in special_chars:
-            cleaned_term = cleaned_term.replace(char, ' ')
+            cleaned_term = cleaned_term.replace(char, " ")
 
         # Handle multi-word queries
         if " " in cleaned_term:
@@ -209,7 +209,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             type_conditions = []
             for entity_type in types:
                 # Create JSONB containment condition for each type
-                type_conditions.append(f"metadata @> '{{\"entity_type\": \"{entity_type}\"}}'")
+                type_conditions.append(f'metadata @> \'{{"entity_type": "{entity_type}"}}\'')
             conditions.append(f"({' OR '.join(type_conditions)})")
 
         # Handle date filter

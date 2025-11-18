@@ -55,6 +55,7 @@ async def test_find_connected_timeframe(
     """
     # Skip for Postgres - needs investigation of duplicate key violations
     from basic_memory.config import DatabaseBackend
+
     if app_config.database_backend == DatabaseBackend.POSTGRES:
         pytest.skip("Not yet supported for Postgres - duplicate key violation issue")
 

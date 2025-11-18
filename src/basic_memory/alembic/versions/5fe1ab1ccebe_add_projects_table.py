@@ -61,7 +61,9 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("project_id", sa.Integer(), nullable=False))
         batch_op.drop_index(
             "uix_entity_permalink",
-            sqlite_where=sa.text("content_type = 'text/markdown' AND permalink IS NOT NULL") if is_sqlite else None,
+            sqlite_where=sa.text("content_type = 'text/markdown' AND permalink IS NOT NULL")
+            if is_sqlite
+            else None,
         )
         batch_op.drop_index("ix_entity_file_path")
         batch_op.create_index(batch_op.f("ix_entity_file_path"), ["file_path"], unique=False)
@@ -73,7 +75,9 @@ def upgrade() -> None:
             "uix_entity_permalink_project",
             ["permalink", "project_id"],
             unique=True,
-            sqlite_where=sa.text("content_type = 'text/markdown' AND permalink IS NOT NULL") if is_sqlite else None,
+            sqlite_where=sa.text("content_type = 'text/markdown' AND permalink IS NOT NULL")
+            if is_sqlite
+            else None,
         )
         batch_op.create_foreign_key("fk_entity_project_id", "project", ["project_id"], ["id"])
 

@@ -380,6 +380,7 @@ class TestConfigManager:
 
             # Clear the config cache to ensure we load from the temp file
             import basic_memory.config
+
             basic_memory.config._CONFIG_CACHE = None
 
             # Should load successfully with cloud_projects defaulting to empty dict

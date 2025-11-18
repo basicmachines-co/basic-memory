@@ -20,6 +20,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+
 # Module level state
 _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
@@ -32,7 +35,9 @@ class DatabaseType(Enum):
     FILESYSTEM = auto()
 
     @classmethod
-    def get_db_url(cls, db_path: Path, db_type: "DatabaseType", config: Optional[BasicMemoryConfig] = None) -> str:
+    def get_db_url(
+        cls, db_path: Path, db_type: "DatabaseType", config: Optional[BasicMemoryConfig] = None
+    ) -> str:
         """Get SQLAlchemy URL for database path.
 
         Args:
@@ -51,7 +56,9 @@ class DatabaseType(Enum):
         if config.database_backend == DatabaseBackend.POSTGRES:
             if not config.database_url:
                 raise ValueError("DATABASE_URL must be set when using Postgres backend")
-            logger.info(f"Using Postgres database: {config.database_url.split('@')[1] if '@' in config.database_url else config.database_url}")
+            logger.info(
+                f"Using Postgres database: {config.database_url.split('@')[1] if '@' in config.database_url else config.database_url}"
+            )
             return config.database_url
 
         # Default to SQLite
@@ -342,10 +349,8 @@ async def run_migrations(
         # For Postgres: No-op (tsvector column added by migrations)
         # The project_id is not used for init_search_index, so we pass a dummy value
         if app_config.database_backend == DatabaseBackend.POSTGRES:
-            from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
             await PostgresSearchRepository(session_maker, 1).init_search_index()
         else:
-            from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
             await SQLiteSearchRepository(session_maker, 1).init_search_index()
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")

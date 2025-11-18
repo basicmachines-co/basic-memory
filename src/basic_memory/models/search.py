@@ -1,9 +1,8 @@
 """Search models and tables."""
 
-from sqlalchemy import DDL, Column, Integer, String, DateTime, Text, event
+from sqlalchemy import DDL, Column, Integer, String, DateTime, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import JSON
-from sqlalchemy.schema import CreateTable
 
 from basic_memory.models.base import Base
 
@@ -14,6 +13,7 @@ class SearchIndex(Base):
     For SQLite: This model is skipped; FTS5 virtual table is created via DDL instead.
     For Postgres: This is the actual table structure with tsvector support.
     """
+
     __tablename__ = "search_index"
 
     # Primary key (rowid in SQLite FTS5, explicit id in Postgres)

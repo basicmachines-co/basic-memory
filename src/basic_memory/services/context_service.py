@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
@@ -262,11 +263,9 @@ class ContextService:
         # Build date and timeframe filters conditionally based on since parameter
         if since:
             # SQLite accepts ISO strings, but Postgres/asyncpg requires datetime objects
-            from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
             if isinstance(self.search_repository, PostgresSearchRepository):
                 # asyncpg expects timezone-NAIVE datetime in UTC for DateTime(timezone=True) columns
                 # even though the column stores timezone-aware values
-                from datetime import timezone
                 since_utc = since.astimezone(timezone.utc) if since.tzinfo else since
                 params["since_date"] = since_utc.replace(tzinfo=None)  # pyright: ignore
             else:
@@ -291,19 +290,28 @@ class ContextService:
         # So we need different queries for each database backend
 
         # Detect database backend
-        is_postgres = "PostgresSearchRepository" in str(type(self.search_repository))
+        is_postgres = isinstance(self.search_repository, PostgresSearchRepository)
 
         if is_postgres:
             query = self._build_postgres_query(
-                entity_id_values, date_filter, project_filter,
-                relation_date_filter, relation_project_filter, timeframe_condition
+                entity_id_values,
+                date_filter,
+                project_filter,
+                relation_date_filter,
+                relation_project_filter,
+                timeframe_condition,
             )
         else:
             # SQLite needs VALUES clause for exclusion (not needed for Postgres)
             values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
             query = self._build_sqlite_query(
-                entity_id_values, date_filter, project_filter,
-                relation_date_filter, relation_project_filter, timeframe_condition, values
+                entity_id_values,
+                date_filter,
+                project_filter,
+                relation_date_filter,
+                relation_project_filter,
+                timeframe_condition,
+                values,
             )
 
         result = await self.search_repository.execute_query(query, params=params)
