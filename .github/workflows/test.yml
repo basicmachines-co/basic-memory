@@ -83,7 +83,7 @@ jobs:
       - name: Run tests (SQLite)
         run: |
           uv pip install pytest pytest-cov
-          just test
+          just test-sqlite
 
       - name: Run tests (Postgres)
         # Only run on Linux since Postgres service is only available there

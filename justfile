@@ -32,11 +32,12 @@ test-int:
 #   docker-compose -f docker-compose-postgres.yml up -d
 # ==============================================================================
 
-# Run tests against SQLite only (default backend, skip Windows/Postgres/Benchmark tests)
+# Run tests against SQLite only (default backend, skip Postgres/Benchmark tests)
 # This is the fastest option and doesn't require any Docker setup.
 # Use this for local development and quick feedback.
+# Includes Windows-specific tests which will auto-skip on non-Windows platforms.
 test-sqlite:
-    uv run pytest -p pytest_mock -v --no-cov -m "not postgres and not windows and not benchmark" tests test-int
+    uv run pytest -p pytest_mock -v --no-cov -m "not postgres and not benchmark" tests test-int
 
 # Run tests against Postgres only (requires docker-compose-postgres.yml up)
 # First start Postgres: docker-compose -f docker-compose-postgres.yml up -d
