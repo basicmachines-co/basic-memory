@@ -31,6 +31,18 @@ class EntityRepository(Repository[Entity]):
         """
         super().__init__(session_maker, Entity, project_id=project_id)
 
+    async def get_by_id(self, entity_id: int) -> Optional[Entity]:
+        """Get entity by numeric ID.
+
+        Args:
+            entity_id: Numeric entity ID
+
+        Returns:
+            Entity if found, None otherwise
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            return await self.select_by_id(session, entity_id)
+
     async def get_by_permalink(self, permalink: str) -> Optional[Entity]:
         """Get entity by permalink.
 

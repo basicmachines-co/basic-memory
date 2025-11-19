@@ -1,4 +1,11 @@
-"""Router for knowledge graph operations."""
+"""Router for knowledge graph operations.
+
+⚠️ DEPRECATED: This v1 API is deprecated and will be removed on June 30, 2026.
+Please migrate to /v2/{project}/knowledge endpoints which use entity IDs instead
+of path-based identifiers for improved performance and stability.
+
+Migration guide: See docs/migration/v1-to-v2.md
+"""
 
 from typing import Annotated
 
@@ -25,7 +32,11 @@ from basic_memory.schemas import (
 from basic_memory.schemas.request import EditEntityRequest, MoveEntityRequest
 from basic_memory.schemas.base import Permalink, Entity
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+router = APIRouter(
+    prefix="/knowledge",
+    tags=["knowledge"],
+    deprecated=True,  # Marks entire router as deprecated in OpenAPI docs
+)
 
 
 async def resolve_relations_background(sync_service, entity_id: int, entity_permalink: str) -> None:
