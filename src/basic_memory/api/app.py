@@ -92,7 +92,7 @@ app.include_router(prompt_router.router, prefix="/{project}")
 app.include_router(importer_router.router, prefix="/{project}")
 
 # Include v2 routers (current)
-app.include_router(v2_knowledge, prefix="/v2/{project}")
+app.include_router(v2_knowledge, prefix="/v2/{project_id}")
 
 # Project resource router works across projects
 app.include_router(project.project_resource_router)

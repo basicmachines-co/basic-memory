@@ -173,6 +173,7 @@ class ProjectWatchStatus(BaseModel):
 class ProjectItem(BaseModel):
     """Simple representation of a project."""
 
+    id: int
     name: str
     path: str
     is_default: bool = False

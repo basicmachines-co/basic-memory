@@ -14,13 +14,14 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Response
 from loguru import logger
 
 from basic_memory.deps import (
-    EntityServiceDep,
-    SearchServiceDep,
-    LinkResolverDep,
-    ProjectConfigDep,
+    EntityServiceV2Dep,
+    SearchServiceV2Dep,
+    LinkResolverV2Dep,
+    ProjectConfigV2Dep,
     AppConfigDep,
-    SyncServiceDep,
-    EntityRepositoryDep,
+    SyncServiceV2Dep,
+    EntityRepositoryV2Dep,
+    ProjectIdPathDep,
 )
 from basic_memory.schemas import EntityResponse, DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
@@ -58,8 +59,9 @@ async def resolve_relations_background(sync_service, entity_id: int, entity_perm
 
 @router.post("/resolve", response_model=EntityResolveResponse)
 async def resolve_identifier(
+    project_id: ProjectIdPathDep,
     data: EntityResolveRequest,
-    link_resolver: LinkResolverDep,
+    link_resolver: LinkResolverV2Dep,
 ) -> EntityResolveResponse:
     """Resolve a string identifier (permalink, title, or path) to an entity ID.
 
@@ -128,8 +130,9 @@ async def resolve_identifier(
 
 @router.get("/entities/{entity_id}", response_model=EntityResponseV2)
 async def get_entity_by_id(
+    project_id: ProjectIdPathDep,
     entity_id: int,
-    entity_repository: EntityRepositoryDep,
+    entity_repository: EntityRepositoryV2Dep,
 ) -> EntityResponseV2:
     """Get an entity by its numeric ID.
 
@@ -162,10 +165,11 @@ async def get_entity_by_id(
 
 @router.post("/entities", response_model=EntityResponse)
 async def create_entity(
+    project_id: ProjectIdPathDep,
     data: Entity,
     background_tasks: BackgroundTasks,
-    entity_service: EntityServiceDep,
-    search_service: SearchServiceDep,
+    entity_service: EntityServiceV2Dep,
+    search_service: SearchServiceV2Dep,
 ) -> EntityResponse:
     """Create a new entity.
 
@@ -199,14 +203,15 @@ async def create_entity(
 
 @router.put("/entities/{entity_id}", response_model=EntityResponse)
 async def update_entity_by_id(
+    project_id: ProjectIdPathDep,
     entity_id: int,
     data: Entity,
     response: Response,
     background_tasks: BackgroundTasks,
-    entity_service: EntityServiceDep,
-    search_service: SearchServiceDep,
-    sync_service: SyncServiceDep,
-    entity_repository: EntityRepositoryDep,
+    entity_service: EntityServiceV2Dep,
+    search_service: SearchServiceV2Dep,
+    sync_service: SyncServiceV2Dep,
+    entity_repository: EntityRepositoryV2Dep,
 ) -> EntityResponse:
     """Update an entity by ID.
 
@@ -248,12 +253,13 @@ async def update_entity_by_id(
 
 @router.patch("/entities/{entity_id}", response_model=EntityResponse)
 async def edit_entity_by_id(
+    project_id: ProjectIdPathDep,
     entity_id: int,
     data: EditEntityRequest,
     background_tasks: BackgroundTasks,
-    entity_service: EntityServiceDep,
-    search_service: SearchServiceDep,
-    entity_repository: EntityRepositoryDep,
+    entity_service: EntityServiceV2Dep,
+    search_service: SearchServiceV2Dep,
+    entity_repository: EntityRepositoryV2Dep,
 ) -> EntityResponse:
     """Edit an existing entity by ID using operations like append, prepend, etc.
 
@@ -267,7 +273,9 @@ async def edit_entity_by_id(
     Raises:
         HTTPException: 404 if entity not found, 400 if edit fails
     """
-    logger.info(f"API v2 request: edit_entity_by_id entity_id={entity_id}, operation='{data.operation}'")
+    logger.info(
+        f"API v2 request: edit_entity_by_id entity_id={entity_id}, operation='{data.operation}'"
+    )
 
     # Verify entity exists
     entity = await entity_repository.get_by_id(entity_id)
@@ -307,10 +315,11 @@ async def edit_entity_by_id(
 
 @router.delete("/entities/{entity_id}", response_model=DeleteEntitiesResponse)
 async def delete_entity_by_id(
+    project_id: ProjectIdPathDep,
     entity_id: int,
     background_tasks: BackgroundTasks,
-    entity_service: EntityServiceDep,
-    entity_repository: EntityRepositoryDep,
+    entity_service: EntityServiceV2Dep,
+    entity_repository: EntityRepositoryV2Dep,
     search_service=Depends(lambda: None),  # Optional for now
 ) -> DeleteEntitiesResponse:
     """Delete an entity by ID.
@@ -347,12 +356,13 @@ async def delete_entity_by_id(
 
 @router.post("/move", response_model=EntityResponse)
 async def move_entity(
+    project_id: ProjectIdPathDep,
     data: MoveEntityRequest,
     background_tasks: BackgroundTasks,
-    entity_service: EntityServiceDep,
-    project_config: ProjectConfigDep,
+    entity_service: EntityServiceV2Dep,
+    project_config: ProjectConfigV2Dep,
     app_config: AppConfigDep,
-    search_service: SearchServiceDep,
+    search_service: SearchServiceV2Dep,
 ) -> EntityResponse:
     """Move an entity to a new file location.
 
