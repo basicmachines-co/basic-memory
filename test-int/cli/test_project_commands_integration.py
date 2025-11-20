@@ -5,13 +5,13 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from basic_memory.cli.main import app
+from basic_memory.cli.main import app as cli_app
 
 
-def test_project_list(app_config, test_project, config_manager):
+def test_project_list(app, app_config, test_project, config_manager):
     """Test 'bm project list' command shows projects."""
     runner = CliRunner()
-    result = runner.invoke(app, ["project", "list"])
+    result = runner.invoke(cli_app, ["project", "list"])
 
     if result.exit_code != 0:
         print(f"STDOUT: {result.stdout}")
@@ -22,10 +22,10 @@ def test_project_list(app_config, test_project, config_manager):
     assert "[X]" in result.stdout  # default marker
 
 
-def test_project_info(app_config, test_project, config_manager):
+def test_project_info(app, app_config, test_project, config_manager):
     """Test 'bm project info' command shows project details."""
     runner = CliRunner()
-    result = runner.invoke(app, ["project", "info", "test-project"])
+    result = runner.invoke(cli_app, ["project", "info", "test-project"])
 
     if result.exit_code != 0:
         print(f"STDOUT: {result.stdout}")
@@ -36,12 +36,12 @@ def test_project_info(app_config, test_project, config_manager):
     assert "Statistics" in result.stdout
 
 
-def test_project_info_json(app_config, test_project, config_manager):
+def test_project_info_json(app, app_config, test_project, config_manager):
     """Test 'bm project info --json' command outputs valid JSON."""
     import json
 
     runner = CliRunner()
-    result = runner.invoke(app, ["project", "info", "test-project", "--json"])
+    result = runner.invoke(cli_app, ["project", "info", "test-project", "--json"])
 
     if result.exit_code != 0:
         print(f"STDOUT: {result.stdout}")
@@ -55,7 +55,7 @@ def test_project_info_json(app_config, test_project, config_manager):
     assert "system" in data
 
 
-def test_project_add_and_remove(app_config, config_manager):
+def test_project_add_and_remove(app, app_config, config_manager):
     """Test adding and removing a project."""
     runner = CliRunner()
 
@@ -65,7 +65,7 @@ def test_project_add_and_remove(app_config, config_manager):
         new_project_path.mkdir()
 
         # Add project
-        result = runner.invoke(app, ["project", "add", "new-project", str(new_project_path)])
+        result = runner.invoke(cli_app, ["project", "add", "new-project", str(new_project_path)])
 
         if result.exit_code != 0:
             print(f"STDOUT: {result.stdout}")
@@ -77,17 +77,17 @@ def test_project_add_and_remove(app_config, config_manager):
         )
 
         # Verify it shows up in list
-        result = runner.invoke(app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"])
         assert result.exit_code == 0
         assert "new-project" in result.stdout
 
         # Remove project
-        result = runner.invoke(app, ["project", "remove", "new-project"])
+        result = runner.invoke(cli_app, ["project", "remove", "new-project"])
         assert result.exit_code == 0
         assert "removed" in result.stdout.lower() or "deleted" in result.stdout.lower()
 
 
-def test_project_set_default(app_config, config_manager):
+def test_project_set_default(app, app_config, config_manager):
     """Test setting default project."""
     runner = CliRunner()
 
@@ -97,14 +97,16 @@ def test_project_set_default(app_config, config_manager):
         new_project_path.mkdir()
 
         # Add a second project
-        result = runner.invoke(app, ["project", "add", "another-project", str(new_project_path)])
+        result = runner.invoke(
+            cli_app, ["project", "add", "another-project", str(new_project_path)]
+        )
         if result.exit_code != 0:
             print(f"STDOUT: {result.stdout}")
             print(f"STDERR: {result.stderr}")
         assert result.exit_code == 0
 
         # Set as default
-        result = runner.invoke(app, ["project", "default", "another-project"])
+        result = runner.invoke(cli_app, ["project", "default", "another-project"])
         if result.exit_code != 0:
             print(f"STDOUT: {result.stdout}")
             print(f"STDERR: {result.stderr}")
@@ -112,7 +114,7 @@ def test_project_set_default(app_config, config_manager):
         assert "default" in result.stdout.lower()
 
         # Verify in list
-        result = runner.invoke(app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"])
         assert result.exit_code == 0
         # The new project should have the [X] marker now
         lines = result.stdout.split("\n")
@@ -121,7 +123,7 @@ def test_project_set_default(app_config, config_manager):
                 assert "[X]" in line
 
 
-def test_remove_main_project(app_config, config_manager):
+def test_remove_main_project(app, app_config, config_manager):
     """Test that removing main project then listing projects prevents main from reappearing (issue #397)."""
     runner = CliRunner()
 
@@ -134,30 +136,30 @@ def test_remove_main_project(app_config, config_manager):
         new_default_path = Path(new_default_dir)
 
         # Ensure main exists
-        result = runner.invoke(app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"])
         if "main" not in result.stdout:
-            result = runner.invoke(app, ["project", "add", "main", str(main_path)])
+            result = runner.invoke(cli_app, ["project", "add", "main", str(main_path)])
             print(result.stdout)
             assert result.exit_code == 0
 
         # Confirm main is present
-        result = runner.invoke(app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"])
         assert "main" in result.stdout
 
         # Add a second project
-        result = runner.invoke(app, ["project", "add", "new_default", str(new_default_path)])
+        result = runner.invoke(cli_app, ["project", "add", "new_default", str(new_default_path)])
         assert result.exit_code == 0
 
         # Set new_default as default (if needed)
-        result = runner.invoke(app, ["project", "default", "new_default"])
+        result = runner.invoke(cli_app, ["project", "default", "new_default"])
         assert result.exit_code == 0
 
         # Remove main
-        result = runner.invoke(app, ["project", "remove", "main"])
+        result = runner.invoke(cli_app, ["project", "remove", "main"])
         assert result.exit_code == 0
 
         # Confirm only new_default exists and main does not
-        result = runner.invoke(app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"])
         assert result.exit_code == 0
         assert "main" not in result.stdout
         assert "new_default" in result.stdout

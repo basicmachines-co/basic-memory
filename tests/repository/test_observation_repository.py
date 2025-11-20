@@ -52,7 +52,7 @@ async def test_create_observation_entity_does_not_exist(
 ):
     """Test creating a new observation"""
     observation_data = {
-        "entity_id": "does-not-exist",
+        "entity_id": 99999,  # Non-existent entity ID (integer for Postgres compatibility)
         "content": "Test content",
         "context": "test-context",
     }

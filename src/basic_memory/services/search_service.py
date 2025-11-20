@@ -185,6 +185,7 @@ class SearchService:
                 entity_id=entity.id,
                 type=SearchItemType.ENTITY.value,
                 title=entity.title,
+                permalink=entity.permalink,  # Required for Postgres NOT NULL constraint
                 file_path=entity.file_path,
                 metadata={
                     "entity_type": entity.entity_type,

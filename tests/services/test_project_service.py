@@ -204,7 +204,7 @@ async def test_add_project_async(project_service: ProjectService):
 
 
 @pytest.mark.asyncio
-async def test_set_default_project_async(project_service: ProjectService):
+async def test_set_default_project_async(project_service: ProjectService, test_project):
     """Test setting a project as default with the updated async method."""
     # First add a test project
     test_project_name = f"test-default-project-{os.urandom(4).hex()}"
@@ -238,9 +238,11 @@ async def test_set_default_project_async(project_service: ProjectService):
                 assert old_default_project.is_default is not True
 
         finally:
-            # Restore original default
+            # Restore original default (only if it exists in database)
             if original_default:
-                await project_service.set_default_project(original_default)
+                original_project = await project_service.repository.get_by_name(original_default)
+                if original_project:
+                    await project_service.set_default_project(original_default)
 
             # Clean up test project
             if test_project_name in project_service.projects:
@@ -319,7 +321,7 @@ async def test_set_default_project_config_db_mismatch(
 
 
 @pytest.mark.asyncio
-async def test_add_project_with_set_default_true(project_service: ProjectService):
+async def test_add_project_with_set_default_true(project_service: ProjectService, test_project):
     """Test adding a project with set_default=True enforces single default."""
     test_project_name = f"test-default-true-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -361,9 +363,11 @@ async def test_add_project_with_set_default_true(project_service: ProjectService
             assert default_projects[0].name == test_project_name
 
         finally:
-            # Restore original default
+            # Restore original default (only if it exists in database)
             if original_default:
-                await project_service.set_default_project(original_default)
+                original_project = await project_service.repository.get_by_name(original_default)
+                if original_project:
+                    await project_service.set_default_project(original_default)
 
             # Clean up test project
             if test_project_name in project_service.projects:
@@ -442,7 +446,9 @@ async def test_add_project_default_parameter_omitted(project_service: ProjectSer
 
 
 @pytest.mark.asyncio
-async def test_ensure_single_default_project_enforcement_logic(project_service: ProjectService):
+async def test_ensure_single_default_project_enforcement_logic(
+    project_service: ProjectService, test_project
+):
     """Test that _ensure_single_default_project logic works correctly."""
     # Test that the method exists and is callable
     assert hasattr(project_service, "_ensure_single_default_project")

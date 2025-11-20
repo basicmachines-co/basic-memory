@@ -8,7 +8,7 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, DatabaseBackend
 
 # set config.env to "test" for pytest to prevent logging to file in utils.setup_logging()
 os.environ["BASIC_MEMORY_ENV"] = "test"
@@ -20,12 +20,28 @@ from basic_memory.models import Base  # noqa: E402
 # access to the values within the .ini file in use.
 config = context.config
 
+# Load app config - this will read environment variables (BASIC_MEMORY_DATABASE_BACKEND, etc.)
+# due to Pydantic's env_prefix="BASIC_MEMORY_" setting
 app_config = ConfigManager().config
-# Set the SQLAlchemy URL from our app config
-sqlalchemy_url = f"sqlite:///{app_config.database_path}"
-config.set_main_option("sqlalchemy.url", sqlalchemy_url)
 
-# print(f"Using SQLAlchemy URL: {sqlalchemy_url}")
+# Set the SQLAlchemy URL based on database backend configuration
+# If the URL is already set in config (e.g., from run_migrations), use that
+# Otherwise, get it from app config
+# Note: alembic.ini has a placeholder URL "driver://user:pass@localhost/dbname" that we need to override
+current_url = config.get_main_option("sqlalchemy.url")
+if not current_url or current_url == "driver://user:pass@localhost/dbname":
+    from basic_memory.db import DatabaseType
+
+    sqlalchemy_url = DatabaseType.get_db_url(
+        app_config.database_path, DatabaseType.FILESYSTEM, app_config
+    )
+
+    # For Postgres, Alembic needs synchronous driver (psycopg2), not async (asyncpg)
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        # Convert asyncpg URL to psycopg2 URL for Alembic
+        sqlalchemy_url = sqlalchemy_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    config.set_main_option("sqlalchemy.url", sqlalchemy_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

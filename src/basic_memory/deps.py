@@ -25,7 +25,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
-from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.search_repository import SearchRepository, create_search_repository
 from basic_memory.services import EntityService, ProjectService
 from basic_memory.services.context_service import ContextService
 from basic_memory.services.directory_service import DirectoryService
@@ -307,8 +307,12 @@ async def get_search_repository(
     session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
 ) -> SearchRepository:
-    """Create a SearchRepository instance for the current project."""
-    return SearchRepository(session_maker, project_id=project_id)
+    """Create a backend-specific SearchRepository instance for the current project.
+
+    Uses factory function to return SQLiteSearchRepository or PostgresSearchRepository
+    based on database backend configuration.
+    """
+    return create_search_repository(session_maker, project_id=project_id)
 
 
 SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]

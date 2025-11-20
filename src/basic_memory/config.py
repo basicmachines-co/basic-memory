@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, List, Tuple
+from enum import Enum
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
@@ -22,6 +23,13 @@ CONFIG_FILE_NAME = "config.json"
 WATCH_STATUS_JSON = "watch-status.json"
 
 Environment = Literal["test", "dev", "user"]
+
+
+class DatabaseBackend(str, Enum):
+    """Supported database backends."""
+
+    SQLITE = "sqlite"
+    POSTGRES = "postgres"
 
 
 @dataclass
@@ -80,6 +88,17 @@ class BasicMemoryConfig(BaseSettings):
 
     # overridden by ~/.basic-memory/config.json
     log_level: str = "INFO"
+
+    # Database configuration
+    database_backend: DatabaseBackend = Field(
+        default=DatabaseBackend.SQLITE,
+        description="Database backend to use (sqlite or postgres)",
+    )
+
+    database_url: Optional[str] = Field(
+        default=None,
+        description="Database connection URL. For Postgres, use postgresql+asyncpg://user:pass@host:port/db. If not set, SQLite will use default path.",
+    )
 
     # Watch service configuration
     sync_delay: int = Field(

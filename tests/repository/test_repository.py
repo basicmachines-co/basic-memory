@@ -1,6 +1,6 @@
 """Test repository implementation."""
 
-from datetime import datetime
+from datetime import datetime, UTC
 import pytest
 from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,9 +17,13 @@ class ModelTest(Base):
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime,
+        default=lambda: datetime.now(UTC).replace(tzinfo=None),
+        onupdate=lambda: datetime.now(UTC).replace(tzinfo=None),
     )
 
 
@@ -169,7 +173,7 @@ async def test_update_model_not_found(repository):
     instance = ModelTest(id="test_add", name="Test Add")
     await repository.add(instance)
 
-    modified = await repository.update(0, {})
+    modified = await repository.update("0", {})  # Use string ID for Postgres compatibility
     assert modified is None
 
 

@@ -1,6 +1,5 @@
 from typing import AsyncGenerator
 
-import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
@@ -26,7 +25,7 @@ async def client(app: FastAPI, aiolib) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
-@pytest.fixture
-def cli_env(project_config, client, test_config):
+@pytest_asyncio.fixture
+async def cli_env(project_config, client, test_config):
     """Set up CLI environment with correct project session."""
     return {"project_config": project_config, "client": client}

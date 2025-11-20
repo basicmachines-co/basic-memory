@@ -4,15 +4,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 import os
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager
+from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager, DatabaseBackend
 from basic_memory.db import DatabaseType
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -23,7 +24,6 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
-from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services import (
     EntityService,
@@ -40,6 +40,27 @@ from basic_memory.sync.watch_service import WatchService
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(
+    params=[
+        pytest.param("sqlite", id="sqlite"),
+        pytest.param("postgres", id="postgres", marks=pytest.mark.postgres),
+    ]
+)
+def db_backend(request) -> Literal["sqlite", "postgres"]:
+    """Parametrize tests to run against both SQLite and Postgres.
+
+    Usage:
+        pytest                          # Runs tests against SQLite only (default)
+        pytest -m postgres              # Runs tests against Postgres only
+        pytest -m "not postgres"        # Runs tests against SQLite only
+        pytest --run-all-backends       # Runs tests against both backends
+
+    Note: Only tests that use database fixtures (engine_factory, session_maker, etc.)
+    will be parametrized. Tests that don't use the database won't be affected.
+    """
+    return request.param
 
 
 @pytest.fixture
@@ -59,25 +80,41 @@ def config_home(tmp_path, monkeypatch) -> Path:
     return tmp_path
 
 
-@pytest.fixture(scope="function", autouse=True)
-def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
+@pytest.fixture(scope="function")
+def app_config(
+    config_home, db_backend: Literal["sqlite", "postgres"], monkeypatch
+) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Create a basic config without depending on test_project to avoid circular dependency
     projects = {"test-project": str(config_home)}
+
+    # Configure database backend based on test parameter
+    if db_backend == "postgres":
+        database_backend = DatabaseBackend.POSTGRES
+        # Use env var if set, otherwise use default matching docker-compose-postgres.yml
+        # These are local test credentials only - NOT for production
+        database_url = os.getenv(
+            "POSTGRES_TEST_URL",
+            "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test",
+        )
+    else:
+        database_backend = DatabaseBackend.SQLITE
+        database_url = None
+
     app_config = BasicMemoryConfig(
         env="test",
         projects=projects,
         default_project="test-project",
         update_permalinks_on_move=True,
+        database_backend=database_backend,
+        database_url=database_url,
     )
 
     return app_config
 
 
-@pytest.fixture(autouse=True)
-def config_manager(
-    app_config: BasicMemoryConfig, project_config: ProjectConfig, config_home: Path, monkeypatch
-) -> ConfigManager:
+@pytest.fixture
+def config_manager(app_config: BasicMemoryConfig, config_home: Path, monkeypatch) -> ConfigManager:
     # Invalidate config cache to ensure clean state for each test
     from basic_memory import config as config_module
 
@@ -95,7 +132,7 @@ def config_manager(
     return config_manager
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 def project_config(test_project):
     """Create test project configuration."""
 
@@ -124,16 +161,80 @@ def test_config(config_home, project_config, app_config, config_manager) -> Test
 @pytest_asyncio.fixture(scope="function")
 async def engine_factory(
     app_config,
+    config_manager,
+    db_backend: Literal["sqlite", "postgres"],
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
-    """Create an engine and session factory using an in-memory SQLite database."""
-    async with db.engine_session_factory(
-        db_path=app_config.database_path, db_type=DatabaseType.MEMORY
-    ) as (engine, session_maker):
-        # Create all tables for the DB the engine is connected to
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    """Create engine and session factory for the configured database backend."""
+    from basic_memory.models.search import CREATE_SEARCH_INDEX
 
-        yield engine, session_maker
+    if db_backend == "postgres":
+        # Postgres: Create fresh engine for each test with full schema reset
+        config_manager._config = app_config
+        db_type = DatabaseType.FILESYSTEM
+
+        # Use context manager to handle engine disposal properly
+        async with db.engine_session_factory(db_path=app_config.database_path, db_type=db_type) as (
+            engine,
+            session_maker,
+        ):
+            # Drop and recreate schema for complete isolation
+            async with engine.begin() as conn:
+                await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+                await conn.execute(text("CREATE SCHEMA public"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO basic_memory_user"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
+
+            # Run migrations to create production tables (including search_index with correct schema)
+            # Alembic handles duplicate migration checks, so it's safe to call this for each test
+            from basic_memory.db import run_migrations
+
+            await run_migrations(app_config, db_type)
+
+            # For Postgres, migrations create all production tables with correct schemas
+            # We only need to create test-specific tables (like ModelTest) that aren't in migrations
+            # Don't create search_index via ORM - it's already created by migration with composite PK
+            async with engine.begin() as conn:
+                # List of tables created by migrations - don't recreate them via ORM
+                production_tables = {
+                    "entity",
+                    "observation",
+                    "relation",
+                    "project",
+                    "search_index",
+                    "alembic_version",
+                }
+
+                # Get test-specific tables that aren't created by migrations
+                test_tables = [
+                    table
+                    for table in Base.metadata.sorted_tables
+                    if table.name not in production_tables
+                ]
+                if test_tables:
+                    await conn.run_sync(
+                        lambda sync_conn: Base.metadata.create_all(sync_conn, tables=test_tables)
+                    )
+
+            yield engine, session_maker
+    else:
+        # SQLite: Create fresh in-memory database for each test
+        db_type = DatabaseType.MEMORY
+        async with db.engine_session_factory(db_path=app_config.database_path, db_type=db_type) as (
+            engine,
+            session_maker,
+        ):
+            # Create all tables via ORM
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            # Drop any SearchIndex ORM table, then create FTS5 virtual table
+            async with db.scoped_session(session_maker) as session:
+                await session.execute(text("DROP TABLE IF EXISTS search_index"))
+                await session.execute(CREATE_SEARCH_INDEX)
+                await session.commit()
+
+            # Yield after setup is complete
+            yield engine, session_maker
 
 
 @pytest_asyncio.fixture
@@ -278,19 +379,20 @@ async def directory_service(entity_repository, project_config) -> DirectoryServi
 
 
 @pytest_asyncio.fixture
-async def search_repository(session_maker, test_project: Project):
-    """Create SearchRepository instance with project context"""
-    return SearchRepository(session_maker, project_id=test_project.id)
+async def search_repository(session_maker, test_project: Project, app_config: BasicMemoryConfig):
+    """Create backend-appropriate SearchRepository instance with project context"""
+    from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 
-
-@pytest_asyncio.fixture(autouse=True)
-async def init_search_index(search_service):
-    await search_service.init_search_index()
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        return PostgresSearchRepository(session_maker, project_id=test_project.id)
+    else:
+        return SQLiteSearchRepository(session_maker, project_id=test_project.id)
 
 
 @pytest_asyncio.fixture
 async def search_service(
-    search_repository: SearchRepository,
+    search_repository,
     entity_repository: EntityRepository,
     file_service: FileService,
 ) -> SearchService:

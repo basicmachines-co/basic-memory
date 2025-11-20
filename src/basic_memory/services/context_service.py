@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.observation_repository import ObservationRepository
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
@@ -252,9 +253,6 @@ class ContextService:
         # Build the VALUES clause for entity IDs
         entity_id_values = ", ".join([str(i) for i in entity_ids])
 
-        # For compatibility with the old query, we still need this for filtering
-        values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
-
         # Parameters for bindings - include project_id for security filtering
         params = {
             "max_depth": max_depth,
@@ -264,7 +262,14 @@ class ContextService:
 
         # Build date and timeframe filters conditionally based on since parameter
         if since:
-            params["since_date"] = since.isoformat()  # pyright: ignore
+            # SQLite accepts ISO strings, but Postgres/asyncpg requires datetime objects
+            if isinstance(self.search_repository, PostgresSearchRepository):
+                # asyncpg expects timezone-NAIVE datetime in UTC for DateTime(timezone=True) columns
+                # even though the column stores timezone-aware values
+                since_utc = since.astimezone(timezone.utc) if since.tzinfo else since
+                params["since_date"] = since_utc.replace(tzinfo=None)  # pyright: ignore
+            else:
+                params["since_date"] = since.isoformat()  # pyright: ignore
             date_filter = "AND e.created_at >= :since_date"
             relation_date_filter = "AND e_from.created_at >= :since_date"
             timeframe_condition = "AND eg.relation_date >= :since_date"
@@ -279,13 +284,210 @@ class ContextService:
 
         # Use a CTE that operates directly on entity and relation tables
         # This avoids the overhead of the search_index virtual table
-        query = text(f"""
+        # Note: Postgres and SQLite have different CTE limitations:
+        # - Postgres: doesn't allow multiple UNION ALL branches referencing the CTE
+        # - SQLite: doesn't support LATERAL joins
+        # So we need different queries for each database backend
+
+        # Detect database backend
+        is_postgres = isinstance(self.search_repository, PostgresSearchRepository)
+
+        if is_postgres:
+            query = self._build_postgres_query(
+                entity_id_values,
+                date_filter,
+                project_filter,
+                relation_date_filter,
+                relation_project_filter,
+                timeframe_condition,
+            )
+        else:
+            # SQLite needs VALUES clause for exclusion (not needed for Postgres)
+            values = ", ".join([f"('{t}', {i})" for t, i in type_id_pairs])
+            query = self._build_sqlite_query(
+                entity_id_values,
+                date_filter,
+                project_filter,
+                relation_date_filter,
+                relation_project_filter,
+                timeframe_condition,
+                values,
+            )
+
+        result = await self.search_repository.execute_query(query, params=params)
+        rows = result.all()
+
+        context_rows = [
+            ContextResultRow(
+                type=row.type,
+                id=row.id,
+                title=row.title,
+                permalink=row.permalink,
+                file_path=row.file_path,
+                from_id=row.from_id,
+                to_id=row.to_id,
+                relation_type=row.relation_type,
+                content=row.content,
+                category=row.category,
+                entity_id=row.entity_id,
+                depth=row.depth,
+                root_id=row.root_id,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+        return context_rows
+
+    def _build_postgres_query(
+        self,
+        entity_id_values: str,
+        date_filter: str,
+        project_filter: str,
+        relation_date_filter: str,
+        relation_project_filter: str,
+        timeframe_condition: str,
+    ):
+        """Build Postgres-specific CTE query using LATERAL joins."""
+        return text(f"""
         WITH RECURSIVE entity_graph AS (
             -- Base case: seed entities
-            SELECT 
+            SELECT
                 e.id,
                 'entity' as type,
-                e.title, 
+                e.title,
+                e.permalink,
+                e.file_path,
+                CAST(NULL AS INTEGER) as from_id,
+                CAST(NULL AS INTEGER) as to_id,
+                CAST(NULL AS TEXT) as relation_type,
+                CAST(NULL AS TEXT) as content,
+                CAST(NULL AS TEXT) as category,
+                CAST(NULL AS INTEGER) as entity_id,
+                0 as depth,
+                e.id as root_id,
+                e.created_at,
+                e.created_at as relation_date
+            FROM entity e
+            WHERE e.id IN ({entity_id_values})
+            {date_filter}
+            {project_filter}
+
+            UNION ALL
+
+            -- Fetch BOTH relations AND connected entities in a single recursive step
+            -- Postgres only allows ONE reference to the recursive CTE in the recursive term
+            -- We use CROSS JOIN LATERAL to generate two rows (relation + entity) from each traversal
+            SELECT
+                CASE
+                    WHEN step_type = 1 THEN r.id
+                    ELSE e.id
+                END as id,
+                CASE
+                    WHEN step_type = 1 THEN 'relation'
+                    ELSE 'entity'
+                END as type,
+                CASE
+                    WHEN step_type = 1 THEN r.relation_type || ': ' || r.to_name
+                    ELSE e.title
+                END as title,
+                CASE
+                    WHEN step_type = 1 THEN ''
+                    ELSE COALESCE(e.permalink, '')
+                END as permalink,
+                CASE
+                    WHEN step_type = 1 THEN e_from.file_path
+                    ELSE e.file_path
+                END as file_path,
+                CASE
+                    WHEN step_type = 1 THEN r.from_id
+                    ELSE NULL
+                END as from_id,
+                CASE
+                    WHEN step_type = 1 THEN r.to_id
+                    ELSE NULL
+                END as to_id,
+                CASE
+                    WHEN step_type = 1 THEN r.relation_type
+                    ELSE NULL
+                END as relation_type,
+                CAST(NULL AS TEXT) as content,
+                CAST(NULL AS TEXT) as category,
+                CAST(NULL AS INTEGER) as entity_id,
+                eg.depth + step_type as depth,
+                eg.root_id,
+                CASE
+                    WHEN step_type = 1 THEN e_from.created_at
+                    ELSE e.created_at
+                END as created_at,
+                CASE
+                    WHEN step_type = 1 THEN e_from.created_at
+                    ELSE eg.relation_date
+                END as relation_date
+            FROM entity_graph eg
+            CROSS JOIN LATERAL (VALUES (1), (2)) AS steps(step_type)
+            JOIN relation r ON (
+                eg.type = 'entity' AND
+                (r.from_id = eg.id OR r.to_id = eg.id)
+            )
+            JOIN entity e_from ON (
+                r.from_id = e_from.id
+                {relation_project_filter}
+            )
+            LEFT JOIN entity e ON (
+                step_type = 2 AND
+                e.id = CASE
+                    WHEN r.from_id = eg.id THEN r.to_id
+                    ELSE r.from_id
+                END
+                {date_filter}
+                {project_filter}
+            )
+            WHERE eg.depth < :max_depth
+            AND (step_type = 1 OR (step_type = 2 AND e.id IS NOT NULL AND e.id != eg.id))
+            {timeframe_condition}
+        )
+        -- Materialize and filter
+        SELECT DISTINCT
+            type,
+            id,
+            title,
+            permalink,
+            file_path,
+            from_id,
+            to_id,
+            relation_type,
+            content,
+            category,
+            entity_id,
+            MIN(depth) as depth,
+            root_id,
+            created_at
+        FROM entity_graph
+        WHERE depth > 0
+        GROUP BY type, id, title, permalink, file_path, from_id, to_id,
+                 relation_type, content, category, entity_id, root_id, created_at
+        ORDER BY depth, type, id
+        LIMIT :max_results
+       """)
+
+    def _build_sqlite_query(
+        self,
+        entity_id_values: str,
+        date_filter: str,
+        project_filter: str,
+        relation_date_filter: str,
+        relation_project_filter: str,
+        timeframe_condition: str,
+        values: str,
+    ):
+        """Build SQLite-specific CTE query using multiple UNION ALL branches."""
+        return text(f"""
+        WITH RECURSIVE entity_graph AS (
+            -- Base case: seed entities
+            SELECT
+                e.id,
+                'entity' as type,
+                e.title,
                 e.permalink,
                 e.file_path,
                 NULL as from_id,
@@ -311,7 +513,6 @@ class ContextService:
                 r.id,
                 'relation' as type,
                 r.relation_type || ': ' || r.to_name as title,
-                -- Relation model doesn't have permalink column - we'll generate it at runtime
                 '' as permalink,
                 e_from.file_path,
                 r.from_id,
@@ -322,7 +523,7 @@ class ContextService:
                 NULL as entity_id,
                 eg.depth + 1,
                 eg.root_id,
-                e_from.created_at, -- Use the from_entity's created_at since relation has no timestamp
+                e_from.created_at,
                 e_from.created_at as relation_date,
                 CASE WHEN r.from_id = eg.id THEN 0 ELSE 1 END as is_incoming
             FROM entity_graph eg
@@ -337,7 +538,6 @@ class ContextService:
             )
             LEFT JOIN entity e_to ON (r.to_id = e_to.id)
             WHERE eg.depth < :max_depth
-            -- Ensure to_entity (if exists) also belongs to same project
             AND (r.to_id IS NULL OR e_to.project_id = :project_id)
 
             UNION ALL
@@ -347,9 +547,9 @@ class ContextService:
                 e.id,
                 'entity' as type,
                 e.title,
-                CASE 
-                    WHEN e.permalink IS NULL THEN '' 
-                    ELSE e.permalink 
+                CASE
+                    WHEN e.permalink IS NULL THEN ''
+                    ELSE e.permalink
                 END as permalink,
                 e.file_path,
                 NULL as from_id,
@@ -366,7 +566,7 @@ class ContextService:
             FROM entity_graph eg
             JOIN entity e ON (
                 eg.type = 'relation' AND
-                e.id = CASE 
+                e.id = CASE
                     WHEN eg.is_incoming = 0 THEN eg.to_id
                     ELSE eg.from_id
                 END
@@ -374,10 +574,9 @@ class ContextService:
                 {project_filter}
             )
             WHERE eg.depth < :max_depth
-            -- Only include entities connected by relations within timeframe if specified
             {timeframe_condition}
         )
-        SELECT DISTINCT 
+        SELECT DISTINCT
             type,
             id,
             title,
@@ -393,33 +592,9 @@ class ContextService:
             root_id,
             created_at
         FROM entity_graph
-        WHERE (type, id) NOT IN ({values})
-        GROUP BY
-            type, id
+        WHERE depth > 0
+        GROUP BY type, id, title, permalink, file_path, from_id, to_id,
+                 relation_type, content, category, entity_id, root_id, created_at
         ORDER BY depth, type, id
         LIMIT :max_results
        """)
-
-        result = await self.search_repository.execute_query(query, params=params)
-        rows = result.all()
-
-        context_rows = [
-            ContextResultRow(
-                type=row.type,
-                id=row.id,
-                title=row.title,
-                permalink=row.permalink,
-                file_path=row.file_path,
-                from_id=row.from_id,
-                to_id=row.to_id,
-                relation_type=row.relation_type,
-                content=row.content,
-                category=row.category,
-                entity_id=row.entity_id,
-                depth=row.depth,
-                root_id=row.root_id,
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
-        return context_rows

@@ -9,9 +9,10 @@ from textwrap import dedent
 
 import pytest
 from fastmcp import Client
-from unittest.mock import patch
 
 from basic_memory.config import ConfigManager
+from basic_memory.schemas.project_info import ProjectItem
+from pathlib import Path
 
 
 @pytest.mark.asyncio
@@ -313,79 +314,68 @@ async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_kebab_filenames_basic(mcp_server, test_project):
+async def test_write_note_kebab_filenames_basic(mcp_server, app, test_project, app_config):
     """Test note creation with kebab_filenames=True and invalid filename characters."""
 
-    config = ConfigManager().config
-    curr_config_val = config.kebab_filenames
-    config.kebab_filenames = True
+    app_config.kebab_filenames = True
+    ConfigManager().save_config(app_config)
 
-    with patch.object(ConfigManager, "config", config):
-        async with Client(mcp_server) as client:
-            result = await client.call_tool(
-                "write_note",
-                {
-                    "project": test_project.name,
-                    "title": "My Note: With/Invalid|Chars?",
-                    "folder": "my-folder",
-                    "content": "Testing kebab-case and invalid characters.",
-                    "tags": "kebab,invalid,filename",
-                },
-            )
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "My Note: With/Invalid|Chars?",
+                "folder": "my-folder",
+                "content": "Testing kebab-case and invalid characters.",
+                "tags": "kebab,invalid,filename",
+            },
+        )
 
-            assert len(result.content) == 1
-            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert len(result.content) == 1
+        response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-            # File path and permalink should be kebab-case and sanitized
-            assert f"project: {test_project.name}" in response_text
-            assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
-            assert "permalink: my-folder/my-note-with-invalid-chars" in response_text
-            assert f"[Session: Using project '{test_project.name}']" in response_text
-
-    # Restore original config value
-    config.kebab_filenames = curr_config_val
+        # File path and permalink should be kebab-case and sanitized
+        assert f"project: {test_project.name}" in response_text
+        assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
+        assert "permalink: my-folder/my-note-with-invalid-chars" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, test_project):
+async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_project, app_config):
     """Test note creation with multiple invalid and repeated characters."""
 
-    config = ConfigManager().config
-    curr_config_val = config.kebab_filenames
-    config.kebab_filenames = True
+    app_config.kebab_filenames = True
+    ConfigManager().save_config(app_config)
 
-    with patch.object(ConfigManager, "config", config):
-        async with Client(mcp_server) as client:
-            result = await client.call_tool(
-                "write_note",
-                {
-                    "project": test_project.name,
-                    "title": 'Crazy<>:"|?*Note/Name',
-                    "folder": "my-folder",
-                    "content": "Should be fully kebab-case and safe.",
-                    "tags": "crazy,filename,test",
-                },
-            )
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": 'Crazy<>:"|?*Note/Name',
+                "folder": "my-folder",
+                "content": "Should be fully kebab-case and safe.",
+                "tags": "crazy,filename,test",
+            },
+        )
 
-            assert len(result.content) == 1
-            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert len(result.content) == 1
+        response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-            assert f"project: {test_project.name}" in response_text
-            assert "file_path: my-folder/crazy-note-name.md" in response_text
-            assert "permalink: my-folder/crazy-note-name" in response_text
-            assert f"[Session: Using project '{test_project.name}']" in response_text
-
-    # Restore original config value
-    config.kebab_filenames = curr_config_val
+        assert f"project: {test_project.name}" in response_text
+        assert "file_path: my-folder/crazy-note-name.md" in response_text
+        assert "permalink: my-folder/crazy-note-name" in response_text
+        assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_file_path_os_path_join(mcp_server, test_project):
+async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, app_config):
     """Test that os.path.join logic in Entity.file_path works for various folder/title combinations."""
 
-    config = ConfigManager().config
-    curr_config_val = config.kebab_filenames
-    config.kebab_filenames = True
+    app_config.kebab_filenames = True
+    ConfigManager().save_config(app_config)
 
     test_cases = [
         # (folder, title, expected file_path, expected permalink)
@@ -407,35 +397,31 @@ async def test_write_note_file_path_os_path_join(mcp_server, test_project):
         ("folder//subfolder", "Note", "folder/subfolder/note.md", "folder/subfolder/note"),
     ]
 
-    with patch.object(ConfigManager, "config", config):
-        async with Client(mcp_server) as client:
-            for folder, title, expected_path, expected_permalink in test_cases:
-                result = await client.call_tool(
-                    "write_note",
-                    {
-                        "project": test_project.name,
-                        "title": title,
-                        "folder": folder,
-                        "content": "Testing os.path.join logic.",
-                        "tags": "integration,ospath",
-                    },
-                )
+    async with Client(mcp_server) as client:
+        for folder, title, expected_path, expected_permalink in test_cases:
+            result = await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": title,
+                    "folder": folder,
+                    "content": "Testing os.path.join logic.",
+                    "tags": "integration,ospath",
+                },
+            )
 
-                assert len(result.content) == 1
-                response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
-                print(response_text)
+            assert len(result.content) == 1
+            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+            print(response_text)
 
-                assert f"project: {test_project.name}" in response_text
-                assert f"file_path: {expected_path}" in response_text
-                assert f"permalink: {expected_permalink}" in response_text
-                assert f"[Session: Using project '{test_project.name}']" in response_text
-
-    # Restore original config value
-    config.kebab_filenames = curr_config_val
+            assert f"project: {test_project.name}" in response_text
+            assert f"file_path: {expected_path}" in response_text
+            assert f"permalink: {expected_permalink}" in response_text
+            assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
 @pytest.mark.asyncio
-async def test_write_note_project_path_validation(mcp_server, test_project):
+async def test_write_note_project_path_validation(mcp_server, app, test_project):
     """Test that ProjectItem.home uses expanded path, not name (Issue #340).
 
     Regression test verifying that:
@@ -446,8 +432,6 @@ async def test_write_note_project_path_validation(mcp_server, test_project):
     the project name and path happen to be the same. The fix in src/basic_memory/schemas/project_info.py:186
     ensures .expanduser() is called, which is critical for paths with ~ like "~/Documents/Test BiSync".
     """
-    from basic_memory.schemas.project_info import ProjectItem
-    from pathlib import Path
 
     # Test the fix directly: ProjectItem.home should expand tilde paths
     project_with_tilde = ProjectItem(

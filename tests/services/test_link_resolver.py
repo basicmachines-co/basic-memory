@@ -81,6 +81,7 @@ async def test_entities(entity_service, file_service):
             entity_type="file",
             content_type="image/png",
             file_path="Image.png",
+            permalink="image",  # Required for Postgres NOT NULL constraint
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
             project_id=entity_service.repository.project_id,

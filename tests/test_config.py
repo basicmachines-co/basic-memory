@@ -378,6 +378,11 @@ class TestConfigManager:
             }
             config_manager.config_file.write_text(json.dumps(old_config_data, indent=2))
 
+            # Clear the config cache to ensure we load from the temp file
+            import basic_memory.config
+
+            basic_memory.config._CONFIG_CACHE = None
+
             # Should load successfully with cloud_projects defaulting to empty dict
             config = config_manager.load_config()
             assert config.cloud_projects == {}

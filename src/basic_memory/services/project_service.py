@@ -766,25 +766,42 @@ class ProjectService:
         )
 
         # Query for monthly entity creation (project filtered)
+        # Use different date formatting for SQLite vs Postgres
+        from basic_memory.config import DatabaseBackend
+
+        is_postgres = self.config_manager.config.database_backend == DatabaseBackend.POSTGRES
+        date_format = (
+            "to_char(created_at, 'YYYY-MM')" if is_postgres else "strftime('%Y-%m', created_at)"
+        )
+
+        # Postgres needs datetime objects, SQLite needs ISO strings
+        six_months_param = six_months_ago if is_postgres else six_months_ago.isoformat()
+
         entity_growth_result = await self.repository.execute_query(
-            text("""
-            SELECT 
-                strftime('%Y-%m', created_at) AS month,
+            text(f"""
+            SELECT
+                {date_format} AS month,
                 COUNT(*) AS count
             FROM entity
             WHERE created_at >= :six_months_ago AND project_id = :project_id
             GROUP BY month
             ORDER BY month
         """),
-            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
+            {"six_months_ago": six_months_param, "project_id": project_id},
         )
         entity_growth = {row[0]: row[1] for row in entity_growth_result.fetchall()}
 
         # Query for monthly observation creation (project filtered)
+        date_format_entity = (
+            "to_char(entity.created_at, 'YYYY-MM')"
+            if is_postgres
+            else "strftime('%Y-%m', entity.created_at)"
+        )
+
         observation_growth_result = await self.repository.execute_query(
-            text("""
-            SELECT 
-                strftime('%Y-%m', entity.created_at) AS month,
+            text(f"""
+            SELECT
+                {date_format_entity} AS month,
                 COUNT(*) AS count
             FROM observation
             INNER JOIN entity ON observation.entity_id = entity.id
@@ -792,15 +809,15 @@ class ProjectService:
             GROUP BY month
             ORDER BY month
         """),
-            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
+            {"six_months_ago": six_months_param, "project_id": project_id},
         )
         observation_growth = {row[0]: row[1] for row in observation_growth_result.fetchall()}
 
         # Query for monthly relation creation (project filtered)
         relation_growth_result = await self.repository.execute_query(
-            text("""
-            SELECT 
-                strftime('%Y-%m', entity.created_at) AS month,
+            text(f"""
+            SELECT
+                {date_format_entity} AS month,
                 COUNT(*) AS count
             FROM relation
             INNER JOIN entity ON relation.from_id = entity.id
@@ -808,7 +825,7 @@ class ProjectService:
             GROUP BY month
             ORDER BY month
         """),
-            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
+            {"six_months_ago": six_months_param, "project_id": project_id},
         )
         relation_growth = {row[0]: row[1] for row in relation_growth_result.fetchall()}
 

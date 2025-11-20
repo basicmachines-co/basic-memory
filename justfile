@@ -7,16 +7,78 @@ install:
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
 
+# Run all tests with unified coverage report
+test: test-unit test-int
+
 # Run unit tests only (fast, no coverage)
 test-unit:
-    uv run pytest -p pytest_mock -v --no-cov -n auto tests
+    uv run pytest -p pytest_mock -v --no-cov tests
 
 # Run integration tests only (fast, no coverage)
 test-int:
-    uv run pytest -p pytest_mock -v --no-cov -n auto test-int
+    uv run pytest -p pytest_mock -v --no-cov test-int
 
-# Run all tests with unified coverage report
-test: test-unit test-int
+# ==============================================================================
+# DATABASE BACKEND TESTING
+# ==============================================================================
+# Basic Memory supports dual database backends (SQLite and Postgres).
+# Tests are parametrized to run against both backends automatically.
+#
+# Quick Start:
+#   just test-sqlite    # Run SQLite tests (default, no Docker needed)
+#   just test-postgres  # Run Postgres tests (requires Docker)
+#
+# For Postgres tests, first start the database:
+#   docker-compose -f docker-compose-postgres.yml up -d
+# ==============================================================================
+
+# Run tests against SQLite only (default backend, skip Postgres/Benchmark tests)
+# This is the fastest option and doesn't require any Docker setup.
+# Use this for local development and quick feedback.
+# Includes Windows-specific tests which will auto-skip on non-Windows platforms.
+test-sqlite:
+    uv run pytest -p pytest_mock -v --no-cov -m "not postgres and not benchmark" tests test-int
+
+# Run tests against Postgres only (requires docker-compose-postgres.yml up)
+# First start Postgres: docker-compose -f docker-compose-postgres.yml up -d
+# Tests will connect to localhost:5433/basic_memory_test
+# To reset the database: just postgres-reset
+test-postgres:
+    uv run pytest -p pytest_mock -v --no-cov -m "postgres and not benchmark" tests test-int
+
+# Reset Postgres test database (drops and recreates schema)
+# Useful when Alembic migration state gets out of sync during development
+# Uses credentials from docker-compose-postgres.yml
+postgres-reset:
+    docker exec basic-memory-postgres psql -U ${POSTGRES_USER:-basic_memory_user} -d ${POSTGRES_TEST_DB:-basic_memory_test} -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+    @echo "✅ Postgres test database reset"
+
+# Run Alembic migrations manually against Postgres test database
+# Useful for debugging migration issues
+# Uses credentials from docker-compose-postgres.yml (can override with env vars)
+postgres-migrate:
+    @cd src/basic_memory/alembic && \
+    BASIC_MEMORY_DATABASE_BACKEND=postgres \
+    BASIC_MEMORY_DATABASE_URL=${POSTGRES_TEST_URL:-postgresql://basic_memory_user:dev_password@localhost:5433/basic_memory_test} \
+    uv run alembic upgrade head
+    @echo "✅ Migrations applied to Postgres test database"
+
+# Run Windows-specific tests only (only works on Windows platform)
+# These tests verify Windows-specific database optimizations (locking mode, NullPool)
+# Will be skipped automatically on non-Windows platforms
+test-windows:
+    uv run pytest -p pytest_mock -v --no-cov -m windows tests test-int
+
+# Run benchmark tests only (performance testing)
+# These are slow tests that measure sync performance with various file counts
+# Excluded from default test runs to keep CI fast
+test-benchmark:
+    uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
+
+# Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
+# Use this before releasing to ensure everything works across all backends and platforms
+test-all:
+    uv run pytest -p pytest_mock -v --no-cov tests test-int
 
 # Generate HTML coverage report
 coverage:

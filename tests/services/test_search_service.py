@@ -163,7 +163,13 @@ async def test_after_date(search_service, test_graph):
         )
     )
     for r in results:
-        assert datetime.fromisoformat(r.created_at) > past_date
+        # Handle both string (SQLite) and datetime (Postgres) formats
+        created_at = (
+            r.created_at
+            if isinstance(r.created_at, datetime)
+            else datetime.fromisoformat(r.created_at)
+        )
+        assert created_at > past_date
 
     # Should not find with future date
     future_date = datetime(2030, 1, 1).astimezone()
@@ -250,12 +256,20 @@ async def test_no_criteria(search_service, test_graph):
 
 
 @pytest.mark.asyncio
-async def test_init_search_index(search_service, session_maker):
+async def test_init_search_index(search_service, session_maker, app_config):
     """Test search index initialization."""
+    from basic_memory.config import DatabaseBackend
+
     async with db.scoped_session(session_maker) as session:
-        result = await session.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name='search_index';")
-        )
+        # Use database-specific query to check table existence
+        if app_config.database_backend == DatabaseBackend.POSTGRES:
+            result = await session.execute(
+                text("SELECT tablename FROM pg_catalog.pg_tables WHERE tablename='search_index';")
+            )
+        else:
+            result = await session.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='search_index';")
+            )
         assert result.scalar() == "search_index"
 
 

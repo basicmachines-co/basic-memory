@@ -50,15 +50,16 @@ The `app` fixture ensures FastAPI dependency overrides are active, and
 `mcp_server` provides the MCP server with proper project session initialization.
 """
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Literal
 
 import pytest
 import pytest_asyncio
 from pathlib import Path
+from sqlalchemy import text
 
 from httpx import AsyncClient, ASGITransport
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager, DatabaseBackend
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -71,24 +72,89 @@ from basic_memory.deps import get_project_config, get_engine_factory, get_app_co
 from basic_memory.mcp import tools  # noqa: F401
 
 
-@pytest_asyncio.fixture(scope="function")
-async def engine_factory(tmp_path):
-    """Create a SQLite file engine factory for integration testing."""
-    db_path = tmp_path / "test.db"
-    async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (
-        engine,
-        session_maker,
-    ):
-        # Initialize database schema
-        from basic_memory.models.base import Base
+@pytest.fixture(
+    params=[
+        pytest.param("sqlite", id="sqlite"),
+        pytest.param("postgres", id="postgres", marks=pytest.mark.postgres),
+    ]
+)
+def db_backend(request) -> Literal["sqlite", "postgres"]:
+    """Parametrize tests to run against both SQLite and Postgres.
 
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    Usage:
+        pytest                          # Runs tests against SQLite only (default)
+        pytest -m postgres              # Runs tests against Postgres only
+        pytest -m "not postgres"        # Runs tests against SQLite only
+        pytest --run-all-backends       # Runs tests against both backends
 
-        yield engine, session_maker
+    Note: Only tests that use database fixtures (engine_factory, session_maker, etc.)
+    will be parametrized. Tests that don't use the database won't be affected.
+    """
+    return request.param
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture
+async def engine_factory(
+    app_config,
+    config_manager,
+    db_backend: Literal["sqlite", "postgres"],
+    tmp_path,
+) -> AsyncGenerator[tuple, None]:
+    """Create engine and session factory for the configured database backend."""
+    from basic_memory.models.search import CREATE_SEARCH_INDEX
+    from basic_memory import db
+
+    # Determine database type based on backend
+    if db_backend == "postgres":
+        db_type = DatabaseType.FILESYSTEM
+    else:
+        db_type = DatabaseType.FILESYSTEM  # Integration tests use file-based SQLite
+
+    # Use tmp_path for SQLite, use config database_path for Postgres
+    if db_backend == "sqlite":
+        db_path = tmp_path / "test.db"
+    else:
+        db_path = app_config.database_path
+
+    if db_backend == "postgres":
+        # Postgres: Create fresh engine for each test with full schema reset
+        config_manager._config = app_config
+
+        # Use context manager to handle engine disposal properly
+        async with engine_session_factory(db_path, db_type) as (engine, session_maker):
+            # Drop and recreate schema for complete isolation
+            async with engine.begin() as conn:
+                await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+                await conn.execute(text("CREATE SCHEMA public"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO basic_memory_user"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO public"))
+
+            # Run migrations to create production tables
+            from basic_memory.db import run_migrations
+
+            await run_migrations(app_config, db_type)
+
+            yield engine, session_maker
+
+    else:
+        # SQLite: Create fresh database (fast with tmp files)
+        async with engine_session_factory(db_path, db_type) as (engine, session_maker):
+            # Create all tables via ORM
+            from basic_memory.models.base import Base
+
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            # Drop any SearchIndex ORM table, then create FTS5 virtual table
+            async with db.scoped_session(session_maker) as session:
+                await session.execute(text("DROP TABLE IF EXISTS search_index"))
+                await session.execute(CREATE_SEARCH_INDEX)
+                await session.commit()
+
+            yield engine, session_maker
+
+
+@pytest_asyncio.fixture
 async def test_project(config_home, engine_factory) -> Project:
     """Create a test project."""
     project_data = {
@@ -113,14 +179,27 @@ def config_home(tmp_path, monkeypatch) -> Path:
     return tmp_path
 
 
-@pytest.fixture(scope="function", autouse=True)
-def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
+@pytest.fixture
+def app_config(
+    config_home, db_backend: Literal["sqlite", "postgres"], tmp_path, monkeypatch
+) -> BasicMemoryConfig:
     """Create test app configuration."""
     # Disable cloud mode for CLI tests
     monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
 
     # Create a basic config with test-project like unit tests do
     projects = {"test-project": str(config_home)}
+
+    # Configure database backend based on test parameter
+    if db_backend == "postgres":
+        database_backend = DatabaseBackend.POSTGRES
+        database_url = (
+            "postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test"
+        )
+    else:
+        database_backend = DatabaseBackend.SQLITE
+        database_url = None
+
     app_config = BasicMemoryConfig(
         env="test",
         projects=projects,
@@ -128,12 +207,19 @@ def app_config(config_home, tmp_path, monkeypatch) -> BasicMemoryConfig:
         default_project_mode=False,  # Match real-world usage - tools must pass explicit project
         update_permalinks_on_move=True,
         cloud_mode=False,  # Explicitly disable cloud mode
+        database_backend=database_backend,
+        database_url=database_url,
     )
     return app_config
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture
 def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
+    # Invalidate config cache to ensure clean state for each test
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+
     config_manager = ConfigManager()
     # Update its paths to use the test directory
     config_manager.config_dir = config_home / ".basic-memory"
@@ -145,7 +231,7 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
     return config_manager
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture
 def project_config(test_project):
     """Create test project configuration."""
 
@@ -157,7 +243,7 @@ def project_config(test_project):
     return project_config
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def app(app_config, project_config, engine_factory, test_project, config_manager) -> FastAPI:
     """Create test FastAPI application with single project."""
 
@@ -172,20 +258,25 @@ def app(app_config, project_config, engine_factory, test_project, config_manager
     return app
 
 
-@pytest_asyncio.fixture(scope="function")
-async def search_service(engine_factory, test_project):
-    """Create and initialize search service for integration tests."""
-    from basic_memory.repository.search_repository import SearchRepository
+@pytest_asyncio.fixture
+async def search_service(engine_factory, test_project, app_config):
+    """Create and initialize search service for integration tests.
+
+    Uses app_config fixture to determine database backend - no patching needed.
+    """
     from basic_memory.repository.entity_repository import EntityRepository
     from basic_memory.services.file_service import FileService
     from basic_memory.services.search_service import SearchService
     from basic_memory.markdown.markdown_processor import MarkdownProcessor
     from basic_memory.markdown import EntityParser
 
+    from basic_memory.repository.search_repository import create_search_repository
+
     engine, session_maker = engine_factory
 
-    # Create repositories
-    search_repository = SearchRepository(session_maker, project_id=test_project.id)
+    # Use factory function to create appropriate search repository
+    search_repository = create_search_repository(session_maker, project_id=test_project.id)
+
     entity_repository = EntityRepository(session_maker, project_id=test_project.id)
 
     # Create file service
@@ -199,7 +290,7 @@ async def search_service(engine_factory, test_project):
     return service
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def mcp_server(config_manager, search_service):
     # Import mcp instance
     from basic_memory.mcp.server import mcp as server
@@ -213,7 +304,7 @@ def mcp_server(config_manager, search_service):
     return server
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Create test client that both MCP and tests will use."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
