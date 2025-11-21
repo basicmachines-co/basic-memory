@@ -53,7 +53,8 @@ async def test_update_project_path_by_id(
         status_response = ProjectStatusResponse.model_validate(response.json())
         assert status_response.status == "success"
         assert status_response.new_project.id == test_project.id
-        assert status_response.new_project.path == new_path
+        # Normalize paths for cross-platform comparison (Windows uses backslashes, API returns forward slashes)
+        assert Path(status_response.new_project.path) == Path(new_path)
         assert status_response.old_project.id == test_project.id
 
 
