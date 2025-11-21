@@ -2,8 +2,26 @@
 
 import pytest
 from httpx import AsyncClient
+from pathlib import Path
 
 from basic_memory.models import Entity, Project
+
+
+async def create_test_entity(test_project, entity_data, entity_repository, search_service, file_service):
+    """Helper to create an entity with file and index it."""
+    # Create file
+    test_content = f"# {entity_data['title']}\n\nTest content"
+    file_path = Path(test_project.path) / entity_data["file_path"]
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    await file_service.write_file(file_path, test_content)
+
+    # Create entity
+    entity = await entity_repository.create(entity_data)
+
+    # Index for search
+    await search_service.index_entity(entity)
+
+    return entity
 
 
 @pytest.mark.asyncio
@@ -12,9 +30,10 @@ async def test_get_recent_context(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
+    file_service,
 ):
     """Test getting recent activity context."""
-    # Create a test entity
     entity_data = {
         "title": "Recent Test Entity",
         "entity_type": "note",
@@ -22,7 +41,7 @@ async def test_get_recent_context(
         "file_path": "recent_test.md",
         "checksum": "abc123",
     }
-    await entity_repository.create(entity_data)
+    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get recent context
     response = await client.get(f"{v2_project_url}/memory/recent")
@@ -30,11 +49,11 @@ async def test_get_recent_context(
     assert response.status_code == 200
     data = response.json()
 
-    # Verify response structure
-    assert "entities" in data
+    # Verify response structure (GraphContext uses 'results' not 'entities')
+    assert "results" in data
+    assert "metadata" in data
     assert "page" in data
-    assert "total" in data
-    assert "has_more" in data
+    assert "page_size" in data
 
 
 @pytest.mark.asyncio
@@ -43,6 +62,7 @@ async def test_get_recent_context_with_pagination(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
 ):
     """Test recent context with pagination parameters."""
     # Create multiple test entities
@@ -50,11 +70,12 @@ async def test_get_recent_context_with_pagination(
         entity_data = {
             "title": f"Entity {i}",
             "entity_type": "note",
-        "content_type": "text/markdown",
+            "content_type": "text/markdown",
             "file_path": f"entity_{i}.md",
             "checksum": f"checksum{i}",
         }
-        await entity_repository.create(entity_data)
+        entity = await entity_repository.create(entity_data)
+        await search_service.index_entity(entity)
 
     # Get recent context with pagination
     response = await client.get(
@@ -64,7 +85,7 @@ async def test_get_recent_context_with_pagination(
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
     assert data["page"] == 1
     assert data["page_size"] == 3
 
@@ -75,6 +96,7 @@ async def test_get_recent_context_with_type_filter(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
 ):
     """Test filtering recent context by type."""
     # Create a test entity
@@ -85,7 +107,8 @@ async def test_get_recent_context_with_type_filter(
         "file_path": "filtered.md",
         "checksum": "xyz789",
     }
-    await entity_repository.create(entity_data)
+    entity = await entity_repository.create(entity_data)
+    await search_service.index_entity(entity)
 
     # Get recent context filtered by type
     response = await client.get(
@@ -95,7 +118,7 @@ async def test_get_recent_context_with_type_filter(
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
 
 
 @pytest.mark.asyncio
@@ -112,7 +135,7 @@ async def test_get_recent_context_with_timeframe(
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
 
 
 @pytest.mark.asyncio
@@ -131,6 +154,7 @@ async def test_get_memory_context_by_permalink(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
 ):
     """Test getting context for a specific memory URI (permalink)."""
     # Create a test entity
@@ -143,13 +167,14 @@ async def test_get_memory_context_by_permalink(
         "permalink": "context-test",
     }
     created_entity = await entity_repository.create(entity_data)
+    await search_service.index_entity(created_entity)
 
     # Get context for this entity
     response = await client.get(f"{v2_project_url}/memory/context-test")
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
 
 
 @pytest.mark.asyncio
@@ -158,6 +183,7 @@ async def test_get_memory_context_by_id(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
 ):
     """Test getting context using ID-based memory URI."""
     # Create a test entity
@@ -169,13 +195,14 @@ async def test_get_memory_context_by_id(
         "checksum": "ghi789",
     }
     created_entity = await entity_repository.create(entity_data)
+    await search_service.index_entity(created_entity)
 
     # Get context using ID format (memory://id/123 or memory://123)
     response = await client.get(f"{v2_project_url}/memory/id/{created_entity.id}")
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
 
 
 @pytest.mark.asyncio
@@ -184,6 +211,7 @@ async def test_get_memory_context_with_depth(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
 ):
     """Test getting context with depth parameter."""
     # Create a test entity
@@ -195,7 +223,8 @@ async def test_get_memory_context_with_depth(
         "checksum": "jkl012",
         "permalink": "depth-test",
     }
-    await entity_repository.create(entity_data)
+    entity = await entity_repository.create(entity_data)
+    await search_service.index_entity(entity)
 
     # Get context with depth
     response = await client.get(
@@ -205,7 +234,7 @@ async def test_get_memory_context_with_depth(
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
 
 
 @pytest.mark.asyncio
@@ -228,6 +257,7 @@ async def test_get_memory_context_with_timeframe(
     test_project: Project,
     v2_project_url: str,
     entity_repository,
+    search_service,
 ):
     """Test getting context with timeframe filter."""
     # Create a test entity
@@ -239,7 +269,8 @@ async def test_get_memory_context_with_timeframe(
         "checksum": "mno345",
         "permalink": "timeframe-test",
     }
-    await entity_repository.create(entity_data)
+    entity = await entity_repository.create(entity_data)
+    await search_service.index_entity(entity)
 
     # Get context with timeframe
     response = await client.get(
@@ -249,7 +280,7 @@ async def test_get_memory_context_with_timeframe(
 
     assert response.status_code == 200
     data = response.json()
-    assert "entities" in data
+    assert "results" in data
 
 
 @pytest.mark.asyncio
