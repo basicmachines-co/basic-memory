@@ -178,3 +178,71 @@ async def test_initialize_file_sync_background_tasks(
 
         # Watch service should still be started
         mock_watch_service.run.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("basic_memory.services.initialization.db.get_or_create_db")
+@patch("basic_memory.cli.commands.sync.get_sync_service")
+@patch("basic_memory.sync.WatchService")
+@patch("basic_memory.services.initialization.asyncio.create_task")
+@patch.dict("os.environ", {"BASIC_MEMORY_MCP_PROJECT": "project1"})
+async def test_initialize_file_sync_respects_project_constraint(
+    mock_create_task, mock_watch_service_class, mock_get_sync_service, mock_get_db, app_config
+):
+    """Test that file sync only syncs the constrained project when BASIC_MEMORY_MCP_PROJECT is set."""
+    # Setup mocks
+    mock_session_maker = AsyncMock()
+    mock_get_db.return_value = (None, mock_session_maker)
+
+    mock_watch_service = AsyncMock()
+    mock_watch_service.run = AsyncMock()
+    mock_watch_service_class.return_value = mock_watch_service
+
+    mock_repository = AsyncMock()
+    mock_project1 = MagicMock()
+    mock_project1.name = "project1"
+    mock_project1.path = "/path/to/project1"
+    mock_project1.id = 1
+
+    mock_project2 = MagicMock()
+    mock_project2.name = "project2"
+    mock_project2.path = "/path/to/project2"
+    mock_project2.id = 2
+
+    mock_project3 = MagicMock()
+    mock_project3.name = "project3"
+    mock_project3.path = "/path/to/project3"
+    mock_project3.id = 3
+
+    mock_sync_service = AsyncMock()
+    mock_sync_service.sync = AsyncMock()
+    mock_get_sync_service.return_value = mock_sync_service
+
+    # Mock background tasks
+    mock_task = MagicMock()
+    mock_create_task.return_value = mock_task
+
+    # Mock the repository
+    with patch("basic_memory.services.initialization.ProjectRepository") as mock_repo_class:
+        mock_repo_class.return_value = mock_repository
+        # Return all 3 projects from get_active_projects
+        mock_repository.get_active_projects.return_value = [
+            mock_project1,
+            mock_project2,
+            mock_project3,
+        ]
+
+        # Run the function
+        result = await initialize_file_sync(app_config)
+
+        # Assertions
+        mock_repository.get_active_projects.assert_called_once()
+
+        # Should only create 1 background task for project1 (the constrained project)
+        assert mock_create_task.call_count == 1
+
+        # Verify the function returns None
+        assert result is None
+
+        # Watch service should still be started
+        mock_watch_service.run.assert_called_once()
