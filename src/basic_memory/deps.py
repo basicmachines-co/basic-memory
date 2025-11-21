@@ -323,7 +323,7 @@ async def get_search_repository_v2(
     project_id: ProjectIdPathDep,
 ) -> SearchRepository:
     """Create a SearchRepository instance for v2 API."""
-    return SearchRepository(session_maker, project_id=project_id)
+    return create_search_repository(session_maker, project_id=project_id)
 
 
 SearchRepositoryV2Dep = Annotated[SearchRepository, Depends(get_search_repository_v2)]
