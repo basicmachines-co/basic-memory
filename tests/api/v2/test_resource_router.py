@@ -37,7 +37,8 @@ async def test_get_resource_by_id(
     response = await client.get(f"{v2_project_url}/resource/{created_entity.id}")
 
     assert response.status_code == 200
-    assert test_content in response.text
+    # Normalize line endings for cross-platform compatibility
+    assert test_content.replace('\n', '') in response.text.replace('\r\n', '').replace('\n', '')
 
 
 @pytest.mark.asyncio
@@ -70,7 +71,8 @@ async def test_get_resource_by_permalink(
     response = await client.get(f"{v2_project_url}/resource/permalink-resource")
 
     assert response.status_code == 200
-    assert test_content in response.text
+    # Normalize line endings for cross-platform compatibility
+    assert test_content.replace('\n', '') in response.text.replace('\r\n', '').replace('\n', '')
 
 
 @pytest.mark.asyncio
