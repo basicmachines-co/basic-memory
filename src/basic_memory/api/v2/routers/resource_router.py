@@ -88,8 +88,18 @@ async def get_resource_content(
     """
     logger.debug(f"V2 Getting content for project {project_id}, identifier: {identifier}")
 
-    # Find single entity by permalink or ID
-    entity = await link_resolver.resolve_link(identifier)
+    # Try numeric ID lookup first (V2 feature)
+    entity = None
+    if identifier.isdigit():
+        entity_id = int(identifier)
+        entities = await entity_service.get_entities_by_id([entity_id])
+        entity = entities[0] if entities else None
+        logger.debug(f"Numeric ID lookup: {'found' if entity else 'not found'}")
+
+    # Fall back to link resolver for permalinks/paths
+    if not entity:
+        entity = await link_resolver.resolve_link(identifier)
+
     results = [entity] if entity else []
 
     # pagination for multiple results

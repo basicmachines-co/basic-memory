@@ -29,6 +29,7 @@ async def test_get_resource_by_id(
         "content_type": "text/markdown",
         "file_path": "test_resource.md",
         "checksum": "res123",
+        "project_id": test_project.id,
     }
     created_entity = await entity_repository.create(entity_data)
 
@@ -279,8 +280,8 @@ async def test_write_resource_dict_content_fails(
         json={"content": "test"}  # This sends a dict, not a string
     )
 
-    # Should fail with validation error
-    assert response.status_code == 400
+    # Should fail with validation error (422 is FastAPI's validation error code)
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

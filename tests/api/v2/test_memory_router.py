@@ -63,6 +63,7 @@ async def test_get_recent_context_with_pagination(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test recent context with pagination parameters."""
     # Create multiple test entities
@@ -74,8 +75,7 @@ async def test_get_recent_context_with_pagination(
             "file_path": f"entity_{i}.md",
             "checksum": f"checksum{i}",
         }
-        entity = await entity_repository.create(entity_data)
-        await search_service.index_entity(entity)
+        await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get recent context with pagination
     response = await client.get(
@@ -97,6 +97,7 @@ async def test_get_recent_context_with_type_filter(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test filtering recent context by type."""
     # Create a test entity
@@ -107,8 +108,7 @@ async def test_get_recent_context_with_type_filter(
         "file_path": "filtered.md",
         "checksum": "xyz789",
     }
-    entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(entity)
+    entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get recent context filtered by type
     response = await client.get(
@@ -155,6 +155,7 @@ async def test_get_memory_context_by_permalink(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test getting context for a specific memory URI (permalink)."""
     # Create a test entity
@@ -166,8 +167,7 @@ async def test_get_memory_context_by_permalink(
         "checksum": "def456",
         "permalink": "context-test",
     }
-    created_entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(created_entity)
+    created_entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get context for this entity
     response = await client.get(f"{v2_project_url}/memory/context-test")
@@ -184,6 +184,7 @@ async def test_get_memory_context_by_id(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test getting context using ID-based memory URI."""
     # Create a test entity
@@ -194,8 +195,7 @@ async def test_get_memory_context_by_id(
         "file_path": "id_context_test.md",
         "checksum": "ghi789",
     }
-    created_entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(created_entity)
+    created_entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get context using ID format (memory://id/123 or memory://123)
     response = await client.get(f"{v2_project_url}/memory/id/{created_entity.id}")
@@ -212,6 +212,7 @@ async def test_get_memory_context_with_depth(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test getting context with depth parameter."""
     # Create a test entity
@@ -223,8 +224,7 @@ async def test_get_memory_context_with_depth(
         "checksum": "jkl012",
         "permalink": "depth-test",
     }
-    entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(entity)
+    entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get context with depth
     response = await client.get(
@@ -258,6 +258,7 @@ async def test_get_memory_context_with_timeframe(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test getting context with timeframe filter."""
     # Create a test entity
@@ -269,8 +270,7 @@ async def test_get_memory_context_with_timeframe(
         "checksum": "mno345",
         "permalink": "timeframe-test",
     }
-    entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(entity)
+    entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Get context with timeframe
     response = await client.get(

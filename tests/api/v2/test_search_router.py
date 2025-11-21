@@ -2,8 +2,26 @@
 
 import pytest
 from httpx import AsyncClient
+from pathlib import Path
 
 from basic_memory.models import Entity, Project
+
+
+async def create_test_entity(test_project, entity_data, entity_repository, search_service, file_service):
+    """Helper to create an entity with file and index it."""
+    # Create file
+    test_content = f"# {entity_data['title']}\n\nTest content"
+    file_path = Path(test_project.path) / entity_data["file_path"]
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    await file_service.write_file(file_path, test_content)
+
+    # Create entity
+    entity = await entity_repository.create(entity_data)
+
+    # Index for search
+    await search_service.index_entity(entity)
+
+    return entity
 
 
 @pytest.mark.asyncio
@@ -13,6 +31,7 @@ async def test_search_entities(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test searching for entities."""
     # Create a test entity
@@ -23,10 +42,7 @@ async def test_search_entities(
         "file_path": "searchable.md",
         "checksum": "search123",
     }
-    created_entity = await entity_repository.create(entity_data)
-
-    # Index the entity
-    await search_service.index_entity(created_entity)
+    created_entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Search for the entity
     response = await client.post(
@@ -50,6 +66,7 @@ async def test_search_with_pagination(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test search with pagination parameters."""
     # Create multiple test entities
@@ -57,12 +74,11 @@ async def test_search_with_pagination(
         entity_data = {
             "title": f"Search Entity {i}",
             "entity_type": "note",
-        "content_type": "text/markdown",
+            "content_type": "text/markdown",
             "file_path": f"search_{i}.md",
             "checksum": f"searchsum{i}",
         }
-        entity = await entity_repository.create(entity_data)
-        await search_service.index_entity(entity)
+        await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Search with pagination
     response = await client.post(
@@ -84,6 +100,7 @@ async def test_search_by_permalink(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test searching by permalink."""
     # Create a test entity with permalink
@@ -95,8 +112,7 @@ async def test_search_by_permalink(
         "checksum": "perm123",
         "permalink": "permalink-search",
     }
-    entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(entity)
+    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Search by permalink
     response = await client.post(
@@ -116,6 +132,7 @@ async def test_search_by_title(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test searching by title."""
     # Create a test entity
@@ -126,8 +143,7 @@ async def test_search_by_title(
         "file_path": "unique_title.md",
         "checksum": "title123",
     }
-    entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(entity)
+    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Search by title
     response = await client.post(
@@ -147,6 +163,7 @@ async def test_search_with_type_filter(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test searching with entity type filter."""
     # Create test entities of different types
@@ -154,11 +171,11 @@ async def test_search_with_type_filter(
         entity_data = {
             "title": f"Type {entity_type}",
             "entity_type": entity_type,
+            "content_type": "text/markdown",
             "file_path": f"type_{entity_type}.md",
             "checksum": f"type{entity_type}",
         }
-        entity = await entity_repository.create(entity_data)
-        await search_service.index_entity(entity)
+        await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Search with type filter
     response = await client.post(
@@ -178,6 +195,7 @@ async def test_search_with_date_filter(
     v2_project_url: str,
     entity_repository,
     search_service,
+    file_service,
 ):
     """Test searching with date filter."""
     # Create a test entity
@@ -188,8 +206,7 @@ async def test_search_with_date_filter(
         "file_path": "date_filtered.md",
         "checksum": "date123",
     }
-    entity = await entity_repository.create(entity_data)
-    await search_service.index_entity(entity)
+    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
 
     # Search with date filter
     response = await client.post(
