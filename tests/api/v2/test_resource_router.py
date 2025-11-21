@@ -295,3 +295,34 @@ async def test_v2_resource_endpoints_use_project_id_not_name(
 
     # FastAPI path validation should reject non-integer project_id
     assert response.status_code in [404, 422]
+
+
+@pytest.mark.asyncio
+async def test_write_resource_path_traversal_protection(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+):
+    """Test that path traversal attacks are blocked."""
+    # Test various path traversal attempts
+    malicious_paths = [
+        "../../../etc/passwd",
+        "../../sensitive.txt",
+        "../outside.md",
+        "subdir/../../outside.md",
+        "~/secret.md",
+        "/etc/passwd",
+    ]
+
+    for malicious_path in malicious_paths:
+        response = await client.put(
+            f"{v2_project_url}/resource/{malicious_path}",
+            content="malicious content",
+            headers={"Content-Type": "text/plain"}
+        )
+
+        # Should fail with 400 Bad Request or 404 Not Found (both block the attack)
+        assert response.status_code in [400, 404], f"Path traversal not blocked for: {malicious_path}, got {response.status_code}"
+        # 400 means our validation caught it, 404 means FastAPI path routing rejected it
+        if response.status_code == 400:
+            assert "invalid" in response.json()["detail"].lower(), f"Wrong error message for: {malicious_path}"

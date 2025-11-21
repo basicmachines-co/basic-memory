@@ -25,6 +25,7 @@ from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import normalize_memory_url
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.models.knowledge import Entity as EntityModel
+from basic_memory.utils import validate_project_path
 from datetime import datetime
 
 # Note: No prefix here - it's added during registration as /v2/{project_id}/resource
@@ -88,6 +89,9 @@ async def get_resource_content(
     """
     logger.debug(f"V2 Getting content for project {project_id}, identifier: {identifier}")
 
+    # Get project path for validation
+    project_path = Path(config.home)
+
     # Try numeric ID lookup first (V2 feature)
     entity = None
     if identifier.isdigit():
@@ -125,6 +129,17 @@ async def get_resource_content(
     # return single response
     if len(results) == 1:
         entity = results[0]
+
+        # Validate entity file path to prevent path traversal
+        if not validate_project_path(entity.file_path, project_path):
+            logger.error(
+                f"Invalid file path in entity {entity.id}: {entity.file_path}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Entity contains invalid file path",
+            )
+
         file_path = Path(f"{config.home}/{entity.file_path}")
         if not file_path.exists():
             raise HTTPException(
@@ -138,6 +153,13 @@ async def get_resource_content(
         temp_file_path = tmp_file.name
 
         for result in results:
+            # Validate entity file path to prevent path traversal
+            if not validate_project_path(result.file_path, project_path):
+                logger.error(
+                    f"Invalid file path in entity {result.id}: {result.file_path}"
+                )
+                continue  # Skip this entity and continue with others
+
             # Read content for each entity
             content = await file_service.read_entity_content(result)
             memory_url = normalize_memory_url(result.permalink)
@@ -223,6 +245,18 @@ async def write_resource(
         else:
             content_str = str(content)
 
+        # Validate path to prevent path traversal attacks
+        project_path = Path(config.home)
+        if not validate_project_path(file_path, project_path):
+            logger.warning(
+                f"Invalid file path attempted: {file_path} in project {config.name}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file path: {file_path}. "
+                "Path must be relative and stay within project boundaries.",
+            )
+
         # Get full file path
         full_path = Path(f"{config.home}/{file_path}")
 
@@ -286,6 +320,9 @@ async def write_resource(
                 "modified_at": file_stats.st_mtime,
             },
         )
+    except HTTPException:
+        # Re-raise HTTP exceptions (like validation errors) without wrapping
+        raise
     except Exception as e:  # pragma: no cover
         logger.error(f"Error writing resource {file_path}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to write resource: {str(e)}")
