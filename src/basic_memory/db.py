@@ -56,9 +56,7 @@ class DatabaseType(Enum):
         if config.database_backend == DatabaseBackend.POSTGRES:
             if not config.database_url:
                 raise ValueError("DATABASE_URL must be set when using Postgres backend")
-            logger.info(
-                f"Using Postgres database: {config.database_url.split('@')[1] if '@' in config.database_url else config.database_url}"
-            )
+            logger.info(f"Using Postgres database: {config.database_url}")
             return config.database_url
 
         # Default to SQLite
@@ -332,6 +330,9 @@ async def run_migrations(
         if app_config.database_backend == DatabaseBackend.POSTGRES:
             # Convert asyncpg URL to psycopg2 URL for Alembic
             db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        elif app_config.database_backend == DatabaseBackend.SQLITE:
+            # Convert aiosqlite URL to pysqlite URL for Alembic
+            db_url = db_url.replace("sqlite+aiosqlite://", "sqlite:///")
 
         config.set_main_option("sqlalchemy.url", db_url)
 
