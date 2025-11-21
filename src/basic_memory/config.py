@@ -132,6 +132,12 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    sync_batch_size: int = Field(
+        default=100,
+        description="Number of files to process in a single database transaction during sync. Higher values improve performance with remote databases (Postgres) but increase memory usage. Typical values: 100 (conservative), 500 (balanced), 1000 (aggressive).",
+        gt=0,
+    )
+
     kebab_filenames: bool = Field(
         default=False,
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",

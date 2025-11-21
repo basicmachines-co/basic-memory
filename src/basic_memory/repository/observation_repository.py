@@ -70,3 +70,33 @@ class ObservationRepository(Repository[Observation]):
             observations_by_entity[obs.entity_id].append(obs)
 
         return observations_by_entity
+
+    async def delete_by_entity_ids(self, entity_ids: List[int]) -> int:
+        """Delete all observations for multiple entities in a single query.
+
+        Optimized for batch operations - deletes observations for many entities
+        in one database transaction.
+
+        Args:
+            entity_ids: List of entity IDs whose observations should be deleted
+
+        Returns:
+            Number of observations deleted
+        """
+        if not entity_ids:
+            return 0
+
+        from basic_memory import db
+
+        async with db.scoped_session(self.session_maker) as session:
+            # Use bulk delete with IN clause
+            query = select(Observation).where(Observation.entity_id.in_(entity_ids))
+            result = await session.execute(query)
+            observations_to_delete = result.scalars().all()
+
+            # Delete all observations
+            for obs in observations_to_delete:
+                await session.delete(obs)
+
+            await session.flush()
+            return len(observations_to_delete)

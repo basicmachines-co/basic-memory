@@ -63,6 +63,38 @@ class EntityRepository(Repository[Entity]):
         )
         return await self.find_one(query)
 
+    async def get_by_file_paths_batch(
+        self, file_paths: Sequence[Union[Path, str]]
+    ) -> dict[str, Entity]:
+        """Batch fetch entities by file paths with eager-loaded relationships.
+
+        Optimized for scan operations - reduces N queries to 1 batched query.
+        Returns entities with relationships already loaded via selectinload.
+
+        Args:
+            file_paths: List of file paths to fetch entities for
+
+        Returns:
+            Dict mapping file_path (as posix string) -> Entity
+            Only includes entities that exist; missing files are not in dict
+        """
+        if not file_paths:
+            return {}
+
+        # Convert all paths to posix strings
+        posix_paths = [Path(p).as_posix() for p in file_paths]
+
+        # Batch query with eager loading
+        query = (
+            self.select().where(Entity.file_path.in_(posix_paths)).options(*self.get_load_options())
+        )
+
+        result = await self.execute_query(query)
+        entities = list(result.scalars().all())
+
+        # Return as dict for O(1) lookup
+        return {e.file_path: e for e in entities}
+
     async def find_by_checksum(self, checksum: str) -> Sequence[Entity]:
         """Find entities with the given checksum.
 
@@ -338,3 +370,80 @@ class EntityRepository(Repository[Entity]):
             # Re-raise if not a foreign key error
             raise
         return entity
+
+    async def upsert_entities(self, entities: List[Entity]) -> List[Entity]:
+        """Bulk insert or update multiple entities in a single transaction.
+
+        Optimized for batch operations with remote databases (Postgres).
+        Handles conflicts the same way as upsert_entity() but processes
+        all entities in one transaction.
+
+        Args:
+            entities: List of entities to upsert
+
+        Returns:
+            List of upserted entities with relationships loaded
+
+        Raises:
+            SyncFatalError: If any entity references a non-existent project_id
+        """
+        if not entities:
+            return []
+
+        async with db.scoped_session(self.session_maker) as session:
+            # Set project_id on all entities if needed
+            for entity in entities:
+                self._set_project_id_if_needed(entity)
+
+            # Try to add all entities
+            for entity in entities:
+                session.add(entity)
+
+            try:
+                await session.flush()
+
+                # Fetch all entities with relationships loaded
+                file_paths = [e.file_path for e in entities]
+                query = (
+                    self.select()
+                    .where(Entity.file_path.in_(file_paths))
+                    .options(*self.get_load_options())
+                )
+                result = await session.execute(query)
+                return list(result.scalars().all())
+
+            except IntegrityError as e:
+                # Check for foreign key constraint failures
+                error_str = str(e)
+                if (
+                    "FOREIGN KEY constraint failed" in error_str
+                    or "violates foreign key constraint" in error_str
+                ):
+                    from basic_memory.services.exceptions import SyncFatalError
+
+                    raise SyncFatalError(
+                        "Cannot sync entities: project_id does not exist in database. "
+                        "The project may have been deleted. This sync will be terminated."
+                    ) from e
+
+                # For other integrity errors (file_path or permalink conflicts),
+                # rollback and fall back to individual processing
+                await session.rollback()
+
+                # Process each entity individually to handle conflicts properly
+                logger.debug(
+                    f"Batch upsert failed with IntegrityError, falling back to individual upserts for {len(entities)} entities"
+                )
+
+                result_entities = []
+                for entity in entities:
+                    try:
+                        upserted = await self.upsert_entity(entity)
+                        result_entities.append(upserted)
+                    except Exception as individual_error:
+                        logger.error(
+                            f"Failed to upsert entity {entity.file_path}: {individual_error}"
+                        )
+                        # Continue with other entities
+
+                return result_entities
