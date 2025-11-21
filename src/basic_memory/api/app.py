@@ -27,7 +27,6 @@ from basic_memory.api.v2.routers import (
     search_router as v2_search,
     resource_router as v2_resource,
 )
-from basic_memory.api.middleware import DeprecationMiddleware, DeprecationMetrics
 from basic_memory.config import ConfigManager
 from basic_memory.services.initialization import initialize_file_sync, initialize_app
 
@@ -74,20 +73,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Initialize deprecation metrics for tracking v1/v2 adoption
-deprecation_metrics = DeprecationMetrics()
-app.state.deprecation_metrics = deprecation_metrics
-
-# Add deprecation middleware for v1 endpoints
-# Sunset date: June 30, 2026 (6 months after v2 release)
-app.add_middleware(
-    DeprecationMiddleware,
-    sunset_date="Tue, 30 Jun 2026 23:59:59 GMT",
-    metrics=deprecation_metrics,
-)
-
-
-# Include v1 routers (deprecated)
+# Include v1 routers
 app.include_router(knowledge.router, prefix="/{project}")
 app.include_router(memory.router, prefix="/{project}")
 app.include_router(resource.router, prefix="/{project}")
