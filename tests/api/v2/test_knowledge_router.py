@@ -96,6 +96,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
         "title": "TestV2Entity",
         "folder": "test",
         "entity_type": "test",
+        "content_type": "text/markdown",
         "content": "TestContent for V2",
     }
 

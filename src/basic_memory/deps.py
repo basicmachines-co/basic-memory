@@ -496,6 +496,22 @@ async def get_context_service(
 ContextServiceDep = Annotated[ContextService, Depends(get_context_service)]
 
 
+async def get_context_service_v2(
+    search_repository: SearchRepositoryV2Dep,
+    entity_repository: EntityRepositoryV2Dep,
+    observation_repository: ObservationRepositoryV2Dep,
+) -> ContextService:
+    """Create ContextService for v2 API."""
+    return ContextService(
+        search_repository=search_repository,
+        entity_repository=entity_repository,
+        observation_repository=observation_repository,
+    )
+
+
+ContextServiceV2Dep = Annotated[ContextService, Depends(get_context_service_v2)]
+
+
 async def get_sync_service(
     app_config: AppConfigDep,
     entity_service: EntityServiceDep,
