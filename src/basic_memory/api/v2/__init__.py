@@ -12,6 +12,18 @@ Key changes from v1:
 All v2 routers are registered with the /v2 prefix.
 """
 
-from basic_memory.api.v2.routers import knowledge_router
+from basic_memory.api.v2.routers import (
+    knowledge_router,
+    memory_router,
+    project_router,
+    resource_router,
+    search_router,
+)
 
-__all__ = ["knowledge_router"]
+__all__ = [
+    "knowledge_router",
+    "memory_router",
+    "project_router",
+    "resource_router",
+    "search_router",
+]
