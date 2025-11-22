@@ -4,7 +4,7 @@ import pytest
 from httpx import AsyncClient
 
 from basic_memory.models import Project
-from basic_memory.schemas import EntityResponse, DeleteEntitiesResponse
+from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
 
 
@@ -24,11 +24,11 @@ async def test_resolve_identifier_by_permalink(
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity is not None
+    # V2 create must return id
+    assert created_entity.id is not None
+    entity_id = created_entity.id
 
     # Now resolve it by permalink
     resolve_data = {"identifier": created_entity.permalink}
@@ -36,7 +36,7 @@ async def test_resolve_identifier_by_permalink(
 
     assert response.status_code == 200
     resolved = EntityResolveResponse.model_validate(response.json())
-    assert resolved.entity_id == entity.id
+    assert resolved.entity_id == entity_id
     assert resolved.permalink == created_entity.permalink
     assert resolved.resolution_method == "permalink"
 
@@ -62,20 +62,20 @@ async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url,
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
+    # V2 create must return id
+    assert created_entity.id is not None
+    entity_id = created_entity.id
 
     # Get it by ID using v2 endpoint
     response = await client.get(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}"
+        f"{v2_project_url}/knowledge/entities/{entity_id}"
     )
 
     assert response.status_code == 200
     entity = EntityResponseV2.model_validate(response.json())
-    assert entity.id == entity_obj.id
+    assert entity.id == entity_id
     assert entity.title == "TestGetById"
     assert entity.api_version == "v2"
 
@@ -103,7 +103,13 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=data)
 
     assert response.status_code == 200
-    entity = EntityResponse.model_validate(response.json())
+    entity = EntityResponseV2.model_validate(response.json())
+
+    # V2 endpoints must return id field
+    assert entity.id is not None
+    assert isinstance(entity.id, int)
+    assert entity.api_version == "v2"
+
     assert entity.permalink == "test/test-v2-entity"
     assert entity.file_path == "test/TestV2Entity.md"
     assert entity.entity_type == data["entity_type"]
@@ -134,7 +140,12 @@ async def test_create_entity_with_observations_and_relations(
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=data)
 
     assert response.status_code == 200
-    entity = EntityResponse.model_validate(response.json())
+    entity = EntityResponseV2.model_validate(response.json())
+
+    # V2 endpoints must return id field
+    assert entity.id is not None
+    assert isinstance(entity.id, int)
+    assert entity.api_version == "v2"
 
     assert len(entity.observations) == 1
     assert entity.observations[0].category == "note"
@@ -156,11 +167,11 @@ async def test_update_entity_by_id(client: AsyncClient, file_service, v2_project
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
+    # V2 create must return id
+    assert created_entity.id is not None
+    original_id = created_entity.id
 
     # Update it by ID
     update_data = {
@@ -169,12 +180,17 @@ async def test_update_entity_by_id(client: AsyncClient, file_service, v2_project
         "content": "Updated content via V2",
     }
     response = await client.put(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}",
+        f"{v2_project_url}/knowledge/entities/{original_id}",
         json=update_data,
     )
 
     assert response.status_code == 200
-    updated_entity = EntityResponse.model_validate(response.json())
+    updated_entity = EntityResponseV2.model_validate(response.json())
+
+    # V2 update must return id field
+    assert updated_entity.id is not None
+    assert isinstance(updated_entity.id, int)
+    assert updated_entity.api_version == "v2"
 
     # Verify file was updated
     file_path = file_service.get_entity_path(updated_entity)
@@ -194,11 +210,11 @@ async def test_edit_entity_by_id_append(client: AsyncClient, file_service, v2_pr
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
+    # V2 create must return id
+    assert created_entity.id is not None
+    original_id = created_entity.id
 
     # Edit it by appending
     edit_data = {
@@ -206,12 +222,17 @@ async def test_edit_entity_by_id_append(client: AsyncClient, file_service, v2_pr
         "content": "\n\n## New Section\n\nAppended content",
     }
     response = await client.patch(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}",
+        f"{v2_project_url}/knowledge/entities/{original_id}",
         json=edit_data,
     )
 
     assert response.status_code == 200
-    edited_entity = EntityResponse.model_validate(response.json())
+    edited_entity = EntityResponseV2.model_validate(response.json())
+
+    # V2 patch must return id field
+    assert edited_entity.id is not None
+    assert isinstance(edited_entity.id, int)
+    assert edited_entity.api_version == "v2"
 
     # Verify file has both original and appended content
     file_path = file_service.get_entity_path(edited_entity)
@@ -233,11 +254,11 @@ async def test_edit_entity_by_id_find_replace(
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
+    # V2 create must return id
+    assert created_entity.id is not None
+    original_id = created_entity.id
 
     # Edit using find/replace
     edit_data = {
@@ -246,11 +267,17 @@ async def test_edit_entity_by_id_find_replace(
         "content": "New text",
     }
     response = await client.patch(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}",
+        f"{v2_project_url}/knowledge/entities/{original_id}",
         json=edit_data,
     )
 
     assert response.status_code == 200
+    edited_entity = EntityResponseV2.model_validate(response.json())
+
+    # V2 patch must return id field
+    assert edited_entity.id is not None
+    assert isinstance(edited_entity.id, int)
+    assert edited_entity.api_version == "v2"
 
     # Verify replacement
     file_path = file_service.get_entity_path(created_entity)
@@ -270,15 +297,15 @@ async def test_delete_entity_by_id(client: AsyncClient, file_service, v2_project
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
+    # V2 create must return id
+    assert created_entity.id is not None
+    entity_id = created_entity.id
 
     # Delete it by ID
     response = await client.delete(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}"
+        f"{v2_project_url}/knowledge/entities/{entity_id}"
     )
 
     assert response.status_code == 200
@@ -287,7 +314,7 @@ async def test_delete_entity_by_id(client: AsyncClient, file_service, v2_project
 
     # Verify it's gone - trying to get it should return 404
     response = await client.get(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}"
+        f"{v2_project_url}/knowledge/entities/{entity_id}"
     )
     assert response.status_code == 404
 
@@ -314,12 +341,11 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
-    original_id = entity_obj.id
+    # V2 create must return id
+    assert created_entity.id is not None
+    original_id = created_entity.id
 
     # Move it to a new folder (use permalink for identifier in v2)
     move_data = {
@@ -329,14 +355,15 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
     response = await client.post(f"{v2_project_url}/knowledge/move", json=move_data)
 
     assert response.status_code == 200
-    moved_entity = EntityResponse.model_validate(response.json())
+    moved_entity = EntityResponseV2.model_validate(response.json())
 
-    # Verify the moved entity from database
-    moved_entity_obj = await entity_repository.get_by_id(original_id)
-    assert moved_entity_obj is not None
+    # V2 move must return id field
+    assert moved_entity.id is not None
+    assert isinstance(moved_entity.id, int)
+    assert moved_entity.api_version == "v2"
 
     # ID should remain the same (stable reference)
-    assert moved_entity_obj.id == original_id
+    assert moved_entity.id == original_id
     assert moved_entity.file_path == "moved/MovedEntity.md"
 
 
@@ -365,18 +392,19 @@ async def test_entity_response_v2_has_api_version(
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
     assert response.status_code == 200
-    created_entity = EntityResponse.model_validate(response.json())
+    created_entity = EntityResponseV2.model_validate(response.json())
 
-    # Look up the entity ID from the repository
-    entity_obj = await entity_repository.get_by_permalink(created_entity.permalink)
-    assert entity_obj is not None
+    # V2 create must return id and api_version
+    assert created_entity.id is not None
+    assert created_entity.api_version == "v2"
+    entity_id = created_entity.id
 
     # Get it via v2 endpoint
     response = await client.get(
-        f"{v2_project_url}/knowledge/entities/{entity_obj.id}"
+        f"{v2_project_url}/knowledge/entities/{entity_id}"
     )
     assert response.status_code == 200
 
     entity_v2 = EntityResponseV2.model_validate(response.json())
     assert entity_v2.api_version == "v2"
-    assert entity_v2.id == entity_obj.id
+    assert entity_v2.id == entity_id

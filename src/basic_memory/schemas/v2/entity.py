@@ -3,9 +3,9 @@
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
-from basic_memory.schemas.base import Observation, Relation
+from basic_memory.schemas.response import ObservationResponse, RelationResponse
 
 
 class EntityResolveRequest(BaseModel):
@@ -64,8 +64,8 @@ class EntityResponseV2(BaseModel):
     entity_metadata: Optional[Dict] = Field(None, description="Entity metadata")
 
     # Relationships
-    observations: List[Observation] = Field(default_factory=list, description="Entity observations")
-    relations: List[Relation] = Field(default_factory=list, description="Entity relations")
+    observations: List[ObservationResponse] = Field(default_factory=list, description="Entity observations")
+    relations: List[RelationResponse] = Field(default_factory=list, description="Entity relations")
 
     # Timestamps
     created_at: datetime = Field(..., description="Creation timestamp")
@@ -76,5 +76,4 @@ class EntityResponseV2(BaseModel):
         default="v2", description="API version (always 'v2' for this response)"
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
