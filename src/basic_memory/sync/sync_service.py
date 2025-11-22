@@ -31,6 +31,7 @@ from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
+from basic_memory.sync.utils import chunks
 
 # Circuit breaker configuration
 MAX_CONSECUTIVE_FAILURES = 3
@@ -299,38 +300,139 @@ class SyncService:
             for path in report.deleted:
                 await self.handle_delete(path)
 
-        # then new and modified
-        with logfire.span("process_new_files", new_count=len(report.new)):
-            for path in report.new:
-                entity, _ = await self.sync_file(path, new=True)
+        # then new and modified - process in batches for better performance
+        batch_size = self.app_config.sync_batch_size
+        logger.debug(f"Using batch size of {batch_size} for file processing")
 
-                # Track if file was skipped
-                if entity is None and await self._should_skip_file(path):
-                    failure_info = self._file_failures[path]
-                    report.skipped_files.append(
-                        SkippedFile(
-                            path=path,
-                            reason=failure_info.last_error,
-                            failure_count=failure_info.count,
-                            first_failed=failure_info.first_failure,
+        with logfire.span("process_new_files", new_count=len(report.new)):
+            # Convert set to list for batching
+            new_files_list = list(report.new)
+
+            for batch in chunks(new_files_list, batch_size):
+                logger.debug(f"Processing batch of {len(batch)} new files")
+
+                # Separate markdown and non-markdown files
+                markdown_files = [p for p in batch if self.file_service.is_markdown(p)]
+                regular_files = [p for p in batch if not self.file_service.is_markdown(p)]
+
+                # Batch process markdown files
+                if markdown_files:
+                    try:
+                        batch_results = await self.sync_markdown_batch(markdown_files, new=True)
+
+                        # Track skipped files
+                        for path, (entity, _) in zip(markdown_files, batch_results):
+                            if entity is None and await self._should_skip_file(path):
+                                failure_info = self._file_failures[path]
+                                report.skipped_files.append(
+                                    SkippedFile(
+                                        path=path,
+                                        reason=failure_info.last_error,
+                                        failure_count=failure_info.count,
+                                        first_failed=failure_info.first_failure,
+                                    )
+                                )
+
+                    except SyncFatalError:
+                        # Re-raise fatal errors immediately
+                        raise
+                    except Exception as e:
+                        # Batch method raised an exception - record failure for all files in batch
+                        logger.error(f"Batch sync failed for {len(markdown_files)} files: {e}")
+                        for path in markdown_files:
+                            await self._record_failure(path, str(e))
+                            # Track skipped files
+                            if await self._should_skip_file(path):
+                                failure_info = self._file_failures[path]
+                                report.skipped_files.append(
+                                    SkippedFile(
+                                        path=path,
+                                        reason=failure_info.last_error,
+                                        failure_count=failure_info.count,
+                                        first_failed=failure_info.first_failure,
+                                    )
+                                )
+
+                # Process regular files individually (they're already fast)
+                for path in regular_files:
+                    entity, _ = await self.sync_file(path, new=True)
+
+                    # Track if file was skipped
+                    if entity is None and await self._should_skip_file(path):
+                        failure_info = self._file_failures[path]
+                        report.skipped_files.append(
+                            SkippedFile(
+                                path=path,
+                                reason=failure_info.last_error,
+                                failure_count=failure_info.count,
+                                first_failed=failure_info.first_failure,
+                            )
                         )
-                    )
 
         with logfire.span("process_modified_files", modified_count=len(report.modified)):
-            for path in report.modified:
-                entity, _ = await self.sync_file(path, new=False)
+            # Convert set to list for batching
+            modified_files_list = list(report.modified)
 
-                # Track if file was skipped
-                if entity is None and await self._should_skip_file(path):
-                    failure_info = self._file_failures[path]
-                    report.skipped_files.append(
-                        SkippedFile(
-                            path=path,
-                            reason=failure_info.last_error,
-                            failure_count=failure_info.count,
-                            first_failed=failure_info.first_failure,
+            for batch in chunks(modified_files_list, batch_size):
+                logger.debug(f"Processing batch of {len(batch)} modified files")
+
+                # Separate markdown and non-markdown files
+                markdown_files = [p for p in batch if self.file_service.is_markdown(p)]
+                regular_files = [p for p in batch if not self.file_service.is_markdown(p)]
+
+                # Batch process markdown files
+                if markdown_files:
+                    try:
+                        batch_results = await self.sync_markdown_batch(markdown_files, new=False)
+
+                        # Track skipped files
+                        for path, (entity, _) in zip(markdown_files, batch_results):
+                            if entity is None and await self._should_skip_file(path):
+                                failure_info = self._file_failures[path]
+                                report.skipped_files.append(
+                                    SkippedFile(
+                                        path=path,
+                                        reason=failure_info.last_error,
+                                        failure_count=failure_info.count,
+                                        first_failed=failure_info.first_failure,
+                                    )
+                                )
+
+                    except SyncFatalError:
+                        # Re-raise fatal errors immediately
+                        raise
+                    except Exception as e:
+                        # Batch method raised an exception - record failure for all files in batch
+                        logger.error(f"Batch sync failed for {len(markdown_files)} files: {e}")
+                        for path in markdown_files:
+                            await self._record_failure(path, str(e))
+                            # Track skipped files
+                            if await self._should_skip_file(path):
+                                failure_info = self._file_failures[path]
+                                report.skipped_files.append(
+                                    SkippedFile(
+                                        path=path,
+                                        reason=failure_info.last_error,
+                                        failure_count=failure_info.count,
+                                        first_failed=failure_info.first_failure,
+                                    )
+                                )
+
+                # Process regular files individually (they're already fast)
+                for path in regular_files:
+                    entity, _ = await self.sync_file(path, new=False)
+
+                    # Track if file was skipped
+                    if entity is None and await self._should_skip_file(path):
+                        failure_info = self._file_failures[path]
+                        report.skipped_files.append(
+                            SkippedFile(
+                                path=path,
+                                reason=failure_info.last_error,
+                                failure_count=failure_info.count,
+                                first_failed=failure_info.first_failure,
+                            )
                         )
-                    )
 
         # Only resolve relations if there were actual changes
         # If no files changed, no new unresolved relations could have been created
@@ -484,6 +586,12 @@ class SyncService:
 
         logger.debug(f"Processing {len(file_paths_to_scan)} files with mtime-based comparison")
 
+        # Optimization: Batch fetch all entities for files being scanned
+        # This reduces N queries to 1 batch query (massive performance win for remote DBs)
+        logger.debug(f"Batch fetching entities for {len(file_paths_to_scan)} files")
+        entities_by_path = await self.entity_repository.get_by_file_paths_batch(file_paths_to_scan)
+        logger.debug(f"Found {len(entities_by_path)} existing entities in database")
+
         for rel_path in file_paths_to_scan:
             scanned_paths.add(rel_path)
 
@@ -495,8 +603,8 @@ class SyncService:
 
             stat_info = abs_path.stat()
 
-            # Indexed lookup - single file query (not full table scan)
-            db_entity = await self.entity_repository.get_by_file_path(rel_path)
+            # O(1) dict lookup instead of database query
+            db_entity = entities_by_path.get(rel_path)
 
             if db_entity is None:
                 # New file - need checksum for move detection
@@ -736,6 +844,206 @@ class SyncService:
 
         # Return the final checksum to ensure everything is consistent
         return entity, final_checksum
+
+    @logfire.instrument()
+    async def sync_markdown_batch(
+        self, paths: List[str], new: bool = True
+    ) -> List[Tuple[Optional[Entity], str]]:
+        """Sync multiple markdown files in a single batch operation.
+
+        Optimized for remote databases (Postgres) - reduces N queries to 1 batch query.
+        Parses all files first, then does all database operations in one transaction.
+
+        Args:
+            paths: List of paths to markdown files
+            new: Whether these are new files
+
+        Returns:
+            List of tuples (entity, checksum) for each file
+        """
+        from basic_memory.markdown.utils import entity_model_from_markdown
+
+        if not paths:
+            return []
+
+        logger.debug(f"Batch syncing {len(paths)} markdown files (new={new})")
+
+        # Phase 1: Parse all files (no DB operations)
+        parsed_files = []
+        for path in paths:
+            # Check if file should be skipped due to repeated failures (circuit breaker)
+            if await self._should_skip_file(path):
+                logger.warning(f"Skipping file in batch due to repeated failures: {path}")
+                parsed_files.append(None)
+                continue
+
+            try:
+                file_content = await self.file_service.read_file_content(path)
+                file_contains_frontmatter = has_frontmatter(file_content)
+
+                # Get file timestamps for tracking modification times
+                file_stats = self.file_service.file_stats(path)
+                created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
+                modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+
+                # Parse markdown to get entity structure
+                entity_markdown = await self.entity_parser.parse_file(path)
+
+                # Resolve permalink if needed (skip conflict checks during batch)
+                permalink = entity_markdown.frontmatter.permalink
+                if file_contains_frontmatter and not self.app_config.disable_permalinks:
+                    permalink = await self.entity_service.resolve_permalink(
+                        path, markdown=entity_markdown, skip_conflict_check=True
+                    )
+
+                    # If permalink changed, update the file
+                    if permalink != entity_markdown.frontmatter.permalink:
+                        logger.info(
+                            f"Updating permalink for path: {path}, "
+                            f"old_permalink: {entity_markdown.frontmatter.permalink}, "
+                            f"new_permalink: {permalink}"
+                        )
+                        entity_markdown.frontmatter.metadata["permalink"] = permalink
+                        await self.file_service.update_frontmatter(path, {"permalink": permalink})
+
+                # Convert to entity model (without saving to DB yet)
+                entity_model = entity_model_from_markdown(Path(path), entity_markdown)
+                entity_model.checksum = None  # Will be set after relations are resolved
+
+                parsed_files.append(
+                    {
+                        "path": path,
+                        "entity_model": entity_model,
+                        "entity_markdown": entity_markdown,
+                        "created": created,
+                        "modified": modified,
+                        "mtime": file_stats.st_mtime,
+                        "size": file_stats.st_size,
+                    }
+                )
+
+            except Exception as e:
+                # Check if this is a fatal error (or caused by one)
+                # Fatal errors like project deletion should terminate sync immediately
+                if isinstance(e, SyncFatalError) or isinstance(e.__cause__, SyncFatalError):
+                    logger.error(
+                        f"Fatal sync error encountered during batch parse, terminating sync: path={path}"
+                    )
+                    raise
+
+                # Otherwise treat as recoverable file-level error
+                logger.error(f"Failed to parse file in batch: path={path}, error={e}")
+                # Track failure for circuit breaker
+                await self._record_failure(path, str(e))
+                parsed_files.append(None)  # Mark as failed
+
+        # Phase 2: Batch database operations
+        # Filter out failed parses
+        valid_files = [f for f in parsed_files if f is not None]
+        if not valid_files:
+            logger.warning("No valid files to sync in batch")
+            return [(None, "") for _ in paths]
+
+        # If this is a new batch, upsert all entities at once
+        if new:
+            entities_to_upsert = [f["entity_model"] for f in valid_files]
+            logger.debug(f"Batch upserting {len(entities_to_upsert)} new entities")
+            upserted_entities = await self.entity_repository.upsert_entities(entities_to_upsert)
+
+            # Create lookup by file_path for O(1) access
+            entities_by_path = {e.file_path: e for e in upserted_entities}
+
+        # If updating existing entities, we need to handle observations/relations differently
+        else:
+            logger.debug(f"Batch updating {len(valid_files)} existing entities")
+            # For updates, we need to:
+            # 1. Get existing entities
+            # 2. Delete old observations/relations
+            # 3. Upsert updated entities
+
+            file_paths = [f["path"] for f in valid_files]
+            existing_entities = await self.entity_repository.get_by_file_paths_batch(file_paths)
+
+            # Delete old observations and relations in batch
+            entity_ids = [e.id for e in existing_entities.values() if e.id]
+            if entity_ids:
+                await self.entity_service.observation_repository.delete_by_entity_ids(entity_ids)
+                await self.relation_repository.delete_outgoing_relations_from_entities(entity_ids)
+
+            # Upsert all updated entities
+            entities_to_upsert = [f["entity_model"] for f in valid_files]
+            upserted_entities = await self.entity_repository.upsert_entities(entities_to_upsert)
+
+            # Create lookup by file_path
+            entities_by_path = {e.file_path: e for e in upserted_entities}
+
+        # Phase 3: Post-processing (relations, checksums, search index)
+        results = []
+        for i, path in enumerate(paths):
+            parsed_file = parsed_files[i]
+
+            # Skip failed files
+            if parsed_file is None:
+                results.append((None, ""))
+                continue
+
+            entity = entities_by_path.get(parsed_file["path"])
+            if entity is None:
+                logger.error(f"Entity not found after upsert: {parsed_file['path']}")
+                results.append((None, ""))
+                continue
+
+            try:
+                # Update relations for this entity
+                entity_with_relations = await self.entity_service.update_entity_relations(
+                    parsed_file["path"], parsed_file["entity_markdown"]
+                )
+
+                # Compute final checksum after relations are resolved
+                final_checksum = await self.file_service.compute_checksum(parsed_file["path"])
+
+                # Update checksum, timestamps, and file metadata
+                await self.entity_repository.update(
+                    entity.id,
+                    {
+                        "checksum": final_checksum,
+                        "created_at": parsed_file["created"],
+                        "updated_at": parsed_file["modified"],
+                        "mtime": parsed_file["mtime"],
+                        "size": parsed_file["size"],
+                    },
+                )
+
+                # Index for search
+                await self.search_service.index_entity(entity_with_relations)
+
+                # Clear failure tracking on successful sync
+                self._clear_failure(parsed_file["path"])
+
+                results.append((entity_with_relations, final_checksum))
+
+                logger.debug(
+                    f"Batch sync completed for file: path={parsed_file['path']}, "
+                    f"entity_id={entity.id}, checksum={final_checksum[:8]}"
+                )
+
+            except Exception as e:
+                # Check if this is a fatal error
+                if isinstance(e, SyncFatalError) or isinstance(e.__cause__, SyncFatalError):
+                    logger.error(
+                        f"Fatal sync error during post-processing, terminating sync: path={parsed_file['path']}"
+                    )
+                    raise
+
+                # Otherwise treat as recoverable file-level error
+                logger.error(
+                    f"Failed to complete post-processing for file: path={parsed_file['path']}, error={e}"
+                )
+                await self._record_failure(parsed_file["path"], str(e))
+                results.append((None, ""))
+                continue
+
+        return results
 
     @logfire.instrument()
     async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
@@ -1134,13 +1442,13 @@ class SyncService:
     async def _scan_directory_full(self, directory: Path) -> List[str]:
         """Full directory scan returning all file paths.
 
-        Uses scan_directory() which respects .bmignore patterns.
+                Uses scan_directory() which respects .bmignore patterns.
 
-        Args:
-            directory: Directory to scan
+                Args:
+                    directory: Directory to scan
 
         Returns:
-            List of relative file paths (respects .bmignore)
+                    List of relative file paths (respects .bmignore)
         """
         file_paths = []
         async for file_path_str, _ in self.scan_directory(directory):

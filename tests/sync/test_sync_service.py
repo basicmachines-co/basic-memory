@@ -1486,11 +1486,12 @@ async def test_circuit_breaker_skips_after_three_failures(
     # Create a file with malformed content that will fail to parse
     await create_test_file(test_file, "invalid markdown content")
 
-    # Mock sync_markdown_file to always fail
-    async def mock_sync_markdown_file(*args, **kwargs):
+    # Mock sync_markdown_batch to always fail for all files in batch
+    async def mock_sync_markdown_batch(paths, new=True):
+        # Simulate batch failure - return (None, "") for each path
         raise ValueError("Simulated sync failure")
 
-    with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
+    with patch.object(sync_service, "sync_markdown_batch", side_effect=mock_sync_markdown_batch):
         # First sync - should fail and record (1/3)
         report1 = await sync_service.sync(project_dir)
         assert len(report1.skipped_files) == 0  # Not skipped yet
@@ -1545,15 +1546,15 @@ async def test_circuit_breaker_resets_on_file_change(
     # Create initial failing content
     await create_test_file(test_file, "initial bad content")
 
-    # Mock sync_markdown_file to fail
+    # Mock sync_markdown_batch to fail
     call_count = 0
 
-    async def mock_sync_markdown_file(*args, **kwargs):
+    async def mock_sync_markdown_batch(paths, new=True):
         nonlocal call_count
-        call_count += 1
+        call_count += len(paths)
         raise ValueError("Simulated sync failure")
 
-    with patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file):
+    with patch.object(sync_service, "sync_markdown_batch", side_effect=mock_sync_markdown_batch):
         # Fail 3 times to hit circuit breaker threshold
         await sync_service.sync(project_dir)  # Fail 1
         await touch_file(test_file)  # Touch to trigger incremental scan
@@ -1670,8 +1671,8 @@ async def test_circuit_breaker_handles_checksum_computation_failure(
     test_file = project_dir / "checksum_fail.md"
     await create_test_file(test_file, "content")
 
-    # Mock sync_markdown_file to fail
-    async def mock_sync_markdown_file(*args, **kwargs):
+    # Mock sync_markdown_batch to fail
+    async def mock_sync_markdown_batch(paths, new=True):
         raise ValueError("Sync failure")
 
     # Mock checksum computation to fail only during _record_failure (not during scan)
@@ -1688,7 +1689,7 @@ async def test_circuit_breaker_handles_checksum_computation_failure(
         raise IOError("Cannot read file")
 
     with (
-        patch.object(sync_service, "sync_markdown_file", side_effect=mock_sync_markdown_file),
+        patch.object(sync_service, "sync_markdown_batch", side_effect=mock_sync_markdown_batch),
         patch.object(
             sync_service.file_service,
             "compute_checksum",
@@ -1757,16 +1758,16 @@ async def test_sync_fatal_error_terminates_sync_immediately(
         ),
     )
 
-    # Mock entity_service.create_entity_from_markdown to raise SyncFatalError on first file
-    # This simulates project being deleted during sync
-    async def mock_create_entity_from_markdown(*args, **kwargs):
+    # Mock entity_repository.upsert_entities to raise SyncFatalError
+    # This simulates project being deleted during batch sync
+    async def mock_upsert_entities(entities):
         raise SyncFatalError(
-            "Cannot sync file 'file1.md': project_id=99999 does not exist in database. "
+            "Cannot sync entities: project_id=99999 does not exist in database. "
             "The project may have been deleted. This sync will be terminated."
         )
 
     with patch.object(
-        entity_service, "create_entity_from_markdown", side_effect=mock_create_entity_from_markdown
+        sync_service.entity_repository, "upsert_entities", side_effect=mock_upsert_entities
     ):
         # Sync should raise SyncFatalError and terminate immediately
         with pytest.raises(SyncFatalError, match="project_id=99999 does not exist"):

@@ -67,6 +67,27 @@ class RelationRepository(Repository[Relation]):
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(delete(Relation).where(Relation.from_id == entity_id))
 
+    async def delete_outgoing_relations_from_entities(self, entity_ids: List[int]) -> int:
+        """Delete outgoing relations for multiple entities in a single query.
+
+        Optimized for batch operations - deletes relations for many entities
+        in one database transaction. Only deletes relations where these entities
+        are the source (from_id).
+
+        Args:
+            entity_ids: List of entity IDs whose outgoing relations should be deleted
+
+        Returns:
+            Number of relations deleted
+        """
+        if not entity_ids:
+            return 0
+
+        async with db.scoped_session(self.session_maker) as session:
+            # Use bulk delete with IN clause
+            result = await session.execute(delete(Relation).where(Relation.from_id.in_(entity_ids)))
+            return result.rowcount or 0
+
     async def find_unresolved_relations(self) -> Sequence[Relation]:
         """Find all unresolved relations, where to_id is null."""
         query = select(Relation).filter(Relation.to_id.is_(None))
