@@ -264,5 +264,6 @@ With GitHub integration, the development workflow includes:
 2. **Contribution tracking** - All of Claude's contributions are properly attributed in the Git history
 3. **Branch management** - Claude can create feature branches for implementations
 4. **Documentation maintenance** - Claude can keep documentation updated as the code evolves
+5. **Code Commits**: ALWAYS sign off commits with `git commit -s`
 
 This level of integration represents a new paradigm in AI-human collaboration, where the AI assistant becomes a full-fledged team member rather than just a tool for generating code snippets.

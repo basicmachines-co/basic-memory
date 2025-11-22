@@ -50,6 +50,7 @@ async def get_project(
         )  # pragma: no cover
 
     return ProjectItem(
+        id=found_project.id,
         name=found_project.name,
         path=normalize_project_path(found_project.path),
         is_default=found_project.is_default or False,
@@ -80,9 +81,15 @@ async def update_project(
             raise HTTPException(status_code=400, detail="Path must be absolute")
 
         # Get original project info for the response
+        old_project = await project_service.get_project(name)
+        if not old_project:
+            raise HTTPException(status_code=400, detail=f"Project '{name}' not found in configuration")
+
         old_project_info = ProjectItem(
-            name=name,
-            path=project_service.projects.get(name, ""),
+            id=old_project.id,
+            name=old_project.name,
+            path=old_project.path,
+            is_default=old_project.is_default or False,
         )
 
         if path:
@@ -91,14 +98,21 @@ async def update_project(
             await project_service.update_project(name, is_active=is_active)
 
         # Get updated project info
-        updated_path = path if path else project_service.projects.get(name, "")
+        updated_project = await project_service.get_project(name)
+        if not updated_project:
+            raise HTTPException(status_code=404, detail=f"Project '{name}' not found after update")
 
         return ProjectStatusResponse(
             message=f"Project '{name}' updated successfully",
             status="success",
             default=(name == project_service.default_project),
             old_project=old_project_info,
-            new_project=ProjectItem(name=name, path=updated_path),
+            new_project=ProjectItem(
+                id=updated_project.id,
+                name=updated_project.name,
+                path=updated_project.path,
+                is_default=updated_project.is_default or False,
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -186,6 +200,7 @@ async def list_projects(
 
     project_items = [
         ProjectItem(
+            id=project.id,
             name=project.name,
             path=normalize_project_path(project.path),
             is_default=project.is_default or False,
@@ -232,6 +247,7 @@ async def add_project(
                 status="success",
                 default=existing_project.is_default or False,
                 new_project=ProjectItem(
+                    id=existing_project.id,
                     name=existing_project.name,
                     path=existing_project.path,
                     is_default=existing_project.is_default or False,
@@ -250,12 +266,20 @@ async def add_project(
             project_data.name, project_data.path, set_default=project_data.set_default
         )
 
+        # Fetch the newly created project to get its ID
+        new_project = await project_service.get_project(project_data.name)
+        if not new_project:
+            raise HTTPException(status_code=500, detail="Failed to retrieve newly created project")
+
         return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
             message=f"Project '{project_data.name}' added successfully",
             status="success",
             default=project_data.set_default,
             new_project=ProjectItem(
-                name=project_data.name, path=project_data.path, is_default=project_data.set_default
+                id=new_project.id,
+                name=new_project.name,
+                path=new_project.path,
+                is_default=new_project.is_default or False,
             ),
         )
     except ValueError as e:  # pragma: no cover
@@ -306,7 +330,12 @@ async def remove_project(
             message=f"Project '{name}' removed successfully",
             status="success",
             default=False,
-            old_project=ProjectItem(name=old_project.name, path=old_project.path),
+            old_project=ProjectItem(
+                id=old_project.id,
+                name=old_project.name,
+                path=old_project.path,
+                is_default=old_project.is_default or False,
+            ),
             new_project=None,
         )
     except ValueError as e:  # pragma: no cover
@@ -349,8 +378,14 @@ async def set_default_project(
             message=f"Project '{name}' set as default successfully",
             status="success",
             default=True,
-            old_project=ProjectItem(name=default_name, path=default_project.path),
+            old_project=ProjectItem(
+                id=default_project.id,
+                name=default_name,
+                path=default_project.path,
+                is_default=False,
+            ),
             new_project=ProjectItem(
+                id=new_default_project.id,
                 name=name,
                 path=new_default_project.path,
                 is_default=True,
@@ -378,7 +413,12 @@ async def get_default_project(
             status_code=404, detail=f"Default Project: '{default_name}' does not exist"
         )
 
-    return ProjectItem(name=default_project.name, path=default_project.path, is_default=True)
+    return ProjectItem(
+        id=default_project.id,
+        name=default_project.name,
+        path=default_project.path,
+        is_default=True,
+    )
 
 
 # Synchronize projects between config and database

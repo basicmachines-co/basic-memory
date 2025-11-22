@@ -55,6 +55,7 @@ def mock_api_client():
             "default": False,
             "old_project": None,
             "new_project": {
+                "id": 1,
                 "name": "test-project",
                 "path": "/test-project",
                 "is_default": False,

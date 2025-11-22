@@ -437,9 +437,7 @@ async def test_write_note_project_path_validation(mcp_server, app, test_project)
     project_with_tilde = ProjectItem(
         id=1,
         name="Test BiSync",  # Name differs from path structure
-        description="Test",
         path="~/Documents/Test BiSync",  # Path with tilde
-        is_active=True,
         is_default=False,
     )
 

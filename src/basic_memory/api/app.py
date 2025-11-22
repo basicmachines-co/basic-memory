@@ -20,6 +20,13 @@ from basic_memory.api.routers import (
     search,
     prompt_router,
 )
+from basic_memory.api.v2.routers import (
+    knowledge_router as v2_knowledge,
+    project_router as v2_project,
+    memory_router as v2_memory,
+    search_router as v2_search,
+    resource_router as v2_resource,
+)
 from basic_memory.config import ConfigManager
 from basic_memory.services.initialization import initialize_file_sync, initialize_app
 
@@ -66,8 +73,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-
-# Include routers
+# Include v1 routers
 app.include_router(knowledge.router, prefix="/{project}")
 app.include_router(memory.router, prefix="/{project}")
 app.include_router(resource.router, prefix="/{project}")
@@ -77,7 +83,14 @@ app.include_router(directory_router.router, prefix="/{project}")
 app.include_router(prompt_router.router, prefix="/{project}")
 app.include_router(importer_router.router, prefix="/{project}")
 
-# Project resource router works accross projects
+# Include v2 routers (current)
+app.include_router(v2_knowledge, prefix="/v2/{project_id}")
+app.include_router(v2_memory, prefix="/v2/{project_id}")
+app.include_router(v2_search, prefix="/v2/{project_id}")
+app.include_router(v2_resource, prefix="/v2/{project_id}")
+app.include_router(v2_project, prefix="/v2")
+
+# Project resource router works across projects
 app.include_router(project.project_resource_router)
 app.include_router(management.router)
 
