@@ -163,18 +163,15 @@ async def get_entity_by_id(
 ## Create endpoints
 
 
-@router.post("/entities", response_model=EntityResponse)
+@router.post("/entities", response_model=EntityResponseV2)
 async def create_entity(
     project_id: ProjectIdPathDep,
     data: Entity,
     background_tasks: BackgroundTasks,
     entity_service: EntityServiceV2Dep,
     search_service: SearchServiceV2Dep,
-) -> EntityResponse:
+) -> EntityResponseV2:
     """Create a new entity.
-
-    Note: This endpoint returns the standard EntityResponse for compatibility.
-    Use GET /entities/{entity_id} to retrieve the v2 response format.
 
     Args:
         data: Entity data to create
@@ -190,7 +187,7 @@ async def create_entity(
 
     # reindex
     await search_service.index_entity(entity, background_tasks=background_tasks)
-    result = EntityResponse.model_validate(entity)
+    result = EntityResponseV2.model_validate(entity)
 
     logger.info(
         f"API v2 response: endpoint='create_entity' id={entity.id}, title={result.title}, permalink={result.permalink}, status_code=201"
@@ -201,7 +198,7 @@ async def create_entity(
 ## Update endpoints
 
 
-@router.put("/entities/{entity_id}", response_model=EntityResponse)
+@router.put("/entities/{entity_id}", response_model=EntityResponseV2)
 async def update_entity_by_id(
     project_id: ProjectIdPathDep,
     entity_id: int,
@@ -212,7 +209,7 @@ async def update_entity_by_id(
     search_service: SearchServiceV2Dep,
     sync_service: SyncServiceV2Dep,
     entity_repository: EntityRepositoryV2Dep,
-) -> EntityResponse:
+) -> EntityResponseV2:
     """Update an entity by ID.
 
     If the entity doesn't exist, it will be created (upsert behavior).
@@ -243,7 +240,7 @@ async def update_entity_by_id(
             resolve_relations_background, sync_service, entity.id, entity.permalink or ""
         )
 
-    result = EntityResponse.model_validate(entity)
+    result = EntityResponseV2.model_validate(entity)
 
     logger.info(
         f"API v2 response: entity_id={entity_id}, created={created}, status_code={response.status_code}"
@@ -251,7 +248,7 @@ async def update_entity_by_id(
     return result
 
 
-@router.patch("/entities/{entity_id}", response_model=EntityResponse)
+@router.patch("/entities/{entity_id}", response_model=EntityResponseV2)
 async def edit_entity_by_id(
     project_id: ProjectIdPathDep,
     entity_id: int,
@@ -260,7 +257,7 @@ async def edit_entity_by_id(
     entity_service: EntityServiceV2Dep,
     search_service: SearchServiceV2Dep,
     entity_repository: EntityRepositoryV2Dep,
-) -> EntityResponse:
+) -> EntityResponseV2:
     """Edit an existing entity by ID using operations like append, prepend, etc.
 
     Args:
@@ -297,7 +294,7 @@ async def edit_entity_by_id(
         # Reindex
         await search_service.index_entity(updated_entity, background_tasks=background_tasks)
 
-        result = EntityResponse.model_validate(updated_entity)
+        result = EntityResponseV2.model_validate(updated_entity)
 
         logger.info(
             f"API v2 response: entity_id={entity_id}, operation='{data.operation}', status_code=200"
@@ -354,7 +351,7 @@ async def delete_entity_by_id(
 ## Move endpoint
 
 
-@router.post("/move", response_model=EntityResponse)
+@router.post("/move", response_model=EntityResponseV2)
 async def move_entity(
     project_id: ProjectIdPathDep,
     data: MoveEntityRequest,
@@ -363,7 +360,7 @@ async def move_entity(
     project_config: ProjectConfigV2Dep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2Dep,
-) -> EntityResponse:
+) -> EntityResponseV2:
     """Move an entity to a new file location.
 
     Note: Identifier in request can be an entity ID or legacy identifier.
@@ -393,7 +390,7 @@ async def move_entity(
         if entity:
             await search_service.index_entity(entity, background_tasks=background_tasks)
 
-        result = EntityResponse.model_validate(moved_entity)
+        result = EntityResponseV2.model_validate(moved_entity)
 
         logger.info(
             f"API v2 response: moved entity_id={moved_entity.id} to '{data.destination_path}'"
