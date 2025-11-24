@@ -20,6 +20,7 @@ from basic_memory.api.v2.routers import (
     search_router,
     directory_router,
     prompt_router,
+    importer_router,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "search_router",
     "directory_router",
     "prompt_router",
+    "importer_router",
 ]

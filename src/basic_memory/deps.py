@@ -644,3 +644,50 @@ async def get_memory_json_importer(
 
 
 MemoryJsonImporterDep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer)]
+
+
+# V2 Import dependencies
+
+
+async def get_chatgpt_importer_v2(
+    project_config: ProjectConfigV2Dep, markdown_processor: MarkdownProcessorV2Dep
+) -> ChatGPTImporter:
+    """Create ChatGPTImporter with v2 dependencies."""
+    return ChatGPTImporter(project_config.home, markdown_processor)
+
+
+ChatGPTImporterV2Dep = Annotated[ChatGPTImporter, Depends(get_chatgpt_importer_v2)]
+
+
+async def get_claude_conversations_importer_v2(
+    project_config: ProjectConfigV2Dep, markdown_processor: MarkdownProcessorV2Dep
+) -> ClaudeConversationsImporter:
+    """Create ClaudeConversationsImporter with v2 dependencies."""
+    return ClaudeConversationsImporter(project_config.home, markdown_processor)
+
+
+ClaudeConversationsImporterV2Dep = Annotated[
+    ClaudeConversationsImporter, Depends(get_claude_conversations_importer_v2)
+]
+
+
+async def get_claude_projects_importer_v2(
+    project_config: ProjectConfigV2Dep, markdown_processor: MarkdownProcessorV2Dep
+) -> ClaudeProjectsImporter:
+    """Create ClaudeProjectsImporter with v2 dependencies."""
+    return ClaudeProjectsImporter(project_config.home, markdown_processor)
+
+
+ClaudeProjectsImporterV2Dep = Annotated[
+    ClaudeProjectsImporter, Depends(get_claude_projects_importer_v2)
+]
+
+
+async def get_memory_json_importer_v2(
+    project_config: ProjectConfigV2Dep, markdown_processor: MarkdownProcessorV2Dep
+) -> MemoryJsonImporter:
+    """Create MemoryJsonImporter with v2 dependencies."""
+    return MemoryJsonImporter(project_config.home, markdown_processor)
+
+
+MemoryJsonImporterV2Dep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer_v2)]
