@@ -1,10 +1,59 @@
-"""Tests for v2 resource router endpoints."""
+"""Tests for V2 resource API routes (ID-based endpoints)."""
 
 import pytest
 from httpx import AsyncClient
-from pathlib import Path
 
-from basic_memory.models import Entity, Project
+from basic_memory.models import Project
+from basic_memory.schemas.v2.resource import ResourceResponse
+
+
+@pytest.mark.asyncio
+async def test_create_resource(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+):
+    """Test creating a new resource via v2 POST endpoint."""
+    create_data = {
+        "file_path": "test-resources/test-file.md",
+        "content": "# Test Resource\n\nThis is test content.",
+    }
+
+    response = await client.post(
+        f"{v2_project_url}/resource",
+        json=create_data,
+    )
+
+    assert response.status_code == 200
+    result = ResourceResponse.model_validate(response.json())
+
+    # V2 must return entity_id
+    assert result.entity_id is not None
+    assert isinstance(result.entity_id, int)
+    assert result.file_path == "test-resources/test-file.md"
+    assert result.checksum is not None
+
+
+@pytest.mark.asyncio
+async def test_create_resource_duplicate_fails(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+):
+    """Test that creating a resource at an existing path returns 409."""
+    create_data = {
+        "file_path": "duplicate-test.md",
+        "content": "First version",
+    }
+
+    # Create first time - should succeed
+    response = await client.post(f"{v2_project_url}/resource", json=create_data)
+    assert response.status_code == 200
+
+    # Try to create again - should fail with 409
+    response = await client.post(f"{v2_project_url}/resource", json=create_data)
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -12,103 +61,25 @@ async def test_get_resource_by_id(
     client: AsyncClient,
     test_project: Project,
     v2_project_url: str,
-    entity_repository,
-    file_service,
 ):
     """Test getting resource content by entity ID."""
-    # Create a test file
+    # First create a resource
     test_content = "# Test Resource\n\nThis is test content."
-    file_path = Path(test_project.path) / "test_resource.md"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    await file_service.write_file(file_path, test_content)
-
-    # Create entity record
-    entity_data = {
-        "title": "Test Resource",
-        "entity_type": "note",
-        "content_type": "text/markdown",
-        "file_path": "test_resource.md",
-        "checksum": "res123",
-        "project_id": test_project.id,
+    create_data = {
+        "file_path": "test-get.md",
+        "content": test_content,
     }
-    created_entity = await entity_repository.create(entity_data)
 
-    # Get resource by ID
-    response = await client.get(f"{v2_project_url}/resource/{created_entity.id}")
+    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
+    assert create_response.status_code == 200
+    created = ResourceResponse.model_validate(create_response.json())
+
+    # Now get it by entity ID
+    response = await client.get(f"{v2_project_url}/resource/{created.entity_id}")
 
     assert response.status_code == 200
     # Normalize line endings for cross-platform compatibility
     assert test_content.replace('\n', '') in response.text.replace('\r\n', '').replace('\n', '')
-
-
-@pytest.mark.asyncio
-async def test_get_resource_by_permalink(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-    entity_repository,
-    file_service,
-):
-    """Test getting resource content by permalink."""
-    # Create a test file
-    test_content = "# Permalink Resource\n\nContent with permalink."
-    file_path = Path(test_project.path) / "permalink_resource.md"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    await file_service.write_file(file_path, test_content)
-
-    # Create entity with permalink
-    entity_data = {
-        "title": "Permalink Resource",
-        "entity_type": "note",
-        "content_type": "text/markdown",
-        "file_path": "permalink_resource.md",
-        "checksum": "perm456",
-        "permalink": "permalink-resource",
-    }
-    await entity_repository.create(entity_data)
-
-    # Get resource by permalink
-    response = await client.get(f"{v2_project_url}/resource/permalink-resource")
-
-    assert response.status_code == 200
-    # Normalize line endings for cross-platform compatibility
-    assert test_content.replace('\n', '') in response.text.replace('\r\n', '').replace('\n', '')
-
-
-@pytest.mark.asyncio
-async def test_get_resource_with_wildcard(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-    entity_repository,
-    file_service,
-    search_service,
-):
-    """Test getting resources using wildcard pattern."""
-    # Create multiple test files
-    for i in range(3):
-        test_content = f"# Wildcard Resource {i}\n\nContent {i}."
-        file_path = Path(test_project.path) / f"wildcard_{i}.md"
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        await file_service.write_file(file_path, test_content)
-
-        entity_data = {
-            "title": f"Wildcard Resource {i}",
-            "entity_type": "note",
-        "content_type": "text/markdown",
-            "file_path": f"wildcard_{i}.md",
-            "checksum": f"wild{i}",
-            "permalink": f"wildcard-{i}",
-        }
-        entity = await entity_repository.create(entity_data)
-        await search_service.index_entity(entity)
-
-    # Get resources with wildcard
-    response = await client.get(f"{v2_project_url}/resource/wildcard-*")
-
-    assert response.status_code == 200
-    # Response should contain multiple resources concatenated
-    assert "Wildcard Resource" in response.text
 
 
 @pytest.mark.asyncio
@@ -117,214 +88,180 @@ async def test_get_resource_not_found(
     test_project: Project,
     v2_project_url: str,
 ):
-    """Test getting non-existent resource returns 404."""
-    response = await client.get(f"{v2_project_url}/resource/nonexistent")
+    """Test getting a non-existent resource returns 404."""
+    response = await client.get(f"{v2_project_url}/resource/999999")
 
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_get_resource_file_not_found(
+async def test_update_resource(
     client: AsyncClient,
     test_project: Project,
     v2_project_url: str,
-    entity_repository,
 ):
-    """Test getting resource when entity exists but file doesn't."""
-    # Create entity without actual file
-    entity_data = {
-        "title": "Missing File",
-        "entity_type": "note",
-        "content_type": "text/markdown",
-        "file_path": "missing_file.md",
-        "checksum": "miss123",
-        "permalink": "missing-file",
+    """Test updating resource content by entity ID."""
+    # Create a resource
+    create_data = {
+        "file_path": "test-update.md",
+        "content": "Original content",
     }
-    await entity_repository.create(entity_data)
+    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
+    assert create_response.status_code == 200
+    created = ResourceResponse.model_validate(create_response.json())
 
-    # Try to get resource
-    response = await client.get(f"{v2_project_url}/resource/missing-file")
-
-    assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_get_resource_invalid_project_id(
-    client: AsyncClient,
-):
-    """Test getting resource with invalid project ID returns 404."""
-    response = await client.get("/v2/projects/999999/resource/test")
-
-    assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_write_resource_new_file(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-    entity_repository,
-):
-    """Test writing a new resource file."""
-    test_content = "# New Resource\n\nThis is new content."
-
-    response = await client.put(
-        f"{v2_project_url}/resource/new_resource.md",
-        content=test_content,
-        headers={"Content-Type": "text/plain"}
-    )
-
-    assert response.status_code == 201
-    data = response.json()
-
-    # Verify response
-    assert "file_path" in data
-    assert data["file_path"] == "new_resource.md"
-    assert "checksum" in data
-    assert "size" in data
-
-    # Verify entity was created
-    entity = await entity_repository.get_by_file_path("new_resource.md")
-    assert entity is not None
-    assert entity.title == "new_resource.md"
-
-
-@pytest.mark.asyncio
-async def test_write_resource_update_existing(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-    entity_repository,
-    file_service,
-):
-    """Test updating an existing resource file."""
-    # Create initial file
-    initial_content = "# Initial Content"
-    file_path = Path(test_project.path) / "update_resource.md"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    await file_service.write_file(file_path, initial_content)
-
-    # Create entity
-    entity_data = {
-        "title": "update_resource.md",
-        "entity_type": "note",
-        "content_type": "text/markdown",
-        "file_path": "update_resource.md",
-        "checksum": "init123",
+    # Update it
+    update_data = {
+        "content": "Updated content",
     }
-    await entity_repository.create(entity_data)
-
-    # Update the file
-    updated_content = "# Updated Content\n\nThis is updated."
     response = await client.put(
-        f"{v2_project_url}/resource/update_resource.md",
-        content=updated_content,
-        headers={"Content-Type": "text/plain"}
+        f"{v2_project_url}/resource/{created.entity_id}",
+        json=update_data,
     )
 
     assert response.status_code == 200
-    data = response.json()
-    assert data["file_path"] == "update_resource.md"
+    result = ResourceResponse.model_validate(response.json())
+    assert result.entity_id == created.entity_id
+    assert result.file_path == "test-update.md"
 
-    # Verify file was updated
-    updated_entity = await entity_repository.get_by_file_path("update_resource.md")
-    assert updated_entity is not None
+    # Verify content was updated
+    get_response = await client.get(f"{v2_project_url}/resource/{created.entity_id}")
+    assert "Updated content" in get_response.text
 
 
 @pytest.mark.asyncio
-async def test_write_resource_with_subdirectory(
+async def test_update_resource_and_move(
     client: AsyncClient,
     test_project: Project,
     v2_project_url: str,
 ):
-    """Test writing resource in a subdirectory."""
-    test_content = "# Nested Resource"
+    """Test updating resource content and moving it to a new path."""
+    # Create a resource
+    create_data = {
+        "file_path": "original-location.md",
+        "content": "Original content",
+    }
+    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
+    assert create_response.status_code == 200
+    created = ResourceResponse.model_validate(create_response.json())
 
+    # Update content and move file
+    update_data = {
+        "content": "Updated content in new location",
+        "file_path": "moved/new-location.md",
+    }
     response = await client.put(
-        f"{v2_project_url}/resource/subdir/nested_resource.md",
-        content=test_content,
-        headers={"Content-Type": "text/plain"}
+        f"{v2_project_url}/resource/{created.entity_id}",
+        json=update_data,
     )
 
-    assert response.status_code == 201
-    data = response.json()
-    assert data["file_path"] == "subdir/nested_resource.md"
+    assert response.status_code == 200
+    result = ResourceResponse.model_validate(response.json())
+    assert result.entity_id == created.entity_id
+    assert result.file_path == "moved/new-location.md"
 
-    # Verify directory was created
-    nested_file = Path(test_project.path) / "subdir" / "nested_resource.md"
-    assert nested_file.exists()
+    # Verify content at new location
+    get_response = await client.get(f"{v2_project_url}/resource/{created.entity_id}")
+    assert "Updated content in new location" in get_response.text
 
 
 @pytest.mark.asyncio
-async def test_write_resource_invalid_project_id(
+async def test_update_resource_not_found(
     client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
 ):
-    """Test writing resource with invalid project ID returns 404."""
+    """Test updating a non-existent resource returns 404."""
+    update_data = {
+        "content": "New content",
+    }
     response = await client.put(
-        "/v2/projects/999999/resource/test.md",
-        content="Test content",
-        headers={"Content-Type": "text/plain"}
+        f"{v2_project_url}/resource/999999",
+        json=update_data,
     )
 
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_write_resource_dict_content_fails(
+async def test_create_resource_invalid_path(
     client: AsyncClient,
     test_project: Project,
     v2_project_url: str,
 ):
-    """Test that writing dict content returns error."""
-    # Try to send JSON object instead of string
+    """Test creating a resource with path traversal attempt fails."""
+    create_data = {
+        "file_path": "../../../etc/passwd",
+        "content": "malicious content",
+    }
+
+    response = await client.post(f"{v2_project_url}/resource", json=create_data)
+
+    assert response.status_code == 400
+    assert "Invalid file path" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_resource_invalid_path(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+):
+    """Test updating a resource with path traversal attempt fails."""
+    # Create a valid resource first
+    create_data = {
+        "file_path": "valid.md",
+        "content": "Valid content",
+    }
+    create_response = await client.post(f"{v2_project_url}/resource", json=create_data)
+    assert create_response.status_code == 200
+    created = ResourceResponse.model_validate(create_response.json())
+
+    # Try to move it to an invalid path
+    update_data = {
+        "content": "Updated content",
+        "file_path": "../../../etc/passwd",
+    }
     response = await client.put(
-        f"{v2_project_url}/resource/test.md",
-        json={"content": "test"}  # This sends a dict, not a string
+        f"{v2_project_url}/resource/{created.entity_id}",
+        json=update_data,
     )
 
-    # Should fail with validation error (422 is FastAPI's validation error code)
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert "Invalid file path" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_resource_invalid_project_id(
+    client: AsyncClient,
+):
+    """Test resource endpoints with invalid project ID return 404."""
+    # Test create
+    response = await client.post(
+        "/v2/projects/999999/resource",
+        json={"file_path": "test.md", "content": "test"},
+    )
+    assert response.status_code == 404
+
+    # Test get
+    response = await client.get("/v2/projects/999999/resource/1")
+    assert response.status_code == 404
+
+    # Test update
+    response = await client.put(
+        "/v2/projects/999999/resource/1",
+        json={"content": "test"},
+    )
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_v2_resource_endpoints_use_project_id_not_name(
-    client: AsyncClient,
-    test_project: Project,
+    client: AsyncClient, test_project: Project
 ):
-    """Test that v2 resource endpoints reject string project names."""
-    # Try to use project name instead of ID - should fail
-    response = await client.get(f"/v2/{test_project.name}/resource/test")
+    """Verify v2 resource endpoints require project ID, not name."""
+    # Try using project name instead of ID - should fail
+    response = await client.get(f"/v2/projects/{test_project.name}/resource/1")
 
-    # FastAPI path validation should reject non-integer project_id
+    # Should get validation error or 404 because name is not a valid integer
     assert response.status_code in [404, 422]
-
-
-@pytest.mark.asyncio
-async def test_write_resource_path_traversal_protection(
-    client: AsyncClient,
-    test_project: Project,
-    v2_project_url: str,
-):
-    """Test that path traversal attacks are blocked."""
-    # Test various path traversal attempts
-    malicious_paths = [
-        "../../../etc/passwd",
-        "../../sensitive.txt",
-        "../outside.md",
-        "subdir/../../outside.md",
-        "~/secret.md",
-        "/etc/passwd",
-    ]
-
-    for malicious_path in malicious_paths:
-        response = await client.put(
-            f"{v2_project_url}/resource/{malicious_path}",
-            content="malicious content",
-            headers={"Content-Type": "text/plain"}
-        )
-
-        # Should fail with 400 Bad Request or 404 Not Found (both block the attack)
-        assert response.status_code in [400, 404], f"Path traversal not blocked for: {malicious_path}, got {response.status_code}"
-        # 400 means our validation caught it, 404 means FastAPI path routing rejected it
-        if response.status_code == 400:
-            assert "invalid" in response.json()["detail"].lower(), f"Wrong error message for: {malicious_path}"
