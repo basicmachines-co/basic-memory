@@ -18,6 +18,7 @@ from basic_memory.api.v2.routers import (
     project_router,
     resource_router,
     search_router,
+    directory_router,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "project_router",
     "resource_router",
     "search_router",
+    "directory_router",
 ]

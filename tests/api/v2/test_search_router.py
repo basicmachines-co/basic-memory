@@ -244,7 +244,7 @@ async def test_search_invalid_project_id(
 ):
     """Test searching with invalid project ID returns 404."""
     response = await client.post(
-        "/v2/999999/search/",
+        "/v2/projects/999999/search/",
         json={"search_text": "test"}
     )
 
@@ -274,7 +274,7 @@ async def test_reindex_invalid_project_id(
     client: AsyncClient,
 ):
     """Test reindexing with invalid project ID returns 404."""
-    response = await client.post("/v2/999999/search/reindex")
+    response = await client.post("/v2/projects/999999/search/reindex")
 
     assert response.status_code == 404
 

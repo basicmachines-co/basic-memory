@@ -153,7 +153,7 @@ async def test_get_resource_invalid_project_id(
     client: AsyncClient,
 ):
     """Test getting resource with invalid project ID returns 404."""
-    response = await client.get("/v2/999999/resource/test")
+    response = await client.get("/v2/projects/999999/resource/test")
 
     assert response.status_code == 404
 
@@ -261,7 +261,7 @@ async def test_write_resource_invalid_project_id(
 ):
     """Test writing resource with invalid project ID returns 404."""
     response = await client.put(
-        "/v2/999999/resource/test.md",
+        "/v2/projects/999999/resource/test.md",
         content="Test content",
         headers={"Content-Type": "text/plain"}
     )

@@ -589,6 +589,18 @@ async def get_directory_service(
 DirectoryServiceDep = Annotated[DirectoryService, Depends(get_directory_service)]
 
 
+async def get_directory_service_v2(
+    entity_repository: EntityRepositoryV2Dep,
+) -> DirectoryService:
+    """Create DirectoryService for v2 API (uses integer project_id from path)."""
+    return DirectoryService(
+        entity_repository=entity_repository,
+    )
+
+
+DirectoryServiceV2Dep = Annotated[DirectoryService, Depends(get_directory_service_v2)]
+
+
 # Import
 
 

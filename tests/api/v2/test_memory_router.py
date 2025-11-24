@@ -143,7 +143,7 @@ async def test_get_recent_context_invalid_project_id(
     client: AsyncClient,
 ):
     """Test getting recent context with invalid project ID returns 404."""
-    response = await client.get("/v2/999999/memory/recent")
+    response = await client.get("/v2/projects/999999/memory/recent")
 
     assert response.status_code == 404
 

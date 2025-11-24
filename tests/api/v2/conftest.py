@@ -12,7 +12,7 @@ def v2_project_url(test_project: Project) -> str:
     This helps tests generate the correct URL for v2 project-scoped routes
     which use integer project IDs instead of permalinks.
     """
-    return f"/v2/{test_project.id}"
+    return f"/v2/projects/{test_project.id}"
 
 
 @pytest.fixture
