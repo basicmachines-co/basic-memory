@@ -27,6 +27,7 @@ from basic_memory.api.v2.routers import (
     search_router as v2_search,
     resource_router as v2_resource,
     directory_router as v2_directory,
+    prompt_router as v2_prompt,
 )
 from basic_memory.config import ConfigManager
 from basic_memory.services.initialization import initialize_file_sync, initialize_app
@@ -90,6 +91,7 @@ app.include_router(v2_memory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_search, prefix="/v2/projects/{project_id}")
 app.include_router(v2_resource, prefix="/v2/projects/{project_id}")
 app.include_router(v2_directory, prefix="/v2/projects/{project_id}")
+app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
 
 # Project resource router works across projects
