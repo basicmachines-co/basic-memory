@@ -40,10 +40,13 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             chats_imported = 0
 
             for chat in conversations:
+                # Get name, providing default for unnamed conversations
+                chat_name = chat.get("name") or f"Conversation {chat.get('uuid', 'untitled')}"
+
                 # Convert to entity
                 entity = self._format_chat_content(
                     base_path=folder_path,
-                    name=chat["name"],
+                    name=chat_name,
                     messages=chat["chat_messages"],
                     created_at=chat["created_at"],
                     modified_at=chat["updated_at"],
