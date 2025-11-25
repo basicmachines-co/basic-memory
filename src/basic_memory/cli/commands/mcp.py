@@ -67,8 +67,9 @@ if not config.cloud_mode_enabled:
                 loop.run_until_complete(initialize_file_sync(app_config))
             except Exception as e:
                 logger.error(f"File sync error: {e}", err=True)
-            finally:
-                loop.close()
+            # Note: Do NOT close the loop here! This is a daemon thread that should
+            # run until process exit. Closing the loop shuts down the ThreadPoolExecutor
+            # which breaks aiofiles operations in background sync tasks.
 
         logger.info(f"Sync changes enabled: {app_config.sync_changes}")
         if app_config.sync_changes:
