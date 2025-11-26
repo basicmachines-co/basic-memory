@@ -124,6 +124,7 @@ class EntitySummary(BaseModel):
     """Simplified entity representation."""
 
     type: Literal["entity"] = "entity"
+    entity_id: int  # Database ID for v2 API consistency
     permalink: Optional[str]
     title: str
     content: Optional[str] = None
@@ -141,12 +142,16 @@ class RelationSummary(BaseModel):
     """Simplified relation representation."""
 
     type: Literal["relation"] = "relation"
+    relation_id: int  # Database ID for v2 API consistency
+    entity_id: Optional[int] = None  # ID of the entity this relation belongs to
     title: str
     file_path: str
     permalink: str
     relation_type: str
     from_entity: Optional[str] = None
+    from_entity_id: Optional[int] = None  # ID of source entity
     to_entity: Optional[str] = None
+    to_entity_id: Optional[int] = None  # ID of target entity
     created_at: Annotated[
         datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
     ]
@@ -160,6 +165,8 @@ class ObservationSummary(BaseModel):
     """Simplified observation representation."""
 
     type: Literal["observation"] = "observation"
+    observation_id: int  # Database ID for v2 API consistency
+    entity_id: Optional[int] = None  # ID of the entity this observation belongs to
     title: str
     file_path: str
     permalink: str

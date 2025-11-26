@@ -18,6 +18,7 @@ def template_loader():
 def entity_summary():
     """Create a sample EntitySummary for testing."""
     return EntitySummary(
+        entity_id=1,
         title="Test Entity",
         permalink="test/entity",
         type=SearchItemType.ENTITY,
@@ -34,6 +35,8 @@ def context_with_results(entity_summary):
 
     # Create an observation for the entity
     observation = ObservationSummary(
+        observation_id=1,
+        entity_id=1,
         title="Test Observation",
         permalink="test/entity/observations/1",
         category="test",

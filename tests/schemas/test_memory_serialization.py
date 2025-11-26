@@ -22,6 +22,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 10, 30, 0)
 
         entity = EntitySummary(
+            entity_id=1,
             permalink="test/entity",
             title="Test Entity",
             file_path="test/entity.md",
@@ -41,6 +42,8 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 15, 45, 30)
 
         relation = RelationSummary(
+            relation_id=1,
+            entity_id=1,
             title="Test Relation",
             file_path="test/relation.md",
             permalink="test/relation",
@@ -63,6 +66,8 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 20, 15, 45)
 
         observation = ObservationSummary(
+            observation_id=1,
+            entity_id=1,
             title="Test Observation",
             file_path="test/observation.md",
             permalink="test/observation",
@@ -100,6 +105,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 9, 30, 15)
 
         entity = EntitySummary(
+            entity_id=1,
             permalink="test/entity",
             title="Test Entity",
             file_path="test/entity.md",
@@ -107,6 +113,8 @@ class TestDateTimeSerialization:
         )
 
         observation = ObservationSummary(
+            observation_id=1,
+            entity_id=1,
             title="Test Observation",
             file_path="test/observation.md",
             permalink="test/observation",
@@ -131,6 +139,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 14, 20, 10)
 
         entity = EntitySummary(
+            entity_id=1,
             permalink="test/entity",
             title="Test Entity",
             file_path="test/entity.md",
@@ -159,6 +168,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 10, 30, 0, 123456)
 
         entity = EntitySummary(
+            entity_id=1,
             permalink="test/entity",
             title="Test Entity",
             file_path="test/entity.md",
@@ -176,6 +186,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 10, 30, 0)
 
         entity = EntitySummary(
+            entity_id=1,
             permalink="test/entity",
             title="Test Entity",
             file_path="test/entity.md",
@@ -212,10 +223,16 @@ class TestDateTimeSerialization:
 
             if model_class == EntitySummary:
                 instance = model_class(
-                    permalink="test", title="Test", file_path="test.md", created_at=test_datetime
+                    entity_id=1,
+                    permalink="test",
+                    title="Test",
+                    file_path="test.md",
+                    created_at=test_datetime,
                 )
             elif model_class == RelationSummary:
                 instance = model_class(
+                    relation_id=1,
+                    entity_id=1,
                     title="Test",
                     file_path="test.md",
                     permalink="test",
@@ -224,6 +241,8 @@ class TestDateTimeSerialization:
                 )
             elif model_class == ObservationSummary:
                 instance = model_class(
+                    observation_id=1,
+                    entity_id=1,
                     title="Test",
                     file_path="test.md",
                     permalink="test",

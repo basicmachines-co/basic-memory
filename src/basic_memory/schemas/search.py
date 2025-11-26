@@ -97,6 +97,11 @@ class SearchResult(BaseModel):
 
     metadata: Optional[dict] = None
 
+    # IDs for v2 API consistency
+    entity_id: Optional[int] = None  # Entity ID (always present for entities)
+    observation_id: Optional[int] = None  # Observation ID (for observation results)
+    relation_id: Optional[int] = None  # Relation ID (for relation results)
+
     # Type-specific fields
     category: Optional[str] = None  # For observations
     from_entity: Optional[Permalink] = None  # For relations

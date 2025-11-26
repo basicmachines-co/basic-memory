@@ -29,6 +29,7 @@ async def to_graph_context(
         match item.type:
             case SearchItemType.ENTITY:
                 return EntitySummary(
+                    entity_id=item.id,
                     title=item.title,  # pyright: ignore
                     permalink=item.permalink,
                     content=item.content,
@@ -37,6 +38,8 @@ async def to_graph_context(
                 )
             case SearchItemType.OBSERVATION:
                 return ObservationSummary(
+                    observation_id=item.id,
+                    entity_id=item.entity_id,  # pyright: ignore
                     title=item.title,  # pyright: ignore
                     file_path=item.file_path,
                     category=item.category,  # pyright: ignore
@@ -48,12 +51,16 @@ async def to_graph_context(
                 from_entity = await entity_repository.find_by_id(item.from_id)  # pyright: ignore
                 to_entity = await entity_repository.find_by_id(item.to_id) if item.to_id else None
                 return RelationSummary(
+                    relation_id=item.id,
+                    entity_id=item.entity_id,  # pyright: ignore
                     title=item.title,  # pyright: ignore
                     file_path=item.file_path,
                     permalink=item.permalink,  # pyright: ignore
                     relation_type=item.relation_type,  # pyright: ignore
                     from_entity=from_entity.title if from_entity else None,
+                    from_entity_id=item.from_id,  # pyright: ignore
                     to_entity=to_entity.title if to_entity else None,
+                    to_entity_id=item.to_id,
                     created_at=item.created_at,
                 )
             case _:  # pragma: no cover
@@ -111,6 +118,21 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
     search_results = []
     for r in results:
         entities = await entity_service.get_entities_by_id([r.entity_id, r.from_id, r.to_id])  # pyright: ignore
+
+        # Determine which IDs to set based on type
+        entity_id = None
+        observation_id = None
+        relation_id = None
+
+        if r.type == SearchItemType.ENTITY:
+            entity_id = r.id
+        elif r.type == SearchItemType.OBSERVATION:
+            observation_id = r.id
+            entity_id = r.entity_id  # Parent entity
+        elif r.type == SearchItemType.RELATION:
+            relation_id = r.id
+            entity_id = r.entity_id  # Parent entity
+
         search_results.append(
             SearchResult(
                 title=r.title,  # pyright: ignore
@@ -121,6 +143,9 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                 content=r.content,
                 file_path=r.file_path,
                 metadata=r.metadata,
+                entity_id=entity_id,
+                observation_id=observation_id,
+                relation_id=relation_id,
                 category=r.category,
                 from_entity=entities[0].permalink if entities else None,
                 to_entity=entities[1].permalink if len(entities) > 1 else None,
