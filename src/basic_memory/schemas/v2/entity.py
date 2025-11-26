@@ -40,6 +40,21 @@ class EntityResolveResponse(BaseModel):
     )
 
 
+class MoveEntityRequestV2(BaseModel):
+    """V2 request schema for moving an entity to a new file location.
+
+    In V2 API, the entity ID is provided in the URL path, so this request
+    only needs the destination path.
+    """
+
+    destination_path: str = Field(
+        ...,
+        description="New file path for the entity (relative to project root)",
+        min_length=1,
+        max_length=500,
+    )
+
+
 class EntityResponseV2(BaseModel):
     """V2 entity response with ID as the primary field.
 

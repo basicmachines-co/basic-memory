@@ -25,11 +25,12 @@ from basic_memory.deps import (
 )
 from basic_memory.schemas import EntityResponse, DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
-from basic_memory.schemas.request import EditEntityRequest, MoveEntityRequest
+from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.schemas.v2 import (
     EntityResolveRequest,
     EntityResolveResponse,
     EntityResponseV2,
+    MoveEntityRequestV2,
 )
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
@@ -351,44 +352,53 @@ async def delete_entity_by_id(
 ## Move endpoint
 
 
-@router.post("/move", response_model=EntityResponseV2)
+@router.put("/entities/{entity_id}/move", response_model=EntityResponseV2)
 async def move_entity(
     project_id: ProjectIdPathDep,
-    data: MoveEntityRequest,
+    entity_id: int,
+    data: MoveEntityRequestV2,
     background_tasks: BackgroundTasks,
     entity_service: EntityServiceV2Dep,
+    entity_repository: EntityRepositoryV2Dep,
     project_config: ProjectConfigV2Dep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2Dep,
 ) -> EntityResponseV2:
     """Move an entity to a new file location.
 
-    Note: Identifier in request can be an entity ID or legacy identifier.
+    V2 API uses entity ID in the URL path for stable references.
     The entity ID will remain stable after the move.
 
     Args:
-        data: Move request with identifier and destination path
+        project_id: Project ID from URL path
+        entity_id: Entity ID from URL path (primary identifier)
+        data: Move request with destination path only
 
     Returns:
         Updated entity with new file path
     """
     logger.info(
-        f"API v2 request: move_entity identifier='{data.identifier}', destination='{data.destination_path}'"
+        f"API v2 request: move_entity entity_id={entity_id}, destination='{data.destination_path}'"
     )
 
     try:
-        # Move the entity
+        # First, get the entity by ID to verify it exists
+        entity = await entity_repository.find_by_id(entity_id)
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Entity not found: {entity_id}")
+
+        # Move the entity using its current file path as identifier
         moved_entity = await entity_service.move_entity(
-            identifier=data.identifier,
+            identifier=entity.file_path,  # Use file path for resolution
             destination_path=data.destination_path,
             project_config=project_config,
             app_config=app_config,
         )
 
         # Reindex at new location
-        entity = await entity_service.link_resolver.resolve_link(data.destination_path)
-        if entity:
-            await search_service.index_entity(entity, background_tasks=background_tasks)
+        reindexed_entity = await entity_service.link_resolver.resolve_link(data.destination_path)
+        if reindexed_entity:
+            await search_service.index_entity(reindexed_entity, background_tasks=background_tasks)
 
         result = EntityResponseV2.model_validate(moved_entity)
 
@@ -398,6 +408,8 @@ async def move_entity(
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error moving entity: {e}")
         raise HTTPException(status_code=400, detail=str(e))

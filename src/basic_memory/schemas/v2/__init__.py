@@ -4,6 +4,7 @@ from basic_memory.schemas.v2.entity import (
     EntityResolveRequest,
     EntityResolveResponse,
     EntityResponseV2,
+    MoveEntityRequestV2,
 )
 from basic_memory.schemas.v2.resource import (
     CreateResourceRequest,
@@ -15,6 +16,7 @@ __all__ = [
     "EntityResolveRequest",
     "EntityResolveResponse",
     "EntityResponseV2",
+    "MoveEntityRequestV2",
     "CreateResourceRequest",
     "UpdateResourceRequest",
     "ResourceResponse",

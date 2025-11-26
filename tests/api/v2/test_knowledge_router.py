@@ -347,12 +347,13 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
     assert created_entity.id is not None
     original_id = created_entity.id
 
-    # Move it to a new folder (use permalink for identifier in v2)
+    # Move it to a new folder (V2 uses entity ID in path)
     move_data = {
-        "identifier": created_entity.permalink,  # Use permalink as identifier
         "destination_path": "moved/MovedEntity.md",
     }
-    response = await client.post(f"{v2_project_url}/knowledge/move", json=move_data)
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.id}/move", json=move_data
+    )
 
     assert response.status_code == 200
     moved_entity = EntityResponseV2.model_validate(response.json())
