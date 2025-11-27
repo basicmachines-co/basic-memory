@@ -1,14 +1,25 @@
 """Alembic environment configuration."""
 
+import asyncio
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+# Allow nested event loops (needed for pytest-asyncio and other async contexts)
+# Note: nest_asyncio doesn't work with uvloop, so we handle that case separately
+try:
+    import nest_asyncio
+
+    nest_asyncio.apply()
+except (ImportError, ValueError):
+    # nest_asyncio not available or can't patch this loop type (e.g., uvloop)
+    pass
+
+from sqlalchemy import engine_from_config, pool
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from alembic import context
 
-from basic_memory.config import ConfigManager, DatabaseBackend
+from basic_memory.config import ConfigManager
 
 # set config.env to "test" for pytest to prevent logging to file in utils.setup_logging()
 os.environ["BASIC_MEMORY_ENV"] = "test"
@@ -35,12 +46,6 @@ if not current_url or current_url == "driver://user:pass@localhost/dbname":
     sqlalchemy_url = DatabaseType.get_db_url(
         app_config.database_path, DatabaseType.FILESYSTEM, app_config
     )
-
-    # For Postgres, Alembic needs synchronous driver (psycopg2), not async (asyncpg)
-    if app_config.database_backend == DatabaseBackend.POSTGRES:
-        # Convert asyncpg URL to psycopg2 URL for Alembic
-        sqlalchemy_url = sqlalchemy_url.replace("postgresql+asyncpg://", "postgresql://")
-
     config.set_main_option("sqlalchemy.url", sqlalchemy_url)
 
 # Interpret the config file for Python logging.
@@ -85,28 +90,89 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def do_run_migrations(connection):
+    """Execute migrations with the given connection."""
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+        render_as_batch=True,
+        compare_type=True,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations(connectable):
+    """Run migrations asynchronously with AsyncEngine."""
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+    await connectable.dispose()
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
+    Supports both sync engines (SQLite) and async engines (PostgreSQL with asyncpg).
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Check if a connection/engine was provided (e.g., from run_migrations)
+    connectable = context.config.attributes.get("connection", None)
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            include_object=include_object,
-            render_as_batch=True,
-        )
+    if connectable is None:
+        # No connection provided, create engine from config
+        url = context.config.get_main_option("sqlalchemy.url")
 
-        with context.begin_transaction():
-            context.run_migrations()
+        # Check if it's an async URL (sqlite+aiosqlite or postgresql+asyncpg)
+        if url and ("+asyncpg" in url or "+aiosqlite" in url):
+            # Create async engine for asyncpg or aiosqlite
+            connectable = create_async_engine(
+                url,
+                poolclass=pool.NullPool,
+                future=True,
+            )
+        else:
+            # Create sync engine for regular sqlite or postgresql
+            connectable = engine_from_config(
+                context.config.get_section(context.config.config_ini_section, {}),
+                prefix="sqlalchemy.",
+                poolclass=pool.NullPool,
+            )
+
+    # Handle async engines (PostgreSQL with asyncpg)
+    if isinstance(connectable, AsyncEngine):
+        # Try to run async migrations
+        # nest_asyncio allows asyncio.run() from within event loops, but doesn't work with uvloop
+        try:
+            asyncio.run(run_async_migrations(connectable))
+        except RuntimeError as e:
+            if "cannot be called from a running event loop" in str(e):
+                # We're in a running event loop (likely uvloop) - need to use a different approach
+                # Create a new thread to run the async migrations
+                import concurrent.futures
+
+                def run_in_thread():
+                    """Run async migrations in a new event loop in a separate thread."""
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        new_loop.run_until_complete(run_async_migrations(connectable))
+                    finally:
+                        new_loop.close()
+
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_in_thread)
+                    future.result()  # Wait for completion and re-raise any exceptions
+            else:
+                raise
+    else:
+        # Handle sync engines (SQLite) or sync connections
+        if hasattr(connectable, "connect"):
+            # It's an engine, get a connection
+            with connectable.connect() as connection:
+                do_run_migrations(connection)
+        else:
+            # It's already a connection
+            do_run_migrations(connectable)
 
 
 if context.is_offline_mode():

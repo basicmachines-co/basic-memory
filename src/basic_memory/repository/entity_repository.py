@@ -1,7 +1,7 @@
 """Repository for managing entities in the knowledge graph."""
 
 from pathlib import Path
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Sequence, Union, Any
 
 from loguru import logger
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.engine import Row
 
 from basic_memory import db
 from basic_memory.models.knowledge import Entity, Observation, Relation
@@ -75,6 +76,34 @@ class EntityRepository(Repository[Entity]):
         )
         return await self.find_one(query)
 
+    async def get_by_file_paths(
+        self, session: AsyncSession, file_paths: Sequence[Union[Path, str]]
+    ) -> List[Row[Any]]:
+        """Get file paths and checksums for multiple entities (optimized for change detection).
+
+        Only queries file_path and checksum columns, skips loading full entities and relationships.
+        This is much faster than loading complete Entity objects when you only need checksums.
+
+        Args:
+            session: Database session to use for the query
+            file_paths: List of file paths to query
+
+        Returns:
+            List of (file_path, checksum) tuples for matching entities
+        """
+        if not file_paths:
+            return []
+
+        # Convert all paths to POSIX strings for consistent comparison
+        posix_paths = [Path(fp).as_posix() for fp in file_paths]
+
+        # Query ONLY file_path and checksum columns (not full Entity objects)
+        query = select(Entity.file_path, Entity.checksum).where(Entity.file_path.in_(posix_paths))
+        query = self._add_project_filter(query)
+
+        result = await session.execute(query)
+        return list(result.all())
+
     async def find_by_checksum(self, checksum: str) -> Sequence[Entity]:
         """Find entities with the given checksum.
 
@@ -88,6 +117,34 @@ class EntityRepository(Repository[Entity]):
             Sequence of entities with matching checksum (may be empty)
         """
         query = self.select().where(Entity.checksum == checksum)
+        # Don't load relationships for move detection - we only need file_path and checksum
+        result = await self.execute_query(query, use_query_options=False)
+        return list(result.scalars().all())
+
+    async def find_by_checksums(self, checksums: Sequence[str]) -> Sequence[Entity]:
+        """Find entities with any of the given checksums (batch query for move detection).
+
+        This is a batch-optimized version of find_by_checksum() that queries multiple checksums
+        in a single database query. Used for efficient move detection in cloud indexing.
+
+        Performance: For 1000 new files, this makes 1 query vs 1000 individual queries (~100x faster).
+
+        Example:
+            When processing new files, we check if any are actually moved files by finding
+            entities with matching checksums at different paths.
+
+        Args:
+            checksums: List of file content checksums to search for
+
+        Returns:
+            Sequence of entities with matching checksums (may be empty).
+            Multiple entities may have the same checksum if files were copied.
+        """
+        if not checksums:
+            return []
+
+        # Query: SELECT * FROM entities WHERE checksum IN (checksum1, checksum2, ...)
+        query = self.select().where(Entity.checksum.in_(checksums))
         # Don't load relationships for move detection - we only need file_path and checksum
         result = await self.execute_query(query, use_query_options=False)
         return list(result.scalars().all())

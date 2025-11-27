@@ -33,6 +33,7 @@ class DatabaseType(Enum):
 
     MEMORY = auto()
     FILESYSTEM = auto()
+    POSTGRES = auto()
 
     @classmethod
     def get_db_url(
@@ -42,7 +43,7 @@ class DatabaseType(Enum):
 
         Args:
             db_path: Path to SQLite database file (ignored for Postgres)
-            db_type: Type of database (MEMORY or FILESYSTEM)
+            db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
             config: Optional config to check for database backend and URL
 
         Returns:
@@ -52,14 +53,21 @@ class DatabaseType(Enum):
         if config is None:
             config = ConfigManager().config
 
-        # Check if Postgres backend is configured
+        # Handle explicit Postgres type
+        if db_type == cls.POSTGRES:
+            if not config.database_url:
+                raise ValueError("DATABASE_URL must be set when using Postgres backend")
+            logger.info(f"Using Postgres database: {config.database_url}")
+            return config.database_url
+
+        # Check if Postgres backend is configured (for backward compatibility)
         if config.database_backend == DatabaseBackend.POSTGRES:
             if not config.database_url:
                 raise ValueError("DATABASE_URL must be set when using Postgres backend")
             logger.info(f"Using Postgres database: {config.database_url}")
             return config.database_url
 
-        # Default to SQLite
+        # SQLite databases
         if db_type == cls.MEMORY:
             logger.info("Using in-memory SQLite database")
             return "sqlite+aiosqlite://"
@@ -208,7 +216,7 @@ def _create_engine_and_session(
 
     Args:
         db_path: Path to database file (used for SQLite, ignored for Postgres)
-        db_type: Type of database (MEMORY or FILESYSTEM)
+        db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
 
     Returns:
         Tuple of (engine, session_maker)
@@ -218,7 +226,8 @@ def _create_engine_and_session(
     logger.debug(f"Creating engine for db_url: {db_url}")
 
     # Delegate to backend-specific engine creation
-    if config.database_backend == DatabaseBackend.POSTGRES:
+    # Check explicit POSTGRES type first, then config setting
+    if db_type == DatabaseType.POSTGRES or config.database_backend == DatabaseBackend.POSTGRES:
         engine = _create_postgres_engine(db_url)
     else:
         engine = _create_sqlite_engine(db_url, db_type)
@@ -324,16 +333,8 @@ async def run_migrations(
         config.set_main_option("revision_environment", "false")
 
         # Get the correct database URL based on backend configuration
+        # No URL conversion needed - env.py now handles both async and sync engines
         db_url = DatabaseType.get_db_url(app_config.database_path, database_type, app_config)
-
-        # For Postgres, Alembic needs synchronous driver (psycopg2), not async (asyncpg)
-        if app_config.database_backend == DatabaseBackend.POSTGRES:
-            # Convert asyncpg URL to psycopg2 URL for Alembic
-            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-        elif app_config.database_backend == DatabaseBackend.SQLITE:
-            # Convert aiosqlite URL to pysqlite URL for Alembic
-            db_url = db_url.replace("sqlite+aiosqlite://", "sqlite:///")
-
         config.set_main_option("sqlalchemy.url", db_url)
 
         command.upgrade(config, "head")
@@ -349,7 +350,10 @@ async def run_migrations(
         # For SQLite: Create FTS5 virtual table
         # For Postgres: No-op (tsvector column added by migrations)
         # The project_id is not used for init_search_index, so we pass a dummy value
-        if app_config.database_backend == DatabaseBackend.POSTGRES:
+        if (
+            database_type == DatabaseType.POSTGRES
+            or app_config.database_backend == DatabaseBackend.POSTGRES
+        ):
             await PostgresSearchRepository(session_maker, 1).init_search_index()
         else:
             await SQLiteSearchRepository(session_maker, 1).init_search_index()

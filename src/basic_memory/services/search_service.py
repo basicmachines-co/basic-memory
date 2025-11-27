@@ -156,22 +156,24 @@ class SearchService:
         self,
         entity: Entity,
         background_tasks: Optional[BackgroundTasks] = None,
+        content: str | None = None,
     ) -> None:
         if background_tasks:
-            background_tasks.add_task(self.index_entity_data, entity)
+            background_tasks.add_task(self.index_entity_data, entity, content)
         else:
-            await self.index_entity_data(entity)
+            await self.index_entity_data(entity, content)
 
     async def index_entity_data(
         self,
         entity: Entity,
+        content: str | None = None,
     ) -> None:
         # delete all search index data associated with entity
         await self.repository.delete_by_entity_id(entity_id=entity.id)
 
         # reindex
         await self.index_entity_markdown(
-            entity
+            entity, content
         ) if entity.is_markdown else await self.index_entity_file(entity)
 
     async def index_entity_file(
@@ -199,8 +201,13 @@ class SearchService:
     async def index_entity_markdown(
         self,
         entity: Entity,
+        content: str | None = None,
     ) -> None:
         """Index an entity and all its observations and relations.
+
+        Args:
+            entity: The entity to index
+            content: Optional pre-loaded content (avoids file read). If None, will read from file.
 
         Indexing structure:
         1. Entities
@@ -230,7 +237,9 @@ class SearchService:
         title_variants = self._generate_variants(entity.title)
         content_stems.extend(title_variants)
 
-        content = await self.file_service.read_entity_content(entity)
+        # Use provided content or read from file
+        if content is None:
+            content = await self.file_service.read_entity_content(entity)
         if content:
             content_stems.append(content)
             content_snippet = f"{content[:250]}"

@@ -15,7 +15,6 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "greenlet>=3.1.1",
     "pydantic[email,timezone]>=2.10.3",
-    "icecream>=2.1.3",
     "mcp>=1.2.0",
     "pydantic-settings>=2.6.1",
     "loguru>=0.7.3",
@@ -37,6 +36,7 @@ dependencies = [
     "aiofiles>=24.1.0", # Async file I/O
     "logfire>=0.73.0", # Optional observability (disabled by default via config)
     "asyncpg>=0.30.0",
+    "nest-asyncio>=1.6.0", # For Alembic migrations with Postgres
 ]
 
 
@@ -81,8 +81,7 @@ dev = [
     "pytest-xdist>=3.0.0",
     "ruff>=0.1.6",
     "freezegun>=1.5.5",
-    "nest-asyncio>=1.6.0",
-    "psycopg2-binary>=2.9.0",  # For Alembic migrations with Postgres
+
 ]
 
 [tool.hatch.version]
