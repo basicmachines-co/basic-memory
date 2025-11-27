@@ -4,10 +4,12 @@ import pytest
 from httpx import AsyncClient
 from pathlib import Path
 
-from basic_memory.models import Entity, Project
+from basic_memory.models import Project
 
 
-async def create_test_entity(test_project, entity_data, entity_repository, search_service, file_service):
+async def create_test_entity(
+    test_project, entity_data, entity_repository, search_service, file_service
+):
     """Helper to create an entity with file and index it."""
     # Create file
     test_content = f"# {entity_data['title']}\n\nTest content"
@@ -41,7 +43,9 @@ async def test_get_recent_context(
         "file_path": "recent_test.md",
         "checksum": "abc123",
     }
-    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Get recent context
     response = await client.get(f"{v2_project_url}/memory/recent")
@@ -75,12 +79,13 @@ async def test_get_recent_context_with_pagination(
             "file_path": f"entity_{i}.md",
             "checksum": f"checksum{i}",
         }
-        await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+        await create_test_entity(
+            test_project, entity_data, entity_repository, search_service, file_service
+        )
 
     # Get recent context with pagination
     response = await client.get(
-        f"{v2_project_url}/memory/recent",
-        params={"page": 1, "page_size": 3}
+        f"{v2_project_url}/memory/recent", params={"page": 1, "page_size": 3}
     )
 
     assert response.status_code == 200
@@ -108,13 +113,12 @@ async def test_get_recent_context_with_type_filter(
         "file_path": "filtered.md",
         "checksum": "xyz789",
     }
-    entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Get recent context filtered by type
-    response = await client.get(
-        f"{v2_project_url}/memory/recent",
-        params={"type": ["entity"]}
-    )
+    response = await client.get(f"{v2_project_url}/memory/recent", params={"type": ["entity"]})
 
     assert response.status_code == 200
     data = response.json()
@@ -128,10 +132,7 @@ async def test_get_recent_context_with_timeframe(
     v2_project_url: str,
 ):
     """Test recent context with custom timeframe."""
-    response = await client.get(
-        f"{v2_project_url}/memory/recent",
-        params={"timeframe": "1d"}
-    )
+    response = await client.get(f"{v2_project_url}/memory/recent", params={"timeframe": "1d"})
 
     assert response.status_code == 200
     data = response.json()
@@ -167,7 +168,9 @@ async def test_get_memory_context_by_permalink(
         "checksum": "def456",
         "permalink": "context-test",
     }
-    created_entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Get context for this entity
     response = await client.get(f"{v2_project_url}/memory/context-test")
@@ -195,7 +198,9 @@ async def test_get_memory_context_by_id(
         "file_path": "id_context_test.md",
         "checksum": "ghi789",
     }
-    created_entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    created_entity = await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Get context using ID format (memory://id/123 or memory://123)
     response = await client.get(f"{v2_project_url}/memory/id/{created_entity.id}")
@@ -224,13 +229,12 @@ async def test_get_memory_context_with_depth(
         "checksum": "jkl012",
         "permalink": "depth-test",
     }
-    entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Get context with depth
-    response = await client.get(
-        f"{v2_project_url}/memory/depth-test",
-        params={"depth": 2}
-    )
+    response = await client.get(f"{v2_project_url}/memory/depth-test", params={"depth": 2})
 
     assert response.status_code == 200
     data = response.json()
@@ -270,12 +274,13 @@ async def test_get_memory_context_with_timeframe(
         "checksum": "mno345",
         "permalink": "timeframe-test",
     }
-    entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Get context with timeframe
     response = await client.get(
-        f"{v2_project_url}/memory/timeframe-test",
-        params={"timeframe": "7d"}
+        f"{v2_project_url}/memory/timeframe-test", params={"timeframe": "7d"}
     )
 
     assert response.status_code == 200

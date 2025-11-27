@@ -79,7 +79,9 @@ class EntityResponseV2(BaseModel):
     entity_metadata: Optional[Dict] = Field(None, description="Entity metadata")
 
     # Relationships
-    observations: List[ObservationResponse] = Field(default_factory=list, description="Entity observations")
+    observations: List[ObservationResponse] = Field(
+        default_factory=list, description="Entity observations"
+    )
     relations: List[RelationResponse] = Field(default_factory=list, description="Entity relations")
 
     # Timestamps

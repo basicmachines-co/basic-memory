@@ -4,10 +4,12 @@ import pytest
 from httpx import AsyncClient
 from pathlib import Path
 
-from basic_memory.models import Entity, Project
+from basic_memory.models import Project
 
 
-async def create_test_entity(test_project, entity_data, entity_repository, search_service, file_service):
+async def create_test_entity(
+    test_project, entity_data, entity_repository, search_service, file_service
+):
     """Helper to create an entity with file and index it."""
     # Create file
     test_content = f"# {entity_data['title']}\n\nTest content"
@@ -42,13 +44,12 @@ async def test_search_entities(
         "file_path": "searchable.md",
         "checksum": "search123",
     }
-    created_entity = await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Search for the entity
-    response = await client.post(
-        f"{v2_project_url}/search/",
-        json={"search_text": "Searchable"}
-    )
+    response = await client.post(f"{v2_project_url}/search/", json={"search_text": "Searchable"})
 
     assert response.status_code == 200
     data = response.json()
@@ -78,13 +79,15 @@ async def test_search_with_pagination(
             "file_path": f"search_{i}.md",
             "checksum": f"searchsum{i}",
         }
-        await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+        await create_test_entity(
+            test_project, entity_data, entity_repository, search_service, file_service
+        )
 
     # Search with pagination
     response = await client.post(
         f"{v2_project_url}/search/",
         json={"search_text": "Search Entity"},
-        params={"page": 1, "page_size": 3}
+        params={"page": 1, "page_size": 3},
     )
 
     assert response.status_code == 200
@@ -112,12 +115,13 @@ async def test_search_by_permalink(
         "checksum": "perm123",
         "permalink": "permalink-search",
     }
-    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Search by permalink
     response = await client.post(
-        f"{v2_project_url}/search/",
-        json={"permalink": "permalink-search"}
+        f"{v2_project_url}/search/", json={"permalink": "permalink-search"}
     )
 
     assert response.status_code == 200
@@ -143,13 +147,12 @@ async def test_search_by_title(
         "file_path": "unique_title.md",
         "checksum": "title123",
     }
-    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Search by title
-    response = await client.post(
-        f"{v2_project_url}/search/",
-        json={"title": "Unique Title"}
-    )
+    response = await client.post(f"{v2_project_url}/search/", json={"title": "Unique Title"})
 
     assert response.status_code == 200
     data = response.json()
@@ -175,12 +178,13 @@ async def test_search_with_type_filter(
             "file_path": f"type_{entity_type}.md",
             "checksum": f"type{entity_type}",
         }
-        await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+        await create_test_entity(
+            test_project, entity_data, entity_repository, search_service, file_service
+        )
 
     # Search with type filter
     response = await client.post(
-        f"{v2_project_url}/search/",
-        json={"search_text": "Type", "types": ["note"]}
+        f"{v2_project_url}/search/", json={"search_text": "Type", "types": ["note"]}
     )
 
     assert response.status_code == 200
@@ -206,15 +210,14 @@ async def test_search_with_date_filter(
         "file_path": "date_filtered.md",
         "checksum": "date123",
     }
-    await create_test_entity(test_project, entity_data, entity_repository, search_service, file_service)
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
 
     # Search with date filter
     response = await client.post(
         f"{v2_project_url}/search/",
-        json={
-            "search_text": "Date Filtered",
-            "after_date": "2024-01-01T00:00:00Z"
-        }
+        json={"search_text": "Date Filtered", "after_date": "2024-01-01T00:00:00Z"},
     )
 
     assert response.status_code == 200
@@ -229,10 +232,7 @@ async def test_search_empty_query(
     v2_project_url: str,
 ):
     """Test search with empty query."""
-    response = await client.post(
-        f"{v2_project_url}/search/",
-        json={}
-    )
+    response = await client.post(f"{v2_project_url}/search/", json={})
 
     # Empty query should still be valid (returns all)
     assert response.status_code in [200, 422]
@@ -243,10 +243,7 @@ async def test_search_invalid_project_id(
     client: AsyncClient,
 ):
     """Test searching with invalid project ID returns 404."""
-    response = await client.post(
-        "/v2/projects/999999/search/",
-        json={"search_text": "test"}
-    )
+    response = await client.post("/v2/projects/999999/search/", json={"search_text": "test"})
 
     assert response.status_code == 404
 
@@ -286,10 +283,7 @@ async def test_v2_search_endpoints_use_project_id_not_name(
 ):
     """Test that v2 search endpoints reject string project names."""
     # Try to use project name instead of ID - should fail
-    response = await client.post(
-        f"/v2/{test_project.name}/search/",
-        json={"search_text": "test"}
-    )
+    response = await client.post(f"/v2/{test_project.name}/search/", json={"search_text": "test"})
 
     # FastAPI path validation should reject non-integer project_id
     assert response.status_code in [404, 422]

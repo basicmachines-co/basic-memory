@@ -34,7 +34,9 @@ async def test_continue_conversation_endpoint(
     }
 
     # Call the endpoint
-    response = await client.post(f"{v2_project_url}/prompt/continue-conversation", json=request_data)
+    response = await client.post(
+        f"{v2_project_url}/prompt/continue-conversation", json=request_data
+    )
 
     # Verify response
     assert response.status_code == 200
@@ -68,7 +70,9 @@ async def test_continue_conversation_without_topic(
     """Test v2 continue_conversation without topic - should use recent activity."""
     request_data = {"timeframe": "1d", "depth": 1, "related_items_limit": 2}
 
-    response = await client.post(f"{v2_project_url}/prompt/continue-conversation", json=request_data)
+    response = await client.post(
+        f"{v2_project_url}/prompt/continue-conversation", json=request_data
+    )
 
     assert response.status_code == 200
     result = response.json()

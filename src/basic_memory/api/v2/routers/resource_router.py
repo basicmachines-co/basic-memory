@@ -9,10 +9,9 @@ Key differences from v1:
 - More RESTful: POST for create, PUT for update, GET for read
 """
 
-import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from loguru import logger
 
@@ -71,9 +70,7 @@ async def get_resource_content(
     # Validate entity file path to prevent path traversal
     project_path = Path(config.home)
     if not validate_project_path(entity.file_path, project_path):
-        logger.error(
-            f"Invalid file path in entity {entity.id}: {entity.file_path}"
-        )
+        logger.error(f"Invalid file path in entity {entity.id}: {entity.file_path}")
         raise HTTPException(
             status_code=500,
             detail="Entity contains invalid file path",

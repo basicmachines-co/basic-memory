@@ -74,9 +74,7 @@ async def test_list_directory_with_glob(
     v2_project_url: str,
 ):
     """Test listing directory with file name glob filter via v2 endpoint."""
-    response = await client.get(
-        f"{v2_project_url}/directory/list?file_name_glob=*.md"
-    )
+    response = await client.get(f"{v2_project_url}/directory/list?file_name_glob=*.md")
 
     assert response.status_code == 200
     nodes = response.json()

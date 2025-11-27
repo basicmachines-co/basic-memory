@@ -23,7 +23,7 @@ from basic_memory.deps import (
     EntityRepositoryV2Dep,
     ProjectIdPathDep,
 )
-from basic_memory.schemas import EntityResponse, DeleteEntitiesResponse
+from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.schemas.v2 import (

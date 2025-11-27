@@ -11,9 +11,7 @@ from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 
 
 @pytest.mark.asyncio
-async def test_get_project_by_id(
-    client: AsyncClient, test_project: Project, v2_projects_url
-):
+async def test_get_project_by_id(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test getting a project by its numeric ID."""
     response = await client.get(f"{v2_projects_url}/{test_project.id}")
 
@@ -98,9 +96,7 @@ async def test_set_default_project_by_id(
     assert created_project is not None
 
     # Set the second project as default
-    response = await client.put(
-        f"{v2_projects_url}/{created_project.id}/default"
-    )
+    response = await client.put(f"{v2_projects_url}/{created_project.id}/default")
 
     assert response.status_code == 200
     status_response = ProjectStatusResponse.model_validate(response.json())
@@ -167,9 +163,7 @@ async def test_delete_project_with_delete_notes_param(
         assert created_project is not None
 
         # Delete with delete_notes=true
-        response = await client.delete(
-            f"{v2_projects_url}/{created_project.id}?delete_notes=true"
-        )
+        response = await client.delete(f"{v2_projects_url}/{created_project.id}?delete_notes=true")
 
         assert response.status_code == 200
 

@@ -83,7 +83,9 @@ async def update_project(
         # Get original project info for the response
         old_project = await project_service.get_project(name)
         if not old_project:
-            raise HTTPException(status_code=400, detail=f"Project '{name}' not found in configuration")
+            raise HTTPException(
+                status_code=400, detail=f"Project '{name}' not found in configuration"
+            )
 
         old_project_info = ProjectItem(
             id=old_project.id,

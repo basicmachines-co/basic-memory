@@ -79,7 +79,7 @@ async def test_get_resource_by_id(
 
     assert response.status_code == 200
     # Normalize line endings for cross-platform compatibility
-    assert test_content.replace('\n', '') in response.text.replace('\r\n', '').replace('\n', '')
+    assert test_content.replace("\n", "") in response.text.replace("\r\n", "").replace("\n", "")
 
 
 @pytest.mark.asyncio

@@ -145,7 +145,12 @@ async def create_test_upload_file(tmp_path, content):
 
 @pytest.mark.asyncio
 async def test_import_chatgpt(
-    project_config, client: AsyncClient, tmp_path, chatgpt_json_content, file_service, v2_project_url: str
+    project_config,
+    client: AsyncClient,
+    tmp_path,
+    chatgpt_json_content,
+    file_service,
+    v2_project_url: str,
 ):
     """Test importing ChatGPT conversations via v2 endpoint."""
     # Create a test file
@@ -199,7 +204,11 @@ async def test_import_chatgpt_invalid_file(client: AsyncClient, tmp_path, v2_pro
 
 @pytest.mark.asyncio
 async def test_import_claude_conversations(
-    client: AsyncClient, tmp_path, claude_conversations_json_content, file_service, v2_project_url: str
+    client: AsyncClient,
+    tmp_path,
+    claude_conversations_json_content,
+    file_service,
+    v2_project_url: str,
 ):
     """Test importing Claude conversations via v2 endpoint."""
     # Create a test file
@@ -233,7 +242,9 @@ async def test_import_claude_conversations(
 
 
 @pytest.mark.asyncio
-async def test_import_claude_conversations_invalid_file(client: AsyncClient, tmp_path, v2_project_url: str):
+async def test_import_claude_conversations_invalid_file(
+    client: AsyncClient, tmp_path, v2_project_url: str
+):
     """Test importing invalid Claude conversations file via v2 endpoint."""
     # Create invalid file
     file_path = tmp_path / "invalid.json"
@@ -296,7 +307,9 @@ async def test_import_claude_projects(
 
 
 @pytest.mark.asyncio
-async def test_import_claude_projects_invalid_file(client: AsyncClient, tmp_path, v2_project_url: str):
+async def test_import_claude_projects_invalid_file(
+    client: AsyncClient, tmp_path, v2_project_url: str
+):
     """Test importing invalid Claude projects file via v2 endpoint."""
     # Create invalid file
     file_path = tmp_path / "invalid.json"

@@ -129,7 +129,7 @@ class Entity(Base):
         return value
 
     def __repr__(self) -> str:
-        return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}'"
+        return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}', checksum='{self.checksum}')"
 
 
 class Observation(Base):

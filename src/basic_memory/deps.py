@@ -278,7 +278,9 @@ async def get_observation_repository_v2(
     return ObservationRepository(session_maker, project_id=project_id)
 
 
-ObservationRepositoryV2Dep = Annotated[ObservationRepository, Depends(get_observation_repository_v2)]
+ObservationRepositoryV2Dep = Annotated[
+    ObservationRepository, Depends(get_observation_repository_v2)
+]
 
 
 async def get_relation_repository(

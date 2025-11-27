@@ -101,9 +101,7 @@ async def update_project_by_id(
         # Get original project info for the response
         old_project = await project_repository.get_by_id(project_id)
         if not old_project:
-            raise HTTPException(
-                status_code=404, detail=f"Project with ID {project_id} not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Project with ID {project_id} not found")
 
         old_project_info = ProjectItem(
             id=old_project.id,
@@ -172,9 +170,7 @@ async def delete_project_by_id(
     try:
         old_project = await project_repository.get_by_id(project_id)
         if not old_project:
-            raise HTTPException(
-                status_code=404, detail=f"Project with ID {project_id} not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Project with ID {project_id} not found")
 
         # Check if trying to delete the default project
         if old_project.name == project_service.default_project:
@@ -242,9 +238,7 @@ async def set_default_project_by_id(
         # Get the new default project
         new_default_project = await project_repository.get_by_id(project_id)
         if not new_default_project:
-            raise HTTPException(
-                status_code=404, detail=f"Project with ID {project_id} not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Project with ID {project_id} not found")
 
         # Set as default using project name (service layer still uses names internally)
         await project_service.set_default_project(new_default_project.name)

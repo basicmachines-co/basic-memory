@@ -311,3 +311,68 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
 
         return results
+
+    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
+        """Index multiple items in a single batch operation using UPSERT.
+
+        Uses INSERT ... ON CONFLICT DO UPDATE to handle re-indexing of existing
+        entities (e.g., during forward reference resolution) without requiring
+        a separate delete operation. This eliminates race conditions between
+        delete and insert operations in separate transactions.
+
+        Args:
+            search_index_rows: List of SearchIndexRow objects to index
+        """
+
+        if not search_index_rows:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            # When using text() raw SQL, always serialize JSON to string
+            # Both SQLite (TEXT) and Postgres (JSONB) accept JSON strings in raw SQL
+            # The database driver/column type will handle conversion
+            insert_data_list = []
+            for row in search_index_rows:
+                insert_data = row.to_insert(serialize_json=True)
+                insert_data["project_id"] = self.project_id
+                insert_data_list.append(insert_data)
+
+            # Use UPSERT (INSERT ... ON CONFLICT) to handle re-indexing
+            # Primary key is (id, type, project_id)
+            # This handles race conditions during forward reference resolution
+            # where an entity might be re-indexed before the delete commits
+            # Syntax works for both SQLite 3.24+ and PostgreSQL
+            await session.execute(
+                text("""
+                    INSERT INTO search_index (
+                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        from_id, to_id, relation_type,
+                        entity_id, category,
+                        created_at, updated_at,
+                        project_id
+                    ) VALUES (
+                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :from_id, :to_id, :relation_type,
+                        :entity_id, :category,
+                        :created_at, :updated_at,
+                        :project_id
+                    )
+                    ON CONFLICT (id, type, project_id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        content_stems = EXCLUDED.content_stems,
+                        content_snippet = EXCLUDED.content_snippet,
+                        permalink = EXCLUDED.permalink,
+                        file_path = EXCLUDED.file_path,
+                        metadata = EXCLUDED.metadata,
+                        from_id = EXCLUDED.from_id,
+                        to_id = EXCLUDED.to_id,
+                        relation_type = EXCLUDED.relation_type,
+                        entity_id = EXCLUDED.entity_id,
+                        category = EXCLUDED.category,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at
+                """),
+                insert_data_list,
+            )
+            logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
+            await session.commit()

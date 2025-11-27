@@ -69,9 +69,7 @@ async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url,
     entity_id = created_entity.id
 
     # Get it by ID using v2 endpoint
-    response = await client.get(
-        f"{v2_project_url}/knowledge/entities/{entity_id}"
-    )
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_id}")
 
     assert response.status_code == 200
     entity = EntityResponseV2.model_validate(response.json())
@@ -157,7 +155,9 @@ async def test_create_entity_with_observations_and_relations(
 
 
 @pytest.mark.asyncio
-async def test_update_entity_by_id(client: AsyncClient, file_service, v2_project_url, entity_repository):
+async def test_update_entity_by_id(
+    client: AsyncClient, file_service, v2_project_url, entity_repository
+):
     """Test updating an entity by ID using PUT (replace)."""
     # Create an entity first
     create_data = {
@@ -200,7 +200,9 @@ async def test_update_entity_by_id(client: AsyncClient, file_service, v2_project
 
 
 @pytest.mark.asyncio
-async def test_edit_entity_by_id_append(client: AsyncClient, file_service, v2_project_url, entity_repository):
+async def test_edit_entity_by_id_append(
+    client: AsyncClient, file_service, v2_project_url, entity_repository
+):
     """Test editing an entity by ID using PATCH (append operation)."""
     # Create an entity first
     create_data = {
@@ -287,7 +289,9 @@ async def test_edit_entity_by_id_find_replace(
 
 
 @pytest.mark.asyncio
-async def test_delete_entity_by_id(client: AsyncClient, file_service, v2_project_url, entity_repository):
+async def test_delete_entity_by_id(
+    client: AsyncClient, file_service, v2_project_url, entity_repository
+):
     """Test deleting an entity by ID."""
     # Create an entity first
     create_data = {
@@ -304,18 +308,14 @@ async def test_delete_entity_by_id(client: AsyncClient, file_service, v2_project
     entity_id = created_entity.id
 
     # Delete it by ID
-    response = await client.delete(
-        f"{v2_project_url}/knowledge/entities/{entity_id}"
-    )
+    response = await client.delete(f"{v2_project_url}/knowledge/entities/{entity_id}")
 
     assert response.status_code == 200
     delete_response = DeleteEntitiesResponse.model_validate(response.json())
     assert delete_response.deleted is True
 
     # Verify it's gone - trying to get it should return 404
-    response = await client.get(
-        f"{v2_project_url}/knowledge/entities/{entity_id}"
-    )
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_id}")
     assert response.status_code == 404
 
 
@@ -369,9 +369,7 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
 
 
 @pytest.mark.asyncio
-async def test_v2_endpoints_use_project_id_not_name(
-    client: AsyncClient, test_project: Project
-):
+async def test_v2_endpoints_use_project_id_not_name(client: AsyncClient, test_project: Project):
     """Verify v2 endpoints require project ID, not name."""
     # Try using project name instead of ID - should fail
     response = await client.get(f"/v2/{test_project.name}/knowledge/entities/1")
@@ -401,9 +399,7 @@ async def test_entity_response_v2_has_api_version(
     entity_id = created_entity.id
 
     # Get it via v2 endpoint
-    response = await client.get(
-        f"{v2_project_url}/knowledge/entities/{entity_id}"
-    )
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_id}")
     assert response.status_code == 200
 
     entity_v2 = EntityResponseV2.model_validate(response.json())
