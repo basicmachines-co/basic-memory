@@ -448,8 +448,11 @@ class EntityService(BaseService[EntityModel]):
             import asyncio
 
             # Create tasks for all relation lookups
+            # Use strict=True to disable fuzzy search - only exact matches should create resolved relations
+            # This ensures forward references (links to non-existent entities) remain unresolved (to_id=NULL)
             lookup_tasks = [
-                self.link_resolver.resolve_link(rel.target) for rel in markdown.relations
+                self.link_resolver.resolve_link(rel.target, strict=True)
+                for rel in markdown.relations
             ]
 
             # Execute all lookups in parallel

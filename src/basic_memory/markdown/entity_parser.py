@@ -189,35 +189,63 @@ class EntityParser:
         return self.base_path / path
 
     async def parse_file_content(self, absolute_path, file_content):
-        # Parse frontmatter with proper error handling for malformed YAML (issue #185)
-        try:
-            post = frontmatter.loads(file_content)
-        except yaml.YAMLError as e:
-            # Log the YAML parsing error with file context
-            logger.warning(
-                f"Failed to parse YAML frontmatter in {absolute_path}: {e}. "
-                f"Treating file as plain markdown without frontmatter."
-            )
-            # Create a post with no frontmatter - treat entire content as markdown
-            post = frontmatter.Post(file_content, metadata={})
+        """Parse markdown content from file stats.
 
-        # Extract file stat info
+        Delegates to parse_markdown_content() for actual parsing logic.
+        Exists for backwards compatibility with code that passes file paths.
+        """
+        # Extract file stat info for timestamps
         file_stats = absolute_path.stat()
 
-        # Normalize frontmatter values to prevent AttributeError on date objects (issue #236)
-        # PyYAML automatically converts date strings like "2025-10-24" to datetime.date objects
-        # This normalization converts them back to ISO format strings to ensure compatibility
-        # with code that expects string values
+        # Delegate to parse_markdown_content with timestamps from file stats
+        return await self.parse_markdown_content(
+            file_path=absolute_path,
+            content=file_content,
+            mtime=file_stats.st_mtime,
+            ctime=file_stats.st_ctime,
+        )
+
+    async def parse_markdown_content(
+        self,
+        file_path: Path,
+        content: str,
+        mtime: Optional[float] = None,
+        ctime: Optional[float] = None,
+    ) -> EntityMarkdown:
+        """Parse markdown content without requiring file to exist on disk.
+
+        Useful for parsing content from S3 or other remote sources where the file
+        is not available locally.
+
+        Args:
+            file_path: Path for metadata (doesn't need to exist on disk)
+            content: Markdown content as string
+            mtime: Optional modification time (Unix timestamp)
+            ctime: Optional creation time (Unix timestamp)
+
+        Returns:
+            EntityMarkdown with parsed content
+        """
+        # Parse frontmatter with proper error handling for malformed YAML
+        try:
+            post = frontmatter.loads(content)
+        except yaml.YAMLError as e:
+            logger.warning(
+                f"Failed to parse YAML frontmatter in {file_path}: {e}. "
+                f"Treating file as plain markdown without frontmatter."
+            )
+            post = frontmatter.Post(content, metadata={})
+
+        # Normalize frontmatter values
         metadata = normalize_frontmatter_metadata(post.metadata)
 
-        # Ensure required fields have defaults (issue #184, #387)
-        # Handle title - use default if missing, None/null, empty, or string "None"
+        # Ensure required fields have defaults
         title = metadata.get("title")
         if not title or title == "None":
-            metadata["title"] = absolute_path.stem
+            metadata["title"] = file_path.stem
         else:
             metadata["title"] = title
-        # Handle type - use default if missing OR explicitly set to None/null
+
         entity_type = metadata.get("type")
         metadata["type"] = entity_type if entity_type is not None else "note"
 
@@ -225,16 +253,20 @@ class EntityParser:
         if tags:
             metadata["tags"] = tags
 
-        # frontmatter - use metadata with defaults applied
-        entity_frontmatter = EntityFrontmatter(
-            metadata=metadata,
-        )
+        # Parse content for observations and relations
+        entity_frontmatter = EntityFrontmatter(metadata=metadata)
         entity_content = parse(post.content)
+
+        # Use provided timestamps or current time as fallback
+        now = datetime.now().astimezone()
+        created = datetime.fromtimestamp(ctime).astimezone() if ctime else now
+        modified = datetime.fromtimestamp(mtime).astimezone() if mtime else now
+
         return EntityMarkdown(
             frontmatter=entity_frontmatter,
             content=post.content,
             observations=entity_content.observations,
             relations=entity_content.relations,
-            created=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
-            modified=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+            created=created,
+            modified=modified,
         )

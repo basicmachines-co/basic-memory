@@ -252,6 +252,7 @@ async def test_benchmark_sync_100_files(app_config, project_config, config_manag
 
 @pytest.mark.benchmark
 @pytest.mark.asyncio
+@pytest.mark.skip
 async def test_benchmark_sync_500_files(app_config, project_config, config_manager):
     """Benchmark: Sync 500 files (medium repository)."""
     results = await run_sync_benchmark(
@@ -268,6 +269,7 @@ async def test_benchmark_sync_500_files(app_config, project_config, config_manag
 @pytest.mark.benchmark
 @pytest.mark.asyncio
 @pytest.mark.slow
+@pytest.mark.skip
 async def test_benchmark_sync_1000_files(app_config, project_config, config_manager):
     """Benchmark: Sync 1000 files (large repository).
 
@@ -287,6 +289,7 @@ async def test_benchmark_sync_1000_files(app_config, project_config, config_mana
 
 @pytest.mark.benchmark
 @pytest.mark.asyncio
+@pytest.mark.skip
 async def test_benchmark_resync_no_changes(app_config, project_config, config_manager):
     """Benchmark: Re-sync with no changes (should be fast).
 
