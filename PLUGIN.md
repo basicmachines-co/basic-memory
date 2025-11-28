@@ -135,6 +135,39 @@ Guides implementation based on specifications stored in Basic Memory.
 - Creating new specifications
 - Reviewing implementation against criteria
 
+### edit-note
+
+Interactively edit notes using MCP tools in a conversational workflow.
+
+**Triggers when:**
+- User wants to edit, update, or modify a note
+- User asks to change specific content in a note
+- User wants to add observations or relations
+
+**How it works:**
+1. Fetches the note via MCP
+2. Shows current content
+3. Applies edits using `edit_note` operations (append, prepend, find_replace, replace_section)
+4. Shows the updated result
+
+**Best for:** Cloud users or when you want conversational editing.
+
+### edit-note-local
+
+Edit notes directly as local markdown files with automatic sync.
+
+**Triggers when:**
+- User has local Basic Memory installation
+- User wants to make substantial file edits
+- User prefers working with full file content
+
+**How it works:**
+1. Finds the note's file path via MCP
+2. Uses Claude Code's Read/Edit/Write tools on the actual file
+3. Basic Memory's `sync --watch` picks up changes automatically
+
+**Best for:** Local users who want full file access and git integration.
+
 ---
 
 ## Hooks
@@ -181,7 +214,9 @@ basic-memory/
 ├── skills/
 │   ├── knowledge-capture/
 │   ├── continue-conversation/
-│   └── spec-driven-development/
+│   ├── spec-driven-development/
+│   ├── edit-note/
+│   └── edit-note-local/
 ├── hooks/
 │   └── hooks.json           # Hook definitions
 └── PLUGIN.md                # This file
