@@ -21,7 +21,7 @@ Then add it to your Claude Code MCP configuration.
 ### Add the Marketplace
 
 ```
-/plugin marketplace add basicmachines-co/basic-memory
+/plugin marketplace add basicmachines-co/basic-memory/claude-code-plugin
 ```
 
 ### Install the Plugin
@@ -41,7 +41,8 @@ Add to your `.claude/settings.json`:
       "basicmachines": {
         "source": {
           "source": "github",
-          "repo": "basicmachines-co/basic-memory"
+          "repo": "basicmachines-co/basic-memory",
+          "path": "claude-code-plugin"
         }
       }
     },
@@ -243,7 +244,7 @@ This plugin leverages Basic Memory's MCP tools:
 ## Plugin Structure
 
 ```
-basic-memory/
+claude-code-plugin/
 ├── .claude-plugin/
 │   ├── plugin.json          # Plugin manifest
 │   └── marketplace.json     # Self-hosted marketplace
@@ -262,7 +263,8 @@ basic-memory/
 │   └── knowledge-organize/
 ├── hooks/
 │   └── hooks.json           # Hook definitions
-└── PLUGIN.md                # This file
+├── README.md                # Quick start guide
+└── PLUGIN.md                # Full documentation
 ```
 
 ---
