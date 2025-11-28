@@ -121,6 +121,22 @@ Actions:
 - `relations` - Suggest connections
 - `tags` - Review tag consistency
 
+### `/research <topic> [folder]`
+
+Research a topic and save a structured report to Basic Memory.
+
+```
+/research MCP protocol
+/research "database migrations"
+/research "auth options" decisions
+```
+
+Produces a report with:
+- Summary and key findings
+- Analysis and recommendations
+- Sources and related notes
+- Saved to `research/` folder by default
+
 ---
 
 ## Skills
@@ -210,6 +226,24 @@ Help organize, link, and maintain the knowledge graph.
 
 **Best for:** Periodic knowledge base maintenance and improving discoverability.
 
+### research
+
+Research topics thoroughly and produce structured reports saved to Basic Memory.
+
+**Triggers when:**
+- User asks to research or investigate something
+- User wants to understand a concept or technology
+- User needs context before making a decision
+- Phrases like "research", "look into", "explore", "investigate"
+
+**What it produces:**
+- Structured report with summary, findings, and analysis
+- Recommendations when applicable
+- Links to sources and related notes
+- Saved to `research/` folder
+
+**Best for:** Building knowledge base through investigation and documentation.
+
 ---
 
 ## Hooks
@@ -253,14 +287,16 @@ claude-code-plugin/
 │   ├── continue.md          # /continue command
 │   ├── context.md           # /context command
 │   ├── recent.md            # /recent command
-│   └── organize.md          # /organize command
+│   ├── organize.md          # /organize command
+│   └── research.md          # /research command
 ├── skills/
 │   ├── knowledge-capture/
 │   ├── continue-conversation/
 │   ├── spec-driven-development/
 │   ├── edit-note/
 │   ├── edit-note-local/
-│   └── knowledge-organize/
+│   ├── knowledge-organize/
+│   └── research/
 ├── hooks/
 │   └── hooks.json           # Hook definitions
 ├── README.md                # Quick start guide

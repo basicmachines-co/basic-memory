@@ -42,6 +42,7 @@ pipx install basic-memory
 | `/context <memory://url>` | Build context from a specific note |
 | `/recent [timeframe]` | Show recent activity |
 | `/organize [action]` | Maintain your knowledge graph |
+| `/research <topic>` | Research a topic and save a report |
 
 ### Examples
 
@@ -57,6 +58,9 @@ pipx install basic-memory
 
 # Find orphan notes and suggest links
 /organize orphans
+
+# Research a topic and save findings
+/research "MCP protocol"
 ```
 
 ## Skills
@@ -71,6 +75,7 @@ Skills are model-invoked - Claude uses them automatically when the context fits.
 | `edit-note` | Edits notes via MCP tools (cloud-compatible) |
 | `edit-note-local` | Edits notes as files (local installations) |
 | `knowledge-organize` | Helps organize and link notes |
+| `research` | Researches topics and produces saved reports |
 
 ## Hooks
 
