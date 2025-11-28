@@ -101,6 +101,25 @@ Show recent activity in Basic Memory.
 /recent today specs
 ```
 
+### `/organize [action] [project]`
+
+Organize and maintain your knowledge graph.
+
+```
+/organize                    # Quick health check
+/organize orphans            # Find unlinked notes
+/organize duplicates         # Find similar notes
+/organize relations "Note"   # Suggest links for a note
+/organize tags               # Review tag consistency
+```
+
+Actions:
+- `health` - Overview of knowledge base status (default)
+- `orphans` - Find notes with no relations
+- `duplicates` - Find overlapping notes
+- `relations` - Suggest connections
+- `tags` - Review tag consistency
+
 ---
 
 ## Skills
@@ -232,7 +251,8 @@ basic-memory/
 │   ├── remember.md          # /remember command
 │   ├── continue.md          # /continue command
 │   ├── context.md           # /context command
-│   └── recent.md            # /recent command
+│   ├── recent.md            # /recent command
+│   └── organize.md          # /organize command
 ├── skills/
 │   ├── knowledge-capture/
 │   ├── continue-conversation/
