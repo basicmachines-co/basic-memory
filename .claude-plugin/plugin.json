@@ -1,0 +1,9 @@
+{
+  "name": "basic-memory",
+  "description": "Claude Code skills for Basic Memory - capture knowledge, continue conversations, and follow spec-driven development using the Basic Memory MCP server",
+  "version": "0.1.0",
+  "author": {
+    "name": "Basic Machines"
+  },
+  "repository": "https://github.com/basicmachines-co/basic-memory"
+}
