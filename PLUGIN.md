@@ -168,6 +168,28 @@ Edit notes directly as local markdown files with automatic sync.
 
 **Best for:** Local users who want full file access and git integration.
 
+### knowledge-organizer
+
+Help organize, link, and maintain the knowledge graph.
+
+**Triggers when:**
+- User wants to organize their notes
+- User asks about orphan or unlinked notes
+- User wants to find connections between notes
+- User mentions duplicates or similar notes
+- User asks for help with folder organization
+
+**Capabilities:**
+- **Find orphan notes** - Identify notes with no relations
+- **Suggest relations** - Propose meaningful links between notes
+- **Identify duplicates** - Find notes covering similar topics
+- **Folder organization** - Review and suggest folder structure
+- **Tag consistency** - Normalize and improve tagging
+- **Create index notes** - Generate hub notes linking related topics
+- **Enrich sparse notes** - Suggest observations and structure
+
+**Best for:** Periodic knowledge base maintenance and improving discoverability.
+
 ---
 
 ## Hooks
@@ -216,7 +238,8 @@ basic-memory/
 │   ├── continue-conversation/
 │   ├── spec-driven-development/
 │   ├── edit-note/
-│   └── edit-note-local/
+│   ├── edit-note-local/
+│   └── knowledge-organizer/
 ├── hooks/
 │   └── hooks.json           # Hook definitions
 └── PLUGIN.md                # This file
