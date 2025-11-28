@@ -168,7 +168,7 @@ Edit notes directly as local markdown files with automatic sync.
 
 **Best for:** Local users who want full file access and git integration.
 
-### knowledge-organizer
+### knowledge-organize
 
 Help organize, link, and maintain the knowledge graph.
 
@@ -239,7 +239,7 @@ basic-memory/
 │   ├── spec-driven-development/
 │   ├── edit-note/
 │   ├── edit-note-local/
-│   └── knowledge-organizer/
+│   └── knowledge-organize/
 ├── hooks/
 │   └── hooks.json           # Hook definitions
 └── PLUGIN.md                # This file

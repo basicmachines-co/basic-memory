@@ -1,9 +1,9 @@
 ---
-name: knowledge-organizer
+name: knowledge-organize
 description: Help organize, link, and maintain the Basic Memory knowledge graph - find orphan notes, suggest relations, identify duplicates, and improve overall knowledge structure
 ---
 
-# Knowledge Organizer
+# Knowledge Organize
 
 This skill helps users maintain a healthy, well-connected knowledge graph. As notes accumulate, it becomes valuable to periodically organize, link, and curate the knowledge base.
 
