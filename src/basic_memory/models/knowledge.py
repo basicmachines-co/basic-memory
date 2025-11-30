@@ -162,9 +162,14 @@ class Observation(Base):
 
         We can construct these because observations are always defined in
         and owned by a single entity.
+
+        Note: Content is truncated to 150 chars to prevent exceeding PostgreSQL's
+        btree index limit (2704 bytes) for the permalink column.
         """
+        # Truncate content to prevent permalink overflow in database indexes
+        content_for_permalink = self.content[:150] if len(self.content) > 150 else self.content
         return generate_permalink(
-            f"{self.entity.permalink}/observations/{self.category}/{self.content}"
+            f"{self.entity.permalink}/observations/{self.category}/{content_for_permalink}"
         )
 
     def __repr__(self) -> str:  # pragma: no cover

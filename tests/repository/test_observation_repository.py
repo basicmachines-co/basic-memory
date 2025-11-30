@@ -356,3 +356,62 @@ async def test_find_by_category_case_sensitivity(
 
     upper_case = await repo.find_by_category("TECH")
     assert len(upper_case) == 0  # Currently case-sensitive
+
+
+@pytest.mark.asyncio
+async def test_observation_permalink_truncation(
+    session_maker: async_sessionmaker, repo, test_project: Project
+):
+    """Test that observation permalinks are truncated to prevent database index overflow (issue #446).
+
+    PostgreSQL btree indexes have a maximum size of 2704 bytes. Long observation content
+    was causing permalinks to exceed this limit. The fix truncates content to 150 chars
+    when generating permalinks.
+    """
+    async with db.scoped_session(session_maker) as session:
+        entity = Entity(
+            project_id=test_project.id,
+            title="test_entity",
+            entity_type="test",
+            permalink="test/test-entity",
+            file_path="test/test_entity.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity)
+        await session.flush()
+
+        # Create observation with very long content (simulating transcript dialogue)
+        long_content = "This is a very long observation content that would normally cause the permalink to exceed the PostgreSQL btree index limit of 2704 bytes. " * 50
+        obs = Observation(
+            entity_id=entity.id,
+            content=long_content,
+            category="transcript",
+        )
+        session.add(obs)
+        await session.commit()
+
+        # Refresh to get the relationship
+        await session.refresh(obs)
+        await session.refresh(obs, ["entity"])
+
+        # Verify the full content is stored
+        assert len(obs.content) > 150
+        assert obs.content == long_content
+
+        # Verify the permalink is truncated
+        permalink = obs.permalink
+        assert permalink is not None
+        assert len(permalink) < 500  # Should be much shorter than full content
+
+        # Verify permalink contains truncated content, not full content
+        # The permalink format is: {entity.permalink}/observations/{category}/{truncated_content}
+        assert "test-entity/observations/transcript/" in permalink
+
+        # Verify the content portion is limited
+        # Extract the content portion after the last slash
+        content_portion = permalink.split("/")[-1]
+        # The content portion should correspond to truncated content (150 chars max)
+        # After generate_permalink processing (lowercase, spaces to hyphens, etc.)
+        assert len(content_portion) <= 200  # Allow some buffer for URL encoding

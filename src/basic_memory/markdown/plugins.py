@@ -30,7 +30,9 @@ def is_observation(token: Token) -> bool:
 
     # Check for proper observation format: [category] content
     match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
-    has_tags = "#" in content
+    # Match proper hashtags (word characters after #), not HTML color codes
+    # Negative lookbehind ensures # is not preceded by hex digit or equals sign
+    has_tags = bool(re.search(r"(?<![0-9a-fA-F=])#\w+", content))
     return bool(match) or has_tags
 
 

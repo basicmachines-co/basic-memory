@@ -121,6 +121,35 @@ def test_observation_excludes_markdown_and_wiki_links():
     assert not is_observation(token), "No space after category should not be valid observation"
 
 
+def test_observation_html_color_codes():
+    """Test that HTML color codes are NOT parsed as hashtags (issue #446).
+
+    This validates the fix where content like:
+    - **<font color="#4285F4">Jane:</font>** Welcome...
+    should NOT be treated as an observation due to the HTML color code.
+    """
+    # Test HTML color codes should NOT be detected as hashtags
+    token = Token("inline", '**<font color="#4285F4">Jane:</font>** Welcome to the deep dive', 0)
+    assert not is_observation(token), "HTML color codes should not be parsed as hashtags"
+
+    token = Token("inline", '<font color="#FF0000">Red text</font>', 0)
+    assert not is_observation(token), "HTML color codes should not be parsed as hashtags"
+
+    token = Token("inline", 'Style: background-color=#ABCDEF', 0)
+    assert not is_observation(token), "CSS color codes should not be parsed as hashtags"
+
+    # Test valid hashtags still work
+    token = Token("inline", "This is a note #hashtag", 0)
+    assert is_observation(token), "Valid hashtags should still be detected"
+
+    token = Token("inline", "[note] Content with #tag1 and #tag2", 0)
+    assert is_observation(token), "Valid hashtags in observations should still work"
+
+    # Test edge case: hashtag next to hex but separated by space
+    token = Token("inline", "Color is ABCDEF #hashtag", 0)
+    assert is_observation(token), "Hashtags after hex should work if properly separated"
+
+
 def test_relation_plugin():
     """Test relation plugin."""
     md = MarkdownIt().use(relation_plugin)
