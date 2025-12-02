@@ -25,9 +25,89 @@ from basic_memory.schemas.project_info import (
     ProjectItem,
     ProjectStatusResponse,
 )
-from basic_memory.utils import normalize_project_path
+from basic_memory.schemas.v2 import ProjectResolveRequest, ProjectResolveResponse
+from basic_memory.utils import normalize_project_path, generate_permalink
 
 router = APIRouter(prefix="/projects", tags=["project_management-v2"])
+
+
+@router.post("/resolve", response_model=ProjectResolveResponse)
+async def resolve_project_identifier(
+    data: ProjectResolveRequest,
+    project_repository: ProjectRepositoryDep,
+) -> ProjectResolveResponse:
+    """Resolve a project identifier (name or permalink) to a project ID.
+
+    This endpoint provides efficient lookup of projects by name without
+    needing to fetch the entire project list. Supports case-insensitive
+    matching on both name and permalink.
+
+    Args:
+        data: Request containing the identifier to resolve
+
+    Returns:
+        Project information including the numeric ID
+
+    Raises:
+        HTTPException: 404 if project not found
+
+    Example:
+        POST /v2/projects/resolve
+        {"identifier": "my-project"}
+
+        Returns:
+        {
+            "project_id": 1,
+            "name": "my-project",
+            "permalink": "my-project",
+            "path": "/path/to/project",
+            "is_active": true,
+            "is_default": false,
+            "resolution_method": "name"
+        }
+    """
+    logger.info(f"API v2 request: resolve_project_identifier for '{data.identifier}'")
+
+    # Generate permalink for comparison
+    identifier_permalink = generate_permalink(data.identifier)
+
+    # Try to find project by ID first (if identifier is numeric)
+    resolution_method = "name"
+    project = None
+
+    if data.identifier.isdigit():
+        project_id = int(data.identifier)
+        project = await project_repository.get_by_id(project_id)
+        if project:
+            resolution_method = "id"
+
+    # If not found by ID, try by permalink first (exact match)
+    if not project:
+        project = await project_repository.get_by_permalink(identifier_permalink)
+        if project:
+            resolution_method = "permalink"
+
+    # If not found by permalink, try case-insensitive name search
+    # Uses efficient database query instead of fetching all projects
+    if not project:
+        project = await project_repository.get_by_name_case_insensitive(data.identifier)
+        if project:
+            resolution_method = "name"
+
+    if not project:
+        raise HTTPException(
+            status_code=404, detail=f"Project not found: '{data.identifier}'"
+        )
+
+    return ProjectResolveResponse(
+        project_id=project.id,
+        name=project.name,
+        permalink=generate_permalink(project.name),
+        path=normalize_project_path(project.path),
+        is_active=project.is_active if hasattr(project, "is_active") else True,
+        is_default=project.is_default or False,
+        resolution_method=resolution_method,
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectItem)

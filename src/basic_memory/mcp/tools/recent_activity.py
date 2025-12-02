@@ -247,11 +247,10 @@ async def recent_activity(
             )
 
             active_project = await get_active_project(client, resolved_project, context)
-            project_url = active_project.project_url
 
             response = await call_get(
                 client,
-                f"{project_url}/memory/recent",
+                f"/v2/projects/{active_project.id}/memory/recent",
                 params=params,
             )
             activity_data = GraphContext.model_validate(response.json())
@@ -274,10 +273,9 @@ async def _get_project_activity(
     Returns:
         ProjectActivity with activity data or empty activity on error
     """
-    project_url = f"/{project_info.permalink}"
     activity_response = await call_get(
         client,
-        f"{project_url}/memory/recent",
+        f"/v2/projects/{project_info.id}/memory/recent",
         params=params,
     )
     activity = GraphContext.model_validate(activity_response.json())

@@ -16,14 +16,9 @@ from datetime import datetime
 
 from rich.panel import Panel
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_get
-from basic_memory.schemas.project_info import ProjectList
-from basic_memory.mcp.tools.utils import call_post
-from basic_memory.schemas.project_info import ProjectStatusResponse
-from basic_memory.mcp.tools.utils import call_delete
-from basic_memory.mcp.tools.utils import call_put
+from basic_memory.mcp.tools.utils import call_get, call_post, call_delete, call_put, call_patch
+from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 from basic_memory.utils import generate_permalink, normalize_project_path
-from basic_memory.mcp.tools.utils import call_patch
 
 # Import rclone commands for project sync
 from basic_memory.cli.commands.cloud.rclone_commands import (
@@ -254,9 +249,17 @@ def remove_project(
 
     async def _remove_project():
         async with get_client() as client:
+            # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)
+
+            # Use v2 project resolver to find project ID by permalink
+            resolve_data = {"identifier": project_permalink}
+            response = await call_post(client, "/v2/projects/resolve", json=resolve_data)
+            target_project = response.json()
+
+            # Use v2 API with project ID
             response = await call_delete(
-                client, f"/projects/{project_permalink}?delete_notes={delete_notes}"
+                client, f"/v2/projects/{target_project['project_id']}?delete_notes={delete_notes}"
             )
             return ProjectStatusResponse.model_validate(response.json())
 
@@ -329,8 +332,16 @@ def set_default_project(
 
     async def _set_default():
         async with get_client() as client:
+            # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)
-            response = await call_put(client, f"/projects/{project_permalink}/default")
+
+            # Use v2 project resolver to find project ID by permalink
+            resolve_data = {"identifier": project_permalink}
+            response = await call_post(client, "/v2/projects/resolve", json=resolve_data)
+            target_project = response.json()
+
+            # Use v2 API with project ID
+            response = await call_put(client, f"/v2/projects/{target_project['project_id']}/default")
             return ProjectStatusResponse.model_validate(response.json())
 
     try:

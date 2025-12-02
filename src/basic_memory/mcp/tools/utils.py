@@ -435,6 +435,36 @@ async def call_post(
         raise ToolError(error_message) from e
 
 
+async def resolve_entity_id(client: AsyncClient, project_id: int, identifier: str) -> int:
+    """Resolve a string identifier to an entity ID using the v2 API.
+
+    Args:
+        client: HTTP client for API calls
+        project_id: Project ID
+        identifier: The identifier to resolve (permalink, title, or path)
+
+    Returns:
+        The resolved entity ID
+
+    Raises:
+        ToolError: If the identifier cannot be resolved
+    """
+    try:
+        response = await call_post(
+            client,
+            f"/v2/projects/{project_id}/knowledge/resolve",
+            json={"identifier": identifier}
+        )
+        data = response.json()
+        return data["entity_id"]
+    except HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise ToolError(f"Entity not found: '{identifier}'")
+        raise ToolError(f"Error resolving identifier '{identifier}': {e}")
+    except Exception as e:
+        raise ToolError(f"Unexpected error resolving identifier '{identifier}': {e}")
+
+
 async def call_delete(
     client: AsyncClient,
     url: URL | str,

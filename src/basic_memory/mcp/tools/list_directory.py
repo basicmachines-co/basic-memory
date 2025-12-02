@@ -65,7 +65,6 @@ async def list_directory(
     """
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
-        project_url = active_project.project_url
 
         # Prepare query parameters
         params = {
@@ -82,7 +81,7 @@ async def list_directory(
         # Call the API endpoint
         response = await call_get(
             client,
-            f"{project_url}/directory/list",
+            f"/v2/projects/{active_project.id}/directory/list",
             params=params,
         )
 

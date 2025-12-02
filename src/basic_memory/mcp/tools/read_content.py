@@ -13,11 +13,12 @@ from typing import Optional
 from loguru import logger
 from PIL import Image as PILImage
 from fastmcp import Context
+from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -203,7 +204,6 @@ async def read_content(
 
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
-        project_url = active_project.project_url
 
         url = memory_url_path(path)
 
@@ -221,7 +221,15 @@ async def read_content(
                 "error": f"Path '{path}' is not allowed - paths must stay within project boundaries",
             }
 
-        response = await call_get(client, f"{project_url}/resource/{url}")
+        # Resolve path to entity ID
+        try:
+            entity_id = await resolve_entity_id(client, active_project.id, url)
+        except ToolError:
+            # Convert resolution errors to "Resource not found" for consistency
+            raise ToolError(f"Resource not found: {url}")
+
+        # Call the v2 resource endpoint
+        response = await call_get(client, f"/v2/projects/{active_project.id}/resource/{entity_id}")
         content_type = response.headers.get("content-type", "application/octet-stream")
         content_length = int(response.headers.get("content-length", 0))
 

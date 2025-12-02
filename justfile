@@ -59,7 +59,7 @@ postgres-reset:
 postgres-migrate:
     @cd src/basic_memory/alembic && \
     BASIC_MEMORY_DATABASE_BACKEND=postgres \
-    BASIC_MEMORY_DATABASE_URL=${POSTGRES_TEST_URL:-postgresql://basic_memory_user:dev_password@localhost:5433/basic_memory_test} \
+    BASIC_MEMORY_DATABASE_URL=${POSTGRES_TEST_URL:-postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test} \
     uv run alembic upgrade head
     @echo "✅ Migrations applied to Postgres test database"
 
