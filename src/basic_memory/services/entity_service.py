@@ -42,6 +42,7 @@ class EntityService(BaseService[EntityModel]):
         relation_repository: RelationRepository,
         file_service: FileService,
         link_resolver: LinkResolver,
+        search_service: Optional["SearchService"] = None,
         app_config: Optional[BasicMemoryConfig] = None,
     ):
         super().__init__(entity_repository)
@@ -50,6 +51,7 @@ class EntityService(BaseService[EntityModel]):
         self.entity_parser = entity_parser
         self.file_service = file_service
         self.link_resolver = link_resolver
+        self.search_service = search_service
         self.app_config = app_config
 
     async def detect_file_path_conflicts(
@@ -335,7 +337,11 @@ class EntityService(BaseService[EntityModel]):
                     )
                 entity = entities[0]
 
-            # Delete file first
+            # Delete from search index first (if search_service is available)
+            if self.search_service:
+                await self.search_service.handle_delete(entity)
+
+            # Delete file
             await self.file_service.delete_entity_file(entity)
 
             # Delete from DB (this will cascade to observations/relations)
