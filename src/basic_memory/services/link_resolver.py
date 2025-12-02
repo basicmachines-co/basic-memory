@@ -2,6 +2,7 @@
 
 from typing import Optional, Tuple
 
+import logfire
 from loguru import logger
 
 from basic_memory.models import Entity
@@ -26,6 +27,7 @@ class LinkResolver:
         self.entity_repository = entity_repository
         self.search_service = search_service
 
+    @logfire.instrument()
     async def resolve_link(
         self, link_text: str, use_search: bool = True, strict: bool = False
     ) -> Optional[Entity]:

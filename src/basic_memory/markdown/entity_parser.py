@@ -22,10 +22,12 @@ from basic_memory.markdown.schemas import (
     Relation,
 )
 from basic_memory.utils import parse_tags
+import logfire
 
 md = MarkdownIt().use(observation_plugin).use(relation_plugin)
 
 
+@logfire.instrument()
 def normalize_frontmatter_value(value: Any) -> Any:
     """Normalize frontmatter values to safe types for processing.
 
@@ -87,6 +89,7 @@ def normalize_frontmatter_value(value: Any) -> Any:
     return value
 
 
+@logfire.instrument()
 def normalize_frontmatter_metadata(metadata: dict) -> dict:
     """Normalize all values in frontmatter metadata dict.
 
@@ -109,6 +112,7 @@ class EntityContent:
     relations: list[Relation] = field(default_factory=list)
 
 
+@logfire.instrument()
 def parse(content: str) -> EntityContent:
     """Parse markdown content into EntityMarkdown."""
 
@@ -167,6 +171,7 @@ class EntityParser:
                 return parsed
         return None
 
+    @logfire.instrument()
     async def parse_file(self, path: Path | str) -> EntityMarkdown:
         """Parse markdown file into EntityMarkdown."""
 
@@ -188,6 +193,7 @@ class EntityParser:
         """Get absolute path for a file using the base path for the project."""
         return self.base_path / path
 
+    @logfire.instrument()
     async def parse_file_content(self, absolute_path, file_content):
         """Parse markdown content from file stats.
 
@@ -205,6 +211,7 @@ class EntityParser:
             ctime=file_stats.st_ctime,
         )
 
+    @logfire.instrument()
     async def parse_markdown_content(
         self,
         file_path: Path,

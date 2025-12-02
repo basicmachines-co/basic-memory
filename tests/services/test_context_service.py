@@ -286,6 +286,7 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
 
         # Create relation in project1 (between entities of project1)
         relation_p1 = Relation(
+            project_id=project1.id,
             from_id=entity1_p1.id,
             to_id=entity2_p1.id,
             to_name="Entity2_P1",

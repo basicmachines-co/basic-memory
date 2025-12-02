@@ -3,13 +3,27 @@
 import fnmatch
 import logging
 import os
+from datetime import datetime
 from typing import Dict, List, Optional, Sequence
+
+import logfire
 
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas.directory import DirectoryNode
 
 logger = logging.getLogger(__name__)
+
+
+def _mtime_to_datetime(entity: Entity) -> datetime:
+    """Convert entity mtime (file modification time) to datetime.
+
+    Returns the file's actual modification time, falling back to updated_at
+    if mtime is not available.
+    """
+    if entity.mtime:
+        return datetime.fromtimestamp(entity.mtime).astimezone()
+    return entity.updated_at
 
 
 class DirectoryService:
@@ -23,6 +37,7 @@ class DirectoryService:
         """
         self.entity_repository = entity_repository
 
+    @logfire.instrument()
     async def get_directory_tree(self) -> DirectoryNode:
         """Build a hierarchical directory tree from indexed files."""
 
@@ -77,7 +92,7 @@ class DirectoryService:
                 entity_id=file.id,
                 entity_type=file.entity_type,
                 content_type=file.content_type,
-                updated_at=file.updated_at,
+                updated_at=_mtime_to_datetime(file),
             )
 
             # Add to parent directory's children
@@ -90,6 +105,7 @@ class DirectoryService:
         # Return the root node with its children
         return root_node
 
+    @logfire.instrument()
     async def get_directory_structure(self) -> DirectoryNode:
         """Build a hierarchical directory structure without file details.
 
@@ -133,6 +149,7 @@ class DirectoryService:
 
         return root_node
 
+    @logfire.instrument()
     async def list_directory(
         self,
         dir_name: str = "/",
@@ -241,7 +258,7 @@ class DirectoryService:
                 entity_id=file.id,
                 entity_type=file.entity_type,
                 content_type=file.content_type,
-                updated_at=file.updated_at,
+                updated_at=_mtime_to_datetime(file),
             )
 
             # Add to parent directory's children

@@ -28,6 +28,7 @@ async def test_upsert_entity_with_observations_conflict(entity_repository: Entit
 
     # Add observations to the entity
     obs1 = Observation(
+        project_id=entity_repository.project_id,
         content="This is a test observation",
         category="testing",
         tags=["test"],
@@ -56,11 +57,13 @@ async def test_upsert_entity_with_observations_conflict(entity_repository: Entit
 
     # Add different observations
     obs2 = Observation(
+        project_id=entity_repository.project_id,
         content="This is an updated observation",
         category="updated",
         tags=["updated"],
     )
     obs3 = Observation(
+        project_id=entity_repository.project_id,
         content="This is a second observation",
         category="second",
         tags=["second"],

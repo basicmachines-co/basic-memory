@@ -107,6 +107,89 @@ Target content
 
 
 @pytest.mark.asyncio
+async def test_resolve_relations_deletes_duplicate_unresolved_relation(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    entity_service: EntityService,
+):
+    """Test that resolve_relations deletes duplicate unresolved relations on IntegrityError.
+
+    When resolving a forward reference would create a duplicate (from_id, to_id, relation_type),
+    the unresolved relation should be deleted since a resolved version already exists.
+    """
+    from unittest.mock import patch
+    from sqlalchemy.exc import IntegrityError
+    from basic_memory.models import Relation
+
+    project_dir = project_config.home
+
+    # Create source entity
+    source_content = """
+---
+type: knowledge
+---
+# Source Entity
+Content
+"""
+    await create_test_file(project_dir / "source.md", source_content)
+
+    # Create target entity
+    target_content = """
+---
+type: knowledge
+---
+# Target Entity
+Content
+"""
+    await create_test_file(project_dir / "target.md", target_content)
+
+    # Sync to create both entities
+    await sync_service.sync(project_config.home)
+
+    source = await entity_service.get_by_permalink("source")
+    await entity_service.get_by_permalink("target")
+
+    # Create an unresolved relation that will resolve to target
+    unresolved_relation = Relation(
+        from_id=source.id,
+        to_id=None,  # Unresolved
+        to_name="target",  # Will resolve to target entity
+        relation_type="relates_to",
+    )
+    await sync_service.relation_repository.add(unresolved_relation)
+    unresolved_id = unresolved_relation.id
+
+    # Verify we have the unresolved relation
+    source = await entity_service.get_by_permalink("source")
+    assert len(source.outgoing_relations) == 1
+    assert source.outgoing_relations[0].to_id is None
+
+    # Mock the repository update to raise IntegrityError (simulating existing duplicate)
+
+    async def mock_update_raises_integrity_error(entity_id, data):
+        # Simulate: a resolved relation with same (from_id, to_id, relation_type) already exists
+        raise IntegrityError(
+            "UNIQUE constraint failed: relation.from_id, relation.to_id, relation.relation_type",
+            None,
+            None,
+        )
+
+    with patch.object(
+        sync_service.relation_repository, "update", side_effect=mock_update_raises_integrity_error
+    ):
+        # Call resolve_relations - should hit IntegrityError and delete the duplicate
+        await sync_service.resolve_relations()
+
+    # Verify the unresolved relation was deleted
+    deleted = await sync_service.relation_repository.find_by_id(unresolved_id)
+    assert deleted is None
+
+    # Verify no unresolved relations remain
+    unresolved = await sync_service.relation_repository.find_unresolved_relations()
+    assert len(unresolved) == 0
+
+
+@pytest.mark.asyncio
 async def test_sync(
     sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):

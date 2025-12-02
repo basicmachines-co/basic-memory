@@ -7,6 +7,7 @@ import frontmatter
 import yaml
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
+import logfire
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import (
@@ -54,6 +55,7 @@ class EntityService(BaseService[EntityModel]):
         self.search_service = search_service
         self.app_config = app_config
 
+    @logfire.instrument()
     async def detect_file_path_conflicts(
         self, file_path: str, skip_check: bool = False
     ) -> List[Entity]:
@@ -93,6 +95,7 @@ class EntityService(BaseService[EntityModel]):
 
         return conflicts
 
+    @logfire.instrument()
     async def resolve_permalink(
         self,
         file_path: Permalink | Path,
@@ -108,6 +111,9 @@ class EntityService(BaseService[EntityModel]):
         4. Generate new unique permalink from file path
 
         Enhanced to detect and handle character-related conflicts.
+
+        Note: Uses lightweight repository methods that skip eager loading of
+        observations and relations for better performance during bulk operations.
         """
         file_path_str = Path(file_path).as_posix()
 
@@ -124,16 +130,20 @@ class EntityService(BaseService[EntityModel]):
         # If markdown has explicit permalink, try to validate it
         if markdown and markdown.frontmatter.permalink:
             desired_permalink = markdown.frontmatter.permalink
-            existing = await self.repository.get_by_permalink(desired_permalink)
+            # Use lightweight method - we only need to check file_path
+            existing_file_path = await self.repository.get_file_path_for_permalink(
+                desired_permalink
+            )
 
             # If no conflict or it's our own file, use as is
-            if not existing or existing.file_path == file_path_str:
+            if not existing_file_path or existing_file_path == file_path_str:
                 return desired_permalink
 
         # For existing files, try to find current permalink
-        existing = await self.repository.get_by_file_path(file_path_str)
-        if existing:
-            return existing.permalink
+        # Use lightweight method - we only need the permalink
+        existing_permalink = await self.repository.get_permalink_for_file_path(file_path_str)
+        if existing_permalink:
+            return existing_permalink
 
         # New file - generate permalink
         if markdown and markdown.frontmatter.permalink:
@@ -142,15 +152,17 @@ class EntityService(BaseService[EntityModel]):
             desired_permalink = generate_permalink(file_path_str)
 
         # Make unique if needed - enhanced to handle character conflicts
+        # Use lightweight existence check instead of loading full entity
         permalink = desired_permalink
         suffix = 1
-        while await self.repository.get_by_permalink(permalink):
+        while await self.repository.permalink_exists(permalink):
             permalink = f"{desired_permalink}-{suffix}"
             suffix += 1
             logger.debug(f"creating unique permalink: {permalink}")
 
         return permalink
 
+    @logfire.instrument()
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:
         """Create new entity or update existing one.
         Returns: (entity, is_new) where is_new is True if a new entity was created
@@ -172,6 +184,7 @@ class EntityService(BaseService[EntityModel]):
             # Create new entity
             return await self.create_entity(schema), True
 
+    @logfire.instrument()
     async def create_entity(self, schema: EntitySchema) -> EntityModel:
         """Create a new entity and write to filesystem."""
         logger.debug(f"Creating entity: {schema.title}")
@@ -238,6 +251,7 @@ class EntityService(BaseService[EntityModel]):
         # Set final checksum to mark complete
         return await self.repository.update(entity.id, {"checksum": checksum})
 
+    @logfire.instrument()
     async def update_entity(self, entity: EntityModel, schema: EntitySchema) -> EntityModel:
         """Update an entity's content and metadata."""
         logger.debug(
@@ -318,6 +332,7 @@ class EntityService(BaseService[EntityModel]):
 
         return entity
 
+    @logfire.instrument()
     async def delete_entity(self, permalink_or_id: str | int) -> bool:
         """Delete entity and its file."""
         logger.debug(f"Deleting entity: {permalink_or_id}")
@@ -351,6 +366,7 @@ class EntityService(BaseService[EntityModel]):
             logger.info(f"Entity not found: {permalink_or_id}")
             return True  # Already deleted
 
+    @logfire.instrument()
     async def get_by_permalink(self, permalink: str) -> EntityModel:
         """Get entity by type and name combination."""
         logger.debug(f"Getting entity by permalink: {permalink}")
@@ -359,20 +375,24 @@ class EntityService(BaseService[EntityModel]):
             raise EntityNotFoundError(f"Entity not found: {permalink}")
         return db_entity
 
+    @logfire.instrument()
     async def get_entities_by_id(self, ids: List[int]) -> Sequence[EntityModel]:
         """Get specific entities and their relationships."""
         logger.debug(f"Getting entities: {ids}")
         return await self.repository.find_by_ids(ids)
 
+    @logfire.instrument()
     async def get_entities_by_permalinks(self, permalinks: List[str]) -> Sequence[EntityModel]:
         """Get specific nodes and their relationships."""
         logger.debug(f"Getting entities permalinks: {permalinks}")
         return await self.repository.find_by_permalinks(permalinks)
 
+    @logfire.instrument()
     async def delete_entity_by_file_path(self, file_path: Union[str, Path]) -> None:
         """Delete entity by file path."""
         await self.repository.delete_by_file_path(str(file_path))
 
+    @logfire.instrument()
     async def create_entity_from_markdown(
         self, file_path: Path, markdown: EntityMarkdown
     ) -> EntityModel:
@@ -384,7 +404,9 @@ class EntityService(BaseService[EntityModel]):
         Uses UPSERT approach to handle permalink/file_path conflicts cleanly.
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
-        model = entity_model_from_markdown(file_path, markdown)
+        model = entity_model_from_markdown(
+            file_path, markdown, project_id=self.repository.project_id
+        )
 
         # Mark as incomplete because we still need to add relations
         model.checksum = None
@@ -396,6 +418,7 @@ class EntityService(BaseService[EntityModel]):
             logger.error(f"Failed to upsert entity for {file_path}: {e}")
             raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
+    @logfire.instrument()
     async def update_entity_and_observations(
         self, file_path: Path, markdown: EntityMarkdown
     ) -> EntityModel:
@@ -414,6 +437,7 @@ class EntityService(BaseService[EntityModel]):
         # add new observations
         observations = [
             Observation(
+                project_id=self.observation_repository.project_id,
                 entity_id=db_entity.id,
                 content=obs.content,
                 category=obs.category,
@@ -436,6 +460,7 @@ class EntityService(BaseService[EntityModel]):
             db_entity,
         )
 
+    @logfire.instrument()
     async def update_entity_relations(
         self,
         path: str,
@@ -480,6 +505,7 @@ class EntityService(BaseService[EntityModel]):
 
                 # Create the relation
                 relation = Relation(
+                    project_id=self.relation_repository.project_id,
                     from_id=db_entity.id,
                     to_id=target_id,
                     to_name=target_name,
@@ -507,6 +533,7 @@ class EntityService(BaseService[EntityModel]):
 
         return await self.repository.get_by_file_path(path)
 
+    @logfire.instrument()
     async def edit_entity(
         self,
         identifier: str,
@@ -564,6 +591,7 @@ class EntityService(BaseService[EntityModel]):
 
         return entity
 
+    @logfire.instrument()
     def apply_edit_operation(
         self,
         current_content: str,
@@ -616,6 +644,7 @@ class EntityService(BaseService[EntityModel]):
         else:
             raise ValueError(f"Unsupported operation: {operation}")
 
+    @logfire.instrument()
     def replace_section_content(
         self, current_content: str, section_header: str, new_content: str
     ) -> str:
@@ -735,6 +764,7 @@ class EntityService(BaseService[EntityModel]):
             return content + "\n" + current_content  # pragma: no cover
         return content + current_content  # pragma: no cover
 
+    @logfire.instrument()
     async def move_entity(
         self,
         identifier: str,

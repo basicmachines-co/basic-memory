@@ -142,21 +142,6 @@ async def test_null_pool_on_windows(tmp_path, monkeypatch):
         assert isinstance(engine.pool, NullPool)
 
 
-@pytest.mark.asyncio
-@pytest.mark.skipif(
-    __import__("os").name == "nt", reason="Non-Windows test - cannot mock POSIX paths on Windows"
-)
-async def test_regular_pool_on_non_windows(tmp_path):
-    """Test that regular pooling is used on non-Windows platforms."""
-    from basic_memory.db import engine_session_factory, DatabaseType
-    from sqlalchemy.pool import NullPool
-
-    db_path = tmp_path / "test_posix_pool.db"
-
-    with patch("basic_memory.db.os.name", "posix"):
-        async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (engine, _):
-            # Engine should NOT be using NullPool on non-Windows
-            assert not isinstance(engine.pool, NullPool)
 
 
 @pytest.mark.asyncio

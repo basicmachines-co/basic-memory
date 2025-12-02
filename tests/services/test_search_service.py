@@ -755,3 +755,182 @@ async def test_search_title_via_repository_direct(search_service, session_maker,
     # Should find the entity without throwing FTS5 syntax errors
     assert len(results) >= 1
     assert any(result.title == "Note (with parentheses)" for result in results)
+
+
+# Tests for duplicate observation permalink deduplication
+
+
+@pytest.mark.asyncio
+async def test_index_entity_with_duplicate_observations(
+    search_service, session_maker, test_project
+):
+    """Test that indexing an entity with duplicate observations doesn't cause unique constraint violations.
+
+    Two observations with the same category and content generate identical permalinks,
+    which would violate the unique constraint on the search_index table.
+    """
+    from basic_memory.repository import EntityRepository, ObservationRepository
+    from unittest.mock import AsyncMock
+    from datetime import datetime
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+
+    # Create entity
+    entity_data = {
+        "title": "Entity With Duplicate Observations",
+        "entity_type": "note",
+        "entity_metadata": {},
+        "content_type": "text/markdown",
+        "file_path": "test/duplicate-obs.md",
+        "permalink": "test/duplicate-obs",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Create duplicate observations - same category and content
+    duplicate_content = "This is a duplicated observation"
+    await obs_repo.create(
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    )
+    await obs_repo.create(
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    )
+
+    # Reload entity with observations (get_by_permalink eagerly loads observations)
+    entity = await entity_repo.get_by_permalink("test/duplicate-obs")
+
+    # Verify we have duplicate observations
+    assert len(entity.observations) == 2
+    assert entity.observations[0].permalink == entity.observations[1].permalink
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    # This should not raise a unique constraint violation
+    await search_service.index_entity(entity)
+
+    # Verify entity is searchable
+    results = await search_service.search(SearchQuery(text="Duplicate Observations"))
+    assert len(results) >= 1
+    assert any(r.title == "Entity With Duplicate Observations" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_index_entity_dedupes_observations_by_permalink(
+    search_service, session_maker, test_project
+):
+    """Test that only unique observation permalinks are indexed.
+
+    When an entity has observations with identical permalinks, only the first one
+    should be indexed to avoid unique constraint violations.
+    """
+    from basic_memory.repository import EntityRepository, ObservationRepository
+    from unittest.mock import AsyncMock
+    from datetime import datetime
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+
+    # Create entity
+    entity_data = {
+        "title": "Dedupe Test Entity",
+        "entity_type": "note",
+        "entity_metadata": {},
+        "content_type": "text/markdown",
+        "file_path": "test/dedupe-test.md",
+        "permalink": "test/dedupe-test",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Create three observations: two duplicates and one unique
+    duplicate_content = "Duplicate observation content"
+    unique_content = "Unique observation content"
+
+    await obs_repo.create(
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    )
+    await obs_repo.create(
+        {"entity_id": entity.id, "category": "note", "content": duplicate_content}
+    )
+    await obs_repo.create({"entity_id": entity.id, "category": "note", "content": unique_content})
+
+    # Reload entity with observations (get_by_permalink eagerly loads observations)
+    entity = await entity_repo.get_by_permalink("test/dedupe-test")
+    assert len(entity.observations) == 3
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    # Index the entity
+    await search_service.index_entity(entity)
+
+    # Search for the unique observation - should find it
+    results = await search_service.search(SearchQuery(text="Unique observation"))
+    assert len(results) >= 1
+
+    # Search for duplicate observation - should find it (only one indexed)
+    results = await search_service.search(SearchQuery(text="Duplicate observation"))
+    assert len(results) >= 1
+
+
+@pytest.mark.asyncio
+async def test_index_entity_multiple_categories_same_content(
+    search_service, session_maker, test_project
+):
+    """Test that observations with same content but different categories are not deduped.
+
+    The permalink includes the category, so observations with different categories
+    but same content should have different permalinks and both be indexed.
+    """
+    from basic_memory.repository import EntityRepository, ObservationRepository
+    from unittest.mock import AsyncMock
+    from datetime import datetime
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
+
+    # Create entity
+    entity_data = {
+        "title": "Multi Category Entity",
+        "entity_type": "note",
+        "entity_metadata": {},
+        "content_type": "text/markdown",
+        "file_path": "test/multi-category.md",
+        "permalink": "test/multi-category",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+
+    entity = await entity_repo.create(entity_data)
+
+    # Create observations with same content but different categories
+    shared_content = "Shared content across categories"
+    await obs_repo.create({"entity_id": entity.id, "category": "tech", "content": shared_content})
+    await obs_repo.create({"entity_id": entity.id, "category": "design", "content": shared_content})
+
+    # Reload entity with observations (get_by_permalink eagerly loads observations)
+    entity = await entity_repo.get_by_permalink("test/multi-category")
+    assert len(entity.observations) == 2
+
+    # Verify permalinks are different due to different categories
+    permalinks = {obs.permalink for obs in entity.observations}
+    assert len(permalinks) == 2  # Should be 2 unique permalinks
+
+    # Mock file service to avoid file I/O
+    search_service.file_service.read_entity_content = AsyncMock(return_value="")
+
+    # Index the entity - both should be indexed since permalinks differ
+    await search_service.index_entity(entity)
+
+    # Search for the shared content - should find both observations
+    results = await search_service.search(SearchQuery(text="Shared content"))
+    assert len(results) >= 2

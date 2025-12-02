@@ -100,6 +100,23 @@ class BasicMemoryConfig(BaseSettings):
         description="Database connection URL. For Postgres, use postgresql+asyncpg://user:pass@host:port/db. If not set, SQLite will use default path.",
     )
 
+    # Database connection pool configuration (Postgres only)
+    db_pool_size: int = Field(
+        default=20,
+        description="Number of connections to keep in the pool (Postgres only)",
+        gt=0,
+    )
+    db_pool_overflow: int = Field(
+        default=40,
+        description="Max additional connections beyond pool_size under load (Postgres only)",
+        gt=0,
+    )
+    db_pool_recycle: int = Field(
+        default=180,
+        description="Recycle connections after N seconds to prevent stale connections. Default 180s works well with Neon's ~5 minute scale-to-zero (Postgres only)",
+        gt=0,
+    )
+
     # Watch service configuration
     sync_delay: int = Field(
         default=1000, description="Milliseconds to wait after changes before syncing", gt=0

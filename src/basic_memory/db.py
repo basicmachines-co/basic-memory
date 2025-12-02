@@ -190,21 +190,37 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
     return engine
 
 
-def _create_postgres_engine(db_url: str) -> AsyncEngine:
+def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngine:
     """Create Postgres async engine with appropriate configuration.
 
     Args:
         db_url: Postgres connection URL (postgresql+asyncpg://...)
+        config: BasicMemoryConfig with pool settings
 
     Returns:
         Configured async engine for Postgres
     """
-    # Postgres with asyncpg - use standard async connection
+    # Use NullPool connection issues.
+    # Assume connection pooler like PgBouncer handles connection pooling.
     engine = create_async_engine(
         db_url,
         echo=False,
-        pool_pre_ping=True,  # Verify connections before using them
+        poolclass=NullPool,  # No pooling - fresh connection per request
+        connect_args={
+            # Disable statement cache to avoid issues with prepared statements on reconnect
+            "statement_cache_size": 0,
+            # Allow 30s for commands (Neon cold start can take 2-5s, sometimes longer)
+            "command_timeout": 30,
+            # Allow 30s for initial connection (Neon wake-up time)
+            "timeout": 30,
+            "server_settings": {
+                "application_name": "basic-memory",
+                # Statement timeout for queries (30s to allow for cold start)
+                "statement_timeout": "30s",
+            },
+        },
     )
+    logger.debug("Created Postgres engine with NullPool (no connection pooling)")
 
     return engine
 
@@ -228,7 +244,7 @@ def _create_engine_and_session(
     # Delegate to backend-specific engine creation
     # Check explicit POSTGRES type first, then config setting
     if db_type == DatabaseType.POSTGRES or config.database_backend == DatabaseBackend.POSTGRES:
-        engine = _create_postgres_engine(db_url)
+        engine = _create_postgres_engine(db_url, config)
     else:
         engine = _create_sqlite_engine(db_url, db_type)
 

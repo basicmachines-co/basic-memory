@@ -100,8 +100,6 @@ app.include_router(v2_project, prefix="/v2")
 app.include_router(project.project_resource_router)
 app.include_router(management.router)
 
-# Auth routes are handled by FastMCP automatically when auth is enabled
-
 
 @app.exception_handler(Exception)
 async def exception_handler(request, exc):  # pragma: no cover

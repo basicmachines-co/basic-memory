@@ -4,6 +4,7 @@ from collections import OrderedDict
 
 from frontmatter import Post
 from loguru import logger
+import logfire
 
 from basic_memory import file_utils
 from basic_memory.file_utils import dump_frontmatter
@@ -39,6 +40,7 @@ class MarkdownProcessor:
         """Initialize processor with base path and parser."""
         self.entity_parser = entity_parser
 
+    @logfire.instrument()
     async def read_file(self, path: Path) -> EntityMarkdown:
         """Read and parse file into EntityMarkdown schema.
 
@@ -47,6 +49,7 @@ class MarkdownProcessor:
         """
         return await self.entity_parser.parse_file(path)
 
+    @logfire.instrument()
     async def write_file(
         self,
         path: Path,
@@ -124,6 +127,7 @@ class MarkdownProcessor:
         await file_utils.write_file_atomic(path, final_content)
         return await file_utils.compute_checksum(final_content)
 
+    @logfire.instrument()
     def format_observations(self, observations: list[Observation]) -> str:
         """Format observations section in standard way.
 
@@ -132,6 +136,7 @@ class MarkdownProcessor:
         lines = [f"{obs}" for obs in observations]
         return "\n".join(lines) + "\n"
 
+    @logfire.instrument()
     def format_relations(self, relations: list[Relation]) -> str:
         """Format relations section in standard way.
 

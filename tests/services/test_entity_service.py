@@ -432,14 +432,14 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
     assert entity.observations[0].context == "Reduces merge conflicts"
 
     assert len(entity.relations) == 4
-    assert entity.relations[0].relation_type == "links to"
+    assert entity.relations[0].relation_type == "links_to"
     assert entity.relations[0].to_name == "Git"
-    assert entity.relations[1].relation_type == "links to"
+    assert entity.relations[1].relation_type == "links_to"
     assert entity.relations[1].to_name == "Trunk Based Development"
     assert entity.relations[2].relation_type == "implements"
     assert entity.relations[2].to_name == "Branch Strategy"
     assert entity.relations[2].context == "Our standard workflow"
-    assert entity.relations[3].relation_type == "links to"
+    assert entity.relations[3].relation_type == "links_to"
     assert entity.relations[3].to_name == "Git Cheat Sheet"
 
     # Verify file has new content but preserved metadata
@@ -557,14 +557,14 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
     assert entity.observations[0].context == "Reduces merge conflicts"
 
     assert len(entity.relations) == 4
-    assert entity.relations[0].relation_type == "links to"
+    assert entity.relations[0].relation_type == "links_to"
     assert entity.relations[0].to_name == "Git"
-    assert entity.relations[1].relation_type == "links to"
+    assert entity.relations[1].relation_type == "links_to"
     assert entity.relations[1].to_name == "Trunk Based Development"
     assert entity.relations[2].relation_type == "implements"
     assert entity.relations[2].to_name == "Branch Strategy"
     assert entity.relations[2].context == "Our standard workflow"
-    assert entity.relations[3].relation_type == "links to"
+    assert entity.relations[3].relation_type == "links_to"
     assert entity.relations[3].to_name == "Git Cheat Sheet"
 
     # Verify file has new content but preserved metadata
@@ -1772,7 +1772,7 @@ async def test_move_entity_with_complex_observations(
     # Check relations
     relation_types = {rel.relation_type for rel in moved_entity.relations}
     assert "implements" in relation_types
-    assert "links to" in relation_types
+    assert "links_to" in relation_types
 
     relation_targets = {rel.to_name for rel in moved_entity.relations}
     assert "Branch Strategy" in relation_targets

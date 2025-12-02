@@ -25,6 +25,17 @@ from datetime import datetime
 router = APIRouter(prefix="/resource", tags=["resources"])
 
 
+def _mtime_to_datetime(entity: EntityModel) -> datetime:
+    """Convert entity mtime (file modification time) to datetime.
+
+    Returns the file's actual modification time, falling back to updated_at
+    if mtime is not available.
+    """
+    if entity.mtime:
+        return datetime.fromtimestamp(entity.mtime).astimezone()
+    return entity.updated_at
+
+
 def get_entity_ids(item: SearchIndexRow) -> set[int]:
     match item.type:
         case SearchItemType.ENTITY:
@@ -97,7 +108,7 @@ async def get_resource_content(
             # Read content for each entity
             content = await file_service.read_entity_content(result)
             memory_url = normalize_memory_url(result.permalink)
-            modified_date = result.updated_at.isoformat()
+            modified_date = _mtime_to_datetime(result).isoformat()
             checksum = result.checksum[:8] if result.checksum else ""
 
             # Prepare the delimited content

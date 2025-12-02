@@ -50,16 +50,18 @@ async def target_entity(session_maker, test_project: Project):
 
 
 @pytest_asyncio.fixture
-async def test_relations(session_maker, source_entity, target_entity):
+async def test_relations(session_maker, source_entity, target_entity, test_project: Project):
     """Create test relations."""
     relations = [
         Relation(
+            project_id=test_project.id,
             from_id=source_entity.id,
             to_id=target_entity.id,
             to_name=target_entity.title,
             relation_type="connects_to",
         ),
         Relation(
+            project_id=test_project.id,
             from_id=source_entity.id,
             to_id=target_entity.id,
             to_name=target_entity.title,
@@ -349,3 +351,156 @@ async def test_delete_nonexistent_relation(relation_repository):
     """Test deleting a relation that doesn't exist."""
     result = await relation_repository.delete_by_fields(relation_type="nonexistent")
     assert result is False
+
+
+# -------------------------------------------------------------------------
+# Tests for add_all_ignore_duplicates
+# -------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_all_ignore_duplicates_basic(
+    relation_repository: RelationRepository, sample_entity: Entity, related_entity: Entity
+):
+    """Test bulk inserting relations with ON CONFLICT DO NOTHING."""
+    relations = [
+        Relation(
+            from_id=sample_entity.id,
+            to_id=related_entity.id,
+            to_name=related_entity.title,
+            relation_type="links_to",
+        ),
+        Relation(
+            from_id=sample_entity.id,
+            to_id=related_entity.id,
+            to_name=related_entity.title,
+            relation_type="references",
+        ),
+    ]
+
+    inserted = await relation_repository.add_all_ignore_duplicates(relations)
+
+    # Both should be inserted
+    assert inserted == 2
+
+    # Verify they exist
+    found = await relation_repository.find_by_entities(sample_entity.id, related_entity.id)
+    assert len(found) == 2
+    relation_types = {r.relation_type for r in found}
+    assert relation_types == {"links_to", "references"}
+
+
+@pytest.mark.asyncio
+async def test_add_all_ignore_duplicates_skips_duplicates(
+    relation_repository: RelationRepository, sample_entity: Entity, related_entity: Entity
+):
+    """Test that duplicate relations are silently ignored."""
+    # Same relation appearing multiple times (common when same [[link]] appears twice in doc)
+    relations = [
+        Relation(
+            from_id=sample_entity.id,
+            to_id=None,  # Unresolved
+            to_name="Some Target",
+            relation_type="links_to",
+        ),
+        Relation(
+            from_id=sample_entity.id,
+            to_id=None,
+            to_name="Some Target",  # Duplicate!
+            relation_type="links_to",
+        ),
+        Relation(
+            from_id=sample_entity.id,
+            to_id=None,
+            to_name="Some Target",  # Triple duplicate!
+            relation_type="links_to",
+        ),
+    ]
+
+    inserted = await relation_repository.add_all_ignore_duplicates(relations)
+
+    # Only 1 should be inserted (duplicates ignored)
+    assert inserted == 1
+
+    # Verify only one exists
+    all_relations = await relation_repository.find_all()
+    matching = [r for r in all_relations if r.to_name == "Some Target"]
+    assert len(matching) == 1
+
+
+@pytest.mark.asyncio
+async def test_add_all_ignore_duplicates_empty_list(relation_repository: RelationRepository):
+    """Test with empty list returns 0."""
+    inserted = await relation_repository.add_all_ignore_duplicates([])
+    assert inserted == 0
+
+
+@pytest.mark.asyncio
+async def test_add_all_ignore_duplicates_mixed(
+    relation_repository: RelationRepository, sample_entity: Entity, related_entity: Entity
+):
+    """Test with mix of new and duplicate relations."""
+    # First, insert one relation
+    first_relation = Relation(
+        from_id=sample_entity.id,
+        to_id=None,
+        to_name="Existing Target",
+        relation_type="links_to",
+    )
+    await relation_repository.add_all_ignore_duplicates([first_relation])
+
+    # Now try to insert a mix of new and duplicate
+    relations = [
+        Relation(
+            from_id=sample_entity.id,
+            to_id=None,
+            to_name="Existing Target",  # Duplicate of first_relation
+            relation_type="links_to",
+        ),
+        Relation(
+            from_id=sample_entity.id,
+            to_id=None,
+            to_name="New Target 1",  # New
+            relation_type="links_to",
+        ),
+        Relation(
+            from_id=sample_entity.id,
+            to_id=None,
+            to_name="New Target 2",  # New
+            relation_type="references",
+        ),
+    ]
+
+    inserted = await relation_repository.add_all_ignore_duplicates(relations)
+
+    # Only 2 new ones should be inserted
+    assert inserted == 2
+
+    # Verify total count
+    all_relations = await relation_repository.find_all()
+    from_sample = [r for r in all_relations if r.from_id == sample_entity.id]
+    assert len(from_sample) == 3  # 1 existing + 2 new
+
+
+@pytest.mark.asyncio
+async def test_add_all_ignore_duplicates_with_context(
+    relation_repository: RelationRepository, sample_entity: Entity, related_entity: Entity
+):
+    """Test that context field is properly inserted."""
+    relations = [
+        Relation(
+            from_id=sample_entity.id,
+            to_id=related_entity.id,
+            to_name=related_entity.title,
+            relation_type="links_to",
+            context="some context here",
+        ),
+    ]
+
+    inserted = await relation_repository.add_all_ignore_duplicates(relations)
+    assert inserted == 1
+
+    # Verify context was saved
+    found = await relation_repository.find_by_entities(sample_entity.id, related_entity.id)
+    assert len(found) == 1
+    assert found[0].context == "some context here"

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import logfire
 from loguru import logger
 from sqlalchemy import Executable, Result, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -102,6 +103,7 @@ class SearchRepositoryBase(ABC):
         """
         pass
 
+    @logfire.instrument()
     async def index_item(self, search_index_row: SearchIndexRow) -> None:
         """Index or update a single item.
 
@@ -145,6 +147,7 @@ class SearchRepositoryBase(ABC):
             logger.debug(f"indexed row {search_index_row}")
             await session.commit()
 
+    @logfire.instrument()
     async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
         """Index multiple items in a single batch operation.
 
@@ -192,6 +195,7 @@ class SearchRepositoryBase(ABC):
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
             await session.commit()
 
+    @logfire.instrument()
     async def delete_by_entity_id(self, entity_id: int) -> None:
         """Delete all search index entries for an entity.
 
@@ -206,6 +210,7 @@ class SearchRepositoryBase(ABC):
             )
             await session.commit()
 
+    @logfire.instrument()
     async def delete_by_permalink(self, permalink: str) -> None:
         """Delete a search index entry by permalink.
 
@@ -220,6 +225,7 @@ class SearchRepositoryBase(ABC):
             )
             await session.commit()
 
+    @logfire.instrument()
     async def execute_query(
         self,
         query: Executable,

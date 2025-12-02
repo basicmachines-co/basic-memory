@@ -1026,16 +1026,27 @@ class SyncService:
                             "to_name": resolved_entity.title,
                         },
                     )
-                except IntegrityError:  # pragma: no cover
+                    # update search index only on successful resolution
+                    await self.search_service.index_entity(resolved_entity)
+                except IntegrityError:
+                    # IntegrityError means a relation with this (from_id, to_id, relation_type)
+                    # already exists. The UPDATE was rolled back, so our unresolved relation
+                    # (to_id=NULL) still exists in the database. We delete it because:
+                    # 1. It's redundant - a resolved relation already captures this relationship
+                    # 2. If we don't delete it, future syncs will try to resolve it again
+                    #    and get the same IntegrityError
                     logger.debug(
-                        "Ignoring duplicate relation "
+                        "Deleting duplicate unresolved relation "
                         f"relation_id={relation.id} "
                         f"from_id={relation.from_id} "
-                        f"to_name={relation.to_name}"
+                        f"to_name={relation.to_name} "
+                        f"resolved_to_id={resolved_entity.id}"
                     )
-
-                # update search index
-                await self.search_service.index_entity(resolved_entity)
+                    try:
+                        await self.relation_repository.delete(relation.id)
+                    except Exception as e:
+                        # Log but don't fail - the relation may have been deleted already
+                        logger.debug(f"Could not delete duplicate relation {relation.id}: {e}")
 
     async def _quick_count_files(self, directory: Path) -> int:
         """Fast file count using find command.

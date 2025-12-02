@@ -18,10 +18,12 @@ async def entity_with_observations(session_maker, sample_entity):
     async with db.scoped_session(session_maker) as session:
         observations = [
             Observation(
+                project_id=sample_entity.project_id,
                 entity_id=sample_entity.id,
                 content="First observation",
             ),
             Observation(
+                project_id=sample_entity.project_id,
                 entity_id=sample_entity.id,
                 content="Second observation",
             ),
@@ -59,6 +61,7 @@ async def related_results(session_maker, test_project: Project):
         await session.flush()
 
         relation = Relation(
+            project_id=test_project.id,
             from_id=source.id,
             to_id=target.id,
             to_name=target.title,
@@ -174,6 +177,55 @@ async def test_update_entity(entity_repository: EntityRepository, sample_entity:
         result = await session.execute(stmt)
         db_entity = result.scalar_one()
         assert db_entity.title == "Updated title"
+
+
+@pytest.mark.asyncio
+async def test_update_entity_returns_with_relations_and_observations(
+    entity_repository: EntityRepository, entity_with_observations, test_project: Project
+):
+    """Test that update() returns entity with observations and relations eagerly loaded."""
+    entity = entity_with_observations
+
+    # Create a target entity and relation
+    async with db.scoped_session(entity_repository.session_maker) as session:
+        target = Entity(
+            project_id=test_project.id,
+            title="target",
+            entity_type="test",
+            permalink="target/target",
+            file_path="target/target.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(target)
+        await session.flush()
+
+        relation = Relation(
+            project_id=test_project.id,
+            from_id=entity.id,
+            to_id=target.id,
+            to_name=target.title,
+            relation_type="connects_to",
+        )
+        session.add(relation)
+
+    # Now update the entity
+    updated = await entity_repository.update(entity.id, {"title": "Updated with relations"})
+
+    # Verify returned entity has observations and relations accessible
+    # (would raise DetachedInstanceError if not eagerly loaded)
+    assert updated is not None
+    assert updated.title == "Updated with relations"
+
+    # Access observations - should NOT raise DetachedInstanceError
+    assert len(updated.observations) == 2
+    assert updated.observations[0].content in ["First observation", "Second observation"]
+
+    # Access relations - should NOT raise DetachedInstanceError
+    assert len(updated.relations) == 1
+    assert updated.relations[0].relation_type == "connects_to"
+    assert updated.relations[0].to_name == "target"
 
 
 @pytest.mark.asyncio
@@ -737,6 +789,7 @@ async def test_get_all_file_paths_performance(entity_repository: EntityRepositor
 
         # Add observations to entity1
         observation = Observation(
+            project_id=entity_repository.project_id,
             entity_id=entity1.id,
             content="Test observation",
             category="note",
@@ -745,6 +798,7 @@ async def test_get_all_file_paths_performance(entity_repository: EntityRepositor
 
         # Add relation between entities
         relation = Relation(
+            project_id=entity_repository.project_id,
             from_id=entity1.id,
             to_id=entity2.id,
             to_name=entity2.title,
@@ -810,3 +864,191 @@ async def test_get_all_file_paths_project_isolation(
     # Should only include files from project 1
     assert len(file_paths) == 1
     assert file_paths == ["test/file1.md"]
+
+
+# -------------------------------------------------------------------------
+# Tests for lightweight permalink resolution methods
+# -------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_permalink_exists(entity_repository: EntityRepository, sample_entity: Entity):
+    """Test checking if a permalink exists without loading full entity."""
+    # Existing permalink should return True
+    assert await entity_repository.permalink_exists(sample_entity.permalink) is True
+
+    # Non-existent permalink should return False
+    assert await entity_repository.permalink_exists("nonexistent/permalink") is False
+
+
+@pytest.mark.asyncio
+async def test_permalink_exists_project_isolation(
+    entity_repository: EntityRepository, session_maker
+):
+    """Test that permalink_exists respects project isolation."""
+    async with db.scoped_session(session_maker) as session:
+        # Create entity in repository's project
+        entity1 = Entity(
+            project_id=entity_repository.project_id,
+            title="Project 1 Entity",
+            entity_type="test",
+            permalink="test/entity1",
+            file_path="test/entity1.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity1)
+
+        # Create a second project with same permalink
+        project2 = Project(name="other-project", path="/tmp/other")
+        session.add(project2)
+        await session.flush()
+
+        entity2 = Entity(
+            project_id=project2.id,
+            title="Project 2 Entity",
+            entity_type="test",
+            permalink="test/entity2",
+            file_path="test/entity2.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(entity2)
+
+    # Should find entity1's permalink in project 1
+    assert await entity_repository.permalink_exists("test/entity1") is True
+
+    # Should NOT find entity2's permalink (it's in project 2)
+    assert await entity_repository.permalink_exists("test/entity2") is False
+
+
+@pytest.mark.asyncio
+async def test_get_file_path_for_permalink(
+    entity_repository: EntityRepository, sample_entity: Entity
+):
+    """Test getting file_path for a permalink without loading full entity."""
+    # Existing permalink should return file_path
+    file_path = await entity_repository.get_file_path_for_permalink(sample_entity.permalink)
+    assert file_path == sample_entity.file_path
+
+    # Non-existent permalink should return None
+    result = await entity_repository.get_file_path_for_permalink("nonexistent/permalink")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_permalink_for_file_path(
+    entity_repository: EntityRepository, sample_entity: Entity
+):
+    """Test getting permalink for a file_path without loading full entity."""
+    # Existing file_path should return permalink
+    permalink = await entity_repository.get_permalink_for_file_path(sample_entity.file_path)
+    assert permalink == sample_entity.permalink
+
+    # Non-existent file_path should return None
+    result = await entity_repository.get_permalink_for_file_path("nonexistent/path.md")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_all_permalinks(entity_repository: EntityRepository, session_maker):
+    """Test getting all permalinks without loading full entities."""
+    async with db.scoped_session(session_maker) as session:
+        entity1 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 1",
+            entity_type="test",
+            permalink="test/entity1",
+            file_path="test/entity1.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        entity2 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 2",
+            entity_type="test",
+            permalink="test/entity2",
+            file_path="test/entity2.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add_all([entity1, entity2])
+
+    permalinks = await entity_repository.get_all_permalinks()
+
+    assert len(permalinks) == 2
+    assert set(permalinks) == {"test/entity1", "test/entity2"}
+
+    # Results should be strings, not entities
+    for permalink in permalinks:
+        assert isinstance(permalink, str)
+
+
+@pytest.mark.asyncio
+async def test_get_permalink_to_file_path_map(entity_repository: EntityRepository, session_maker):
+    """Test getting permalink -> file_path mapping for bulk operations."""
+    async with db.scoped_session(session_maker) as session:
+        entity1 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 1",
+            entity_type="test",
+            permalink="test/entity1",
+            file_path="test/entity1.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        entity2 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 2",
+            entity_type="test",
+            permalink="test/entity2",
+            file_path="test/entity2.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add_all([entity1, entity2])
+
+    mapping = await entity_repository.get_permalink_to_file_path_map()
+
+    assert len(mapping) == 2
+    assert mapping["test/entity1"] == "test/entity1.md"
+    assert mapping["test/entity2"] == "test/entity2.md"
+
+
+@pytest.mark.asyncio
+async def test_get_file_path_to_permalink_map(entity_repository: EntityRepository, session_maker):
+    """Test getting file_path -> permalink mapping for bulk operations."""
+    async with db.scoped_session(session_maker) as session:
+        entity1 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 1",
+            entity_type="test",
+            permalink="test/entity1",
+            file_path="test/entity1.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        entity2 = Entity(
+            project_id=entity_repository.project_id,
+            title="Entity 2",
+            entity_type="test",
+            permalink="test/entity2",
+            file_path="test/entity2.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add_all([entity1, entity2])
+
+    mapping = await entity_repository.get_file_path_to_permalink_map()
+
+    assert len(mapping) == 2
+    assert mapping["test/entity1.md"] == "test/entity1"
+    assert mapping["test/entity2.md"] == "test/entity2"

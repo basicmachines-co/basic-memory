@@ -4,6 +4,7 @@ import ast
 from datetime import datetime
 from typing import List, Optional, Set
 
+import logfire
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
@@ -14,6 +15,21 @@ from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services import FileService
+
+# Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
+# We use 6000 characters to leave headroom for other indexed columns and overhead.
+MAX_CONTENT_STEMS_SIZE = 6000
+
+
+def _mtime_to_datetime(entity: Entity) -> datetime:
+    """Convert entity mtime (file modification time) to datetime.
+
+    Returns the file's actual modification time, falling back to updated_at
+    if mtime is not available.
+    """
+    if entity.mtime:
+        return datetime.fromtimestamp(entity.mtime).astimezone()
+    return entity.updated_at
 
 
 class SearchService:
@@ -35,10 +51,12 @@ class SearchService:
         self.entity_repository = entity_repository
         self.file_service = file_service
 
+    @logfire.instrument()
     async def init_search_index(self):
         """Create FTS5 virtual table if it doesn't exist."""
         await self.repository.init_search_index()
 
+    @logfire.instrument()
     async def reindex_all(self, background_tasks: Optional[BackgroundTasks] = None) -> None:
         """Reindex all content from database."""
 
@@ -55,6 +73,7 @@ class SearchService:
 
         logger.info("Reindex complete")
 
+    @logfire.instrument()
     async def search(self, query: SearchQuery, limit=10, offset=0) -> List[SearchIndexRow]:
         """Search across all indexed content.
 
@@ -152,6 +171,7 @@ class SearchService:
 
         return []  # pragma: no cover
 
+    @logfire.instrument()
     async def index_entity(
         self,
         entity: Entity,
@@ -163,6 +183,7 @@ class SearchService:
         else:
             await self.index_entity_data(entity, content)
 
+    @logfire.instrument()
     async def index_entity_data(
         self,
         entity: Entity,
@@ -176,6 +197,7 @@ class SearchService:
             entity, content
         ) if entity.is_markdown else await self.index_entity_file(entity)
 
+    @logfire.instrument()
     async def index_entity_file(
         self,
         entity: Entity,
@@ -193,11 +215,12 @@ class SearchService:
                     "entity_type": entity.entity_type,
                 },
                 created_at=entity.created_at,
-                updated_at=entity.updated_at,
+                updated_at=_mtime_to_datetime(entity),
                 project_id=entity.project_id,
             )
         )
 
+    @logfire.instrument()
     async def index_entity_markdown(
         self,
         entity: Entity,
@@ -256,6 +279,10 @@ class SearchService:
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
+        # Truncate to stay under Postgres's 8KB index row limit
+        if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:
+            entity_content_stems = entity_content_stems[:MAX_CONTENT_STEMS_SIZE]
+
         # Add entity row
         rows_to_index.append(
             SearchIndexRow(
@@ -271,17 +298,28 @@ class SearchService:
                     "entity_type": entity.entity_type,
                 },
                 created_at=entity.created_at,
-                updated_at=entity.updated_at,
+                updated_at=_mtime_to_datetime(entity),
                 project_id=entity.project_id,
             )
         )
 
-        # Add observation rows
+        # Add observation rows - dedupe by permalink to avoid unique constraint violations
+        # Two observations with same entity/category/content generate identical permalinks
+        seen_permalinks: set[str] = {entity.permalink} if entity.permalink else set()
         for obs in entity.observations:
+            obs_permalink = obs.permalink
+            if obs_permalink in seen_permalinks:
+                logger.debug(f"Skipping duplicate observation permalink: {obs_permalink}")
+                continue
+            seen_permalinks.add(obs_permalink)
+
             # Index with parent entity's file path since that's where it's defined
             obs_content_stems = "\n".join(
                 p for p in self._generate_variants(obs.content) if p and p.strip()
             )
+            # Truncate to stay under Postgres's 8KB index row limit
+            if len(obs_content_stems) > MAX_CONTENT_STEMS_SIZE:
+                obs_content_stems = obs_content_stems[:MAX_CONTENT_STEMS_SIZE]
             rows_to_index.append(
                 SearchIndexRow(
                     id=obs.id,
@@ -289,7 +327,7 @@ class SearchService:
                     title=f"{obs.category}: {obs.content[:100]}...",
                     content_stems=obs_content_stems,
                     content_snippet=obs.content,
-                    permalink=obs.permalink,
+                    permalink=obs_permalink,
                     file_path=entity.file_path,
                     category=obs.category,
                     entity_id=entity.id,
@@ -297,7 +335,7 @@ class SearchService:
                         "tags": obs.tags,
                     },
                     created_at=entity.created_at,
-                    updated_at=entity.updated_at,
+                    updated_at=_mtime_to_datetime(entity),
                     project_id=entity.project_id,
                 )
             )
@@ -327,7 +365,7 @@ class SearchService:
                     to_id=rel.to_id,
                     relation_type=rel.relation_type,
                     created_at=entity.created_at,
-                    updated_at=entity.updated_at,
+                    updated_at=_mtime_to_datetime(entity),
                     project_id=entity.project_id,
                 )
             )
@@ -335,14 +373,17 @@ class SearchService:
         # Batch insert all rows at once
         await self.repository.bulk_index_items(rows_to_index)
 
+    @logfire.instrument()
     async def delete_by_permalink(self, permalink: str):
         """Delete an item from the search index."""
         await self.repository.delete_by_permalink(permalink)
 
+    @logfire.instrument()
     async def delete_by_entity_id(self, entity_id: int):
         """Delete an item from the search index."""
         await self.repository.delete_by_entity_id(entity_id)
 
+    @logfire.instrument()
     async def handle_delete(self, entity: Entity):
         """Handle complete entity deletion from search index including observations and relations.
 

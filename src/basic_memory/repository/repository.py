@@ -2,6 +2,7 @@
 
 from typing import Type, Optional, Any, Sequence, TypeVar, List, Dict
 
+import logfire
 from loguru import logger
 from sqlalchemy import (
     select,
@@ -84,6 +85,7 @@ class Repository[T: Base]:
         result = await session.execute(query)
         return result.scalars().one_or_none()
 
+    @logfire.instrument()
     async def select_by_ids(self, session: AsyncSession, ids: List[int]) -> Sequence[T]:
         """Select multiple entities by IDs using an existing session."""
         query = (
@@ -95,6 +97,7 @@ class Repository[T: Base]:
         result = await session.execute(query)
         return result.scalars().all()
 
+    @logfire.instrument()
     async def add(self, model: T) -> T:
         """
         Add a model to the repository. This will also add related objects
@@ -121,6 +124,7 @@ class Repository[T: Base]:
                 )
             return found
 
+    @logfire.instrument()
     async def add_all(self, models: List[T]) -> Sequence[T]:
         """
         Add a list of models to the repository. This will also add related objects
@@ -152,6 +156,7 @@ class Repository[T: Base]:
         # Add project filter if applicable
         return self._add_project_filter(query)
 
+    @logfire.instrument()
     async def find_all(
         self, skip: int = 0, limit: Optional[int] = None, use_load_options: bool = True
     ) -> Sequence[T]:
@@ -183,6 +188,7 @@ class Repository[T: Base]:
             logger.debug(f"Found {len(items)} {self.Model.__name__} records")
             return items
 
+    @logfire.instrument()
     async def find_by_id(self, entity_id: int) -> Optional[T]:
         """Fetch an entity by its unique identifier."""
         logger.debug(f"Finding {self.Model.__name__} by ID: {entity_id}")
@@ -190,6 +196,7 @@ class Repository[T: Base]:
         async with db.scoped_session(self.session_maker) as session:
             return await self.select_by_id(session, entity_id)
 
+    @logfire.instrument()
     async def find_by_ids(self, ids: List[int]) -> Sequence[T]:
         """Fetch multiple entities by their identifiers in a single query."""
         logger.debug(f"Finding {self.Model.__name__} by IDs: {ids}")
@@ -197,6 +204,7 @@ class Repository[T: Base]:
         async with db.scoped_session(self.session_maker) as session:
             return await self.select_by_ids(session, ids)
 
+    @logfire.instrument()
     async def find_one(self, query: Select[tuple[T]]) -> Optional[T]:
         """Execute a query and retrieve a single record."""
         # add in load options
@@ -210,6 +218,7 @@ class Repository[T: Base]:
             logger.trace(f"No {self.Model.__name__} found")
         return entity
 
+    @logfire.instrument()
     async def create(self, data: dict) -> T:
         """Create a new record from a model instance."""
         logger.debug(f"Creating {self.Model.__name__} from entity_data: {data}")
@@ -241,6 +250,7 @@ class Repository[T: Base]:
                 )
             return return_instance
 
+    @logfire.instrument()
     async def create_all(self, data_list: List[dict]) -> Sequence[T]:
         """Create multiple records in a single transaction."""
         logger.debug(f"Bulk creating {len(data_list)} {self.Model.__name__} instances")
@@ -266,6 +276,7 @@ class Repository[T: Base]:
 
             return await self.select_by_ids(session, [model.id for model in model_list])  # pyright: ignore [reportAttributeAccessIssue]
 
+    @logfire.instrument()
     async def update(self, entity_id: int, entity_data: dict | T) -> Optional[T]:
         """Update an entity with the given data."""
         logger.debug(f"Updating {self.Model.__name__} {entity_id} with data: {entity_data}")
@@ -295,6 +306,7 @@ class Repository[T: Base]:
                 logger.debug(f"No {self.Model.__name__} found to update: {entity_id}")
                 return None
 
+    @logfire.instrument()
     async def delete(self, entity_id: int) -> bool:
         """Delete an entity from the database."""
         logger.debug(f"Deleting {self.Model.__name__}: {entity_id}")
@@ -312,6 +324,7 @@ class Repository[T: Base]:
                 logger.debug(f"No {self.Model.__name__} found to delete: {entity_id}")
                 return False
 
+    @logfire.instrument()
     async def delete_by_ids(self, ids: List[int]) -> int:
         """Delete records matching given IDs."""
         logger.debug(f"Deleting {self.Model.__name__} by ids: {ids}")
@@ -327,6 +340,7 @@ class Repository[T: Base]:
             logger.debug(f"Deleted {result.rowcount} records")
             return result.rowcount
 
+    @logfire.instrument()
     async def delete_by_fields(self, **filters: Any) -> bool:
         """Delete records matching given field values."""
         logger.debug(f"Deleting {self.Model.__name__} by fields: {filters}")
@@ -343,6 +357,7 @@ class Repository[T: Base]:
             logger.debug(f"Deleted {result.rowcount} records")
             return deleted
 
+    @logfire.instrument()
     async def count(self, query: Executable | None = None) -> int:
         """Count entities in the database table."""
         async with db.scoped_session(self.session_maker) as session:
@@ -364,6 +379,7 @@ class Repository[T: Base]:
             logger.debug(f"Counted {count} {self.Model.__name__} records")
             return count
 
+    @logfire.instrument()
     async def execute_query(
         self,
         query: Executable,

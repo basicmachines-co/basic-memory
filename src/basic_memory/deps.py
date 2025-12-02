@@ -368,11 +368,10 @@ MarkdownProcessorV2Dep = Annotated[MarkdownProcessor, Depends(get_markdown_proce
 async def get_file_service(
     project_config: ProjectConfigDep, markdown_processor: MarkdownProcessorDep
 ) -> FileService:
-    logger.debug(
-        f"Creating FileService for project: {project_config.name}, base_path: {project_config.home}"
-    )
     file_service = FileService(project_config.home, markdown_processor)
-    logger.debug(f"Created FileService for project: {file_service} ")
+    logger.debug(
+        f"Created FileService for project: {project_config.name}, base_path: {project_config.home} "
+    )
     return file_service
 
 
@@ -382,11 +381,10 @@ FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 async def get_file_service_v2(
     project_config: ProjectConfigV2Dep, markdown_processor: MarkdownProcessorV2Dep
 ) -> FileService:
-    logger.debug(
-        f"Creating FileService for project: {project_config.name}, base_path: {project_config.home}"
-    )
     file_service = FileService(project_config.home, markdown_processor)
-    logger.debug(f"Created FileService for project: {file_service} ")
+    logger.debug(
+        f"Created FileService for project: {project_config.name}, base_path: {project_config.home}"
+    )
     return file_service
 
 

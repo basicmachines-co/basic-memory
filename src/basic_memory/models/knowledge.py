@@ -145,6 +145,7 @@ class Observation(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String, nullable=False, default="note")
@@ -162,9 +163,14 @@ class Observation(Base):
 
         We can construct these because observations are always defined in
         and owned by a single entity.
+
+        Content is truncated to 200 chars to stay under PostgreSQL's
+        btree index limit of 2704 bytes.
         """
+        # Truncate content to avoid exceeding PostgreSQL's btree index limit
+        content_for_permalink = self.content[:200] if len(self.content) > 200 else self.content
         return generate_permalink(
-            f"{self.entity.permalink}/observations/{self.category}/{self.content}"
+            f"{self.entity.permalink}/observations/{self.category}/{content_for_permalink}"
         )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -186,6 +192,7 @@ class Relation(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     from_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     to_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True

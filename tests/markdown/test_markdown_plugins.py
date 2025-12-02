@@ -121,6 +121,44 @@ def test_observation_excludes_markdown_and_wiki_links():
     assert not is_observation(token), "No space after category should not be valid observation"
 
 
+def test_observation_excludes_html_color_codes():
+    """Test that HTML color codes are NOT interpreted as hashtags.
+
+    This test validates the fix for issue #446 where:
+    - HTML color codes like #4285F4 in attributes were incorrectly
+      causing lines to be parsed as observations.
+    """
+    # HTML color code in font tag should NOT be an observation
+    token = Token("inline", '**<font color="#4285F4">Jane:</font>** Welcome to the show', 0)
+    assert not is_observation(token), "HTML color codes should not trigger hashtag detection"
+
+    # Color code in style attribute
+    token = Token("inline", '<span style="color:#FF5733">Styled text</span>', 0)
+    assert not is_observation(token), "Color codes in style should not be observations"
+
+    # Multiple color codes
+    token = Token(
+        "inline", '<font color="#4285F4">Blue</font> and <font color="#EA4335">Red</font>', 0
+    )
+    assert not is_observation(token), "Multiple color codes should not be observations"
+
+    # Hex color without quotes (edge case)
+    token = Token("inline", "background-color:#FFFFFF is white", 0)
+    assert not is_observation(token), "Inline hex colors should not be observations"
+
+    # But standalone hashtags SHOULD still work
+    token = Token("inline", "This has a #realtag in it", 0)
+    assert is_observation(token), "Standalone hashtags should still work"
+
+    # Multiple real hashtags
+    token = Token("inline", "Tags: #design #feature #important", 0)
+    assert is_observation(token), "Multiple standalone hashtags should work"
+
+    # Mix of color code and real tag - should be observation because of real tag
+    token = Token("inline", '<font color="#4285F4">Text</font> #actualtag', 0)
+    assert is_observation(token), "Real hashtag with color code should still be observation"
+
+
 def test_relation_plugin():
     """Test relation plugin."""
     md = MarkdownIt().use(relation_plugin)
@@ -143,7 +181,7 @@ def test_relation_plugin():
     token = [t for t in md.parse(content) if t.type == "inline"][0]
     rels = token.meta["relations"]
     assert len(rels) == 2
-    assert rels[0]["type"] == "links to"
+    assert rels[0]["type"] == "links_to"
     assert rels[0]["target"] == "Link"
     assert rels[1]["target"] == "Another Link"
 
@@ -208,4 +246,4 @@ def test_combined_plugins():
     text_token = inline_tokens[4]
     assert "relations" in text_token.meta
     link = text_token.meta["relations"][0]
-    assert link["type"] == "links to"
+    assert link["type"] == "links_to"

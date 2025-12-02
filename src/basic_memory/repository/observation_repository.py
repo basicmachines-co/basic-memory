@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Sequence
 
+import logfire
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -21,30 +22,35 @@ class ObservationRepository(Repository[Observation]):
         """
         super().__init__(session_maker, Observation, project_id=project_id)
 
+    @logfire.instrument()
     async def find_by_entity(self, entity_id: int) -> Sequence[Observation]:
         """Find all observations for a specific entity."""
         query = select(Observation).filter(Observation.entity_id == entity_id)
         result = await self.execute_query(query)
         return result.scalars().all()
 
+    @logfire.instrument()
     async def find_by_context(self, context: str) -> Sequence[Observation]:
         """Find observations with a specific context."""
         query = select(Observation).filter(Observation.context == context)
         result = await self.execute_query(query)
         return result.scalars().all()
 
+    @logfire.instrument()
     async def find_by_category(self, category: str) -> Sequence[Observation]:
         """Find observations with a specific context."""
         query = select(Observation).filter(Observation.category == category)
         result = await self.execute_query(query)
         return result.scalars().all()
 
+    @logfire.instrument()
     async def observation_categories(self) -> Sequence[str]:
         """Return a list of all observation categories."""
         query = select(Observation.category).distinct()
         result = await self.execute_query(query, use_query_options=False)
         return result.scalars().all()
 
+    @logfire.instrument()
     async def find_by_entities(self, entity_ids: List[int]) -> Dict[int, List[Observation]]:
         """Find all observations for multiple entities in a single query.
 

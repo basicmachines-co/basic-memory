@@ -34,7 +34,7 @@ dependencies = [
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
     "aiofiles>=24.1.0", # Async file I/O
-    "logfire>=0.73.0", # Optional observability (disabled by default via config)
+    "logfire[fastapi]>=0.73.0", # Optional observability (disabled by default via config)
     "asyncpg>=0.30.0",
     "nest-asyncio>=1.6.0", # For Alembic migrations with Postgres
 ]

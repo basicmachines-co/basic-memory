@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+import logfire
 from loguru import logger
 from sqlalchemy import text
 
@@ -85,6 +86,7 @@ class ContextService:
         self.entity_repository = entity_repository
         self.observation_repository = observation_repository
 
+    @logfire.instrument()
     async def build_context(
         self,
         memory_url: Optional[MemoryUrl] = None,
@@ -215,6 +217,7 @@ class ContextService:
         # Return the structured ContextResult
         return ContextResult(results=context_results, metadata=metadata)
 
+    @logfire.instrument()
     async def find_related(
         self,
         type_id_pairs: List[Tuple[str, int]],
