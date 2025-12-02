@@ -29,6 +29,7 @@ from basic_memory.schemas.base import Permalink
 from basic_memory.services import BaseService, FileService
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.link_resolver import LinkResolver
+from basic_memory.services.search_service import SearchService
 from basic_memory.utils import generate_permalink
 
 
@@ -43,7 +44,7 @@ class EntityService(BaseService[EntityModel]):
         relation_repository: RelationRepository,
         file_service: FileService,
         link_resolver: LinkResolver,
-        search_service: Optional["SearchService"] = None,
+        search_service: Optional[SearchService] = None,
         app_config: Optional[BasicMemoryConfig] = None,
     ):
         super().__init__(entity_repository)
