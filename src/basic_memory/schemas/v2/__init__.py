@@ -1,10 +1,12 @@
-"""V2 API schemas - ID-based entity references."""
+"""V2 API schemas - ID-based entity and project references."""
 
 from basic_memory.schemas.v2.entity import (
     EntityResolveRequest,
     EntityResolveResponse,
     EntityResponseV2,
     MoveEntityRequestV2,
+    ProjectResolveRequest,
+    ProjectResolveResponse,
 )
 from basic_memory.schemas.v2.resource import (
     CreateResourceRequest,
@@ -17,6 +19,8 @@ __all__ = [
     "EntityResolveResponse",
     "EntityResponseV2",
     "MoveEntityRequestV2",
+    "ProjectResolveRequest",
+    "ProjectResolveResponse",
     "CreateResourceRequest",
     "UpdateResourceRequest",
     "ResourceResponse",

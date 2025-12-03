@@ -398,6 +398,7 @@ async def get_entity_service(
     entity_parser: EntityParserDep,
     file_service: FileServiceDep,
     link_resolver: "LinkResolverDep",
+    search_service: "SearchServiceDep",
     app_config: AppConfigDep,
 ) -> EntityService:
     """Create EntityService with repository."""
@@ -408,6 +409,7 @@ async def get_entity_service(
         entity_parser=entity_parser,
         file_service=file_service,
         link_resolver=link_resolver,
+        search_service=search_service,
         app_config=app_config,
     )
 
@@ -422,6 +424,7 @@ async def get_entity_service_v2(
     entity_parser: EntityParserV2Dep,
     file_service: FileServiceV2Dep,
     link_resolver: "LinkResolverV2Dep",
+    search_service: "SearchServiceV2Dep",
     app_config: AppConfigDep,
 ) -> EntityService:
     """Create EntityService for v2 API."""
@@ -432,6 +435,7 @@ async def get_entity_service_v2(
         entity_parser=entity_parser,
         file_service=file_service,
         link_resolver=link_resolver,
+        search_service=search_service,
         app_config=app_config,
     )
 

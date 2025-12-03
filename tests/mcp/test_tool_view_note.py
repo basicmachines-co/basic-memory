@@ -268,14 +268,18 @@ async def test_view_note_direct_success(app, test_project, mock_call_get):
     mock_response.text = note_content
     mock_call_get.return_value = mock_response
 
-    # Call the function
-    result = await view_note.fn("test/test-note", project=test_project.name)
+    # Mock resolve_entity_id for v2 API
+    with patch("basic_memory.mcp.tools.read_note.resolve_entity_id") as mock_resolve:
+        mock_resolve.return_value = 123
 
-    # Verify direct lookup was used
-    mock_call_get.assert_called_once()
-    assert "test/test-note" in mock_call_get.call_args[0][1]
+        # Call the function
+        result = await view_note.fn("test/test-note", project=test_project.name)
 
-    # Verify result contains note content
-    assert 'Note retrieved: "test/test-note"' in result
-    assert "Display this note as a markdown artifact for the user" in result
-    assert "This is a test note." in result
+        # Verify direct lookup was used
+        mock_call_get.assert_called_once()
+        assert "test/test-note" in mock_call_get.call_args[0][1] or "/resource/123" in mock_call_get.call_args[0][1]
+
+        # Verify result contains note content
+        assert 'Note retrieved: "test/test-note"' in result
+        assert "Display this note as a markdown artifact for the user" in result
+        assert "This is a test note." in result

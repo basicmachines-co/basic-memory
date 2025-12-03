@@ -104,11 +104,9 @@ async def build_context(
         # Get the active project using the new stateless approach
         active_project = await get_active_project(client, project, context)
 
-        project_url = active_project.project_url
-
         response = await call_get(
             client,
-            f"{project_url}/memory/{memory_url_path(url)}",
+            f"/v2/projects/{active_project.id}/memory/{memory_url_path(url)}",
             params={
                 "depth": depth,
                 "timeframe": timeframe,

@@ -138,12 +138,14 @@ class TestReadContentSecurityValidation:
         for safe_path in safe_paths:
             # Mock the API call to simulate a successful response
             with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-                mock_response = MagicMock()
-                mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
-                mock_response.text = f"# Content for {safe_path}\nThis is test content."
-                mock_call_get.return_value = mock_response
+                with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                    mock_response = MagicMock()
+                    mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
+                    mock_response.text = f"# Content for {safe_path}\nThis is test content."
+                    mock_call_get.return_value = mock_response
+                    mock_resolve.return_value = 123
 
-                result = await read_content.fn(project=test_project.name, path=safe_path)
+                    result = await read_content.fn(project=test_project.name, path=safe_path)
 
                 # Should succeed (not a security error)
                 assert isinstance(result, dict)
@@ -189,12 +191,14 @@ class TestReadContentSecurityValidation:
         """Test that empty path is handled securely."""
         # Mock the API call since empty path should be allowed (resolves to project root)
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            mock_response = MagicMock()
-            mock_response.headers = {"content-type": "text/markdown", "content-length": "50"}
-            mock_response.text = "# Root content"
-            mock_call_get.return_value = mock_response
+            with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                mock_response = MagicMock()
+                mock_response.headers = {"content-type": "text/markdown", "content-length": "50"}
+                mock_response.text = "# Root content"
+                mock_call_get.return_value = mock_response
+                mock_resolve.return_value = 123
 
-            result = await read_content.fn(project=test_project.name, path="")
+                result = await read_content.fn(project=test_project.name, path="")
 
             assert isinstance(result, dict)
             # Empty path should not trigger security error (it's handled as project root)
@@ -217,12 +221,14 @@ class TestReadContentSecurityValidation:
         for safe_path in safe_paths:
             # Mock the API call for these safe paths
             with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-                mock_response = MagicMock()
-                mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
-                mock_response.text = f"# Content for {safe_path}"
-                mock_call_get.return_value = mock_response
+                with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                    mock_response = MagicMock()
+                    mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
+                    mock_response.text = f"# Content for {safe_path}"
+                    mock_call_get.return_value = mock_response
+                    mock_resolve.return_value = 123
 
-                result = await read_content.fn(project=test_project.name, path=safe_path)
+                    result = await read_content.fn(project=test_project.name, path=safe_path)
 
                 assert isinstance(result, dict)
                 # Should NOT contain security error message
@@ -249,50 +255,54 @@ class TestReadContentFunctionality:
 
         # Mock the API call to simulate reading the file
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            mock_response = MagicMock()
-            mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
-            mock_response.text = "# Test Document\nThis is test content for reading."
-            mock_call_get.return_value = mock_response
+            with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                mock_response = MagicMock()
+                mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
+                mock_response.text = "# Test Document\nThis is test content for reading."
+                mock_call_get.return_value = mock_response
+                mock_resolve.return_value = 123
 
-            result = await read_content.fn(project=test_project.name, path="docs/test-document.md")
+                result = await read_content.fn(project=test_project.name, path="docs/test-document.md")
 
-            assert isinstance(result, dict)
-            assert result["type"] == "text"
-            assert "Test Document" in result["text"]
-            assert result["content_type"] == "text/markdown"
-            assert result["encoding"] == "utf-8"
+                assert isinstance(result, dict)
+                assert result["type"] == "text"
+                assert "Test Document" in result["text"]
+                assert result["content_type"] == "text/markdown"
+                assert result["encoding"] == "utf-8"
 
     @pytest.mark.asyncio
     async def test_read_content_image_file_handling(self, client, test_project):
         """Test reading an image file with security validation."""
         # Mock the API call to simulate reading an image
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            # Create a simple fake image data
-            fake_image_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb\x00\x00\x00\x00IEND\xaeB`\x82"
+            with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                # Create a simple fake image data
+                fake_image_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xdb\x00\x00\x00\x00IEND\xaeB`\x82"
 
-            mock_response = MagicMock()
-            mock_response.headers = {
-                "content-type": "image/png",
-                "content-length": str(len(fake_image_data)),
-            }
-            mock_response.content = fake_image_data
-            mock_call_get.return_value = mock_response
+                mock_response = MagicMock()
+                mock_response.headers = {
+                    "content-type": "image/png",
+                    "content-length": str(len(fake_image_data)),
+                }
+                mock_response.content = fake_image_data
+                mock_call_get.return_value = mock_response
+                mock_resolve.return_value = 123
 
-            # Mock PIL Image processing
-            with patch("basic_memory.mcp.tools.read_content.PILImage") as mock_pil:
-                mock_img = MagicMock()
-                mock_img.width = 100
-                mock_img.height = 100
-                mock_img.mode = "RGB"
-                mock_img.getbands.return_value = ["R", "G", "B"]
-                mock_pil.open.return_value = mock_img
+                # Mock PIL Image processing
+                with patch("basic_memory.mcp.tools.read_content.PILImage") as mock_pil:
+                    mock_img = MagicMock()
+                    mock_img.width = 100
+                    mock_img.height = 100
+                    mock_img.mode = "RGB"
+                    mock_img.getbands.return_value = ["R", "G", "B"]
+                    mock_pil.open.return_value = mock_img
 
-                with patch("basic_memory.mcp.tools.read_content.optimize_image") as mock_optimize:
-                    mock_optimize.return_value = b"optimized_image_data"
+                    with patch("basic_memory.mcp.tools.read_content.optimize_image") as mock_optimize:
+                        mock_optimize.return_value = b"optimized_image_data"
 
-                    result = await read_content.fn(
-                        project=test_project.name, path="assets/safe-image.png"
-                    )
+                        result = await read_content.fn(
+                            project=test_project.name, path="assets/safe-image.png"
+                        )
 
                     assert isinstance(result, dict)
                     assert result["type"] == "image"
@@ -305,23 +315,28 @@ class TestReadContentFunctionality:
         """Test reading content with explicit project parameter."""
         # Mock the API call and project configuration
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            with patch(
-                "basic_memory.mcp.tools.read_content.get_active_project"
-            ) as mock_get_project:
-                # Mock project configuration
-                mock_project = MagicMock()
-                mock_project.project_url = "http://test"
-                mock_project.home = Path("/test/project")
-                mock_get_project.return_value = mock_project
+            with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                with patch(
+                    "basic_memory.mcp.tools.read_content.get_active_project"
+                ) as mock_get_project:
+                    # Mock project configuration
+                    mock_project = MagicMock()
+                    mock_project.id = 1  # Set project ID for v2 API
+                    mock_project.project_url = "http://test"
+                    mock_project.home = Path("/test/project")
+                    mock_get_project.return_value = mock_project
 
-                mock_response = MagicMock()
-                mock_response.headers = {"content-type": "text/plain", "content-length": "50"}
-                mock_response.text = "Project-specific content"
-                mock_call_get.return_value = mock_response
+                    # Mock resolve_entity_id to return an entity ID
+                    mock_resolve.return_value = 123
 
-                result = await read_content.fn(
-                    path="notes/project-file.txt", project="specific-project"
-                )
+                    mock_response = MagicMock()
+                    mock_response.headers = {"content-type": "text/plain", "content-length": "50"}
+                    mock_response.text = "Project-specific content"
+                    mock_call_get.return_value = mock_response
+
+                    result = await read_content.fn(
+                        path="notes/project-file.txt", project="specific-project"
+                    )
 
                 assert isinstance(result, dict)
                 assert result["type"] == "text"
@@ -332,41 +347,45 @@ class TestReadContentFunctionality:
         """Test handling of nonexistent files (after security validation)."""
         # Mock API call to return 404
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            mock_call_get.side_effect = Exception("File not found")
+            with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                mock_call_get.side_effect = Exception("File not found")
+                mock_resolve.return_value = 123
 
-            # This should pass security validation but fail on API call
-            try:
-                result = await read_content.fn(
-                    project=test_project.name, path="docs/nonexistent-file.md"
-                )
-                # If no exception is raised, check the result format
-                assert isinstance(result, dict)
-            except Exception as e:
-                # Exception due to API failure is acceptable for this test
-                assert "File not found" in str(e)
+                # This should pass security validation but fail on API call
+                try:
+                    result = await read_content.fn(
+                        project=test_project.name, path="docs/nonexistent-file.md"
+                    )
+                    # If no exception is raised, check the result format
+                    assert isinstance(result, dict)
+                except Exception as e:
+                    # Exception due to API failure is acceptable for this test
+                    assert "File not found" in str(e)
 
     @pytest.mark.asyncio
     async def test_read_content_binary_file_handling(self, client, test_project):
         """Test reading binary files with security validation."""
         # Mock the API call to simulate reading a binary file
         with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
-            binary_data = b"Binary file content with special bytes: \x00\x01\x02\x03"
+            with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
+                binary_data = b"Binary file content with special bytes: \x00\x01\x02\x03"
 
-            mock_response = MagicMock()
-            mock_response.headers = {
-                "content-type": "application/octet-stream",
-                "content-length": str(len(binary_data)),
-            }
-            mock_response.content = binary_data
-            mock_call_get.return_value = mock_response
+                mock_response = MagicMock()
+                mock_response.headers = {
+                    "content-type": "application/octet-stream",
+                    "content-length": str(len(binary_data)),
+                }
+                mock_response.content = binary_data
+                mock_call_get.return_value = mock_response
+                mock_resolve.return_value = 123
 
-            result = await read_content.fn(project=test_project.name, path="files/safe-binary.bin")
+                result = await read_content.fn(project=test_project.name, path="files/safe-binary.bin")
 
-            assert isinstance(result, dict)
-            assert result["type"] == "document"
-            assert "source" in result
-            assert result["source"]["type"] == "base64"
-            assert result["source"]["media_type"] == "application/octet-stream"
+                assert isinstance(result, dict)
+                assert result["type"] == "document"
+                assert "source" in result
+                assert result["source"]["type"] == "base64"
+                assert result["source"]["media_type"] == "application/octet-stream"
 
 
 class TestReadContentEdgeCases:
