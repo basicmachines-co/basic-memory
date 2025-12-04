@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__basic-memory__write_note",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '✓ Note saved to Basic Memory'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "If this conversation contained valuable insights, decisions, or learnings that should be preserved, suggest using `/remember [title]` to capture them in Basic Memory. Only suggest this if there's genuinely valuable content worth preserving - don't suggest for trivial interactions."
+          }
+        ]
+      }
+    ]
+  }
+}
