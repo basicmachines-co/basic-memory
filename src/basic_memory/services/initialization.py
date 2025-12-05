@@ -5,6 +5,7 @@ to ensure consistent application startup across all entry points.
 """
 
 import asyncio
+import os
 from pathlib import Path
 
 import logfire
@@ -107,6 +108,12 @@ async def initialize_file_sync(
 
     # Get active projects
     active_projects = await project_repository.get_active_projects()
+
+    # Filter to constrained project if MCP server was started with --project
+    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    if constrained_project:
+        active_projects = [p for p in active_projects if p.name == constrained_project]
+        logger.info(f"Background sync constrained to project: {constrained_project}")
 
     # Start sync for all projects as background tasks (non-blocking)
     async def sync_project_background(project: Project):
