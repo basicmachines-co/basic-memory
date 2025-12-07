@@ -893,13 +893,13 @@ class TestMoveNoteErrorHandling:
     async def test_move_note_exception_handling(self):
         """Test exception handling in move_note."""
         with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
+            mock_get_project.return_value.id = 1  # Set project ID for v2 API
             mock_get_project.return_value.project_url = "http://test"
             mock_get_project.return_value.name = "test-project"
 
-            with patch(
-                "basic_memory.mcp.tools.move_note.call_post",
-                side_effect=Exception("entity not found"),
-            ):
+            with patch("basic_memory.mcp.tools.move_note.resolve_entity_id") as mock_resolve:
+                mock_resolve.side_effect = Exception("Entity not found: 'test-note'")
+
                 result = await move_note.fn("test-note", "target/file.md", project="test-project")
 
                 assert isinstance(result, str)
@@ -909,13 +909,13 @@ class TestMoveNoteErrorHandling:
     async def test_move_note_permission_error_handling(self):
         """Test permission error handling in move_note."""
         with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
+            mock_get_project.return_value.id = 1  # Set project ID for v2 API
             mock_get_project.return_value.project_url = "http://test"
             mock_get_project.return_value.name = "test-project"
 
-            with patch(
-                "basic_memory.mcp.tools.move_note.call_post",
-                side_effect=Exception("permission denied"),
-            ):
+            with patch("basic_memory.mcp.tools.move_note.resolve_entity_id") as mock_resolve:
+                mock_resolve.side_effect = Exception("permission denied")
+
                 result = await move_note.fn("test-note", "target/file.md", project="test-project")
 
                 assert isinstance(result, str)

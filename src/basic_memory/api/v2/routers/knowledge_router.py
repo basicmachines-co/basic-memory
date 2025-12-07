@@ -97,7 +97,7 @@ async def resolve_identifier(
     entity = await link_resolver.resolve_link(data.identifier)
     if not entity:
         raise HTTPException(
-            status_code=404, detail=f"Could not resolve identifier: '{data.identifier}'"
+            status_code=404, detail=f"Entity not found: '{data.identifier}'"
         )
 
     # Determine resolution method

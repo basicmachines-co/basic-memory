@@ -8,6 +8,7 @@ from httpx import AsyncClient
 
 from basic_memory.models import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
+from basic_memory.schemas.v2 import ProjectResolveResponse
 
 
 @pytest.mark.asyncio
@@ -249,3 +250,88 @@ async def test_update_project_active_status(
     assert response.status_code == 200
     status_response = ProjectStatusResponse.model_validate(response.json())
     assert status_response.status == "success"
+
+@pytest.mark.asyncio
+async def test_resolve_project_by_name(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """Test resolving a project by name returns correct project ID."""
+    resolve_data = {"identifier": test_project.name}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 200
+    resolved = ProjectResolveResponse.model_validate(response.json())
+    assert resolved.project_id == test_project.id
+    assert resolved.name == test_project.name
+    assert resolved.path == test_project.path
+    assert resolved.is_default == (test_project.is_default or False)
+    # Resolution method could be "name" or "permalink" depending on whether name == permalink
+    assert resolved.resolution_method in ["name", "permalink"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_by_permalink(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """Test resolving a project by permalink returns correct project ID."""
+    # Assume test_project.name can be converted to permalink
+    from basic_memory.utils import generate_permalink
+
+    project_permalink = generate_permalink(test_project.name)
+    resolve_data = {"identifier": project_permalink}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 200
+    resolved = ProjectResolveResponse.model_validate(response.json())
+    assert resolved.project_id == test_project.id
+    assert resolved.name == test_project.name
+    # Resolution method could be "name" or "permalink" depending on implementation
+    assert resolved.resolution_method in ["name", "permalink"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_by_id(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """Test resolving a project by ID string returns correct project ID."""
+    resolve_data = {"identifier": str(test_project.id)}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 200
+    resolved = ProjectResolveResponse.model_validate(response.json())
+    assert resolved.project_id == test_project.id
+    assert resolved.name == test_project.name
+    assert resolved.resolution_method == "id"
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_case_insensitive(
+    client: AsyncClient, test_project: Project, v2_projects_url
+):
+    """Test resolving a project by name is case-insensitive."""
+    resolve_data = {"identifier": test_project.name.upper()}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 200
+    resolved = ProjectResolveResponse.model_validate(response.json())
+    assert resolved.project_id == test_project.id
+    assert resolved.name == test_project.name
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_not_found(client: AsyncClient, v2_projects_url):
+    """Test resolving a non-existent project returns 404."""
+    resolve_data = {"identifier": "nonexistent-project"}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_project_empty_identifier(client: AsyncClient, v2_projects_url):
+    """Test resolving with empty identifier returns 422."""
+    resolve_data = {"identifier": ""}
+    response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
+
+    assert response.status_code == 422  # Validation error
