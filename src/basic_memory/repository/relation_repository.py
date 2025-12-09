@@ -140,7 +140,8 @@ class RelationRepository(Repository[Relation]):
                 stmt = stmt.on_conflict_do_nothing()
 
             result = await session.execute(stmt)
-            return result.rowcount if result.rowcount else 0
+            # rowcount can be -1 for ON CONFLICT DO NOTHING (undefined affected rows)
+            return result.rowcount if result.rowcount > 0 else 0
 
     def get_load_options(self) -> List[LoaderOption]:
         return [selectinload(Relation.from_entity), selectinload(Relation.to_entity)]
