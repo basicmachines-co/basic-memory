@@ -260,7 +260,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 {score_expr} as score
             FROM search_index
             WHERE {where_clause}
-            ORDER BY score DESC {order_by_clause}
+            ORDER BY score DESC, id ASC {order_by_clause}
             LIMIT :limit
             OFFSET :offset
         """

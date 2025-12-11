@@ -1,55 +1,52 @@
-"""Search models and tables."""
+"""Search DDL statements for SQLite and Postgres.
 
-from sqlalchemy import DDL, Column, Integer, String, DateTime, Text, ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.types import JSON
+The search_index table is created via raw DDL, not ORM models, because:
+- SQLite uses FTS5 virtual tables (cannot be represented as ORM)
+- Postgres uses composite primary keys and generated tsvector columns
+- Both backends use raw SQL for all search operations via SearchIndexRow dataclass
+"""
 
-from basic_memory.models.base import Base
+from sqlalchemy import DDL
 
 
-class SearchIndex(Base):
-    """Search index table for Postgres only.
+# Define Postgres search_index table with composite primary key and tsvector
+# This DDL matches the Alembic migration schema (314f1ea54dc4)
+# Used by tests to create the table without running full migrations
+# NOTE: Split into separate DDL statements because asyncpg doesn't support
+# multiple statements in a single execute call.
+CREATE_POSTGRES_SEARCH_INDEX_TABLE = DDL("""
+CREATE TABLE IF NOT EXISTS search_index (
+    id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    title TEXT,
+    content_stems TEXT,
+    content_snippet TEXT,
+    permalink VARCHAR,
+    file_path VARCHAR,
+    type VARCHAR,
+    from_id INTEGER,
+    to_id INTEGER,
+    relation_type VARCHAR,
+    entity_id INTEGER,
+    category VARCHAR,
+    metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    textsearchable_index_col tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(content_stems, ''))
+    ) STORED,
+    PRIMARY KEY (id, type, project_id),
+    FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE
+)
+""")
 
-    For SQLite: This model is skipped; FTS5 virtual table is created via DDL instead.
-    For Postgres: This is the actual table structure with tsvector support.
-    """
+CREATE_POSTGRES_SEARCH_INDEX_FTS = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_fts ON search_index USING gin(textsearchable_index_col)
+""")
 
-    __tablename__ = "search_index"
-
-    # Primary key (rowid in SQLite FTS5, explicit id in Postgres)
-    id = Column(Integer, primary_key=True, autoincrement=True)
-
-    # Core searchable fields
-    title = Column(Text, nullable=True)
-    content_stems = Column(Text, nullable=True)
-    content_snippet = Column(Text, nullable=True)
-    permalink = Column(String(255), nullable=True, index=True)
-    file_path = Column(Text, nullable=True)
-    type = Column(String(50), nullable=True)
-
-    # Project context
-    project_id = Column(Integer, nullable=True, index=True)
-
-    # Relation fields
-    from_id = Column(Integer, nullable=True)
-    to_id = Column(Integer, nullable=True)
-    relation_type = Column(String(100), nullable=True)
-
-    # Observation fields
-    # Note: FK with CASCADE only applies to Postgres. SQLite uses FTS5 virtual tables
-    # which don't support foreign keys, so cascade delete is handled explicitly there.
-    entity_id = Column(Integer, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True)
-    category = Column(String(100), nullable=True)
-
-    # Common fields
-    # Use JSONB for Postgres, JSON for SQLite
-    # Note: 'metadata' is a reserved name in SQLAlchemy, so we use 'metadata_' and map to 'metadata'
-    metadata_ = Column("metadata", JSON().with_variant(JSONB(), "postgresql"), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=True)
-    updated_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Note: textsearchable_index_col (tsvector) will be added by migration for Postgres only
-
+CREATE_POSTGRES_SEARCH_INDEX_METADATA = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_metadata_gin ON search_index USING gin(metadata jsonb_path_ops)
+""")
 
 # Define FTS5 virtual table creation for SQLite only
 # This DDL is executed separately for SQLite databases

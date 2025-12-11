@@ -437,38 +437,39 @@ See the [Documentation](https://memory.basicmachines.co/) for more info, includi
 
 ### Running Tests
 
-Basic Memory supports dual database backends (SQLite and Postgres). Tests are parametrized to run against both backends automatically.
+Basic Memory supports dual database backends (SQLite and Postgres). By default, tests run against SQLite. Set `BASIC_MEMORY_TEST_POSTGRES=1` to run against Postgres (uses testcontainers - Docker required).
 
 **Quick Start:**
 ```bash
-# Run SQLite tests (default, no Docker needed)
+# Run all tests against SQLite (default, fast)
 just test-sqlite
 
-# Run Postgres tests (requires Docker)
+# Run all tests against Postgres (uses testcontainers)
 just test-postgres
+
+# Run both SQLite and Postgres tests
+just test
 ```
 
 **Available Test Commands:**
 
-- `just test-sqlite` - Run tests against SQLite only (fastest, no Docker needed)
-- `just test-postgres` - Run tests against Postgres only (requires Docker)
+- `just test` - Run all tests against both SQLite and Postgres
+- `just test-sqlite` - Run all tests against SQLite (fast, no Docker needed)
+- `just test-postgres` - Run all tests against Postgres (uses testcontainers)
+- `just test-unit-sqlite` - Run unit tests against SQLite
+- `just test-unit-postgres` - Run unit tests against Postgres
+- `just test-int-sqlite` - Run integration tests against SQLite
+- `just test-int-postgres` - Run integration tests against Postgres
 - `just test-windows` - Run Windows-specific tests (auto-skips on other platforms)
 - `just test-benchmark` - Run performance benchmark tests
-- `just test-all` - Run all tests including Windows, Postgres, and benchmarks
 
-**Postgres Testing Requirements:**
+**Postgres Testing:**
 
-To run Postgres tests, you need to start the test database:
-```bash
-docker-compose -f docker-compose-postgres.yml up -d
-```
-
-Tests will connect to `localhost:5433/basic_memory_test`.
+Postgres tests use [testcontainers](https://testcontainers-python.readthedocs.io/) which automatically spins up a Postgres instance in Docker. No manual database setup required - just have Docker running.
 
 **Test Markers:**
 
 Tests use pytest markers for selective execution:
-- `postgres` - Tests that run against Postgres backend
 - `windows` - Windows-specific database optimizations
 - `benchmark` - Performance tests (excluded from default runs)
 
