@@ -466,3 +466,56 @@ class TestTimeframeParsing:
         # They should be approximately the same time (within an hour due to parsing differences)
         time_diff = abs((today_parsed - oneday_parsed).total_seconds())
         assert time_diff < 3600, f"'today' and '1d' should be similar times, diff: {time_diff}s"
+
+
+def test_observation_content_unlimited_length():
+    """Test that observation content accepts unlimited length to match DB schema.
+
+    The DB model uses Text type (unlimited), so the API schema should not impose
+    artificial length limits. This test verifies:
+    1. Very long observations are accepted (no MaxLen constraint)
+    2. Empty observations are rejected (MinLen(1))
+    3. Whitespace-only observations are rejected (strip + MinLen(1))
+    """
+    from basic_memory.schemas.base import Observation
+
+    # Test that very long content is accepted (previously failed at 1000 chars)
+    long_content = "x" * 10000  # 10K characters
+    obs = Observation.model_validate({
+        "content": long_content,
+        "category": "test"
+    })
+    assert obs.content == long_content
+    assert len(obs.content) == 10000
+
+    # Test even longer content (like JSON schemas)
+    very_long_content = "y" * 50000  # 50K characters
+    obs = Observation.model_validate({
+        "content": very_long_content,
+        "category": "test"
+    })
+    assert obs.content == very_long_content
+    assert len(obs.content) == 50000
+
+    # Test that empty content is still rejected (MinLen(1))
+    with pytest.raises(ValidationError) as exc_info:
+        Observation.model_validate({
+            "content": "",
+            "category": "test"
+        })
+    assert "at least 1 character" in str(exc_info.value).lower()
+
+    # Test that whitespace-only content is rejected (strip + MinLen(1))
+    with pytest.raises(ValidationError) as exc_info:
+        Observation.model_validate({
+            "content": "   ",
+            "category": "test"
+        })
+    assert "at least 1 character" in str(exc_info.value).lower()
+
+    # Test that whitespace is properly stripped but content remains
+    obs = Observation.model_validate({
+        "content": "  valid content  ",
+        "category": "test"
+    })
+    assert obs.content == "valid content"
