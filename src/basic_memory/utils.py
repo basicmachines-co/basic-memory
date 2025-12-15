@@ -5,7 +5,7 @@ import os
 import logging
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Protocol, Union, runtime_checkable, List
 
@@ -443,10 +443,15 @@ def validate_project_path(path: str, project_path: Path) -> bool:
 
 
 def ensure_timezone_aware(dt: datetime) -> datetime:
-    """Ensure a datetime is timezone-aware using system timezone.
+    """Ensure a datetime is timezone-aware.
 
-    If the datetime is naive, convert it to timezone-aware using the system's local timezone.
-    If it's already timezone-aware, return it unchanged.
+    If the datetime is naive, convert it to timezone-aware. The interpretation
+    depends on cloud_mode:
+    - In cloud mode (PostgreSQL/asyncpg): naive datetimes are interpreted as UTC
+    - In local mode (SQLite): naive datetimes are interpreted as local time
+
+    asyncpg uses binary protocol which returns timestamps in UTC but as naive
+    datetimes. In cloud deployments, cloud_mode=True handles this correctly.
 
     Args:
         dt: The datetime to ensure is timezone-aware
@@ -454,9 +459,16 @@ def ensure_timezone_aware(dt: datetime) -> datetime:
     Returns:
         A timezone-aware datetime
     """
+    from basic_memory.config import ConfigManager
+
     if dt.tzinfo is None:
-        # Naive datetime - assume it's in local time and add timezone
-        return dt.astimezone()
+        config = ConfigManager().config
+        if config.cloud_mode_enabled:
+            # Cloud/PostgreSQL mode: naive datetimes from asyncpg are already UTC
+            return dt.replace(tzinfo=timezone.utc)
+        else:
+            # Local/SQLite mode: naive datetimes are in local time
+            return dt.astimezone()
     else:
         # Already timezone-aware
         return dt
