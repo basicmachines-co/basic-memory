@@ -221,6 +221,41 @@ class FileService:
             logger.exception("File read error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")
 
+    async def read_file_bytes(self, path: FilePath) -> bytes:
+        """Read file content as bytes using true async I/O with aiofiles.
+
+        This method reads files in binary mode, suitable for non-text files
+        like images, PDFs, etc. For cloud compatibility with S3FileService.
+
+        Args:
+            path: Path to read (Path or string)
+
+        Returns:
+            File content as bytes
+
+        Raises:
+            FileOperationError: If read fails
+        """
+        # Convert string to Path if needed
+        path_obj = self.base_path / path if isinstance(path, str) else path
+        full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
+
+        try:
+            logger.debug("Reading file bytes", operation="read_file_bytes", path=str(full_path))
+            async with aiofiles.open(full_path, mode="rb") as f:
+                content = await f.read()
+
+            logger.debug(
+                "File read completed",
+                path=str(full_path),
+                content_length=len(content),
+            )
+            return content
+
+        except Exception as e:
+            logger.exception("File read error", path=str(full_path), error=str(e))
+            raise FileOperationError(f"Failed to read file: {e}")
+
     async def read_file(self, path: FilePath) -> Tuple[str, str]:
         """Read file and compute checksum using true async I/O.
 

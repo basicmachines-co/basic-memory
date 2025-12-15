@@ -2,9 +2,9 @@
 
 import tempfile
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Union
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Body
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Body, Response
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 
@@ -50,7 +50,7 @@ def get_entity_ids(item: SearchIndexRow) -> set[int]:
             raise ValueError(f"Unexpected type: {item.type}")
 
 
-@router.get("/{identifier:path}")
+@router.get("/{identifier:path}", response_model=None)
 async def get_resource_content(
     config: ProjectConfigDep,
     link_resolver: LinkResolverDep,
@@ -61,7 +61,7 @@ async def get_resource_content(
     identifier: str,
     page: int = 1,
     page_size: int = 10,
-) -> FileResponse:
+) -> Union[Response, FileResponse]:
     """Get resource content by identifier: name or permalink."""
     logger.debug(f"Getting content for: {identifier}")
 
@@ -92,13 +92,16 @@ async def get_resource_content(
     # return single response
     if len(results) == 1:
         entity = results[0]
-        file_path = Path(f"{config.home}/{entity.file_path}")
-        if not file_path.exists():
+        # Check file exists via file_service (for cloud compatibility)
+        if not await file_service.exists(entity.file_path):
             raise HTTPException(
                 status_code=404,
-                detail=f"File not found: {file_path}",
+                detail=f"File not found: {entity.file_path}",
             )
-        return FileResponse(path=file_path)
+        # Read content via file_service as bytes (works with both local and S3)
+        content = await file_service.read_file_bytes(entity.file_path)
+        content_type = file_service.content_type(entity.file_path)
+        return Response(content=content, media_type=content_type)
 
     # for multiple files, initialize a temporary file for writing the results
     with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".md") as tmp_file:

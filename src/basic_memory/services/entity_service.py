@@ -233,8 +233,11 @@ class EntityService(BaseService[EntityModel]):
         final_content = dump_frontmatter(post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
-        # parse entity from file
-        entity_markdown = await self.entity_parser.parse_file(file_path)
+        # parse entity from content we just wrote (avoids re-reading file for cloud compatibility)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=final_content,
+        )
 
         # create entity
         created = await self.create_entity_from_markdown(file_path, entity_markdown)
@@ -254,8 +257,12 @@ class EntityService(BaseService[EntityModel]):
         # Convert file path string to Path
         file_path = Path(entity.file_path)
 
-        # Read existing frontmatter from the file if it exists
-        existing_markdown = await self.entity_parser.parse_file(file_path)
+        # Read existing content via file_service (for cloud compatibility)
+        existing_content = await self.file_service.read_file_content(file_path)
+        existing_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=existing_content,
+        )
 
         # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
@@ -311,8 +318,11 @@ class EntityService(BaseService[EntityModel]):
         final_content = dump_frontmatter(merged_post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
-        # parse entity from file
-        entity_markdown = await self.entity_parser.parse_file(file_path)
+        # parse entity from content we just wrote (avoids re-reading file for cloud compatibility)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=final_content,
+        )
 
         # update entity in db
         entity = await self.update_entity_and_observations(file_path, entity_markdown)
@@ -559,8 +569,11 @@ class EntityService(BaseService[EntityModel]):
         # Write the updated content back to the file
         checksum = await self.file_service.write_file(file_path, new_content)
 
-        # Parse the updated file to get new observations/relations
-        entity_markdown = await self.entity_parser.parse_file(file_path)
+        # Parse the content we just wrote (avoids re-reading file for cloud compatibility)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=new_content,
+        )
 
         # Update entity and its relationships
         entity = await self.update_entity_and_observations(file_path, entity_markdown)

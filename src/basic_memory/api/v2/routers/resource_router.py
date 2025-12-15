@@ -11,8 +11,7 @@ Key differences from v1:
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Response
 from loguru import logger
 
 from basic_memory.deps import (
@@ -41,7 +40,7 @@ async def get_resource_content(
     config: ProjectConfigV2Dep,
     entity_service: EntityServiceV2Dep,
     file_service: FileServiceV2Dep,
-) -> FileResponse:
+) -> Response:
     """Get raw resource content by entity ID.
 
     Args:
@@ -52,7 +51,7 @@ async def get_resource_content(
         file_service: File service for reading file content
 
     Returns:
-        FileResponse with entity content
+        Response with entity content
 
     Raises:
         HTTPException: 404 if entity or file not found
@@ -75,14 +74,18 @@ async def get_resource_content(
             detail="Entity contains invalid file path",
         )
 
-    file_path = Path(f"{config.home}/{entity.file_path}")
-    if not file_path.exists():
+    # Check file exists via file_service (for cloud compatibility)
+    if not await file_service.exists(entity.file_path):
         raise HTTPException(
             status_code=404,
-            detail=f"File not found: {file_path}",
+            detail=f"File not found: {entity.file_path}",
         )
 
-    return FileResponse(path=file_path)
+    # Read content via file_service as bytes (works with both local and S3)
+    content = await file_service.read_file_bytes(entity.file_path)
+    content_type = file_service.content_type(entity.file_path)
+
+    return Response(content=content, media_type=content_type)
 
 
 @router.post("", response_model=ResourceResponse)
@@ -232,7 +235,6 @@ async def update_resource(
             )
 
         # Get full paths
-        old_full_path = Path(f"{config.home}/{entity.file_path}")
         new_full_path = Path(f"{config.home}/{target_file_path}")
 
         # If moving file, handle the move
@@ -240,9 +242,9 @@ async def update_resource(
             # Ensure new parent directory exists
             new_full_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # If old file exists, remove it
-            if old_full_path.exists():
-                old_full_path.unlink()
+            # If old file exists, remove it via file_service (for cloud compatibility)
+            if await file_service.exists(entity.file_path):
+                await file_service.delete_file(entity.file_path)
         else:
             # Ensure directory exists for in-place update
             new_full_path.parent.mkdir(parents=True, exist_ok=True)

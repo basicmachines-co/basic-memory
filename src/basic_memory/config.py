@@ -592,5 +592,4 @@ def setup_basic_memory_logging():  # pragma: no cover
     _LOGGING_SETUP = True
 
 
-# Set up logging
-setup_basic_memory_logging()
+# setup_basic_memory_logging()
