@@ -144,6 +144,7 @@ class ProjectService:
         """
         # If project_root is set, constrain all projects to that directory
         project_root = self.config_manager.config.project_root
+        sanitized_name = None
         if project_root:
             base_path = Path(project_root)
 
@@ -200,14 +201,15 @@ class ProjectService:
                         f"Projects cannot share directory trees."
                     )
 
-        # First add to config file (this will validate the project doesn't exist)
-        project_config = self.config_manager.add_project(name, resolved_path)
+        if not config.cloud_mode:
+            # First add to config file (this will validate the project doesn't exist)
+            self.config_manager.add_project(name, resolved_path)
 
         # Then add to database
         project_data = {
             "name": name,
             "path": resolved_path,
-            "permalink": generate_permalink(project_config.name),
+            "permalink": sanitized_name,
             "is_active": True,
             # Don't set is_default=False to avoid UNIQUE constraint issues
             # Let it default to NULL, only set to True when explicitly making default

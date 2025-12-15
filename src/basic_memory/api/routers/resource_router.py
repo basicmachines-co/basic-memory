@@ -192,7 +192,7 @@ async def write_resource(
         checksum = await file_service.write_file(full_path, content_str)
 
         # Get file info
-        file_stats = file_service.file_stats(full_path)
+        file_metadata = await file_service.get_file_metadata(full_path)
 
         # Determine file details
         file_name = Path(file_path).name
@@ -213,7 +213,7 @@ async def write_resource(
                     "content_type": content_type,
                     "file_path": file_path,
                     "checksum": checksum,
-                    "updated_at": datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+                    "updated_at": file_metadata.modified_at,
                 },
             )
             status_code = 200
@@ -225,8 +225,8 @@ async def write_resource(
                 content_type=content_type,
                 file_path=file_path,
                 checksum=checksum,
-                created_at=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
-                updated_at=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+                created_at=file_metadata.created_at,
+                updated_at=file_metadata.modified_at,
             )
             entity = await entity_repository.add(entity)
             status_code = 201
@@ -240,9 +240,9 @@ async def write_resource(
             content={
                 "file_path": file_path,
                 "checksum": checksum,
-                "size": file_stats.st_size,
-                "created_at": file_stats.st_ctime,
-                "modified_at": file_stats.st_mtime,
+                "size": file_metadata.size,
+                "created_at": file_metadata.created_at.timestamp(),
+                "modified_at": file_metadata.modified_at.timestamp(),
             },
         )
     except Exception as e:  # pragma: no cover

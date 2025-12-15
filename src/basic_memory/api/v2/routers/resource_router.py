@@ -30,7 +30,6 @@ from basic_memory.schemas.v2.resource import (
     ResourceResponse,
 )
 from basic_memory.utils import validate_project_path
-from datetime import datetime
 
 router = APIRouter(prefix="/resource", tags=["resources-v2"])
 
@@ -143,7 +142,7 @@ async def create_resource(
         checksum = await file_service.write_file(full_path, data.content)
 
         # Get file info
-        file_stats = file_service.file_stats(full_path)
+        file_metadata = await file_service.get_file_metadata(full_path)
 
         # Determine file details
         file_name = Path(data.file_path).name
@@ -157,8 +156,8 @@ async def create_resource(
             content_type=content_type,
             file_path=data.file_path,
             checksum=checksum,
-            created_at=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
-            updated_at=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+            created_at=file_metadata.created_at,
+            updated_at=file_metadata.modified_at,
         )
         entity = await entity_repository.add(entity)
 
@@ -170,9 +169,9 @@ async def create_resource(
             entity_id=entity.id,
             file_path=data.file_path,
             checksum=checksum,
-            size=file_stats.st_size,
-            created_at=file_stats.st_ctime,
-            modified_at=file_stats.st_mtime,
+            size=file_metadata.size,
+            created_at=file_metadata.created_at.timestamp(),
+            modified_at=file_metadata.modified_at.timestamp(),
         )
     except HTTPException:
         # Re-raise HTTP exceptions without wrapping
@@ -252,7 +251,7 @@ async def update_resource(
         checksum = await file_service.write_file(new_full_path, data.content)
 
         # Get file info
-        file_stats = file_service.file_stats(new_full_path)
+        file_metadata = await file_service.get_file_metadata(new_full_path)
 
         # Determine file details
         file_name = Path(target_file_path).name
@@ -268,7 +267,7 @@ async def update_resource(
                 "content_type": content_type,
                 "file_path": target_file_path,
                 "checksum": checksum,
-                "updated_at": datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+                "updated_at": file_metadata.modified_at,
             },
         )
 
@@ -280,9 +279,9 @@ async def update_resource(
             entity_id=entity_id,
             file_path=target_file_path,
             checksum=checksum,
-            size=file_stats.st_size,
-            created_at=file_stats.st_ctime,
-            modified_at=file_stats.st_mtime,
+            size=file_metadata.size,
+            created_at=file_metadata.created_at.timestamp(),
+            modified_at=file_metadata.modified_at.timestamp(),
         )
     except HTTPException:
         # Re-raise HTTP exceptions without wrapping

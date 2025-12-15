@@ -9,7 +9,7 @@ from typing import Any, Dict, Literal, Optional, List, Tuple
 from enum import Enum
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 import basic_memory
@@ -214,6 +214,36 @@ class BasicMemoryConfig(BaseSettings):
         # Fall back to config file value
         return self.cloud_mode
 
+    @classmethod
+    def for_cloud_tenant(
+        cls,
+        database_url: str,
+        projects: Optional[Dict[str, str]] = None,
+    ) -> "BasicMemoryConfig":
+        """Create config for cloud tenant - no config.json, database is source of truth.
+
+        This factory method creates a BasicMemoryConfig suitable for cloud deployments
+        where:
+        - Database is Postgres (Neon), not SQLite
+        - Projects are discovered from the database, not config file
+        - Path validation is skipped (no local filesystem in cloud)
+        - Initialization sync is skipped (stateless deployment)
+
+        Args:
+            database_url: Postgres connection URL for tenant database
+            projects: Optional project mapping (usually empty, discovered from DB)
+
+        Returns:
+            BasicMemoryConfig configured for cloud mode
+        """
+        return cls(
+            database_backend=DatabaseBackend.POSTGRES,
+            database_url=database_url,
+            projects=projects or {},
+            cloud_mode=True,
+            skip_initialization_sync=True,
+        )
+
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
@@ -230,6 +260,10 @@ class BasicMemoryConfig(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
+        # Skip project initialization in cloud mode - projects are discovered from DB
+        if self.database_backend == DatabaseBackend.POSTGRES:
+            return
+
         # Ensure at least one project exists; if none exist then create main
         if not self.projects:  # pragma: no cover
             self.projects["main"] = str(
@@ -272,19 +306,26 @@ class BasicMemoryConfig(BaseSettings):
         """Get all configured projects as ProjectConfig objects."""
         return [ProjectConfig(name=name, home=Path(path)) for name, path in self.projects.items()]
 
-    @field_validator("projects")
-    @classmethod
-    def ensure_project_paths_exists(cls, v: Dict[str, str]) -> Dict[str, str]:  # pragma: no cover
-        """Ensure project path exists."""
-        for name, path_value in v.items():
+    @model_validator(mode="after")
+    def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
+        """Ensure project paths exist.
+
+        Skips path creation when using Postgres backend (cloud mode) since
+        cloud tenants don't use local filesystem paths.
+        """
+        # Skip path creation for cloud mode - no local filesystem
+        if self.database_backend == DatabaseBackend.POSTGRES:
+            return self
+
+        for name, path_value in self.projects.items():
             path = Path(path_value)
-            if not Path(path).exists():
+            if not path.exists():
                 try:
                     path.mkdir(parents=True)
                 except Exception as e:
                     logger.error(f"Failed to create project path: {e}")
                     raise e
-        return v
+        return self
 
     @property
     def data_dir_path(self):

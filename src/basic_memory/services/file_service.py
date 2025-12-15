@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 import mimetypes
-from os import stat_result
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Tuple, Union
 
@@ -12,7 +12,7 @@ import aiofiles
 import yaml
 
 from basic_memory import file_utils
-from basic_memory.file_utils import FileError, ParseError
+from basic_memory.file_utils import FileError, FileMetadata, ParseError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Entity as EntityModel
 from basic_memory.schemas import Entity as EntitySchema
@@ -382,20 +382,31 @@ class FileService:
                 logger.error("Failed to compute checksum", path=str(full_path), error=str(e))
                 raise FileError(f"Failed to compute checksum for {path}: {e}")
 
-    def file_stats(self, path: FilePath) -> stat_result:
-        """Return file stats for a given path.
+    async def get_file_metadata(self, path: FilePath) -> FileMetadata:
+        """Return file metadata for a given path.
+
+        This method is async to support cloud implementations (S3FileService)
+        where file metadata requires async operations (head_object).
 
         Args:
             path: Path to the file (Path or string)
 
         Returns:
-            File statistics
+            FileMetadata with size, created_at, and modified_at
         """
         # Convert string to Path if needed
         path_obj = self.base_path / path if isinstance(path, str) else path
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
-        # get file timestamps
-        return full_path.stat()
+
+        # Run blocking stat() in thread pool to maintain async compatibility
+        loop = asyncio.get_event_loop()
+        stat_result = await loop.run_in_executor(None, full_path.stat)
+
+        return FileMetadata(
+            size=stat_result.st_size,
+            created_at=datetime.fromtimestamp(stat_result.st_ctime).astimezone(),
+            modified_at=datetime.fromtimestamp(stat_result.st_mtime).astimezone(),
+        )
 
     def content_type(self, path: FilePath) -> str:
         """Return content_type for a given path.

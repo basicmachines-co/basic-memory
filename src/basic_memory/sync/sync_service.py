@@ -642,12 +642,19 @@ class SyncService:
         file_contains_frontmatter = has_frontmatter(file_content)
 
         # Get file timestamps for tracking modification times
-        file_stats = self.file_service.file_stats(path)
-        created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
-        modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+        file_metadata = await self.file_service.get_file_metadata(path)
+        created = file_metadata.created_at
+        modified = file_metadata.modified_at
 
-        # entity markdown will always contain front matter, so it can be used up create/update the entity
-        entity_markdown = await self.entity_parser.parse_file(path)
+        # Parse markdown content with file metadata (avoids redundant file read/stat)
+        # This enables cloud implementations (S3FileService) to provide metadata from head_object
+        abs_path = self.file_service.base_path / path
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=abs_path,
+            content=file_content,
+            mtime=file_metadata.modified_at.timestamp(),
+            ctime=file_metadata.created_at.timestamp(),
+        )
 
         # if the file contains frontmatter, resolve a permalink (unless disabled)
         if file_contains_frontmatter and not self.app_config.disable_permalinks:
@@ -693,8 +700,8 @@ class SyncService:
                 "checksum": final_checksum,
                 "created_at": created,
                 "updated_at": modified,
-                "mtime": file_stats.st_mtime,
-                "size": file_stats.st_size,
+                "mtime": file_metadata.modified_at.timestamp(),
+                "size": file_metadata.size,
             },
         )
 
@@ -723,9 +730,9 @@ class SyncService:
             await self.entity_service.resolve_permalink(path, skip_conflict_check=True)
 
             # get file timestamps
-            file_stats = self.file_service.file_stats(path)
-            created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
-            modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+            file_metadata = await self.file_service.get_file_metadata(path)
+            created = file_metadata.created_at
+            modified = file_metadata.modified_at
 
             # get mime type
             content_type = self.file_service.content_type(path)
@@ -741,8 +748,8 @@ class SyncService:
                         created_at=created,
                         updated_at=modified,
                         content_type=content_type,
-                        mtime=file_stats.st_mtime,
-                        size=file_stats.st_size,
+                        mtime=file_metadata.modified_at.timestamp(),
+                        size=file_metadata.size,
                     )
                 )
                 return entity, checksum
@@ -758,15 +765,15 @@ class SyncService:
                         logger.error(f"Entity not found after constraint violation, path={path}")
                         raise ValueError(f"Entity not found after constraint violation: {path}")
 
-                    # Re-get file stats since we're in update path
-                    file_stats_for_update = self.file_service.file_stats(path)
+                    # Re-get file metadata since we're in update path
+                    file_metadata_for_update = await self.file_service.get_file_metadata(path)
                     updated = await self.entity_repository.update(
                         entity.id,
                         {
                             "file_path": path,
                             "checksum": checksum,
-                            "mtime": file_stats_for_update.st_mtime,
-                            "size": file_stats_for_update.st_size,
+                            "mtime": file_metadata_for_update.modified_at.timestamp(),
+                            "size": file_metadata_for_update.size,
                         },
                     )
 
@@ -780,8 +787,8 @@ class SyncService:
                     raise
         else:
             # Get file timestamps for updating modification time
-            file_stats = self.file_service.file_stats(path)
-            modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+            file_metadata = await self.file_service.get_file_metadata(path)
+            modified = file_metadata.modified_at
 
             entity = await self.entity_repository.get_by_file_path(path)
             if entity is None:  # pragma: no cover
@@ -796,8 +803,8 @@ class SyncService:
                     "file_path": path,
                     "checksum": checksum,
                     "updated_at": modified,
-                    "mtime": file_stats.st_mtime,
-                    "size": file_stats.st_size,
+                    "mtime": file_metadata.modified_at.timestamp(),
+                    "size": file_metadata.size,
                 },
             )
 
