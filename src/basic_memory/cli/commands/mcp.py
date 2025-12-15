@@ -6,7 +6,7 @@ import typer
 from typing import Optional
 
 from basic_memory.cli.app import app
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, init_mcp_logging
 
 # Import mcp instance
 from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
@@ -44,6 +44,8 @@ if not config.cloud_mode_enabled:
         - streamable-http: Recommended for web deployments (default)
         - sse: Server-Sent Events (for compatibility with existing clients)
         """
+        # Initialize logging for MCP (file only, stdout breaks protocol)
+        init_mcp_logging()
 
         # Validate and set project constraint if specified
         if project:

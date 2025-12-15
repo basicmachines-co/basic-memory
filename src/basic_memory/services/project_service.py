@@ -24,9 +24,6 @@ from basic_memory.config import WATCH_STATUS_JSON, ConfigManager, get_project_co
 from basic_memory.utils import generate_permalink
 
 
-config = ConfigManager().config
-
-
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
@@ -201,7 +198,7 @@ class ProjectService:
                         f"Projects cannot share directory trees."
                     )
 
-        if not config.cloud_mode:
+        if not self.config_manager.config.cloud_mode:
             # First add to config file (this will validate the project doesn't exist)
             self.config_manager.add_project(name, resolved_path)
 

@@ -890,11 +890,6 @@ async def test_add_project_without_project_root_allows_arbitrary_paths(
         if "BASIC_MEMORY_PROJECT_ROOT" in os.environ:
             monkeypatch.delenv("BASIC_MEMORY_PROJECT_ROOT")
 
-        # Force reload config without project_root
-        from basic_memory.services import project_service as ps_module
-
-        monkeypatch.setattr(ps_module, "config", config_manager.load_config())
-
         # Create a test directory
         test_dir = Path(temp_dir) / "arbitrary-location"
         test_dir.mkdir(parents=True, exist_ok=True)

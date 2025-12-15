@@ -2,7 +2,7 @@ from typing import Optional
 
 import typer
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, init_cli_logging
 
 
 def version_callback(value: bool) -> None:
@@ -30,6 +30,9 @@ def app_callback(
     ),
 ) -> None:
     """Basic Memory - Local-first personal knowledge management."""
+
+    # Initialize logging for CLI (file only, no stdout)
+    init_cli_logging()
 
     # Run initialization for every command unless --version was specified
     if not version and ctx.invoked_subcommand is not None:

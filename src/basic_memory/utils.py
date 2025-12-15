@@ -203,29 +203,35 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
 
 
 def setup_logging(
-    env: str,
-    home_dir: Path,
-    log_file: Optional[str] = None,
     log_level: str = "INFO",
-    console: bool = True,
+    log_to_file: bool = False,
+    log_to_stdout: bool = False,
+    structured_context: bool = False,
 ) -> None:  # pragma: no cover
-    """
-    Configure logging for the application.
+    """Configure logging with explicit settings.
+
+    This function provides a simple, explicit interface for configuring logging.
+    Each entry point (CLI, MCP, API) should call this with appropriate settings.
 
     Args:
-        env: The environment name (dev, test, prod)
-        home_dir: The root directory for the application
-        log_file: The name of the log file to write to
-        log_level: The logging level to use
-        console: Whether to log to the console
+        log_level: DEBUG, INFO, WARNING, ERROR
+        log_to_file: Write to ~/.basic-memory/basic-memory.log with rotation
+        log_to_stdout: Write to stderr (for Docker/cloud deployments)
+        structured_context: Bind tenant_id, fly_region, etc. for cloud observability
     """
     # Remove default handler and any existing handlers
     logger.remove()
 
-    # Add file handler if we are not running tests and a log file is specified
-    if log_file and env != "test":
-        # Setup file logger
-        log_path = home_dir / log_file
+    # In test mode, only log to stdout regardless of settings
+    env = os.getenv("BASIC_MEMORY_ENV", "dev")
+    if env == "test":
+        logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=True, colorize=True)
+        return
+
+    # Add file handler with rotation
+    if log_to_file:
+        log_path = Path.home() / ".basic-memory" / "basic-memory.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         logger.add(
             str(log_path),
             level=log_level,
@@ -233,42 +239,28 @@ def setup_logging(
             retention="10 days",
             backtrace=True,
             diagnose=True,
-            enqueue=True,
+            enqueue=True,  # Thread-safe async logging
             colorize=False,
         )
 
-    # Add console logger if requested or in test mode
-    if env == "test" or console:
+    # Add stdout handler (for Docker/cloud)
+    if log_to_stdout:
         logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=True, colorize=True)
 
-    logger.info(f"ENV: '{env}' Log level: '{log_level}' Logging to {log_file}")
-
-    # Bind environment context for structured logging (works in both local and cloud)
-    tenant_id = os.getenv("BASIC_MEMORY_TENANT_ID", "local")
-    fly_app_name = os.getenv("FLY_APP_NAME", "local")
-    fly_machine_id = os.getenv("FLY_MACHINE_ID", "local")
-    fly_region = os.getenv("FLY_REGION", "local")
-
-    logger.configure(
-        extra={
-            "tenant_id": tenant_id,
-            "fly_app_name": fly_app_name,
-            "fly_machine_id": fly_machine_id,
-            "fly_region": fly_region,
-        }
-    )
+    # Bind structured context for cloud observability
+    if structured_context:
+        logger.configure(
+            extra={
+                "tenant_id": os.getenv("BASIC_MEMORY_TENANT_ID", "local"),
+                "fly_app_name": os.getenv("FLY_APP_NAME", "local"),
+                "fly_machine_id": os.getenv("FLY_MACHINE_ID", "local"),
+                "fly_region": os.getenv("FLY_REGION", "local"),
+            }
+        )
 
     # Reduce noise from third-party libraries
-    noisy_loggers = {
-        # HTTP client logs
-        "httpx": logging.WARNING,
-        # File watching logs
-        "watchfiles.main": logging.WARNING,
-    }
-
-    # Set log levels for noisy loggers
-    for logger_name, level in noisy_loggers.items():
-        logging.getLogger(logger_name).setLevel(level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
 
 
 def parse_tags(tags: Union[List[str], str, None]) -> List[str]:

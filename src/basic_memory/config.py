@@ -528,68 +528,38 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
         logger.error(f"Failed to save config: {e}")
 
 
-# setup logging to a single log file in user home directory
-user_home = Path.home()
-log_dir = user_home / DATA_DIR_NAME
-log_dir.mkdir(parents=True, exist_ok=True)
+# Logging initialization functions for different entry points
 
 
-# Process info for logging
-def get_process_name():  # pragma: no cover
+def init_cli_logging() -> None:  # pragma: no cover
+    """Initialize logging for CLI commands - file only.
+
+    CLI commands should not log to stdout to avoid interfering with
+    command output and shell integration.
     """
-    get the type of process for logging
-    """
-    import sys
+    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    setup_logging(log_level=log_level, log_to_file=True)
 
-    if "sync" in sys.argv:
-        return "sync"
-    elif "mcp" in sys.argv:
-        return "mcp"
-    elif "cli" in sys.argv:
-        return "cli"
+
+def init_mcp_logging() -> None:  # pragma: no cover
+    """Initialize logging for MCP server - file only.
+
+    MCP server must not log to stdout as it would corrupt the
+    JSON-RPC protocol communication.
+    """
+    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    setup_logging(log_level=log_level, log_to_file=True)
+
+
+def init_api_logging() -> None:  # pragma: no cover
+    """Initialize logging for API server.
+
+    Cloud mode (BASIC_MEMORY_CLOUD_MODE=1): stdout with structured context
+    Local mode: file only
+    """
+    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    cloud_mode = os.getenv("BASIC_MEMORY_CLOUD_MODE", "").lower() in ("1", "true")
+    if cloud_mode:
+        setup_logging(log_level=log_level, log_to_stdout=True, structured_context=True)
     else:
-        return "api"
-
-
-process_name = get_process_name()
-
-# Global flag to track if logging has been set up
-_LOGGING_SETUP = False
-
-
-# Logging
-
-
-def setup_basic_memory_logging():  # pragma: no cover
-    """Set up logging for basic-memory, ensuring it only happens once."""
-    global _LOGGING_SETUP
-    if _LOGGING_SETUP:
-        # We can't log before logging is set up
-        # print("Skipping duplicate logging setup")
-        return
-
-    # Check for console logging environment variable - accept more truthy values
-    console_logging_env = os.getenv("BASIC_MEMORY_CONSOLE_LOGGING", "false").lower()
-    console_logging = console_logging_env in ("true", "1", "yes", "on")
-
-    # Check for log level environment variable first, fall back to config
-    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL")
-    if not log_level:
-        config_manager = ConfigManager()
-        log_level = config_manager.config.log_level
-
-    config_manager = ConfigManager()
-    config = get_project_config()
-    setup_logging(
-        env=config_manager.config.env,
-        home_dir=user_home,  # Use user home for logs
-        log_level=log_level,
-        log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",
-        console=console_logging,
-    )
-
-    logger.info(f"Basic Memory {basic_memory.__version__} (Project: {config.project})")
-    _LOGGING_SETUP = True
-
-
-# setup_basic_memory_logging()
+        setup_logging(log_level=log_level, log_to_file=True)
