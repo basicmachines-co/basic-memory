@@ -59,6 +59,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
         app.state.sync_task = asyncio.create_task(initialize_file_sync(app_config))
     else:
         logger.info("Sync changes disabled. Skipping file sync service.")
+        app.state.sync_task = None
 
     # proceed with startup
     yield
@@ -67,6 +68,10 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     if app.state.sync_task:
         logger.info("Stopping sync...")
         app.state.sync_task.cancel()  # pyright: ignore
+        try:
+            await app.state.sync_task
+        except asyncio.CancelledError:
+            logger.info("Sync task cancelled successfully")
 
     await db.shutdown_db()
 
