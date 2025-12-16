@@ -329,7 +329,7 @@ def normalize_file_path_for_comparison(file_path: str) -> str:
     This function normalizes file paths to help detect potential conflicts:
     - Converts to lowercase for case-insensitive comparison
     - Normalizes Unicode characters
-    - Handles path separators consistently
+    - Converts backslashes to forward slashes for cross-platform consistency
 
     Args:
         file_path: The file path to normalize
@@ -338,18 +338,14 @@ def normalize_file_path_for_comparison(file_path: str) -> str:
         Normalized file path for comparison purposes
     """
     import unicodedata
+    from pathlib import PureWindowsPath
 
-    # Convert to lowercase for case-insensitive comparison
-    normalized = file_path.lower()
+    # Use PureWindowsPath to ensure backslashes are treated as separators
+    # regardless of current platform, then convert to POSIX-style
+    normalized = PureWindowsPath(file_path).as_posix().lower()
 
     # Normalize Unicode characters (NFD normalization)
     normalized = unicodedata.normalize("NFD", normalized)
-
-    # Replace path separators with forward slashes
-    normalized = normalized.replace("\\", "/")
-
-    # Remove multiple slashes
-    normalized = re.sub(r"/+", "/", normalized)
 
     return normalized
 
@@ -434,7 +430,7 @@ def validate_project_path(path: str, project_path: Path) -> bool:
         return False
 
 
-def ensure_timezone_aware(dt: datetime) -> datetime:
+def ensure_timezone_aware(dt: datetime, cloud_mode: bool | None = None) -> datetime:
     """Ensure a datetime is timezone-aware.
 
     If the datetime is naive, convert it to timezone-aware. The interpretation
@@ -447,15 +443,19 @@ def ensure_timezone_aware(dt: datetime) -> datetime:
 
     Args:
         dt: The datetime to ensure is timezone-aware
+        cloud_mode: Optional explicit cloud_mode setting. If None, loads from config.
 
     Returns:
         A timezone-aware datetime
     """
-    from basic_memory.config import ConfigManager
-
     if dt.tzinfo is None:
-        config = ConfigManager().config
-        if config.cloud_mode_enabled:
+        # Determine cloud_mode: use explicit parameter if provided, otherwise load from config
+        if cloud_mode is None:
+            from basic_memory.config import ConfigManager
+
+            cloud_mode = ConfigManager().config.cloud_mode_enabled
+
+        if cloud_mode:
             # Cloud/PostgreSQL mode: naive datetimes from asyncpg are already UTC
             return dt.replace(tzinfo=timezone.utc)
         else:
