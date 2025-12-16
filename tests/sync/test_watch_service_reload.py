@@ -85,8 +85,8 @@ async def test_run_handles_no_projects():
         with patch.object(watch_service, "write_status", return_value=None):
             await watch_service.run()
 
-    # Should have slept for 30 seconds when no projects found
-    mock_sleep.assert_called_with(30)
+    # Should have slept for the configured reload interval when no projects found
+    mock_sleep.assert_called_with(config.watch_project_reload_interval)
 
 
 @pytest.mark.asyncio

@@ -122,7 +122,9 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     watch_project_reload_interval: int = Field(
-        default=30, description="Seconds between reloading project list in watch service", gt=0
+        default=300,
+        description="Seconds between reloading project list in watch service. Higher values reduce CPU usage by minimizing watcher restarts. Default 300s (5 min) balances efficiency with responsiveness to new projects.",
+        gt=0,
     )
 
     # update permalinks on move
