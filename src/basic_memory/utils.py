@@ -7,7 +7,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Protocol, Union, runtime_checkable, List
+from typing import Protocol, Union, runtime_checkable, List
 
 from loguru import logger
 from unidecode import unidecode

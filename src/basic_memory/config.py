@@ -12,7 +12,6 @@ from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-import basic_memory
 from basic_memory.utils import setup_logging, generate_permalink
 
 
