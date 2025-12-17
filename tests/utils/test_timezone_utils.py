@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 
-import pytest
 
 from basic_memory.utils import ensure_timezone_aware
 

@@ -51,7 +51,7 @@ test-int-sqlite:
 # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
 # See: https://github.com/jlowin/fastmcp/issues/1311
 test-int-postgres:
-    timeout --signal=KILL 300 bash -c 'BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int' || test $? -eq 137
+    timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int' || test $? -eq 137
 
 # Reset Postgres test database (drops and recreates schema)
 # Useful when Alembic migration state gets out of sync during development

@@ -27,7 +27,9 @@ async def to_graph_context(
     # First pass: collect all entity IDs needed for relations
     entity_ids_needed: set[int] = set()
     for context_item in context_result.results:
-        for item in [context_item.primary_result] + context_item.observations + context_item.related_results:
+        for item in (
+            [context_item.primary_result] + context_item.observations + context_item.related_results
+        ):
             if item.type == SearchItemType.RELATION:
                 if item.from_id:  # pyright: ignore
                     entity_ids_needed.add(item.from_id)  # pyright: ignore

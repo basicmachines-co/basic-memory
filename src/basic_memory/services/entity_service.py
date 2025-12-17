@@ -792,23 +792,20 @@ class EntityService(BaseService[EntityModel]):
             raise ValueError(f"Invalid destination path: {destination_path}")
 
         # 3. Validate paths
-        source_file = project_config.home / current_path
-        destination_file = project_config.home / destination_path
-
-        # Validate source exists
-        if not source_file.exists():
+        # NOTE: In tenantless/cloud mode, we cannot rely on local filesystem paths.
+        # Use FileService for existence checks and moving.
+        if not await self.file_service.exists(current_path):
             raise ValueError(f"Source file not found: {current_path}")
 
-        # Check if destination already exists
-        if destination_file.exists():
+        if await self.file_service.exists(destination_path):
             raise ValueError(f"Destination already exists: {destination_path}")
 
         try:
-            # 4. Create destination directory if needed
-            destination_file.parent.mkdir(parents=True, exist_ok=True)
+            # 4. Ensure destination directory if needed (no-op for S3)
+            await self.file_service.ensure_directory(Path(destination_path).parent)
 
-            # 5. Move physical file
-            source_file.rename(destination_file)
+            # 5. Move physical file via FileService (filesystem rename or cloud move)
+            await self.file_service.move_file(current_path, destination_path)
             logger.info(f"Moved file: {current_path} -> {destination_path}")
 
             # 6. Prepare database updates
@@ -847,12 +844,14 @@ class EntityService(BaseService[EntityModel]):
 
         except Exception as e:
             # Rollback: try to restore original file location if move succeeded
-            if destination_file.exists() and not source_file.exists():
-                try:
-                    destination_file.rename(source_file)
+            try:
+                if await self.file_service.exists(
+                    destination_path
+                ) and not await self.file_service.exists(current_path):
+                    await self.file_service.move_file(destination_path, current_path)
                     logger.info(f"Rolled back file move: {destination_path} -> {current_path}")
-                except Exception as rollback_error:  # pragma: no cover
-                    logger.error(f"Failed to rollback file move: {rollback_error}")
+            except Exception as rollback_error:  # pragma: no cover
+                logger.error(f"Failed to rollback file move: {rollback_error}")
 
             # Re-raise the original error with context
             raise ValueError(f"Move failed: {str(e)}") from e

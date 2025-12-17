@@ -135,21 +135,17 @@ async def create_resource(
                 f"Use PUT /resource/{existing_entity.id} to update it.",
             )
 
-        # Get full file path
-        full_path = Path(f"{config.home}/{data.file_path}")
-
-        # Ensure parent directory exists
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write content to file
-        checksum = await file_service.write_file(full_path, data.content)
+        # Cloud compatibility: avoid assuming a local filesystem path.
+        # Delegate directory creation + writes to FileService (local or S3).
+        await file_service.ensure_directory(Path(data.file_path).parent)
+        checksum = await file_service.write_file(data.file_path, data.content)
 
         # Get file info
-        file_metadata = await file_service.get_file_metadata(full_path)
+        file_metadata = await file_service.get_file_metadata(data.file_path)
 
         # Determine file details
         file_name = Path(data.file_path).name
-        content_type = file_service.content_type(full_path)
+        content_type = file_service.content_type(data.file_path)
         entity_type = "canvas" if data.file_path.endswith(".canvas") else "file"
 
         # Create a new entity model
@@ -234,30 +230,27 @@ async def update_resource(
                 "Path must be relative and stay within project boundaries.",
             )
 
-        # Get full paths
-        new_full_path = Path(f"{config.home}/{target_file_path}")
-
         # If moving file, handle the move
         if data.file_path and data.file_path != entity.file_path:
-            # Ensure new parent directory exists
-            new_full_path.parent.mkdir(parents=True, exist_ok=True)
+            # Ensure new parent directory exists (no-op for S3)
+            await file_service.ensure_directory(Path(target_file_path).parent)
 
             # If old file exists, remove it via file_service (for cloud compatibility)
             if await file_service.exists(entity.file_path):
                 await file_service.delete_file(entity.file_path)
         else:
             # Ensure directory exists for in-place update
-            new_full_path.parent.mkdir(parents=True, exist_ok=True)
+            await file_service.ensure_directory(Path(target_file_path).parent)
 
         # Write content to target file
-        checksum = await file_service.write_file(new_full_path, data.content)
+        checksum = await file_service.write_file(target_file_path, data.content)
 
         # Get file info
-        file_metadata = await file_service.get_file_metadata(new_full_path)
+        file_metadata = await file_service.get_file_metadata(target_file_path)
 
         # Determine file details
         file_name = Path(target_file_path).name
-        content_type = file_service.content_type(new_full_path)
+        content_type = file_service.content_type(target_file_path)
         entity_type = "canvas" if target_file_path.endswith(".canvas") else "file"
 
         # Update entity

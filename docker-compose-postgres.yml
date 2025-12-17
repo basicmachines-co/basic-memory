@@ -1,0 +1,42 @@
+# Docker Compose configuration for Basic Memory with PostgreSQL
+# Use this for local development and testing with Postgres backend
+#
+# Usage:
+#   docker-compose -f docker-compose-postgres.yml up -d
+#   docker-compose -f docker-compose-postgres.yml down
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: basic-memory-postgres
+    environment:
+      # Local development/test credentials - NOT for production
+      # These values are referenced by tests and justfile commands
+      POSTGRES_DB: basic_memory
+      POSTGRES_USER: basic_memory_user
+      POSTGRES_PASSWORD: dev_password  # Simple password for local testing only
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U basic_memory_user -d basic_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  # Named volume for Postgres data
+  postgres_data:
+    driver: local
+
+  # Named volume for persistent configuration
+  # Database will be stored in Postgres, not in this volume
+  basic-memory-config:
+    driver: local
+
+# Network configuration (optional)
+# networks:
+#   basic-memory-net:
+#     driver: bridge

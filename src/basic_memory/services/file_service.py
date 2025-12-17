@@ -312,6 +312,43 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
         full_path.unlink(missing_ok=True)
 
+    async def move_file(self, source: FilePath, destination: FilePath) -> None:
+        """Move/rename a file from source to destination.
+
+        This method abstracts the underlying storage (filesystem vs cloud).
+        Default implementation uses atomic filesystem rename, but cloud-backed
+        implementations (e.g., S3) can override to copy+delete.
+
+        Args:
+            source: Source path (relative to base_path or absolute)
+            destination: Destination path (relative to base_path or absolute)
+
+        Raises:
+            FileOperationError: If the move fails
+        """
+        # Convert strings to Paths and resolve relative paths against base_path
+        src_obj = self.base_path / source if isinstance(source, str) else source
+        dst_obj = self.base_path / destination if isinstance(destination, str) else destination
+        src_full = src_obj if src_obj.is_absolute() else self.base_path / src_obj
+        dst_full = dst_obj if dst_obj.is_absolute() else self.base_path / dst_obj
+
+        try:
+            # Ensure destination directory exists
+            await self.ensure_directory(dst_full.parent)
+
+            # Use semaphore for concurrency control and run blocking rename in executor
+            async with self._file_semaphore:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, lambda: src_full.rename(dst_full))
+        except Exception as e:
+            logger.exception(
+                "File move error",
+                source=str(src_full),
+                destination=str(dst_full),
+                error=str(e),
+            )
+            raise FileOperationError(f"Failed to move file {source} -> {destination}: {e}")
+
     async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
         """Update frontmatter fields in a file while preserving all content.
 

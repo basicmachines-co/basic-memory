@@ -185,21 +185,17 @@ async def write_resource(
         else:
             content_str = str(content)
 
-        # Get full file path
-        full_path = Path(f"{config.home}/{file_path}")
-
-        # Ensure parent directory exists
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write content to file
-        checksum = await file_service.write_file(full_path, content_str)
+        # Cloud compatibility: do not assume a local filesystem path structure.
+        # Delegate directory creation + writes to the configured FileService (local or S3).
+        await file_service.ensure_directory(Path(file_path).parent)
+        checksum = await file_service.write_file(file_path, content_str)
 
         # Get file info
-        file_metadata = await file_service.get_file_metadata(full_path)
+        file_metadata = await file_service.get_file_metadata(file_path)
 
         # Determine file details
         file_name = Path(file_path).name
-        content_type = file_service.content_type(full_path)
+        content_type = file_service.content_type(file_path)
 
         entity_type = "canvas" if file_path.endswith(".canvas") else "file"
 
