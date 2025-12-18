@@ -9,11 +9,14 @@ This module provides simplified, project-scoped rclone operations:
 Replaces tenant-wide sync with project-scoped workflows.
 """
 
+import configparser
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import boto3
+from botocore.exceptions import ClientError
 from rich.console import Console
 
 from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
@@ -98,6 +101,116 @@ def bisync_initialized(project_name: str) -> bool:
     """
     state_path = get_project_bisync_state(project_name)
     return state_path.exists() and any(state_path.iterdir())
+
+
+def get_rclone_config_path() -> Path:
+    """Get path to rclone configuration file."""
+    return Path.home() / ".config" / "rclone" / "rclone.conf"
+
+
+def get_s3_credentials_from_rclone() -> tuple[str, str, str]:
+    """Extract S3 credentials from rclone config.
+
+    Returns:
+        Tuple of (access_key, secret_key, endpoint)
+
+    Raises:
+        RcloneError: If rclone config is not found or missing credentials
+    """
+    config_path = get_rclone_config_path()
+    if not config_path.exists():
+        raise RcloneError(f"rclone config not found at {config_path}")
+
+    config = configparser.ConfigParser()
+    config.read(config_path)
+
+    remote_name = "basic-memory-cloud"
+    if not config.has_section(remote_name):
+        raise RcloneError(f"rclone remote '{remote_name}' not found in config")
+
+    try:
+        access_key = config.get(remote_name, "access_key_id")
+        secret_key = config.get(remote_name, "secret_access_key")
+        endpoint = config.get(remote_name, "endpoint")
+        return access_key, secret_key, endpoint
+    except (configparser.NoOptionError, configparser.NoSectionError) as e:
+        raise RcloneError(f"Missing S3 credentials in rclone config: {e}") from e
+
+
+def create_folder_markers(
+    local_path: Path,
+    bucket_name: str,
+    cloud_path: str,
+    verbose: bool = False,
+) -> int:
+    """Create S3 folder markers for all directories in local path.
+
+    TigrisFS requires folder marker objects (empty S3 objects with keys ending in '/')
+    to recognize directory structure. Rclone bisync does not create these automatically.
+
+    Args:
+        local_path: Local directory to scan
+        bucket_name: S3 bucket name
+        cloud_path: Cloud path prefix (e.g., "project-name")
+        verbose: Show detailed output
+
+    Returns:
+        Number of folder markers created
+
+    Raises:
+        RcloneError: If unable to create folder markers
+    """
+    try:
+        # Get S3 credentials from rclone config
+        access_key, secret_key, endpoint = get_s3_credentials_from_rclone()
+
+        # Create S3 client
+        s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            endpoint_url=endpoint,
+        )
+
+        # Collect all directories (relative to local_path)
+        directories = set()
+        for item in local_path.rglob("*"):
+            if item.is_dir():
+                # Get path relative to local_path
+                rel_path = item.relative_to(local_path)
+                # Add all parent directories too
+                for parent in [rel_path] + list(rel_path.parents):
+                    if parent != Path("."):
+                        directories.add(parent)
+
+        # Create folder markers in S3
+        created_count = 0
+        for directory in sorted(directories):
+            # Convert to S3 key with cloud_path prefix
+            s3_key = f"{cloud_path.rstrip('/')}/{directory.as_posix()}/"
+
+            try:
+                # Check if marker already exists
+                s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+                if verbose:
+                    console.print(f"[dim]Folder marker exists: {s3_key}[/dim]")
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "404":
+                    # Marker doesn't exist, create it
+                    s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=b"")
+                    created_count += 1
+                    if verbose:
+                        console.print(f"[green]Created folder marker: {s3_key}[/green]")
+                else:
+                    # Other error, re-raise
+                    raise
+
+        return created_count
+
+    except ClientError as e:
+        raise RcloneError(f"S3 error while creating folder markers: {e}") from e
+    except Exception as e:
+        raise RcloneError(f"Failed to create folder markers: {e}") from e
 
 
 def get_project_remote(project: SyncProject, bucket_name: str) -> str:
@@ -248,7 +361,35 @@ def project_bisync(
         )
 
     result = subprocess.run(cmd, text=True)
-    return result.returncode == 0
+    success = result.returncode == 0
+
+    # Create folder markers after successful bisync (not for dry runs)
+    if success and not dry_run:
+        try:
+            # Normalize path to strip /app/data/ mount point prefix
+            cloud_path = normalize_project_path(project.path).lstrip("/")
+
+            console.print("[blue]Creating S3 folder markers for TigrisFS...[/blue]")
+            created_count = create_folder_markers(
+                local_path=local_path,
+                bucket_name=bucket_name,
+                cloud_path=cloud_path,
+                verbose=verbose,
+            )
+
+            if created_count > 0:
+                console.print(f"[green]Created {created_count} folder markers[/green]")
+            else:
+                console.print("[dim]All folder markers already exist[/dim]")
+
+        except RcloneError as e:
+            # Log warning but don't fail the bisync operation
+            console.print(f"[yellow]Warning: Could not create folder markers: {e}[/yellow]")
+            console.print(
+                "[yellow]Files may not be visible in TigrisFS mount until markers are created[/yellow]"
+            )
+
+    return success
 
 
 def project_check(

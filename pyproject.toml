@@ -38,6 +38,7 @@ dependencies = [
     "nest-asyncio>=1.6.0", # For Alembic migrations with Postgres
     "pytest-asyncio>=1.2.0",
     "psycopg==3.3.1",
+    "boto3>=1.35.0", # For S3 folder marker creation in cloud sync
 ]
 
 
