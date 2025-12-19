@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.tree import Tree
 
+from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_post
@@ -165,8 +166,16 @@ def status(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed file information"),
 ):
     """Show sync status between files and database."""
+
+    async def _run_with_cleanup():
+        """Wrap run_status with proper database cleanup to prevent process hang."""
+        try:
+            await run_status(project, verbose)
+        finally:
+            await db.shutdown_db()
+
     try:
-        asyncio.run(run_status(project, verbose))  # pragma: no cover
+        asyncio.run(_run_with_cleanup())  # pragma: no cover
     except Exception as e:
         logger.error(f"Error checking status: {e}")
         typer.echo(f"Error checking status: {e}", err=True)

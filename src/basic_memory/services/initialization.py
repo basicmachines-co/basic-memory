@@ -189,9 +189,21 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
         logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
         return
 
+    async def _init_and_cleanup():
+        """Initialize app and clean up database connections.
+
+        Database connections created during initialization must be cleaned up
+        before the event loop closes, otherwise the process will hang indefinitely.
+        """
+        try:
+            await initialize_app(app_config)
+        finally:
+            # Always cleanup database connections to prevent process hang
+            await db.shutdown_db()
+
     try:
-        result = asyncio.run(initialize_app(app_config))
-        logger.info(f"Initialization completed successfully: result={result}")
+        asyncio.run(_init_and_cleanup())
+        logger.info("Initialization completed successfully")
     except Exception as e:  # pragma: no cover
         logger.exception(f"Error during initialization: {e}")
         # Continue execution even if initialization fails

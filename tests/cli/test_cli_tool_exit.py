@@ -23,21 +23,23 @@ class TestCLIToolExit:
     """Test that CLI tool commands exit cleanly."""
 
     @pytest.mark.parametrize(
-        "command",
+        "command,expect_success",
         [
-            ["tool", "--help"],
-            ["tool", "write-note", "--help"],
-            ["tool", "read-note", "--help"],
-            ["tool", "search-notes", "--help"],
-            ["tool", "build-context", "--help"],
-            ["status"],  # Also affected by same issue
+            (["tool", "--help"], True),
+            (["tool", "write-note", "--help"], True),
+            (["tool", "read-note", "--help"], True),
+            (["tool", "search-notes", "--help"], True),
+            (["tool", "build-context", "--help"], True),
+            # status may fail due to no project configured, but should still exit cleanly
+            (["status"], False),
         ],
     )
-    def test_cli_command_exits_cleanly(self, command: list[str]):
+    def test_cli_command_exits_cleanly(self, command: list[str], expect_success: bool):
         """Test that CLI commands exit without hanging.
 
         Each command should complete within the timeout without requiring
-        manual termination (Ctrl+C).
+        manual termination (Ctrl+C). Some commands may fail due to configuration
+        (e.g., no project), but they should still exit cleanly.
         """
         full_command = [sys.executable, "-m", "basic_memory.cli.main"] + command
 
@@ -48,8 +50,10 @@ class TestCLIToolExit:
                 text=True,
                 timeout=10.0,  # 10 second timeout - commands should complete in ~2s
             )
-            # Command should exit with code 0 for --help
-            assert result.returncode == 0, f"Command failed: {result.stderr}"
+            if expect_success:
+                # Command should exit with code 0 for --help
+                assert result.returncode == 0, f"Command failed: {result.stderr}"
+            # If not expecting success, we just care that it didn't hang
         except subprocess.TimeoutExpired:
             pytest.fail(
                 f"Command '{' '.join(command)}' hung and did not exit within timeout. "
