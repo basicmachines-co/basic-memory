@@ -172,8 +172,8 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     formatter_command: Optional[str] = Field(
-        default=None,
-        description="Default formatter command. Use {file} as placeholder for file path. Example: 'prettier --write {file}'",
+        default="npx prettier --write {file}",
+        description="Default formatter command. Use {file} as placeholder for file path. Uses npx prettier by default.",
     )
 
     formatters: Dict[str, str] = Field(

@@ -242,8 +242,8 @@ async def test_format_file_no_formatter_configured(tmp_path: Path):
     test_file = tmp_path / "test.md"
     test_file.write_text("# Test\n")
 
-    config = BasicMemoryConfig(format_on_save=True)
-    # No formatter_command or formatters configured
+    # Explicitly set formatter_command to None to test the "no formatter" case
+    config = BasicMemoryConfig(format_on_save=True, formatter_command=None)
 
     result = await format_file(test_file, config)
     assert result is None
