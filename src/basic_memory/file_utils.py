@@ -1,11 +1,13 @@
 """Utilities for file operations."""
 
+import asyncio
 import hashlib
+import shlex
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
-from typing import Any, Dict, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import aiofiles
 import yaml
@@ -13,6 +15,9 @@ import frontmatter
 from loguru import logger
 
 from basic_memory.utils import FilePath
+
+if TYPE_CHECKING:
+    from basic_memory.config import BasicMemoryConfig
 
 
 @dataclass
@@ -98,6 +103,101 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
         temp_path.unlink(missing_ok=True)
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
+
+
+async def format_file(
+    path: Path,
+    config: "BasicMemoryConfig",
+) -> Optional[str]:
+    """
+    Format a file using configured formatter.
+
+    Runs an external formatter (like prettier) on the file after it has been written.
+    The formatter command is determined by file extension, falling back to a global
+    formatter if no extension-specific one is configured.
+
+    Args:
+        path: File to format
+        config: Configuration with formatter settings
+
+    Returns:
+        Formatted content if successful, None if formatting was skipped or failed.
+        Failures are logged as warnings but don't raise exceptions.
+    """
+    if not config.format_on_save:
+        return None
+
+    extension = path.suffix.lstrip(".")
+    formatter = config.formatters.get(extension) or config.formatter_command
+
+    if not formatter:
+        logger.debug("No formatter configured for extension", extension=extension)
+        return None
+
+    # Replace {file} placeholder with the actual path
+    cmd = formatter.replace("{file}", str(path))
+
+    try:
+        # Parse command into args list for safer execution (no shell=True)
+        args = shlex.split(cmd)
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=config.formatter_timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning(
+                "Formatter timed out",
+                path=str(path),
+                timeout=config.formatter_timeout,
+            )
+            return None
+
+        if proc.returncode != 0:
+            logger.warning(
+                "Formatter exited with non-zero status",
+                path=str(path),
+                returncode=proc.returncode,
+                stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+            )
+            # Still try to read the file - formatter may have partially worked
+            # or the file may be unchanged
+
+        # Read formatted content
+        async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
+            formatted_content = await f.read()
+
+        logger.debug(
+            "Formatted file successfully",
+            path=str(path),
+            formatter=args[0] if args else formatter,
+        )
+        return formatted_content
+
+    except FileNotFoundError:
+        # Formatter executable not found
+        logger.warning(
+            "Formatter executable not found",
+            command=cmd.split()[0] if cmd else "",
+            path=str(path),
+        )
+        return None
+    except Exception as e:
+        logger.warning(
+            "Formatter failed",
+            path=str(path),
+            error=str(e),
+        )
+        return None
 
 
 def has_frontmatter(content: str) -> bool:

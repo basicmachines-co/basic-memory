@@ -5,13 +5,16 @@ import hashlib
 import mimetypes
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
 import aiofiles
 
 import yaml
 
 from basic_memory import file_utils
+
+if TYPE_CHECKING:
+    from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import FileError, FileMetadata, ParseError
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Entity as EntityModel
@@ -42,9 +45,11 @@ class FileService:
         base_path: Path,
         markdown_processor: MarkdownProcessor,
         max_concurrent_files: int = 10,
+        app_config: Optional["BasicMemoryConfig"] = None,
     ):
         self.base_path = base_path.resolve()  # Get absolute path
         self.markdown_processor = markdown_processor
+        self.app_config = app_config
         # Semaphore to limit concurrent file operations
         # Prevents OOM on large projects by processing files in batches
         self._file_semaphore = asyncio.Semaphore(max_concurrent_files)
@@ -149,12 +154,15 @@ class FileService:
         Handles both absolute and relative paths. Relative paths are resolved
         against base_path.
 
+        If format_on_save is enabled in config, runs the configured formatter
+        after writing and returns the checksum of the formatted content.
+
         Args:
             path: Where to write (Path or string)
             content: Content to write
 
         Returns:
-            Checksum of written content
+            Checksum of written content (or formatted content if formatting enabled)
 
         Raises:
             FileOperationError: If write fails
@@ -177,8 +185,15 @@ class FileService:
 
             await file_utils.write_file_atomic(full_path, content)
 
-            # Compute and return checksum
-            checksum = await file_utils.compute_checksum(content)
+            # Format file if configured
+            final_content = content
+            if self.app_config:
+                formatted_content = await file_utils.format_file(full_path, self.app_config)
+                if formatted_content is not None:
+                    final_content = formatted_content
+
+            # Compute and return checksum of final content
+            checksum = await file_utils.compute_checksum(final_content)
             logger.debug(f"File write completed path={full_path}, {checksum=}")
             return checksum
 
@@ -405,7 +420,15 @@ class FileService:
             )
 
             await file_utils.write_file_atomic(full_path, final_content)
-            return await file_utils.compute_checksum(final_content)
+
+            # Format file if configured
+            content_for_checksum = final_content
+            if self.app_config:
+                formatted_content = await file_utils.format_file(full_path, self.app_config)
+                if formatted_content is not None:
+                    content_for_checksum = formatted_content
+
+            return await file_utils.compute_checksum(content_for_checksum)
 
         except Exception as e:
             # Only log real errors (not YAML parsing, which is handled above)

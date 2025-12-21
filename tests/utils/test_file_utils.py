@@ -6,11 +6,13 @@ import pytest
 import random
 import string
 
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import (
     FileError,
     FileWriteError,
     ParseError,
     compute_checksum,
+    format_file,
     has_frontmatter,
     parse_frontmatter,
     remove_frontmatter,
@@ -214,3 +216,188 @@ def test_sanitize_for_filename_removes_invalid_characters():
 )
 def test_sanitize_for_folder_edge_cases(input_folder, expected):
     assert sanitize_for_folder(input_folder) == expected
+
+
+# =============================================================================
+# format_file tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_format_file_disabled_by_default(tmp_path: Path):
+    """Test that format_file returns None when format_on_save is False (default)."""
+    test_file = tmp_path / "test.md"
+    test_file.write_text("# Test\n")
+
+    config = BasicMemoryConfig()
+    assert config.format_on_save is False
+
+    result = await format_file(test_file, config)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_file_no_formatter_configured(tmp_path: Path):
+    """Test that format_file returns None when no formatter is configured for the extension."""
+    test_file = tmp_path / "test.md"
+    test_file.write_text("# Test\n")
+
+    config = BasicMemoryConfig(format_on_save=True)
+    # No formatter_command or formatters configured
+
+    result = await format_file(test_file, config)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_format_file_with_global_formatter(tmp_path: Path):
+    """Test formatting with global formatter_command."""
+    test_file = tmp_path / "test.md"
+    original_content = "# Test\n"
+    test_file.write_text(original_content)
+
+    # Use a simple formatter that just echoes content (cat)
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="cat {file}",  # This doesn't modify the file but runs successfully
+    )
+
+    result = await format_file(test_file, config)
+    assert result == original_content
+
+
+@pytest.mark.asyncio
+async def test_format_file_with_extension_specific_formatter(tmp_path: Path):
+    """Test formatting with extension-specific formatter."""
+    test_file = tmp_path / "test.json"
+    original_content = '{"key": "value"}'
+    test_file.write_text(original_content)
+
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="echo global",  # This should NOT be used
+        formatters={"json": "cat {file}"},  # Extension-specific should be used
+    )
+
+    result = await format_file(test_file, config)
+    assert result == original_content
+
+
+@pytest.mark.asyncio
+async def test_format_file_extension_specific_overrides_global(tmp_path: Path):
+    """Test that extension-specific formatter takes precedence over global."""
+    test_file = tmp_path / "test.md"
+    original_content = "# Test\n"
+    test_file.write_text(original_content)
+
+    # Use different commands to verify which one is used
+    # Since cat just reads the file, we can tell which was used by the content
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="cat /dev/null",  # Would return empty
+        formatters={"md": "cat {file}"},  # Should return original content
+    )
+
+    result = await format_file(test_file, config)
+    assert result == original_content
+
+
+@pytest.mark.asyncio
+async def test_format_file_falls_back_to_global(tmp_path: Path):
+    """Test that global formatter is used when no extension-specific one exists."""
+    test_file = tmp_path / "test.txt"  # No extension-specific formatter for .txt
+    original_content = "Some text\n"
+    test_file.write_text(original_content)
+
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="cat {file}",
+        formatters={"md": "echo wrong"},  # Only for .md, not .txt
+    )
+
+    result = await format_file(test_file, config)
+    assert result == original_content
+
+
+@pytest.mark.asyncio
+async def test_format_file_handles_nonexistent_formatter(tmp_path: Path):
+    """Test that format_file handles missing formatter executable gracefully."""
+    test_file = tmp_path / "test.md"
+    test_file.write_text("# Test\n")
+
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="nonexistent_formatter_executable_12345 {file}",
+    )
+
+    result = await format_file(test_file, config)
+    assert result is None  # Should return None on error
+
+
+@pytest.mark.asyncio
+async def test_format_file_handles_timeout(tmp_path: Path):
+    """Test that format_file handles formatter timeout gracefully."""
+    test_file = tmp_path / "test.md"
+    test_file.write_text("# Test\n")
+
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="sleep 10",  # Will timeout
+        formatter_timeout=0.1,  # Very short timeout
+    )
+
+    result = await format_file(test_file, config)
+    assert result is None  # Should return None on timeout
+
+
+@pytest.mark.asyncio
+async def test_format_file_handles_nonzero_exit(tmp_path: Path):
+    """Test that format_file handles non-zero exit codes gracefully."""
+    test_file = tmp_path / "test.md"
+    original_content = "# Test\n"
+    test_file.write_text(original_content)
+
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="sh -c 'exit 1'",  # Non-zero exit
+    )
+
+    result = await format_file(test_file, config)
+    # Should still return file content even with non-zero exit
+    assert result == original_content
+
+
+@pytest.mark.asyncio
+async def test_format_file_returns_modified_content(tmp_path: Path):
+    """Test that format_file returns the modified file content after formatting."""
+    test_file = tmp_path / "test.md"
+    original_content = "original content"
+    test_file.write_text(original_content)
+
+    # This formatter modifies the file to contain different content
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="sh -c 'echo modified > {file}'",
+    )
+
+    result = await format_file(test_file, config)
+    assert result == "modified\n"
+    assert test_file.read_text() == "modified\n"
+
+
+@pytest.mark.asyncio
+async def test_format_file_with_spaces_in_path(tmp_path: Path):
+    """Test formatting files with spaces in path."""
+    subdir = tmp_path / "path with spaces"
+    subdir.mkdir()
+    test_file = subdir / "my file.md"
+    original_content = "# Test\n"
+    test_file.write_text(original_content)
+
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command="cat {file}",
+    )
+
+    result = await format_file(test_file, config)
+    assert result == original_content

@@ -351,24 +351,32 @@ async def get_entity_parser_v2(project_config: ProjectConfigV2Dep) -> EntityPars
 EntityParserV2Dep = Annotated["EntityParser", Depends(get_entity_parser_v2)]
 
 
-async def get_markdown_processor(entity_parser: EntityParserDep) -> MarkdownProcessor:
-    return MarkdownProcessor(entity_parser)
+async def get_markdown_processor(
+    entity_parser: EntityParserDep, app_config: AppConfigDep
+) -> MarkdownProcessor:
+    return MarkdownProcessor(entity_parser, app_config=app_config)
 
 
 MarkdownProcessorDep = Annotated[MarkdownProcessor, Depends(get_markdown_processor)]
 
 
-async def get_markdown_processor_v2(entity_parser: EntityParserV2Dep) -> MarkdownProcessor:
-    return MarkdownProcessor(entity_parser)
+async def get_markdown_processor_v2(
+    entity_parser: EntityParserV2Dep, app_config: AppConfigDep
+) -> MarkdownProcessor:
+    return MarkdownProcessor(entity_parser, app_config=app_config)
 
 
 MarkdownProcessorV2Dep = Annotated[MarkdownProcessor, Depends(get_markdown_processor_v2)]
 
 
 async def get_file_service(
-    project_config: ProjectConfigDep, markdown_processor: MarkdownProcessorDep
+    project_config: ProjectConfigDep,
+    markdown_processor: MarkdownProcessorDep,
+    app_config: AppConfigDep,
 ) -> FileService:
-    file_service = FileService(project_config.home, markdown_processor)
+    file_service = FileService(
+        project_config.home, markdown_processor, app_config=app_config
+    )
     logger.debug(
         f"Created FileService for project: {project_config.name}, base_path: {project_config.home} "
     )
@@ -379,9 +387,13 @@ FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
 async def get_file_service_v2(
-    project_config: ProjectConfigV2Dep, markdown_processor: MarkdownProcessorV2Dep
+    project_config: ProjectConfigV2Dep,
+    markdown_processor: MarkdownProcessorV2Dep,
+    app_config: AppConfigDep,
 ) -> FileService:
-    file_service = FileService(project_config.home, markdown_processor)
+    file_service = FileService(
+        project_config.home, markdown_processor, app_config=app_config
+    )
     logger.debug(
         f"Created FileService for project: {project_config.name}, base_path: {project_config.home}"
     )

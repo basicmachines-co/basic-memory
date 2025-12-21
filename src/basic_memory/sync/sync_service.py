@@ -1186,8 +1186,8 @@ async def get_sync_service(project: Project) -> SyncService:  # pragma: no cover
 
     project_path = Path(project.path)
     entity_parser = EntityParser(project_path)
-    markdown_processor = MarkdownProcessor(entity_parser)
-    file_service = FileService(project_path, markdown_processor)
+    markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
+    file_service = FileService(project_path, markdown_processor, app_config=app_config)
 
     # Initialize repositories
     entity_repository = EntityRepository(session_maker, project_id=project.id)

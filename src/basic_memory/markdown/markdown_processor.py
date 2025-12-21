@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from collections import OrderedDict
 
 from frontmatter import Post
@@ -10,6 +10,9 @@ from basic_memory import file_utils
 from basic_memory.file_utils import dump_frontmatter
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
+
+if TYPE_CHECKING:
+    from basic_memory.config import BasicMemoryConfig
 
 
 class DirtyFileError(Exception):
@@ -36,9 +39,14 @@ class MarkdownProcessor:
     3. Track schema changes (that's done by the database)
     """
 
-    def __init__(self, entity_parser: EntityParser):
-        """Initialize processor with base path and parser."""
+    def __init__(
+        self,
+        entity_parser: EntityParser,
+        app_config: Optional["BasicMemoryConfig"] = None,
+    ):
+        """Initialize processor with parser and optional config."""
         self.entity_parser = entity_parser
+        self.app_config = app_config
 
     async def read_file(self, path: Path) -> EntityMarkdown:
         """Read and parse file into EntityMarkdown schema.
@@ -123,7 +131,15 @@ class MarkdownProcessor:
         # Write atomically and return checksum of updated file
         path.parent.mkdir(parents=True, exist_ok=True)
         await file_utils.write_file_atomic(path, final_content)
-        return await file_utils.compute_checksum(final_content)
+
+        # Format file if configured
+        content_for_checksum = final_content
+        if self.app_config:
+            formatted_content = await file_utils.format_file(path, self.app_config)
+            if formatted_content is not None:
+                content_for_checksum = formatted_content
+
+        return await file_utils.compute_checksum(content_for_checksum)
 
     def format_observations(self, observations: list[Observation]) -> str:
         """Format observations section in standard way.

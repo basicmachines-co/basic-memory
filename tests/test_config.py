@@ -483,3 +483,116 @@ class TestPlatformNativePathSeparators:
         else:
             # Unix: should have forward slashes
             assert "/" in main_path
+
+
+class TestFormattingConfig:
+    """Test file formatting configuration options."""
+
+    def test_format_on_save_defaults_to_false(self):
+        """Test that format_on_save is disabled by default."""
+        config = BasicMemoryConfig()
+        assert config.format_on_save is False
+
+    def test_format_on_save_can_be_enabled(self):
+        """Test that format_on_save can be set to True."""
+        config = BasicMemoryConfig(format_on_save=True)
+        assert config.format_on_save is True
+
+    def test_formatter_command_defaults_to_none(self):
+        """Test that formatter_command defaults to None."""
+        config = BasicMemoryConfig()
+        assert config.formatter_command is None
+
+    def test_formatter_command_can_be_set(self):
+        """Test that formatter_command can be configured."""
+        config = BasicMemoryConfig(formatter_command="prettier --write {file}")
+        assert config.formatter_command == "prettier --write {file}"
+
+    def test_formatters_defaults_to_empty_dict(self):
+        """Test that formatters defaults to empty dict."""
+        config = BasicMemoryConfig()
+        assert config.formatters == {}
+
+    def test_formatters_can_be_configured(self):
+        """Test that per-extension formatters can be configured."""
+        config = BasicMemoryConfig(
+            formatters={
+                "md": "prettier --write {file}",
+                "json": "jq . {file} > {file}.tmp && mv {file}.tmp {file}",
+            }
+        )
+        assert config.formatters["md"] == "prettier --write {file}"
+        assert "json" in config.formatters
+
+    def test_formatter_timeout_defaults_to_5_seconds(self):
+        """Test that formatter_timeout defaults to 5.0 seconds."""
+        config = BasicMemoryConfig()
+        assert config.formatter_timeout == 5.0
+
+    def test_formatter_timeout_can_be_customized(self):
+        """Test that formatter_timeout can be set to a different value."""
+        config = BasicMemoryConfig(formatter_timeout=10.0)
+        assert config.formatter_timeout == 10.0
+
+    def test_formatter_timeout_must_be_positive(self):
+        """Test that formatter_timeout validation rejects non-positive values."""
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            BasicMemoryConfig(formatter_timeout=0)
+
+        with pytest.raises(pydantic.ValidationError):
+            BasicMemoryConfig(formatter_timeout=-1)
+
+    def test_formatting_env_vars(self, monkeypatch):
+        """Test that formatting config can be set via environment variables."""
+        monkeypatch.setenv("BASIC_MEMORY_FORMAT_ON_SAVE", "true")
+        monkeypatch.setenv("BASIC_MEMORY_FORMATTER_COMMAND", "prettier --write {file}")
+        monkeypatch.setenv("BASIC_MEMORY_FORMATTER_TIMEOUT", "10.0")
+
+        config = BasicMemoryConfig()
+
+        assert config.format_on_save is True
+        assert config.formatter_command == "prettier --write {file}"
+        assert config.formatter_timeout == 10.0
+
+    def test_formatters_env_var_json(self, monkeypatch):
+        """Test that formatters dict can be set via JSON environment variable."""
+        import json
+
+        formatters_json = json.dumps({"md": "prettier --write {file}", "json": "jq . {file}"})
+        monkeypatch.setenv("BASIC_MEMORY_FORMATTERS", formatters_json)
+
+        config = BasicMemoryConfig()
+
+        assert config.formatters == {"md": "prettier --write {file}", "json": "jq . {file}"}
+
+    def test_save_and_load_formatting_config(self):
+        """Test that formatting config survives save/load cycle."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create config with formatting settings
+            test_config = BasicMemoryConfig(
+                projects={"main": str(temp_path / "main")},
+                format_on_save=True,
+                formatter_command="prettier --write {file}",
+                formatters={"md": "prettier --write {file}", "json": "prettier --write {file}"},
+                formatter_timeout=10.0,
+            )
+            config_manager.save_config(test_config)
+
+            # Load and verify
+            loaded_config = config_manager.load_config()
+            assert loaded_config.format_on_save is True
+            assert loaded_config.formatter_command == "prettier --write {file}"
+            assert loaded_config.formatters == {
+                "md": "prettier --write {file}",
+                "json": "prettier --write {file}",
+            }
+            assert loaded_config.formatter_timeout == 10.0

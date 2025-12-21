@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 from basic_memory.cli.app import claude_app
-from basic_memory.config import get_project_config
+from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.importers.claude_projects_importer import ClaudeProjectsImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from loguru import logger
@@ -20,8 +20,9 @@ console = Console()
 async def get_markdown_processor() -> MarkdownProcessor:
     """Get MarkdownProcessor instance."""
     config = get_project_config()
+    app_config = ConfigManager().config
     entity_parser = EntityParser(config.home)
-    return MarkdownProcessor(entity_parser)
+    return MarkdownProcessor(entity_parser, app_config=app_config)
 
 
 @claude_app.command(name="projects", help="Import projects from Claude.ai.")
