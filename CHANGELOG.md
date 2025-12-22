@@ -1,5 +1,98 @@
 # CHANGELOG
 
+## v0.16.3 (2025-12-20)
+
+### Features
+
+- **#439**: Add PostgreSQL database backend support
+  ([`fb5e9e1`](https://github.com/basicmachines-co/basic-memory/commit/fb5e9e1))
+  - Full PostgreSQL/Neon database support as alternative to SQLite
+  - Async connection pooling with asyncpg
+  - Alembic migrations support for both backends
+  - Configurable via `BASIC_MEMORY_DATABASE_BACKEND` environment variable
+
+- **#441**: Implement API v2 with ID-based endpoints (Phase 1)
+  ([`28cc522`](https://github.com/basicmachines-co/basic-memory/commit/28cc522))
+  - New ID-based API endpoints for improved performance
+  - Foundation for future API enhancements
+  - Backward compatible with existing endpoints
+
+- Add project_id to Relation and Observation for efficient project-scoped queries
+  ([`a920a9f`](https://github.com/basicmachines-co/basic-memory/commit/a920a9f))
+  - Enables faster queries in multi-project environments
+  - Improved database schema for cloud deployments
+
+- Add bulk insert with ON CONFLICT handling for relations
+  ([`0818bda`](https://github.com/basicmachines-co/basic-memory/commit/0818bda))
+  - Faster relation creation during sync operations
+  - Handles duplicate relations gracefully
+
+### Performance
+
+- Lightweight permalink resolution to avoid eager loading
+  ([`6f99d2e`](https://github.com/basicmachines-co/basic-memory/commit/6f99d2e))
+  - Reduces database queries during entity lookups
+  - Improved response times for read operations
+
+### Bug Fixes
+
+- **#464**: Pin FastMCP to 2.12.3 to fix MCP tools visibility
+  ([`f227ef6`](https://github.com/basicmachines-co/basic-memory/commit/f227ef6))
+  - Fixes issue where MCP tools were not visible to Claude
+  - Reverts to last known working FastMCP version
+
+- **#458**: Reduce watch service CPU usage by increasing reload interval
+  ([`897b1ed`](https://github.com/basicmachines-co/basic-memory/commit/897b1ed))
+  - Lowers CPU usage during file watching
+  - More efficient resource utilization
+
+- **#456**: Await background sync task cancellation in lifespan shutdown
+  ([`efbc758`](https://github.com/basicmachines-co/basic-memory/commit/efbc758))
+  - Prevents hanging on shutdown
+  - Clean async task cleanup
+
+- **#434**: Respect --project flag in background sync
+  ([`70bb10b`](https://github.com/basicmachines-co/basic-memory/commit/70bb10b))
+  - Background sync now correctly uses specified project
+  - Fixes multi-project sync issues
+
+- **#446**: Fix observation parsing and permalink limits
+  ([`73d940e`](https://github.com/basicmachines-co/basic-memory/commit/73d940e))
+  - Handles edge cases in observation content
+  - Prevents permalink truncation issues
+
+- **#424**: Handle periods in kebab_filenames mode
+  ([`b004565`](https://github.com/basicmachines-co/basic-memory/commit/b004565))
+  - Fixes filename handling for files with multiple periods
+  - Improved kebab-case conversion
+
+- Fix Postgres/Neon connection settings and search index dedupe
+  ([`b5d4fb5`](https://github.com/basicmachines-co/basic-memory/commit/b5d4fb5))
+  - Optimized connection pooling for Postgres
+  - Prevents duplicate search index entries
+
+### Testing & CI
+
+- Replace py-pglite with testcontainers for Postgres testing
+  ([`c462faf`](https://github.com/basicmachines-co/basic-memory/commit/c462faf))
+  - More reliable Postgres testing infrastructure
+  - Uses Docker-based test containers
+
+- Add PostgreSQL testing to GitHub Actions workflow
+  ([`66b91b2`](https://github.com/basicmachines-co/basic-memory/commit/66b91b2))
+  - CI now tests both SQLite and PostgreSQL backends
+  - Ensures cross-database compatibility
+
+- **#416**: Add integration test for read_note with underscored folders
+  ([`0c12a39`](https://github.com/basicmachines-co/basic-memory/commit/0c12a39))
+  - Verifies folder name handling edge cases
+
+### Internal
+
+- Cloud compatibility fixes and performance improvements (#454)
+- Remove logfire instrumentation for cleaner production deployments
+- Truncate content_stems to fix Postgres 8KB index row limit
+
 ## v0.16.2 (2025-11-16)
 
 ### Bug Fixes
