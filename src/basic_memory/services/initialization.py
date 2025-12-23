@@ -6,6 +6,7 @@ to ensure consistent application startup across all entry points.
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 
@@ -192,6 +193,13 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
         finally:
             # Always cleanup database connections to prevent process hang
             await db.shutdown_db()
+
+    # On Windows, use SelectorEventLoop to avoid ProactorEventLoop cleanup issues
+    # The ProactorEventLoop can raise "IndexError: pop from an empty deque" during
+    # event loop cleanup when there are pending handles. SelectorEventLoop is more
+    # stable for our use case (no subprocess pipes or named pipes needed).
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     asyncio.run(_init_and_cleanup())
     logger.info("Initialization completed successfully")
