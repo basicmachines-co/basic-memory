@@ -232,6 +232,9 @@ def setup_logging(
     if log_to_file:
         log_path = Path.home() / ".basic-memory" / "basic-memory.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        # On Windows, disable enqueue to avoid thread cleanup issues during quick exit
+        # The background logging thread can hang the process on Windows
+        use_enqueue = os.name != "nt"
         logger.add(
             str(log_path),
             level=log_level,
@@ -239,7 +242,7 @@ def setup_logging(
             retention="10 days",
             backtrace=True,
             diagnose=True,
-            enqueue=True,  # Thread-safe async logging
+            enqueue=use_enqueue,  # Thread-safe async logging (disabled on Windows)
             colorize=False,
         )
 
