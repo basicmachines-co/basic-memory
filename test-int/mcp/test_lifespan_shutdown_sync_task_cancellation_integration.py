@@ -66,5 +66,3 @@ def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
     # Use asyncio.run to match the CLI/MCP execution model where loop teardown
     # would hang if a background task is left running.
     asyncio.run(_run_client_once())
-
-
