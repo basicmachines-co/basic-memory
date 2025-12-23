@@ -1,6 +1,5 @@
 """Status command for basic-memory CLI."""
 
-import asyncio
 from typing import Set, Dict
 from typing import Annotated, Optional
 
