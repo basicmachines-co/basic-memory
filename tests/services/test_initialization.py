@@ -26,7 +26,8 @@ async def test_initialize_database(mock_get_or_create_db, app_config):
 async def test_initialize_database_error(mock_get_or_create_db, app_config):
     """Test handling errors during database initialization."""
     mock_get_or_create_db.side_effect = Exception("Test error")
-    await initialize_database(app_config)
+    with pytest.raises(Exception, match="Test error"):
+        await initialize_database(app_config)
     mock_get_or_create_db.assert_called_once_with(app_config.database_path)
 
 

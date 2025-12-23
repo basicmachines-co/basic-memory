@@ -165,8 +165,10 @@ def status(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed file information"),
 ):
     """Show sync status between files and database."""
+    from basic_memory.cli.commands.command_utils import run_with_cleanup
+
     try:
-        asyncio.run(run_status(project, verbose))  # pragma: no cover
+        run_with_cleanup(run_status(project, verbose))  # pragma: no cover
     except Exception as e:
         logger.error(f"Error checking status: {e}")
         typer.echo(f"Error checking status: {e}", err=True)

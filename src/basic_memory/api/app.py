@@ -53,8 +53,9 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     app.state.session_maker = session_maker
     logger.info("Database connections cached in app state")
 
-    logger.info(f"Sync changes enabled: {app_config.sync_changes}")
+    # Start file sync if enabled
     if app_config.sync_changes:
+        logger.info(f"Sync changes enabled: {app_config.sync_changes}")
         # start file sync task in background
         app.state.sync_task = asyncio.create_task(initialize_file_sync(app_config))
     else:
