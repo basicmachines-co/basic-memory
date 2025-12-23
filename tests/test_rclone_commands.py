@@ -12,6 +12,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     check_rclone_installed,
     get_project_bisync_state,
     get_project_remote,
+    get_rclone_version,
     project_bisync,
     project_check,
     project_ls,
@@ -479,3 +480,138 @@ def test_project_ls_checks_rclone_installed(mock_is_installed):
 
     assert "rclone is not installed" in str(exc_info.value)
     mock_is_installed.assert_called_once()
+
+
+# Tests for rclone version detection
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_success(mock_run):
+    """Test successful rclone version detection."""
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="rclone v1.64.2\n- os/version: darwin 14.1.1 (64 bit)\n"
+    )
+
+    version = get_rclone_version()
+
+    assert version == (1, 64, 2)
+    mock_run.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_dev_build(mock_run):
+    """Test rclone version detection with DEV suffix."""
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="rclone v1.60.1-DEV\n- os/version: linux\n"
+    )
+
+    version = get_rclone_version()
+
+    assert version == (1, 60, 1)
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_old_version(mock_run):
+    """Test rclone version detection with older version."""
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="rclone v1.55.0\n- os/version: linux\n"
+    )
+
+    version = get_rclone_version()
+
+    assert version == (1, 55, 0)
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_parse_failure(mock_run):
+    """Test rclone version detection when version string cannot be parsed."""
+    mock_run.return_value = MagicMock(returncode=0, stdout="unknown output\n")
+
+    version = get_rclone_version()
+
+    assert version is None
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_subprocess_error(mock_run):
+    """Test rclone version detection when subprocess fails."""
+    mock_run.side_effect = Exception("Command failed")
+
+    version = get_rclone_version()
+
+    assert version is None
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_project_bisync_includes_flag_for_new_version(
+    mock_version, mock_bisync_init, mock_run, mock_is_installed
+):
+    """Test that --create-empty-src-dirs is included for rclone v1.64+."""
+    mock_is_installed.return_value = True
+    mock_bisync_init.return_value = True
+    mock_version.return_value = (1, 64, 2)  # Version supports flag
+    mock_run.return_value = MagicMock(returncode=0)
+
+    project = SyncProject(
+        name="research",
+        path="app/data/research",
+        local_sync_path="/tmp/research",
+    )
+
+    project_bisync(project, "my-bucket")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--create-empty-src-dirs" in cmd
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_project_bisync_excludes_flag_for_old_version(
+    mock_version, mock_bisync_init, mock_run, mock_is_installed
+):
+    """Test that --create-empty-src-dirs is excluded for rclone < v1.64."""
+    mock_is_installed.return_value = True
+    mock_bisync_init.return_value = True
+    mock_version.return_value = (1, 60, 1)  # Old version doesn't support flag
+    mock_run.return_value = MagicMock(returncode=0)
+
+    project = SyncProject(
+        name="research",
+        path="app/data/research",
+        local_sync_path="/tmp/research",
+    )
+
+    project_bisync(project, "my-bucket")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--create-empty-src-dirs" not in cmd
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_project_bisync_excludes_flag_when_version_unknown(
+    mock_version, mock_bisync_init, mock_run, mock_is_installed
+):
+    """Test that --create-empty-src-dirs is excluded when version cannot be determined."""
+    mock_is_installed.return_value = True
+    mock_bisync_init.return_value = True
+    mock_version.return_value = None  # Version detection failed
+    mock_run.return_value = MagicMock(returncode=0)
+
+    project = SyncProject(
+        name="research",
+        path="app/data/research",
+        local_sync_path="/tmp/research",
+    )
+
+    project_bisync(project, "my-bucket")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--create-empty-src-dirs" not in cmd

@@ -9,6 +9,7 @@ This module provides simplified, project-scoped rclone operations:
 Replaces tenant-wide sync with project-scoped workflows.
 """
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,31 @@ def check_rclone_installed() -> None:
             "Or install manually from: https://rclone.org/downloads/\n\n"
             "Windows users: Ensure you have a package manager installed (winget, chocolatey, or scoop)"
         )
+
+
+def get_rclone_version() -> tuple[int, int, int] | None:
+    """Get rclone version as (major, minor, patch) tuple.
+
+    Returns:
+        Version tuple (major, minor, patch) or None if version cannot be determined
+
+    Example:
+        >>> version = get_rclone_version()
+        >>> if version and version >= (1, 64, 0):
+        ...     # Use features from rclone v1.64+
+    """
+    try:
+        result = subprocess.run(
+            ["rclone", "version"], capture_output=True, text=True, timeout=5
+        )
+        # Match version pattern like "v1.64.2" or "v1.60.1-DEV"
+        match = re.search(r"v(\d+)\.(\d+)\.(\d+)", result.stdout)
+        if match:
+            return int(match.group(1)), int(match.group(2)), int(match.group(3))
+    except Exception:
+        # If we can't determine version, return None (caller should handle gracefully)
+        pass
+    return None
 
 
 @dataclass
@@ -218,16 +244,26 @@ def project_bisync(
         "bisync",
         str(local_path),
         remote_path,
-        "--create-empty-src-dirs",
-        "--resilient",
-        "--conflict-resolve=newer",
-        "--max-delete=25",
-        "--compare=modtime",  # Ignore size differences from line ending conversions
-        "--filter-from",
-        str(filter_path),
-        "--workdir",
-        str(state_path),
     ]
+
+    # Only include --create-empty-src-dirs if rclone version >= 1.64
+    # This flag was added in rclone v1.64 and causes errors in older versions
+    version = get_rclone_version()
+    if version and version >= (1, 64, 0):
+        cmd.append("--create-empty-src-dirs")
+
+    cmd.extend(
+        [
+            "--resilient",
+            "--conflict-resolve=newer",
+            "--max-delete=25",
+            "--compare=modtime",  # Ignore size differences from line ending conversions
+            "--filter-from",
+            str(filter_path),
+            "--workdir",
+            str(state_path),
+        ]
+    )
 
     if verbose:
         cmd.append("--verbose")
