@@ -236,6 +236,7 @@ def app_config(
         default_project_mode=False,  # Match real-world usage - tools must pass explicit project
         update_permalinks_on_move=True,
         cloud_mode=False,  # Explicitly disable cloud mode
+        sync_changes=False,  # Disable file sync in tests - prevents lifespan from starting blocking task
         database_backend=database_backend,
         database_url=database_url,
     )

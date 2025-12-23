@@ -38,7 +38,11 @@ def app_callback(
     # Skip for 'mcp' command - it has its own lifespan that handles initialization
     # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py
     api_commands = {"mcp", "status", "sync", "project", "tools"}
-    if not version and ctx.invoked_subcommand is not None and ctx.invoked_subcommand not in api_commands:
+    if (
+        not version
+        and ctx.invoked_subcommand is not None
+        and ctx.invoked_subcommand not in api_commands
+    ):
         from basic_memory.services.initialization import ensure_initialization
 
         app_config = ConfigManager().config
