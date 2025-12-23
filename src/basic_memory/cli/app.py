@@ -37,7 +37,7 @@ def app_callback(
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization
     # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py
-    api_commands = {"mcp", "status", "sync", "project", "tools"}
+    api_commands = {"mcp", "status", "sync", "project", "tool"}
     if (
         not version
         and ctx.invoked_subcommand is not None
