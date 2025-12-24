@@ -12,7 +12,7 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id, ToolError
+from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 
 
 @mcp.tool(

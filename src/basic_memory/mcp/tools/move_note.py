@@ -8,7 +8,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_post, call_get, call_put, resolve_entity_id, ToolError
+from basic_memory.mcp.tools.utils import call_get, call_put, resolve_entity_id
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.project_info import ProjectList

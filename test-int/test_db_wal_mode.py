@@ -5,7 +5,6 @@ and other SQLite configuration settings work correctly in production scenarios.
 """
 
 import pytest
-from unittest.mock import patch
 from sqlalchemy import text
 
 

@@ -9,7 +9,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_post, call_delete, ToolError
+from basic_memory.mcp.tools.utils import call_get, call_post, call_delete
 from basic_memory.schemas.project_info import (
     ProjectList,
     ProjectStatusResponse,
