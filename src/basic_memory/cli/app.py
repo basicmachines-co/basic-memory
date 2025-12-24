@@ -1,3 +1,8 @@
+# Suppress Logfire "not configured" warning - we only use Logfire in cloud/server contexts
+import os
+
+os.environ.setdefault("LOGFIRE_IGNORE_NO_CONFIG", "1")
+
 # Remove loguru's default handler IMMEDIATELY, before any other imports.
 # This prevents DEBUG logs from appearing on stdout during module-level
 # initialization (e.g., template_loader.TemplateLoader() logs at DEBUG level).
