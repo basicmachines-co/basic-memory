@@ -1075,7 +1075,7 @@ class SyncService:
         especially on network filesystems like TigrisFS where stat operations are expensive.
 
         On Windows, subprocess is not supported with SelectorEventLoop (which we use
-        to avoid aiosqlite cleanup issues), so we fall back to a full directory scan.
+        to avoid aiosqlite cleanup issues), so we implement mtime filtering in Python.
 
         Args:
             directory: Directory to scan
@@ -1085,8 +1085,14 @@ class SyncService:
             List of relative file paths modified since the timestamp (respects .bmignore)
         """
         # Windows with SelectorEventLoop doesn't support subprocess
+        # Implement mtime filtering in Python to preserve watermark optimization
         if sys.platform == "win32":
-            return await self._scan_directory_full(directory)
+            file_paths = []
+            async for file_path_str, stat_info in self.scan_directory(directory):
+                if stat_info.st_mtime > since_timestamp:
+                    rel_path = Path(file_path_str).relative_to(directory).as_posix()
+                    file_paths.append(rel_path)
+            return file_paths
 
         # Convert timestamp to find-compatible format
         since_date = datetime.fromtimestamp(since_timestamp).strftime("%Y-%m-%d %H:%M:%S")
