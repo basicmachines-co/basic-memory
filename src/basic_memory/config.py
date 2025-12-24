@@ -9,10 +9,9 @@ from typing import Any, Dict, Literal, Optional, List, Tuple
 from enum import Enum
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-import basic_memory
 from basic_memory.utils import setup_logging, generate_permalink
 
 
@@ -123,7 +122,9 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     watch_project_reload_interval: int = Field(
-        default=30, description="Seconds between reloading project list in watch service", gt=0
+        default=300,
+        description="Seconds between reloading project list in watch service. Higher values reduce CPU usage by minimizing watcher restarts. Default 300s (5 min) balances efficiency with responsiveness to new projects.",
+        gt=0,
     )
 
     # update permalinks on move
@@ -214,6 +215,36 @@ class BasicMemoryConfig(BaseSettings):
         # Fall back to config file value
         return self.cloud_mode
 
+    @classmethod
+    def for_cloud_tenant(
+        cls,
+        database_url: str,
+        projects: Optional[Dict[str, str]] = None,
+    ) -> "BasicMemoryConfig":
+        """Create config for cloud tenant - no config.json, database is source of truth.
+
+        This factory method creates a BasicMemoryConfig suitable for cloud deployments
+        where:
+        - Database is Postgres (Neon), not SQLite
+        - Projects are discovered from the database, not config file
+        - Path validation is skipped (no local filesystem in cloud)
+        - Initialization sync is skipped (stateless deployment)
+
+        Args:
+            database_url: Postgres connection URL for tenant database
+            projects: Optional project mapping (usually empty, discovered from DB)
+
+        Returns:
+            BasicMemoryConfig configured for cloud mode
+        """
+        return cls(
+            database_backend=DatabaseBackend.POSTGRES,
+            database_url=database_url,
+            projects=projects or {},
+            cloud_mode=True,
+            skip_initialization_sync=True,
+        )
+
     model_config = SettingsConfigDict(
         env_prefix="BASIC_MEMORY_",
         extra="ignore",
@@ -230,6 +261,10 @@ class BasicMemoryConfig(BaseSettings):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
+        # Skip project initialization in cloud mode - projects are discovered from DB
+        if self.database_backend == DatabaseBackend.POSTGRES:
+            return
+
         # Ensure at least one project exists; if none exist then create main
         if not self.projects:  # pragma: no cover
             self.projects["main"] = str(
@@ -272,19 +307,26 @@ class BasicMemoryConfig(BaseSettings):
         """Get all configured projects as ProjectConfig objects."""
         return [ProjectConfig(name=name, home=Path(path)) for name, path in self.projects.items()]
 
-    @field_validator("projects")
-    @classmethod
-    def ensure_project_paths_exists(cls, v: Dict[str, str]) -> Dict[str, str]:  # pragma: no cover
-        """Ensure project path exists."""
-        for name, path_value in v.items():
+    @model_validator(mode="after")
+    def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
+        """Ensure project paths exist.
+
+        Skips path creation when using Postgres backend (cloud mode) since
+        cloud tenants don't use local filesystem paths.
+        """
+        # Skip path creation for cloud mode - no local filesystem
+        if self.database_backend == DatabaseBackend.POSTGRES:
+            return self
+
+        for name, path_value in self.projects.items():
             path = Path(path_value)
-            if not Path(path).exists():
+            if not path.exists():
                 try:
                     path.mkdir(parents=True)
                 except Exception as e:
                     logger.error(f"Failed to create project path: {e}")
                     raise e
-        return v
+        return self
 
     @property
     def data_dir_path(self):
@@ -487,69 +529,38 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
         logger.error(f"Failed to save config: {e}")
 
 
-# setup logging to a single log file in user home directory
-user_home = Path.home()
-log_dir = user_home / DATA_DIR_NAME
-log_dir.mkdir(parents=True, exist_ok=True)
+# Logging initialization functions for different entry points
 
 
-# Process info for logging
-def get_process_name():  # pragma: no cover
+def init_cli_logging() -> None:  # pragma: no cover
+    """Initialize logging for CLI commands - file only.
+
+    CLI commands should not log to stdout to avoid interfering with
+    command output and shell integration.
     """
-    get the type of process for logging
-    """
-    import sys
+    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    setup_logging(log_level=log_level, log_to_file=True)
 
-    if "sync" in sys.argv:
-        return "sync"
-    elif "mcp" in sys.argv:
-        return "mcp"
-    elif "cli" in sys.argv:
-        return "cli"
+
+def init_mcp_logging() -> None:  # pragma: no cover
+    """Initialize logging for MCP server - file only.
+
+    MCP server must not log to stdout as it would corrupt the
+    JSON-RPC protocol communication.
+    """
+    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    setup_logging(log_level=log_level, log_to_file=True)
+
+
+def init_api_logging() -> None:  # pragma: no cover
+    """Initialize logging for API server.
+
+    Cloud mode (BASIC_MEMORY_CLOUD_MODE=1): stdout with structured context
+    Local mode: file only
+    """
+    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    cloud_mode = os.getenv("BASIC_MEMORY_CLOUD_MODE", "").lower() in ("1", "true")
+    if cloud_mode:
+        setup_logging(log_level=log_level, log_to_stdout=True, structured_context=True)
     else:
-        return "api"
-
-
-process_name = get_process_name()
-
-# Global flag to track if logging has been set up
-_LOGGING_SETUP = False
-
-
-# Logging
-
-
-def setup_basic_memory_logging():  # pragma: no cover
-    """Set up logging for basic-memory, ensuring it only happens once."""
-    global _LOGGING_SETUP
-    if _LOGGING_SETUP:
-        # We can't log before logging is set up
-        # print("Skipping duplicate logging setup")
-        return
-
-    # Check for console logging environment variable - accept more truthy values
-    console_logging_env = os.getenv("BASIC_MEMORY_CONSOLE_LOGGING", "false").lower()
-    console_logging = console_logging_env in ("true", "1", "yes", "on")
-
-    # Check for log level environment variable first, fall back to config
-    log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL")
-    if not log_level:
-        config_manager = ConfigManager()
-        log_level = config_manager.config.log_level
-
-    config_manager = ConfigManager()
-    config = get_project_config()
-    setup_logging(
-        env=config_manager.config.env,
-        home_dir=user_home,  # Use user home for logs
-        log_level=log_level,
-        log_file=f"{DATA_DIR_NAME}/basic-memory-{process_name}.log",
-        console=console_logging,
-    )
-
-    logger.info(f"Basic Memory {basic_memory.__version__} (Project: {config.project})")
-    _LOGGING_SETUP = True
-
-
-# Set up logging
-setup_basic_memory_logging()
+        setup_logging(log_level=log_level, log_to_file=True)

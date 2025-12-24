@@ -141,8 +141,6 @@ async def test_null_pool_on_windows(tmp_path, monkeypatch):
         assert isinstance(engine.pool, NullPool)
 
 
-
-
 @pytest.mark.asyncio
 @pytest.mark.windows
 @pytest.mark.skipif(

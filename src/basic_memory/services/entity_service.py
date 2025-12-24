@@ -7,7 +7,7 @@ import frontmatter
 import yaml
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
-import logfire
+
 
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import (
@@ -56,7 +56,6 @@ class EntityService(BaseService[EntityModel]):
         self.search_service = search_service
         self.app_config = app_config
 
-    @logfire.instrument()
     async def detect_file_path_conflicts(
         self, file_path: str, skip_check: bool = False
     ) -> List[Entity]:
@@ -96,7 +95,6 @@ class EntityService(BaseService[EntityModel]):
 
         return conflicts
 
-    @logfire.instrument()
     async def resolve_permalink(
         self,
         file_path: Permalink | Path,
@@ -163,7 +161,6 @@ class EntityService(BaseService[EntityModel]):
 
         return permalink
 
-    @logfire.instrument()
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:
         """Create new entity or update existing one.
         Returns: (entity, is_new) where is_new is True if a new entity was created
@@ -185,7 +182,6 @@ class EntityService(BaseService[EntityModel]):
             # Create new entity
             return await self.create_entity(schema), True
 
-    @logfire.instrument()
     async def create_entity(self, schema: EntitySchema) -> EntityModel:
         """Create a new entity and write to filesystem."""
         logger.debug(f"Creating entity: {schema.title}")
@@ -240,8 +236,11 @@ class EntityService(BaseService[EntityModel]):
         final_content = dump_frontmatter(post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
-        # parse entity from file
-        entity_markdown = await self.entity_parser.parse_file(file_path)
+        # parse entity from content we just wrote (avoids re-reading file for cloud compatibility)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=final_content,
+        )
 
         # create entity
         created = await self.create_entity_from_markdown(file_path, entity_markdown)
@@ -252,7 +251,6 @@ class EntityService(BaseService[EntityModel]):
         # Set final checksum to mark complete
         return await self.repository.update(entity.id, {"checksum": checksum})
 
-    @logfire.instrument()
     async def update_entity(self, entity: EntityModel, schema: EntitySchema) -> EntityModel:
         """Update an entity's content and metadata."""
         logger.debug(
@@ -262,8 +260,12 @@ class EntityService(BaseService[EntityModel]):
         # Convert file path string to Path
         file_path = Path(entity.file_path)
 
-        # Read existing frontmatter from the file if it exists
-        existing_markdown = await self.entity_parser.parse_file(file_path)
+        # Read existing content via file_service (for cloud compatibility)
+        existing_content = await self.file_service.read_file_content(file_path)
+        existing_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=existing_content,
+        )
 
         # Parse content frontmatter to check for user-specified permalink and entity_type
         content_markdown = None
@@ -319,8 +321,11 @@ class EntityService(BaseService[EntityModel]):
         final_content = dump_frontmatter(merged_post)
         checksum = await self.file_service.write_file(file_path, final_content)
 
-        # parse entity from file
-        entity_markdown = await self.entity_parser.parse_file(file_path)
+        # parse entity from content we just wrote (avoids re-reading file for cloud compatibility)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=final_content,
+        )
 
         # update entity in db
         entity = await self.update_entity_and_observations(file_path, entity_markdown)
@@ -333,7 +338,6 @@ class EntityService(BaseService[EntityModel]):
 
         return entity
 
-    @logfire.instrument()
     async def delete_entity(self, permalink_or_id: str | int) -> bool:
         """Delete entity and its file."""
         logger.debug(f"Deleting entity: {permalink_or_id}")
@@ -367,7 +371,6 @@ class EntityService(BaseService[EntityModel]):
             logger.info(f"Entity not found: {permalink_or_id}")
             return True  # Already deleted
 
-    @logfire.instrument()
     async def get_by_permalink(self, permalink: str) -> EntityModel:
         """Get entity by type and name combination."""
         logger.debug(f"Getting entity by permalink: {permalink}")
@@ -376,24 +379,20 @@ class EntityService(BaseService[EntityModel]):
             raise EntityNotFoundError(f"Entity not found: {permalink}")
         return db_entity
 
-    @logfire.instrument()
     async def get_entities_by_id(self, ids: List[int]) -> Sequence[EntityModel]:
         """Get specific entities and their relationships."""
         logger.debug(f"Getting entities: {ids}")
         return await self.repository.find_by_ids(ids)
 
-    @logfire.instrument()
     async def get_entities_by_permalinks(self, permalinks: List[str]) -> Sequence[EntityModel]:
         """Get specific nodes and their relationships."""
         logger.debug(f"Getting entities permalinks: {permalinks}")
         return await self.repository.find_by_permalinks(permalinks)
 
-    @logfire.instrument()
     async def delete_entity_by_file_path(self, file_path: Union[str, Path]) -> None:
         """Delete entity by file path."""
         await self.repository.delete_by_file_path(str(file_path))
 
-    @logfire.instrument()
     async def create_entity_from_markdown(
         self, file_path: Path, markdown: EntityMarkdown
     ) -> EntityModel:
@@ -419,7 +418,6 @@ class EntityService(BaseService[EntityModel]):
             logger.error(f"Failed to upsert entity for {file_path}: {e}")
             raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
-    @logfire.instrument()
     async def update_entity_and_observations(
         self, file_path: Path, markdown: EntityMarkdown
     ) -> EntityModel:
@@ -461,7 +459,6 @@ class EntityService(BaseService[EntityModel]):
             db_entity,
         )
 
-    @logfire.instrument()
     async def update_entity_relations(
         self,
         path: str,
@@ -534,7 +531,6 @@ class EntityService(BaseService[EntityModel]):
 
         return await self.repository.get_by_file_path(path)
 
-    @logfire.instrument()
     async def edit_entity(
         self,
         identifier: str,
@@ -580,8 +576,11 @@ class EntityService(BaseService[EntityModel]):
         # Write the updated content back to the file
         checksum = await self.file_service.write_file(file_path, new_content)
 
-        # Parse the updated file to get new observations/relations
-        entity_markdown = await self.entity_parser.parse_file(file_path)
+        # Parse the content we just wrote (avoids re-reading file for cloud compatibility)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=new_content,
+        )
 
         # Update entity and its relationships
         entity = await self.update_entity_and_observations(file_path, entity_markdown)
@@ -592,7 +591,6 @@ class EntityService(BaseService[EntityModel]):
 
         return entity
 
-    @logfire.instrument()
     def apply_edit_operation(
         self,
         current_content: str,
@@ -645,7 +643,6 @@ class EntityService(BaseService[EntityModel]):
         else:
             raise ValueError(f"Unsupported operation: {operation}")
 
-    @logfire.instrument()
     def replace_section_content(
         self, current_content: str, section_header: str, new_content: str
     ) -> str:
@@ -765,7 +762,6 @@ class EntityService(BaseService[EntityModel]):
             return content + "\n" + current_content  # pragma: no cover
         return content + current_content  # pragma: no cover
 
-    @logfire.instrument()
     async def move_entity(
         self,
         identifier: str,
@@ -803,23 +799,20 @@ class EntityService(BaseService[EntityModel]):
             raise ValueError(f"Invalid destination path: {destination_path}")
 
         # 3. Validate paths
-        source_file = project_config.home / current_path
-        destination_file = project_config.home / destination_path
-
-        # Validate source exists
-        if not source_file.exists():
+        # NOTE: In tenantless/cloud mode, we cannot rely on local filesystem paths.
+        # Use FileService for existence checks and moving.
+        if not await self.file_service.exists(current_path):
             raise ValueError(f"Source file not found: {current_path}")
 
-        # Check if destination already exists
-        if destination_file.exists():
+        if await self.file_service.exists(destination_path):
             raise ValueError(f"Destination already exists: {destination_path}")
 
         try:
-            # 4. Create destination directory if needed
-            destination_file.parent.mkdir(parents=True, exist_ok=True)
+            # 4. Ensure destination directory if needed (no-op for S3)
+            await self.file_service.ensure_directory(Path(destination_path).parent)
 
-            # 5. Move physical file
-            source_file.rename(destination_file)
+            # 5. Move physical file via FileService (filesystem rename or cloud move)
+            await self.file_service.move_file(current_path, destination_path)
             logger.info(f"Moved file: {current_path} -> {destination_path}")
 
             # 6. Prepare database updates
@@ -858,12 +851,14 @@ class EntityService(BaseService[EntityModel]):
 
         except Exception as e:
             # Rollback: try to restore original file location if move succeeded
-            if destination_file.exists() and not source_file.exists():
-                try:
-                    destination_file.rename(source_file)
+            try:
+                if await self.file_service.exists(
+                    destination_path
+                ) and not await self.file_service.exists(current_path):
+                    await self.file_service.move_file(destination_path, current_path)
                     logger.info(f"Rolled back file move: {destination_path} -> {current_path}")
-                except Exception as rollback_error:  # pragma: no cover
-                    logger.error(f"Failed to rollback file move: {rollback_error}")
+            except Exception as rollback_error:  # pragma: no cover
+                logger.error(f"Failed to rollback file move: {rollback_error}")
 
             # Re-raise the original error with context
             raise ValueError(f"Move failed: {str(e)}") from e

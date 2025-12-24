@@ -5,7 +5,10 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Set, Sequence
+from typing import List, Optional, Set, Sequence, Callable, Awaitable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from basic_memory.sync.sync_service import SyncService
 
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
@@ -71,12 +74,17 @@ class WatchServiceState(BaseModel):
         self.last_error = datetime.now()
 
 
+# Type alias for sync service factory function
+SyncServiceFactory = Callable[[Project], Awaitable["SyncService"]]
+
+
 class WatchService:
     def __init__(
         self,
         app_config: BasicMemoryConfig,
         project_repository: ProjectRepository,
         quiet: bool = False,
+        sync_service_factory: Optional[SyncServiceFactory] = None,
     ):
         self.app_config = app_config
         self.project_repository = project_repository
@@ -84,9 +92,19 @@ class WatchService:
         self.status_path = Path.home() / ".basic-memory" / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
         self._ignore_patterns_cache: dict[Path, Set[str]] = {}
+        self._sync_service_factory = sync_service_factory
 
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
+
+    async def _get_sync_service(self, project: Project) -> "SyncService":
+        """Get sync service for a project, using factory if provided."""
+        if self._sync_service_factory:
+            return await self._sync_service_factory(project)
+        # Fall back to default factory
+        from basic_memory.sync.sync_service import get_sync_service
+
+        return await get_sync_service(project)
 
     async def _schedule_restart(self, stop_event: asyncio.Event):
         """Schedule a restart of the watch service after the configured interval."""
@@ -233,9 +251,6 @@ class WatchService:
 
     async def handle_changes(self, project: Project, changes: Set[FileChange]) -> None:
         """Process a batch of file changes"""
-        # avoid circular imports
-        from basic_memory.sync.sync_service import get_sync_service
-
         # Check if project still exists in configuration before processing
         # This prevents deleted projects from being recreated by background sync
         from basic_memory.config import ConfigManager
@@ -250,7 +265,7 @@ class WatchService:
             )
             return
 
-        sync_service = await get_sync_service(project)
+        sync_service = await self._get_sync_service(project)
         file_service = sync_service.file_service
 
         start_time = time.time()

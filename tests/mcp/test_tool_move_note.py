@@ -1,7 +1,9 @@
 """Tests for the move_note MCP tool."""
 
 import pytest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from contextlib import asynccontextmanager
 
 from basic_memory.mcp.tools.move_note import move_note, _format_move_error_response
 from basic_memory.mcp.tools.write_note import write_note
@@ -887,36 +889,71 @@ class TestMoveNoteSecurityValidation:
 
 
 class TestMoveNoteErrorHandling:
-    """Test move note exception handling."""
+    """Test move note exception handling.
+
+    These are pure unit tests that mock get_client and other dependencies.
+    They don't need the database or ASGI app.
+    """
+
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock async client context manager."""
+        mock = MagicMock()
+
+        @asynccontextmanager
+        async def mock_get_client():
+            yield mock
+
+        return mock_get_client, mock
 
     @pytest.mark.asyncio
-    async def test_move_note_exception_handling(self):
+    async def test_move_note_exception_handling(self, mock_client):
         """Test exception handling in move_note."""
-        with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
-            mock_get_project.return_value.id = 1  # Set project ID for v2 API
-            mock_get_project.return_value.project_url = "http://test"
-            mock_get_project.return_value.name = "test-project"
+        mock_get_client, _ = mock_client
 
-            with patch("basic_memory.mcp.tools.move_note.resolve_entity_id") as mock_resolve:
-                mock_resolve.side_effect = Exception("Entity not found: 'test-note'")
+        with patch("basic_memory.mcp.tools.move_note.get_client", mock_get_client):
+            with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
+                mock_get_project.return_value.project_url = "http://test"
+                mock_get_project.return_value.name = "test-project"
+                mock_get_project.return_value.home = Path("/tmp/test")
 
-                result = await move_note.fn("test-note", "target/file.md", project="test-project")
+                with patch(
+                    "basic_memory.mcp.tools.move_note.call_post",
+                    side_effect=Exception("entity not found"),
+                ):
+                    with patch(
+                        "basic_memory.mcp.tools.move_note.call_get",
+                        side_effect=Exception("not found"),
+                    ):
+                        result = await move_note.fn(
+                            "test-note", "target/file.md", project="test-project"
+                        )
 
-                assert isinstance(result, str)
-                assert "# Move Failed - Note Not Found" in result
+                        assert isinstance(result, str)
+                        assert "# Move Failed - Note Not Found" in result
 
     @pytest.mark.asyncio
-    async def test_move_note_permission_error_handling(self):
+    async def test_move_note_permission_error_handling(self, mock_client):
         """Test permission error handling in move_note."""
-        with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
-            mock_get_project.return_value.id = 1  # Set project ID for v2 API
-            mock_get_project.return_value.project_url = "http://test"
-            mock_get_project.return_value.name = "test-project"
+        mock_get_client, _ = mock_client
 
-            with patch("basic_memory.mcp.tools.move_note.resolve_entity_id") as mock_resolve:
-                mock_resolve.side_effect = Exception("permission denied")
+        with patch("basic_memory.mcp.tools.move_note.get_client", mock_get_client):
+            with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
+                mock_get_project.return_value.project_url = "http://test"
+                mock_get_project.return_value.name = "test-project"
+                mock_get_project.return_value.home = Path("/tmp/test")
 
-                result = await move_note.fn("test-note", "target/file.md", project="test-project")
+                with patch(
+                    "basic_memory.mcp.tools.move_note.call_post",
+                    side_effect=Exception("permission denied"),
+                ):
+                    with patch(
+                        "basic_memory.mcp.tools.move_note.call_get",
+                        side_effect=Exception("not found"),
+                    ):
+                        result = await move_note.fn(
+                            "test-note", "target/file.md", project="test-project"
+                        )
 
-                assert isinstance(result, str)
-                assert "# Move Failed - Permission Error" in result
+                        assert isinstance(result, str)
+                        assert "# Move Failed - Permission Error" in result

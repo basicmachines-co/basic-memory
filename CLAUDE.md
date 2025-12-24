@@ -15,10 +15,14 @@ See the [README.md](README.md) file for a project overview.
 ### Build and Test Commands
 
 - Install: `just install` or `pip install -e ".[dev]"`
-- Run all tests (with coverage): `just test` - Runs both unit and integration tests with unified coverage
-- Run unit tests only: `just test-unit` - Fast, no coverage
-- Run integration tests only: `just test-int` - Fast, no coverage
-- Generate HTML coverage: `just coverage` - Opens in browser
+- Run all tests (SQLite + Postgres): `just test`
+- Run all tests against SQLite: `just test-sqlite`
+- Run all tests against Postgres: `just test-postgres` (uses testcontainers)
+- Run unit tests (SQLite): `just test-unit-sqlite`
+- Run unit tests (Postgres): `just test-unit-postgres`
+- Run integration tests (SQLite): `just test-int-sqlite`
+- Run integration tests (Postgres): `just test-int-postgres`
+- Generate HTML coverage: `just coverage`
 - Single test: `pytest tests/path/to/test_file.py::test_function_name`
 - Run benchmarks: `pytest test-int/test_sync_performance_benchmark.py -v -m "benchmark and not slow"`
 - Lint: `just lint` or `ruff check . --fix`
@@ -29,6 +33,8 @@ See the [README.md](README.md) file for a project overview.
 - Run development MCP Inspector: `just run-inspector`
 
 **Note:** Project requires Python 3.12+ (uses type parameter syntax and `type` aliases introduced in 3.12)
+
+**Postgres Testing:** Uses [testcontainers](https://testcontainers-python.readthedocs.io/) which automatically spins up a Postgres instance in Docker. No manual database setup required - just have Docker running.
 
 ### Test Structure
 
@@ -76,8 +82,10 @@ See the [README.md](README.md) file for a project overview.
 - SQLite is used for indexing and full text search, files are source of truth
 - Testing uses pytest with asyncio support (strict mode)
 - Unit tests (`tests/`) use mocks when necessary; integration tests (`test-int/`) use real implementations
-- Test database uses in-memory SQLite
-- Each test runs in a standalone environment with in-memory SQLite and tmp_file directory
+- By default, tests run against SQLite (fast, no Docker needed)
+- Set `BASIC_MEMORY_TEST_POSTGRES=1` to run against Postgres (uses testcontainers - Docker required)
+- Each test runs in a standalone environment with isolated database and tmp_path directory
+- CI runs SQLite and Postgres tests in parallel for faster feedback
 - Performance benchmarks are in `test-int/test_sync_performance_benchmark.py`
 - Use pytest markers: `@pytest.mark.benchmark` for benchmarks, `@pytest.mark.slow` for slow tests
 
@@ -228,6 +236,11 @@ of using AI just for code generation, we've developed a true collaborative workf
 
 This approach has allowed us to tackle more complex challenges and build a more robust system than either humans or AI
 could achieve independently.
+
+**Problem-Solving Guidance:**
+- If a solution isn't working after reasonable effort, suggest alternative approaches
+- Don't persist with a problematic library or pattern when better alternatives exist
+- Example: When py-pglite caused cascading test failures, switching to testcontainers-postgres was the right call
 
 ## GitHub Integration
 

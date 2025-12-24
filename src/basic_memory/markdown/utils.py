@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from typing import Any, Optional
-import logfire
+
 
 from frontmatter import Post
 
@@ -12,7 +12,6 @@ from basic_memory.models import Entity
 from basic_memory.models import Observation as ObservationModel
 
 
-@logfire.instrument()
 def entity_model_from_markdown(
     file_path: Path,
     markdown: EntityMarkdown,
@@ -74,7 +73,6 @@ def entity_model_from_markdown(
     return model
 
 
-@logfire.instrument()
 async def schema_to_markdown(schema: Any) -> Post:
     """
     Convert schema to markdown Post object.

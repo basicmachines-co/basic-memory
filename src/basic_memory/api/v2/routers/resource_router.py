@@ -11,8 +11,7 @@ Key differences from v1:
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Response
 from loguru import logger
 
 from basic_memory.deps import (
@@ -30,7 +29,6 @@ from basic_memory.schemas.v2.resource import (
     ResourceResponse,
 )
 from basic_memory.utils import validate_project_path
-from datetime import datetime
 
 router = APIRouter(prefix="/resource", tags=["resources-v2"])
 
@@ -42,7 +40,7 @@ async def get_resource_content(
     config: ProjectConfigV2Dep,
     entity_service: EntityServiceV2Dep,
     file_service: FileServiceV2Dep,
-) -> FileResponse:
+) -> Response:
     """Get raw resource content by entity ID.
 
     Args:
@@ -53,7 +51,7 @@ async def get_resource_content(
         file_service: File service for reading file content
 
     Returns:
-        FileResponse with entity content
+        Response with entity content
 
     Raises:
         HTTPException: 404 if entity or file not found
@@ -76,14 +74,18 @@ async def get_resource_content(
             detail="Entity contains invalid file path",
         )
 
-    file_path = Path(f"{config.home}/{entity.file_path}")
-    if not file_path.exists():
+    # Check file exists via file_service (for cloud compatibility)
+    if not await file_service.exists(entity.file_path):
         raise HTTPException(
             status_code=404,
-            detail=f"File not found: {file_path}",
+            detail=f"File not found: {entity.file_path}",
         )
 
-    return FileResponse(path=file_path)
+    # Read content via file_service as bytes (works with both local and S3)
+    content = await file_service.read_file_bytes(entity.file_path)
+    content_type = file_service.content_type(entity.file_path)
+
+    return Response(content=content, media_type=content_type)
 
 
 @router.post("", response_model=ResourceResponse)
@@ -133,21 +135,17 @@ async def create_resource(
                 f"Use PUT /resource/{existing_entity.id} to update it.",
             )
 
-        # Get full file path
-        full_path = Path(f"{config.home}/{data.file_path}")
-
-        # Ensure parent directory exists
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write content to file
-        checksum = await file_service.write_file(full_path, data.content)
+        # Cloud compatibility: avoid assuming a local filesystem path.
+        # Delegate directory creation + writes to FileService (local or S3).
+        await file_service.ensure_directory(Path(data.file_path).parent)
+        checksum = await file_service.write_file(data.file_path, data.content)
 
         # Get file info
-        file_stats = file_service.file_stats(full_path)
+        file_metadata = await file_service.get_file_metadata(data.file_path)
 
         # Determine file details
         file_name = Path(data.file_path).name
-        content_type = file_service.content_type(full_path)
+        content_type = file_service.content_type(data.file_path)
         entity_type = "canvas" if data.file_path.endswith(".canvas") else "file"
 
         # Create a new entity model
@@ -157,8 +155,8 @@ async def create_resource(
             content_type=content_type,
             file_path=data.file_path,
             checksum=checksum,
-            created_at=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
-            updated_at=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+            created_at=file_metadata.created_at,
+            updated_at=file_metadata.modified_at,
         )
         entity = await entity_repository.add(entity)
 
@@ -170,9 +168,9 @@ async def create_resource(
             entity_id=entity.id,
             file_path=data.file_path,
             checksum=checksum,
-            size=file_stats.st_size,
-            created_at=file_stats.st_ctime,
-            modified_at=file_stats.st_mtime,
+            size=file_metadata.size,
+            created_at=file_metadata.created_at.timestamp(),
+            modified_at=file_metadata.modified_at.timestamp(),
         )
     except HTTPException:
         # Re-raise HTTP exceptions without wrapping
@@ -232,31 +230,27 @@ async def update_resource(
                 "Path must be relative and stay within project boundaries.",
             )
 
-        # Get full paths
-        old_full_path = Path(f"{config.home}/{entity.file_path}")
-        new_full_path = Path(f"{config.home}/{target_file_path}")
-
         # If moving file, handle the move
         if data.file_path and data.file_path != entity.file_path:
-            # Ensure new parent directory exists
-            new_full_path.parent.mkdir(parents=True, exist_ok=True)
+            # Ensure new parent directory exists (no-op for S3)
+            await file_service.ensure_directory(Path(target_file_path).parent)
 
-            # If old file exists, remove it
-            if old_full_path.exists():
-                old_full_path.unlink()
+            # If old file exists, remove it via file_service (for cloud compatibility)
+            if await file_service.exists(entity.file_path):
+                await file_service.delete_file(entity.file_path)
         else:
             # Ensure directory exists for in-place update
-            new_full_path.parent.mkdir(parents=True, exist_ok=True)
+            await file_service.ensure_directory(Path(target_file_path).parent)
 
         # Write content to target file
-        checksum = await file_service.write_file(new_full_path, data.content)
+        checksum = await file_service.write_file(target_file_path, data.content)
 
         # Get file info
-        file_stats = file_service.file_stats(new_full_path)
+        file_metadata = await file_service.get_file_metadata(target_file_path)
 
         # Determine file details
         file_name = Path(target_file_path).name
-        content_type = file_service.content_type(new_full_path)
+        content_type = file_service.content_type(target_file_path)
         entity_type = "canvas" if target_file_path.endswith(".canvas") else "file"
 
         # Update entity
@@ -268,7 +262,7 @@ async def update_resource(
                 "content_type": content_type,
                 "file_path": target_file_path,
                 "checksum": checksum,
-                "updated_at": datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+                "updated_at": file_metadata.modified_at,
             },
         )
 
@@ -280,9 +274,9 @@ async def update_resource(
             entity_id=entity_id,
             file_path=target_file_path,
             checksum=checksum,
-            size=file_stats.st_size,
-            created_at=file_stats.st_ctime,
-            modified_at=file_stats.st_mtime,
+            size=file_metadata.size,
+            created_at=file_metadata.created_at.timestamp(),
+            modified_at=file_metadata.modified_at.timestamp(),
         )
     except HTTPException:
         # Re-raise HTTP exceptions without wrapping

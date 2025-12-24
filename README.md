@@ -433,42 +433,76 @@ See the [Documentation](https://memory.basicmachines.co/) for more info, includi
 - [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/#project)
 - [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/#import)
 
+## Logging
+
+Basic Memory uses [Loguru](https://github.com/Delgan/loguru) for logging. The logging behavior varies by entry point:
+
+| Entry Point | Default Behavior | Use Case |
+|-------------|------------------|----------|
+| CLI commands | File only | Prevents log output from interfering with command output |
+| MCP server | File only | Stdout would corrupt the JSON-RPC protocol |
+| API server | File (local) or stdout (cloud) | Docker/cloud deployments use stdout |
+
+**Log file location:** `~/.basic-memory/basic-memory.log` (10MB rotation, 10 days retention)
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BASIC_MEMORY_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
+| `BASIC_MEMORY_CLOUD_MODE` | `false` | When `true`, API logs to stdout with structured context |
+| `BASIC_MEMORY_ENV` | `dev` | Set to `test` for test mode (stderr only) |
+
+### Examples
+
+```bash
+# Enable debug logging
+BASIC_MEMORY_LOG_LEVEL=DEBUG basic-memory sync
+
+# View logs
+tail -f ~/.basic-memory/basic-memory.log
+
+# Cloud/Docker mode (stdout logging with structured context)
+BASIC_MEMORY_CLOUD_MODE=true uvicorn basic_memory.api.app:app
+```
+
 ## Development
 
 ### Running Tests
 
-Basic Memory supports dual database backends (SQLite and Postgres). Tests are parametrized to run against both backends automatically.
+Basic Memory supports dual database backends (SQLite and Postgres). By default, tests run against SQLite. Set `BASIC_MEMORY_TEST_POSTGRES=1` to run against Postgres (uses testcontainers - Docker required).
 
 **Quick Start:**
 ```bash
-# Run SQLite tests (default, no Docker needed)
+# Run all tests against SQLite (default, fast)
 just test-sqlite
 
-# Run Postgres tests (requires Docker)
+# Run all tests against Postgres (uses testcontainers)
 just test-postgres
+
+# Run both SQLite and Postgres tests
+just test
 ```
 
 **Available Test Commands:**
 
-- `just test-sqlite` - Run tests against SQLite only (fastest, no Docker needed)
-- `just test-postgres` - Run tests against Postgres only (requires Docker)
+- `just test` - Run all tests against both SQLite and Postgres
+- `just test-sqlite` - Run all tests against SQLite (fast, no Docker needed)
+- `just test-postgres` - Run all tests against Postgres (uses testcontainers)
+- `just test-unit-sqlite` - Run unit tests against SQLite
+- `just test-unit-postgres` - Run unit tests against Postgres
+- `just test-int-sqlite` - Run integration tests against SQLite
+- `just test-int-postgres` - Run integration tests against Postgres
 - `just test-windows` - Run Windows-specific tests (auto-skips on other platforms)
 - `just test-benchmark` - Run performance benchmark tests
-- `just test-all` - Run all tests including Windows, Postgres, and benchmarks
 
-**Postgres Testing Requirements:**
+**Postgres Testing:**
 
-To run Postgres tests, you need to start the test database:
-```bash
-docker-compose -f docker-compose-postgres.yml up -d
-```
-
-Tests will connect to `localhost:5433/basic_memory_test`.
+Postgres tests use [testcontainers](https://testcontainers-python.readthedocs.io/) which automatically spins up a Postgres instance in Docker. No manual database setup required - just have Docker running.
 
 **Test Markers:**
 
 Tests use pytest markers for selective execution:
-- `postgres` - Tests that run against Postgres backend
 - `windows` - Windows-specific database optimizations
 - `benchmark` - Performance tests (excluded from default runs)
 

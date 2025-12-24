@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-import logfire
+
 from loguru import logger
 from sqlalchemy import text
 
@@ -26,7 +26,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     - Prefix wildcard matching with *
     """
 
-    @logfire.instrument()
     async def init_search_index(self):
         """Create FTS5 virtual table for search.
 
@@ -281,7 +280,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         # For non-Boolean queries, use the single term preparation logic
         return self._prepare_single_term(term, is_prefix)
 
-    @logfire.instrument()
     async def search(
         self,
         search_text: Optional[str] = None,

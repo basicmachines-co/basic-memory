@@ -1,6 +1,8 @@
 """Utilities for file operations."""
 
 import hashlib
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 import re
 from typing import Any, Dict, Union
@@ -11,6 +13,20 @@ import frontmatter
 from loguru import logger
 
 from basic_memory.utils import FilePath
+
+
+@dataclass
+class FileMetadata:
+    """File metadata for cloud-compatible file operations.
+
+    This dataclass provides a cloud-agnostic way to represent file metadata,
+    enabling S3FileService to return metadata from head_object responses
+    instead of mock stat_result with zeros.
+    """
+
+    size: int
+    created_at: datetime
+    modified_at: datetime
 
 
 class FileError(Exception):

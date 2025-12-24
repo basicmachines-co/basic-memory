@@ -1,6 +1,7 @@
 """FastAPI application for basic-memory knowledge graph API."""
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -30,13 +31,16 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
 )
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, init_api_logging
 from basic_memory.services.initialization import initialize_file_sync, initialize_app
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # pragma: no cover
     """Lifecycle manager for the FastAPI app. Not called in stdio mcp mode"""
+
+    # Initialize logging for API (stdout in cloud mode, file otherwise)
+    init_api_logging()
 
     app_config = ConfigManager().config
     logger.info("Starting Basic Memory API")
@@ -50,12 +54,26 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     app.state.session_maker = session_maker
     logger.info("Database connections cached in app state")
 
-    logger.info(f"Sync changes enabled: {app_config.sync_changes}")
-    if app_config.sync_changes:
+    # Start file sync if enabled
+    is_test_env = (
+        app_config.env == "test"
+        or os.getenv("BASIC_MEMORY_ENV", "").lower() == "test"
+        or os.getenv("PYTEST_CURRENT_TEST") is not None
+    )
+    if app_config.sync_changes and not is_test_env:
+        logger.info(f"Sync changes enabled: {app_config.sync_changes}")
+
         # start file sync task in background
-        app.state.sync_task = asyncio.create_task(initialize_file_sync(app_config))
+        async def _file_sync_runner() -> None:
+            await initialize_file_sync(app_config)
+
+        app.state.sync_task = asyncio.create_task(_file_sync_runner())
     else:
-        logger.info("Sync changes disabled. Skipping file sync service.")
+        if is_test_env:
+            logger.info("Test environment detected. Skipping file sync service.")
+        else:
+            logger.info("Sync changes disabled. Skipping file sync service.")
+        app.state.sync_task = None
 
     # proceed with startup
     yield
@@ -64,6 +82,10 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     if app.state.sync_task:
         logger.info("Stopping sync...")
         app.state.sync_task.cancel()  # pyright: ignore
+        try:
+            await app.state.sync_task
+        except asyncio.CancelledError:
+            logger.info("Sync task cancelled successfully")
 
     await db.shutdown_db()
 

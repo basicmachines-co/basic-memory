@@ -875,7 +875,7 @@ async def test_get_all_file_paths_project_isolation(
 async def test_permalink_exists(entity_repository: EntityRepository, sample_entity: Entity):
     """Test checking if a permalink exists without loading full entity."""
     # Existing permalink should return True
-    assert await entity_repository.permalink_exists(sample_entity.permalink) is True
+    assert await entity_repository.permalink_exists(sample_entity.permalink) is True  # pyright: ignore [reportArgumentType]
 
     # Non-existent permalink should return False
     assert await entity_repository.permalink_exists("nonexistent/permalink") is False
@@ -930,7 +930,7 @@ async def test_get_file_path_for_permalink(
 ):
     """Test getting file_path for a permalink without loading full entity."""
     # Existing permalink should return file_path
-    file_path = await entity_repository.get_file_path_for_permalink(sample_entity.permalink)
+    file_path = await entity_repository.get_file_path_for_permalink(sample_entity.permalink)  # pyright: ignore [reportArgumentType]
     assert file_path == sample_entity.file_path
 
     # Non-existent permalink should return None

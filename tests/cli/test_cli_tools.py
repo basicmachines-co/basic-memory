@@ -13,6 +13,7 @@ from typing import AsyncGenerator
 from unittest.mock import patch
 
 import nest_asyncio
+import pytest
 import pytest_asyncio
 from typer.testing import CliRunner
 
@@ -484,14 +485,13 @@ def test_ensure_migrations_functionality(mock_initialize_database, app_config, m
 
 
 @patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_handles_errors(mock_initialize_database, app_config, monkeypatch):
-    """Test that initialization handles errors gracefully."""
+def test_ensure_migrations_propagates_errors(mock_initialize_database, app_config, monkeypatch):
+    """Test that initialization errors propagate to caller."""
     from basic_memory.services.initialization import ensure_initialization
 
     # Configure mock to raise an exception
     mock_initialize_database.side_effect = Exception("Test error")
 
-    # Call the function - should not raise exception
-    ensure_initialization(app_config)
-
-    # We're just making sure it doesn't crash by calling it
+    # Call the function - should raise exception
+    with pytest.raises(Exception, match="Test error"):
+        ensure_initialization(app_config)
