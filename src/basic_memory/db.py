@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from contextlib import asynccontextmanager
 from enum import Enum, auto
 from pathlib import Path
@@ -22,6 +23,20 @@ from sqlalchemy.pool import NullPool
 
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+
+# -----------------------------------------------------------------------------
+# Windows event loop policy
+# -----------------------------------------------------------------------------
+# On Windows, the default ProactorEventLoop has known rough edges with aiosqlite
+# during shutdown/teardown (threads posting results to a loop that's closing),
+# which can manifest as:
+# - "RuntimeError: Event loop is closed"
+# - "IndexError: pop from an empty deque"
+#
+# We don't rely on Proactor-only features (like subprocess pipes), so use the
+# more stable SelectorEventLoopPolicy everywhere on Windows.
+if sys.platform == "win32":  # pragma: no cover
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Module level state
 _engine: Optional[AsyncEngine] = None

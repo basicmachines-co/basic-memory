@@ -71,7 +71,7 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
 
 async def initialize_file_sync(
     app_config: BasicMemoryConfig,
-):
+) -> None:
     """Initialize file synchronization services. This function starts the watch service and does not return
 
     Args:
@@ -80,6 +80,18 @@ async def initialize_file_sync(
     Returns:
         The watch service task that's monitoring file changes
     """
+    # Never start file watching during tests. Even "background" watchers add tasks/threads
+    # and can interact badly with strict asyncio teardown (especially on Windows/aiosqlite).
+    #
+    # Note: Some tests patch ConfigManager.config with a minimal BasicMemoryConfig that
+    # may not set env="test". So also detect pytest via env vars.
+    if (
+        app_config.env == "test"
+        or os.getenv("BASIC_MEMORY_ENV", "").lower() == "test"
+        or os.getenv("PYTEST_CURRENT_TEST") is not None
+    ):
+        logger.info("Test environment detected - skipping file sync initialization")
+        return None
 
     # delay import
     from basic_memory.sync import WatchService
