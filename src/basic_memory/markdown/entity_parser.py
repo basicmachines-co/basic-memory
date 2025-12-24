@@ -230,6 +230,7 @@ class EntityParser:
         # Strip BOM before parsing (can be present in files from Windows or certain sources)
         # See issue #452
         from basic_memory.file_utils import strip_bom
+
         content = strip_bom(content)
 
         # Parse frontmatter with proper error handling for malformed YAML

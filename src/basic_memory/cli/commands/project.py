@@ -341,7 +341,9 @@ def set_default_project(
             target_project = response.json()
 
             # Use v2 API with project ID
-            response = await call_put(client, f"/v2/projects/{target_project['project_id']}/default")
+            response = await call_put(
+                client, f"/v2/projects/{target_project['project_id']}/default"
+            )
             return ProjectStatusResponse.model_validate(response.json())
 
     try:

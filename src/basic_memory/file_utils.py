@@ -75,7 +75,7 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
 
 
 # UTF-8 BOM character that can appear at the start of files
-UTF8_BOM = '\ufeff'
+UTF8_BOM = "\ufeff"
 
 
 def strip_bom(content: str) -> str:

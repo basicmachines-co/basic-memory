@@ -95,9 +95,7 @@ async def resolve_project_identifier(
             resolution_method = "name"
 
     if not project:
-        raise HTTPException(
-            status_code=404, detail=f"Project not found: '{data.identifier}'"
-        )
+        raise HTTPException(status_code=404, detail=f"Project not found: '{data.identifier}'")
 
     return ProjectResolveResponse(
         project_id=project.id,

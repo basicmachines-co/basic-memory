@@ -451,9 +451,7 @@ async def resolve_entity_id(client: AsyncClient, project_id: int, identifier: st
     """
     try:
         response = await call_post(
-            client,
-            f"/v2/projects/{project_id}/knowledge/resolve",
-            json={"identifier": identifier}
+            client, f"/v2/projects/{project_id}/knowledge/resolve", json={"identifier": identifier}
         )
         data = response.json()
         return data["entity_id"]

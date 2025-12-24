@@ -251,10 +251,9 @@ async def test_update_project_active_status(
     status_response = ProjectStatusResponse.model_validate(response.json())
     assert status_response.status == "success"
 
+
 @pytest.mark.asyncio
-async def test_resolve_project_by_name(
-    client: AsyncClient, test_project: Project, v2_projects_url
-):
+async def test_resolve_project_by_name(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test resolving a project by name returns correct project ID."""
     resolve_data = {"identifier": test_project.name}
     response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
@@ -290,9 +289,7 @@ async def test_resolve_project_by_permalink(
 
 
 @pytest.mark.asyncio
-async def test_resolve_project_by_id(
-    client: AsyncClient, test_project: Project, v2_projects_url
-):
+async def test_resolve_project_by_id(client: AsyncClient, test_project: Project, v2_projects_url):
     """Test resolving a project by ID string returns correct project ID."""
     resolve_data = {"identifier": str(test_project.id)}
     response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)

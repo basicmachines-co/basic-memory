@@ -374,9 +374,7 @@ async def get_file_service(
     markdown_processor: MarkdownProcessorDep,
     app_config: AppConfigDep,
 ) -> FileService:
-    file_service = FileService(
-        project_config.home, markdown_processor, app_config=app_config
-    )
+    file_service = FileService(project_config.home, markdown_processor, app_config=app_config)
     logger.debug(
         f"Created FileService for project: {project_config.name}, base_path: {project_config.home} "
     )
@@ -391,9 +389,7 @@ async def get_file_service_v2(
     markdown_processor: MarkdownProcessorV2Dep,
     app_config: AppConfigDep,
 ) -> FileService:
-    file_service = FileService(
-        project_config.home, markdown_processor, app_config=app_config
-    )
+    file_service = FileService(project_config.home, markdown_processor, app_config=app_config)
     logger.debug(
         f"Created FileService for project: {project_config.name}, base_path: {project_config.home}"
     )

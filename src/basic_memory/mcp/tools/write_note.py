@@ -161,7 +161,11 @@ async def write_note(
             action = "Created"
         except Exception as e:
             # If creation failed due to conflict (already exists), try to update
-            if "409" in str(e) or "conflict" in str(e).lower() or "already exists" in str(e).lower():
+            if (
+                "409" in str(e)
+                or "conflict" in str(e).lower()
+                or "already exists" in str(e).lower()
+            ):
                 logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
                 try:
                     if not entity.permalink:

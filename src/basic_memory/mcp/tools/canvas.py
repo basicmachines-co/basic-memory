@@ -118,7 +118,11 @@ async def canvas(
             action = "Created"
         except Exception as e:
             # If creation failed due to conflict (already exists), try to update
-            if "409" in str(e) or "conflict" in str(e).lower() or "already exists" in str(e).lower():
+            if (
+                "409" in str(e)
+                or "conflict" in str(e).lower()
+                or "already exists" in str(e).lower()
+            ):
                 logger.info(f"Canvas file exists, updating instead: {file_path}")
                 try:
                     entity_id = await resolve_entity_id(client, active_project.id, file_path)

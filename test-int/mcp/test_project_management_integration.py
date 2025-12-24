@@ -65,7 +65,9 @@ async def test_create_project_basic_operation(mcp_server, app, test_project, tmp
             "create_memory_project",
             {
                 "project_name": "test-new-project",
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "project-test-new-project"),
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-test-new-project"
+                ),
             },
         )
 
@@ -97,7 +99,9 @@ async def test_create_project_with_default_flag(mcp_server, app, test_project, t
             "create_memory_project",
             {
                 "project_name": "test-default-project",
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "project-test-default-project"),
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-test-default-project"
+                ),
                 "set_default": True,
             },
         )
@@ -125,7 +129,9 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
             "create_memory_project",
             {
                 "project_name": "duplicate-test",
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-1"),
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-1"
+                ),
             },
         )
 
@@ -135,7 +141,9 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
                 "create_memory_project",
                 {
                     "project_name": "duplicate-test",
-                    "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-2"),
+                    "project_path": str(
+                        tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-2"
+                    ),
                 },
             )
 
@@ -159,7 +167,9 @@ async def test_delete_project_basic_operation(mcp_server, app, test_project, tmp
             "create_memory_project",
             {
                 "project_name": "to-be-deleted",
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "project-to-be-deleted"),
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-to-be-deleted"
+                ),
             },
         )
 
@@ -245,7 +255,9 @@ async def test_project_lifecycle_workflow(mcp_server, app, test_project, tmp_pat
 
     async with Client(mcp_server) as client:
         project_name = "lifecycle-test"
-        project_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "project-lifecycle-test")
+        project_path = str(
+            tmp_path.parent / (tmp_path.name + "-projects") / "project-lifecycle-test"
+        )
 
         # 1. Create new project
         create_result = await client.call_tool(
@@ -307,7 +319,11 @@ async def test_create_delete_project_edge_cases(mcp_server, app, test_project, t
             "create_memory_project",
             {
                 "project_name": special_name,
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / "project-test-project-with-special-chars"),
+                "project_path": str(
+                    tmp_path.parent
+                    / (tmp_path.name + "-projects")
+                    / "project-test-project-with-special-chars"
+                ),
             },
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -343,7 +359,9 @@ async def test_case_insensitive_project_switching(mcp_server, app, test_project,
             "create_memory_project",
             {
                 "project_name": project_name,
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"),
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"
+                ),
             },
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -394,7 +412,9 @@ async def test_case_insensitive_project_operations(mcp_server, app, test_project
             "create_memory_project",
             {
                 "project_name": project_name,
-                "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"),
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"
+                ),
             },
         )
         assert "✓" in create_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
@@ -483,7 +503,9 @@ async def test_case_preservation_in_project_list(mcp_server, app, test_project, 
                 "create_memory_project",
                 {
                     "project_name": project_name,
-                    "project_path": str(tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"),
+                    "project_path": str(
+                        tmp_path.parent / (tmp_path.name + "-projects") / f"project-{project_name}"
+                    ),
                 },
             )
 
@@ -522,7 +544,9 @@ async def test_nested_project_paths_rejected(mcp_server, app, test_project, tmp_
     async with Client(mcp_server) as client:
         # Create a parent project
         parent_name = "parent-project"
-        parent_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "project-nested-test/parent")
+        parent_path = str(
+            tmp_path.parent / (tmp_path.name + "-projects") / "project-nested-test/parent"
+        )
 
         await client.call_tool(
             "create_memory_project",
@@ -534,7 +558,9 @@ async def test_nested_project_paths_rejected(mcp_server, app, test_project, tmp_
 
         # Try to create a child project nested under the parent
         child_name = "child-project"
-        child_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "project-nested-test/parent/child")
+        child_path = str(
+            tmp_path.parent / (tmp_path.name + "-projects") / "project-nested-test/parent/child"
+        )
 
         with pytest.raises(Exception) as exc_info:
             await client.call_tool(

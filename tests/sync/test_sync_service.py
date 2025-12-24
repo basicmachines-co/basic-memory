@@ -2102,7 +2102,9 @@ async def test_sync_handles_file_not_found_gracefully(
     async def mock_read_that_fails(*args, **kwargs):
         raise FileNotFoundError("Simulated file not found")
 
-    with patch.object(sync_service.file_service, "read_file_content", side_effect=mock_read_that_fails):
+    with patch.object(
+        sync_service.file_service, "read_file_content", side_effect=mock_read_that_fails
+    ):
         # Force full scan to detect the file
         await force_full_scan(sync_service)
 

@@ -277,7 +277,10 @@ async def test_view_note_direct_success(app, test_project, mock_call_get):
 
         # Verify direct lookup was used
         mock_call_get.assert_called_once()
-        assert "test/test-note" in mock_call_get.call_args[0][1] or "/resource/123" in mock_call_get.call_args[0][1]
+        assert (
+            "test/test-note" in mock_call_get.call_args[0][1]
+            or "/resource/123" in mock_call_get.call_args[0][1]
+        )
 
         # Verify result contains note content
         assert 'Note retrieved: "test/test-note"' in result

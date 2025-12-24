@@ -28,7 +28,9 @@ async def format_single_file(file_path: Path, app_config) -> tuple[Path, bool, O
         Tuple of (path, success, error_message)
     """
     try:
-        result = await format_file(file_path, app_config, is_markdown=is_markdown_extension(file_path))
+        result = await format_file(
+            file_path, app_config, is_markdown=is_markdown_extension(file_path)
+        )
         if result is not None:
             return (file_path, True, None)
         else:
@@ -87,7 +89,11 @@ async def run_format(
     app_config = ConfigManager().config
 
     # Check if formatting is enabled
-    if not app_config.format_on_save and not app_config.formatter_command and not app_config.formatters:
+    if (
+        not app_config.format_on_save
+        and not app_config.formatter_command
+        and not app_config.formatters
+    ):
         console.print(
             "[yellow]No formatters configured. Set format_on_save=true and "
             "formatter_command or formatters in your config.[/yellow]"
@@ -112,7 +118,11 @@ async def run_format(
                 files = [path]
             elif path.is_dir():
                 # Find all markdown and json files
-                files = list(path.rglob("*.md")) + list(path.rglob("*.json")) + list(path.rglob("*.canvas"))
+                files = (
+                    list(path.rglob("*.md"))
+                    + list(path.rglob("*.json"))
+                    + list(path.rglob("*.canvas"))
+                )
             else:
                 console.print(f"[red]Path not found: {path}[/red]")
                 raise typer.Exit(1)

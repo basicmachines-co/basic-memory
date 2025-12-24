@@ -220,7 +220,9 @@ async def delete_note(
 
         try:
             # Call the DELETE endpoint
-            response = await call_delete(client, f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}")
+            response = await call_delete(
+                client, f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+            )
             result = DeleteEntitiesResponse.model_validate(response.json())
 
             if result.deleted:

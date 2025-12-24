@@ -140,7 +140,10 @@ class TestReadContentSecurityValidation:
             with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
                 with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
                     mock_response = MagicMock()
-                    mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
+                    mock_response.headers = {
+                        "content-type": "text/markdown",
+                        "content-length": "100",
+                    }
                     mock_response.text = f"# Content for {safe_path}\nThis is test content."
                     mock_call_get.return_value = mock_response
                     mock_resolve.return_value = 123
@@ -223,7 +226,10 @@ class TestReadContentSecurityValidation:
             with patch("basic_memory.mcp.tools.read_content.call_get") as mock_call_get:
                 with patch("basic_memory.mcp.tools.read_content.resolve_entity_id") as mock_resolve:
                     mock_response = MagicMock()
-                    mock_response.headers = {"content-type": "text/markdown", "content-length": "100"}
+                    mock_response.headers = {
+                        "content-type": "text/markdown",
+                        "content-length": "100",
+                    }
                     mock_response.text = f"# Content for {safe_path}"
                     mock_call_get.return_value = mock_response
                     mock_resolve.return_value = 123
@@ -262,7 +268,9 @@ class TestReadContentFunctionality:
                 mock_call_get.return_value = mock_response
                 mock_resolve.return_value = 123
 
-                result = await read_content.fn(project=test_project.name, path="docs/test-document.md")
+                result = await read_content.fn(
+                    project=test_project.name, path="docs/test-document.md"
+                )
 
                 assert isinstance(result, dict)
                 assert result["type"] == "text"
@@ -297,7 +305,9 @@ class TestReadContentFunctionality:
                     mock_img.getbands.return_value = ["R", "G", "B"]
                     mock_pil.open.return_value = mock_img
 
-                    with patch("basic_memory.mcp.tools.read_content.optimize_image") as mock_optimize:
+                    with patch(
+                        "basic_memory.mcp.tools.read_content.optimize_image"
+                    ) as mock_optimize:
                         mock_optimize.return_value = b"optimized_image_data"
 
                         result = await read_content.fn(
@@ -379,7 +389,9 @@ class TestReadContentFunctionality:
                 mock_call_get.return_value = mock_response
                 mock_resolve.return_value = 123
 
-                result = await read_content.fn(project=test_project.name, path="files/safe-binary.bin")
+                result = await read_content.fn(
+                    project=test_project.name, path="files/safe-binary.bin"
+                )
 
                 assert isinstance(result, dict)
                 assert result["type"] == "document"

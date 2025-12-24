@@ -99,7 +99,9 @@ async def read_note(
 
         # Get the file via REST API - first try direct identifier resolution
         entity_path = memory_url_path(identifier)
-        logger.info(f"Attempting to read note from Project: {active_project.name} identifier: {entity_path}")
+        logger.info(
+            f"Attempting to read note from Project: {active_project.name} identifier: {entity_path}"
+        )
 
         try:
             # Try to resolve identifier to entity ID
@@ -109,7 +111,7 @@ async def read_note(
             response = await call_get(
                 client,
                 f"/v2/projects/{active_project.id}/resource/{entity_id}",
-                params={"page": page, "page_size": page_size}
+                params={"page": page, "page_size": page_size},
             )
 
             # If successful, return the content
@@ -138,7 +140,7 @@ async def read_note(
                     response = await call_get(
                         client,
                         f"/v2/projects/{active_project.id}/resource/{entity_id}",
-                        params={"page": page, "page_size": page_size}
+                        params={"page": page, "page_size": page_size},
                     )
 
                     if response.status_code == 200:
