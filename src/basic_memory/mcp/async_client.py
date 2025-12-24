@@ -95,6 +95,7 @@ async def get_client() -> AsyncIterator[AsyncClient]:
                 yield client
         else:
             # Local mode: ASGI transport for in-process calls
+            # Note: ASGI transport does NOT trigger FastAPI lifespan, so no special handling needed
             logger.info("Creating ASGI client for local Basic Memory API")
             async with AsyncClient(
                 transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout

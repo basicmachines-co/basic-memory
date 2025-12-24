@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-import logfire
+
 from loguru import logger
 from sqlalchemy import text
 
@@ -26,7 +26,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
     - JSONB containment operators for metadata search
     """
 
-    @logfire.instrument()
     async def init_search_index(self):
         """Create Postgres table with tsvector column and GIN indexes.
 
@@ -147,7 +146,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
         else:
             return cleaned_term
 
-    @logfire.instrument()
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -260,7 +258,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 {score_expr} as score
             FROM search_index
             WHERE {where_clause}
-            ORDER BY score DESC {order_by_clause}
+            ORDER BY score DESC, id ASC {order_by_clause}
             LIMIT :limit
             OFFSET :offset
         """
@@ -315,7 +313,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         return results
 
-    @logfire.instrument()
     async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
         """Index multiple items in a single batch operation using UPSERT.
 

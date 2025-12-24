@@ -8,7 +8,7 @@ import pytest
 from watchfiles import Change
 
 from basic_memory.models.project import Project
-from basic_memory.sync.watch_service import WatchService, WatchServiceState
+from basic_memory.sync.watch_service import WatchServiceState
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -17,10 +17,7 @@ async def create_test_file(path: Path, content: str = "test content") -> None:
     path.write_text(content)
 
 
-@pytest.fixture
-def watch_service(sync_service, file_service, project_config):
-    """Create watch service instance."""
-    return WatchService(sync_service, file_service, project_config)
+# Note: watch_service fixture is defined in conftest.py with sync_service_factory
 
 
 def test_watch_service_init(watch_service, project_config):

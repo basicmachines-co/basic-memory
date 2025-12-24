@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
-import logfire
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,7 +23,6 @@ class ProjectRepository(Repository[Project]):
         """Initialize with session maker."""
         super().__init__(session_maker, Project)
 
-    @logfire.instrument()
     async def get_by_name(self, name: str) -> Optional[Project]:
         """Get project by name (exact match).
 
@@ -56,7 +55,6 @@ class ProjectRepository(Repository[Project]):
         query = self.select().where(Project.permalink == permalink)
         return await self.find_one(query)
 
-    @logfire.instrument()
     async def get_by_path(self, path: Union[Path, str]) -> Optional[Project]:
         """Get project by filesystem path.
 
@@ -66,7 +64,6 @@ class ProjectRepository(Repository[Project]):
         query = self.select().where(Project.path == Path(path).as_posix())
         return await self.find_one(query)
 
-    @logfire.instrument()
     async def get_by_id(self, project_id: int) -> Optional[Project]:
         """Get project by numeric ID.
 
@@ -79,20 +76,17 @@ class ProjectRepository(Repository[Project]):
         async with db.scoped_session(self.session_maker) as session:
             return await self.select_by_id(session, project_id)
 
-    @logfire.instrument()
     async def get_default_project(self) -> Optional[Project]:
         """Get the default project (the one marked as is_default=True)."""
         query = self.select().where(Project.is_default.is_not(None))
         return await self.find_one(query)
 
-    @logfire.instrument()
     async def get_active_projects(self) -> Sequence[Project]:
         """Get all active projects."""
         query = self.select().where(Project.is_active == True)  # noqa: E712
         result = await self.execute_query(query)
         return list(result.scalars().all())
 
-    @logfire.instrument()
     async def set_as_default(self, project_id: int) -> Optional[Project]:
         """Set a project as the default and unset previous default.
 
@@ -117,7 +111,6 @@ class ProjectRepository(Repository[Project]):
                 return target_project
             return None  # pragma: no cover
 
-    @logfire.instrument()
     async def update_path(self, project_id: int, new_path: str) -> Optional[Project]:
         """Update project path.
 

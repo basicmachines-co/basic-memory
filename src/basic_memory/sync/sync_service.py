@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import AsyncIterator, Dict, List, Optional, Set, Tuple
 
 import aiofiles.os
-import logfire
+
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
@@ -215,17 +216,12 @@ class SyncService:
                 f"path={path}, error={error}"
             )
 
-            # Record metric for file failure
-            logfire.metric_counter("sync.circuit_breaker.failures").add(1)
-
             # Log when threshold is reached
             if failure_info.count >= MAX_CONSECUTIVE_FAILURES:
                 logger.error(
                     f"File {path} has failed {MAX_CONSECUTIVE_FAILURES} times and will be skipped. "
                     f"First failure: {failure_info.first_failure}, Last error: {error}"
                 )
-                # Record metric for file being blocked by circuit breaker
-                logfire.metric_counter("sync.circuit_breaker.blocked_files").add(1)
         else:
             # Create new failure record
             self._file_failures[path] = FileFailureInfo(
@@ -255,7 +251,6 @@ class SyncService:
             logger.info(f"Clearing failure history for {path} after successful sync")
             del self._file_failures[path]
 
-    @logfire.instrument()
     async def sync(
         self, directory: Path, project_name: Optional[str] = None, force_full: bool = False
     ) -> SyncReport:
@@ -282,63 +277,58 @@ class SyncService:
         )
 
         # sync moves first
-        with logfire.span("process_moves", move_count=len(report.moves)):
-            for old_path, new_path in report.moves.items():
-                # in the case where a file has been deleted and replaced by another file
-                # it will show up in the move and modified lists, so handle it in modified
-                if new_path in report.modified:
-                    report.modified.remove(new_path)
-                    logger.debug(
-                        f"File marked as moved and modified: old_path={old_path}, new_path={new_path}"
-                    )
-                else:
-                    await self.handle_move(old_path, new_path)
+        for old_path, new_path in report.moves.items():
+            # in the case where a file has been deleted and replaced by another file
+            # it will show up in the move and modified lists, so handle it in modified
+            if new_path in report.modified:
+                report.modified.remove(new_path)
+                logger.debug(
+                    f"File marked as moved and modified: old_path={old_path}, new_path={new_path}"
+                )
+            else:
+                await self.handle_move(old_path, new_path)
 
         # deleted next
-        with logfire.span("process_deletes", delete_count=len(report.deleted)):
-            for path in report.deleted:
-                await self.handle_delete(path)
+        for path in report.deleted:
+            await self.handle_delete(path)
 
         # then new and modified
-        with logfire.span("process_new_files", new_count=len(report.new)):
-            for path in report.new:
-                entity, _ = await self.sync_file(path, new=True)
+        for path in report.new:
+            entity, _ = await self.sync_file(path, new=True)
 
-                # Track if file was skipped
-                if entity is None and await self._should_skip_file(path):
-                    failure_info = self._file_failures[path]
-                    report.skipped_files.append(
-                        SkippedFile(
-                            path=path,
-                            reason=failure_info.last_error,
-                            failure_count=failure_info.count,
-                            first_failed=failure_info.first_failure,
-                        )
+            # Track if file was skipped
+            if entity is None and await self._should_skip_file(path):
+                failure_info = self._file_failures[path]
+                report.skipped_files.append(
+                    SkippedFile(
+                        path=path,
+                        reason=failure_info.last_error,
+                        failure_count=failure_info.count,
+                        first_failed=failure_info.first_failure,
                     )
+                )
 
-        with logfire.span("process_modified_files", modified_count=len(report.modified)):
-            for path in report.modified:
-                entity, _ = await self.sync_file(path, new=False)
+        for path in report.modified:
+            entity, _ = await self.sync_file(path, new=False)
 
-                # Track if file was skipped
-                if entity is None and await self._should_skip_file(path):
-                    failure_info = self._file_failures[path]
-                    report.skipped_files.append(
-                        SkippedFile(
-                            path=path,
-                            reason=failure_info.last_error,
-                            failure_count=failure_info.count,
-                            first_failed=failure_info.first_failure,
-                        )
+            # Track if file was skipped
+            if entity is None and await self._should_skip_file(path):
+                failure_info = self._file_failures[path]
+                report.skipped_files.append(
+                    SkippedFile(
+                        path=path,
+                        reason=failure_info.last_error,
+                        failure_count=failure_info.count,
+                        first_failed=failure_info.first_failure,
                     )
+                )
 
         # Only resolve relations if there were actual changes
         # If no files changed, no new unresolved relations could have been created
-        with logfire.span("resolve_relations"):
-            if report.total > 0:
-                await self.resolve_relations()
-            else:
-                logger.info("Skipping relation resolution - no file changes detected")
+        if report.total > 0:
+            await self.resolve_relations()
+        else:
+            logger.info("Skipping relation resolution - no file changes detected")
 
         # Update scan watermark after successful sync
         # Use the timestamp from sync start (not end) to ensure we catch files
@@ -361,15 +351,6 @@ class SyncService:
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Record metrics for sync operation
-        logfire.metric_histogram("sync.duration", unit="ms").record(duration_ms)
-        logfire.metric_counter("sync.files.new").add(len(report.new))
-        logfire.metric_counter("sync.files.modified").add(len(report.modified))
-        logfire.metric_counter("sync.files.deleted").add(len(report.deleted))
-        logfire.metric_counter("sync.files.moved").add(len(report.moves))
-        if report.skipped_files:
-            logfire.metric_counter("sync.files.skipped").add(len(report.skipped_files))
-
         # Log summary with skipped files if any
         if report.skipped_files:
             logger.warning(
@@ -390,7 +371,6 @@ class SyncService:
 
         return report
 
-    @logfire.instrument()
     async def scan(self, directory, force_full: bool = False):
         """Smart scan using watermark and file count for large project optimization.
 
@@ -471,12 +451,6 @@ class SyncService:
             scan_type = "full_fallback"
             logger.warning("No scan watermark available, falling back to full scan")
             file_paths_to_scan = await self._scan_directory_full(directory)
-
-        # Record scan type metric
-        logfire.metric_counter(f"sync.scan.{scan_type}").add(1)
-        logfire.metric_histogram("sync.scan.files_scanned", unit="files").record(
-            len(file_paths_to_scan)
-        )
 
         # Step 3: Process each file with mtime-based comparison
         scanned_paths: Set[str] = set()
@@ -589,7 +563,6 @@ class SyncService:
         report.checksums = changed_checksums
 
         scan_duration_ms = int((time.time() - scan_start_time) * 1000)
-        logfire.metric_histogram("sync.scan.duration", unit="ms").record(scan_duration_ms)
 
         logger.info(
             f"Completed {scan_type} scan for directory {directory} in {scan_duration_ms}ms, "
@@ -599,7 +572,6 @@ class SyncService:
         )
         return report
 
-    @logfire.instrument()
     async def sync_file(
         self, path: str, new: bool = True
     ) -> Tuple[Optional[Entity], Optional[str]]:
@@ -654,7 +626,6 @@ class SyncService:
 
             return None, None
 
-    @logfire.instrument()
     async def sync_markdown_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a markdown file with full processing.
 
@@ -672,12 +643,19 @@ class SyncService:
         file_contains_frontmatter = has_frontmatter(file_content)
 
         # Get file timestamps for tracking modification times
-        file_stats = self.file_service.file_stats(path)
-        created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
-        modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+        file_metadata = await self.file_service.get_file_metadata(path)
+        created = file_metadata.created_at
+        modified = file_metadata.modified_at
 
-        # entity markdown will always contain front matter, so it can be used up create/update the entity
-        entity_markdown = await self.entity_parser.parse_file(path)
+        # Parse markdown content with file metadata (avoids redundant file read/stat)
+        # This enables cloud implementations (S3FileService) to provide metadata from head_object
+        abs_path = self.file_service.base_path / path
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=abs_path,
+            content=file_content,
+            mtime=file_metadata.modified_at.timestamp(),
+            ctime=file_metadata.created_at.timestamp(),
+        )
 
         # if the file contains frontmatter, resolve a permalink (unless disabled)
         if file_contains_frontmatter and not self.app_config.disable_permalinks:
@@ -723,8 +701,8 @@ class SyncService:
                 "checksum": final_checksum,
                 "created_at": created,
                 "updated_at": modified,
-                "mtime": file_stats.st_mtime,
-                "size": file_stats.st_size,
+                "mtime": file_metadata.modified_at.timestamp(),
+                "size": file_metadata.size,
             },
         )
 
@@ -737,7 +715,6 @@ class SyncService:
         # Return the final checksum to ensure everything is consistent
         return entity, final_checksum
 
-    @logfire.instrument()
     async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a non-markdown file with basic tracking.
 
@@ -754,9 +731,9 @@ class SyncService:
             await self.entity_service.resolve_permalink(path, skip_conflict_check=True)
 
             # get file timestamps
-            file_stats = self.file_service.file_stats(path)
-            created = datetime.fromtimestamp(file_stats.st_ctime).astimezone()
-            modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+            file_metadata = await self.file_service.get_file_metadata(path)
+            created = file_metadata.created_at
+            modified = file_metadata.modified_at
 
             # get mime type
             content_type = self.file_service.content_type(path)
@@ -772,8 +749,8 @@ class SyncService:
                         created_at=created,
                         updated_at=modified,
                         content_type=content_type,
-                        mtime=file_stats.st_mtime,
-                        size=file_stats.st_size,
+                        mtime=file_metadata.modified_at.timestamp(),
+                        size=file_metadata.size,
                     )
                 )
                 return entity, checksum
@@ -789,15 +766,15 @@ class SyncService:
                         logger.error(f"Entity not found after constraint violation, path={path}")
                         raise ValueError(f"Entity not found after constraint violation: {path}")
 
-                    # Re-get file stats since we're in update path
-                    file_stats_for_update = self.file_service.file_stats(path)
+                    # Re-get file metadata since we're in update path
+                    file_metadata_for_update = await self.file_service.get_file_metadata(path)
                     updated = await self.entity_repository.update(
                         entity.id,
                         {
                             "file_path": path,
                             "checksum": checksum,
-                            "mtime": file_stats_for_update.st_mtime,
-                            "size": file_stats_for_update.st_size,
+                            "mtime": file_metadata_for_update.modified_at.timestamp(),
+                            "size": file_metadata_for_update.size,
                         },
                     )
 
@@ -811,8 +788,8 @@ class SyncService:
                     raise
         else:
             # Get file timestamps for updating modification time
-            file_stats = self.file_service.file_stats(path)
-            modified = datetime.fromtimestamp(file_stats.st_mtime).astimezone()
+            file_metadata = await self.file_service.get_file_metadata(path)
+            modified = file_metadata.modified_at
 
             entity = await self.entity_repository.get_by_file_path(path)
             if entity is None:  # pragma: no cover
@@ -827,8 +804,8 @@ class SyncService:
                     "file_path": path,
                     "checksum": checksum,
                     "updated_at": modified,
-                    "mtime": file_stats.st_mtime,
-                    "size": file_stats.st_size,
+                    "mtime": file_metadata.modified_at.timestamp(),
+                    "size": file_metadata.size,
                 },
             )
 
@@ -838,7 +815,6 @@ class SyncService:
 
             return updated, checksum
 
-    @logfire.instrument()
     async def handle_delete(self, file_path: str):
         """Handle complete entity deletion including search index cleanup."""
 
@@ -870,7 +846,6 @@ class SyncService:
                 else:
                     await self.search_service.delete_by_entity_id(entity.id)
 
-    @logfire.instrument()
     async def handle_move(self, old_path, new_path):
         logger.debug("Moving entity", old_path=old_path, new_path=new_path)
 
@@ -975,7 +950,6 @@ class SyncService:
             # update search index
             await self.search_service.index_entity(updated)
 
-    @logfire.instrument()
     async def resolve_relations(self, entity_id: int | None = None):
         """Try to resolve unresolved relations.
 
@@ -1054,12 +1028,22 @@ class SyncService:
         Uses subprocess to leverage OS-level file counting which is much faster
         than Python iteration, especially on network filesystems like TigrisFS.
 
+        On Windows, subprocess is not supported with SelectorEventLoop (which we use
+        to avoid aiosqlite cleanup issues), so we fall back to Python-based counting.
+
         Args:
             directory: Directory to count files in
 
         Returns:
             Number of files in directory (recursive)
         """
+        # Windows with SelectorEventLoop doesn't support subprocess
+        if sys.platform == "win32":
+            count = 0
+            async for _ in self.scan_directory(directory):
+                count += 1
+            return count
+
         process = await asyncio.create_subprocess_shell(
             f'find "{directory}" -type f | wc -l',
             stdout=asyncio.subprocess.PIPE,
@@ -1074,8 +1058,6 @@ class SyncService:
                 f"error: {error_msg}. Falling back to manual count. "
                 f"This will slow down watermark detection!"
             )
-            # Track optimization failures for visibility
-            logfire.metric_counter("sync.scan.file_count_failure").add(1)
             # Fallback: count using scan_directory
             count = 0
             async for _ in self.scan_directory(directory):
@@ -1092,6 +1074,9 @@ class SyncService:
         This is dramatically faster than scanning all files and comparing mtimes,
         especially on network filesystems like TigrisFS where stat operations are expensive.
 
+        On Windows, subprocess is not supported with SelectorEventLoop (which we use
+        to avoid aiosqlite cleanup issues), so we implement mtime filtering in Python.
+
         Args:
             directory: Directory to scan
             since_timestamp: Unix timestamp to find files newer than
@@ -1099,6 +1084,16 @@ class SyncService:
         Returns:
             List of relative file paths modified since the timestamp (respects .bmignore)
         """
+        # Windows with SelectorEventLoop doesn't support subprocess
+        # Implement mtime filtering in Python to preserve watermark optimization
+        if sys.platform == "win32":
+            file_paths = []
+            async for file_path_str, stat_info in self.scan_directory(directory):
+                if stat_info.st_mtime > since_timestamp:
+                    rel_path = Path(file_path_str).relative_to(directory).as_posix()
+                    file_paths.append(rel_path)
+            return file_paths
+
         # Convert timestamp to find-compatible format
         since_date = datetime.fromtimestamp(since_timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1116,8 +1111,6 @@ class SyncService:
                 f"error: {error_msg}. Falling back to full scan. "
                 f"This will cause slow syncs on large projects!"
             )
-            # Track optimization failures for visibility
-            logfire.metric_counter("sync.scan.optimization_failure").add(1)
             # Fallback to full scan
             return await self._scan_directory_full(directory)
 

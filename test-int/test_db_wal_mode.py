@@ -5,7 +5,6 @@ and other SQLite configuration settings work correctly in production scenarios.
 """
 
 import pytest
-from unittest.mock import patch
 from sqlalchemy import text
 
 
@@ -140,8 +139,6 @@ async def test_null_pool_on_windows(tmp_path, monkeypatch):
     async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (engine, _):
         # Engine should be using NullPool on Windows
         assert isinstance(engine.pool, NullPool)
-
-
 
 
 @pytest.mark.asyncio

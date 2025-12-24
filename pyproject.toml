@@ -29,14 +29,15 @@ dependencies = [
     "alembic>=1.14.1",
     "pillow>=11.1.0",
     "pybars3>=0.9.7",
-    "fastmcp>=2.10.2",
+    "fastmcp==2.12.3",  # Pinned - 2.14.x breaks MCP tools visibility (issue #463)
     "pyjwt>=2.10.1",
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
-    "aiofiles>=24.1.0", # Async file I/O
-    "logfire[fastapi]>=0.73.0", # Optional observability (disabled by default via config)
+    "aiofiles>=24.1.0", # Optional observability (disabled by default via config)
     "asyncpg>=0.30.0",
     "nest-asyncio>=1.6.0", # For Alembic migrations with Postgres
+    "pytest-asyncio>=1.2.0",
+    "psycopg==3.3.1",
 ]
 
 
@@ -81,7 +82,8 @@ dev = [
     "pytest-xdist>=3.0.0",
     "ruff>=0.1.6",
     "freezegun>=1.5.5",
-
+    "testcontainers[postgres]>=4.0.0",
+    "psycopg>=3.2.0",
 ]
 
 [tool.hatch.version]

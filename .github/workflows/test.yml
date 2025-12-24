@@ -78,21 +78,7 @@ jobs:
         python-version: [ "3.12", "3.13" ]
     runs-on: ubuntu-latest
 
-    # Postgres service (only available on Linux runners)
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_DB: basic_memory_test
-          POSTGRES_USER: basic_memory_user
-          POSTGRES_PASSWORD: dev_password
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5433:5432
+    # Note: No services section needed - testcontainers handles Postgres in Docker
 
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +107,7 @@ jobs:
         run: |
           uv pip install -e .[dev]
 
-      - name: Run tests (Postgres)
+      - name: Run tests (Postgres via testcontainers)
         run: |
           uv pip install pytest pytest-cov
           just test-postgres

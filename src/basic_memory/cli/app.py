@@ -2,7 +2,7 @@ from typing import Optional
 
 import typer
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, init_cli_logging
 
 
 def version_callback(value: bool) -> None:
@@ -31,8 +31,18 @@ def app_callback(
 ) -> None:
     """Basic Memory - Local-first personal knowledge management."""
 
-    # Run initialization for every command unless --version was specified
-    if not version and ctx.invoked_subcommand is not None:
+    # Initialize logging for CLI (file only, no stdout)
+    init_cli_logging()
+
+    # Run initialization for commands that don't use the API
+    # Skip for 'mcp' command - it has its own lifespan that handles initialization
+    # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py
+    api_commands = {"mcp", "status", "sync", "project", "tool"}
+    if (
+        not version
+        and ctx.invoked_subcommand is not None
+        and ctx.invoked_subcommand not in api_commands
+    ):
         from basic_memory.services.initialization import ensure_initialization
 
         app_config = ConfigManager().config

@@ -171,7 +171,7 @@ Content
         raise IntegrityError(
             "UNIQUE constraint failed: relation.from_id, relation.to_id, relation.relation_type",
             None,
-            None,
+            None,  # pyright: ignore [reportArgumentType]
         )
 
     with patch.object(
@@ -712,11 +712,8 @@ async def test_sync_preserves_timestamps(
     sync_service: SyncService,
     project_config: ProjectConfig,
     entity_service: EntityService,
-    db_backend,
 ):
     """Test that sync preserves file timestamps and frontmatter dates."""
-    if db_backend == "postgres":
-        pytest.skip("Postgres timestamp handling differs from SQLite")
     project_dir = project_config.home
 
     # Create a file with explicit frontmatter dates
@@ -768,7 +765,6 @@ async def test_sync_updates_timestamps_on_file_modification(
     sync_service: SyncService,
     project_config: ProjectConfig,
     entity_service: EntityService,
-    db_backend,
 ):
     """Test that sync updates entity timestamps when files are modified.
 
@@ -777,9 +773,6 @@ async def test_sync_updates_timestamps_on_file_modification(
     not the database operation time. This is critical for accurate temporal ordering in
     search and recent_activity queries.
     """
-    if db_backend == "postgres":
-        pytest.skip("Postgres timestamp handling differs from SQLite")
-
     project_dir = project_config.home
 
     # Create initial file
