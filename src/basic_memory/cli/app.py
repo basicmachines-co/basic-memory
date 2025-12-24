@@ -1,8 +1,15 @@
-from typing import Optional
+# Remove loguru's default handler IMMEDIATELY, before any other imports.
+# This prevents DEBUG logs from appearing on stdout during module-level
+# initialization (e.g., template_loader.TemplateLoader() logs at DEBUG level).
+from loguru import logger
 
-import typer
+logger.remove()
 
-from basic_memory.config import ConfigManager, init_cli_logging
+from typing import Optional  # noqa: E402
+
+import typer  # noqa: E402
+
+from basic_memory.config import ConfigManager, init_cli_logging  # noqa: E402
 
 
 def version_callback(value: bool) -> None:
