@@ -8,7 +8,6 @@ from basic_memory.services.initialization import (
     ensure_initialization,
     initialize_database,
     reconcile_projects_with_config,
-    initialize_file_sync,
 )
 
 

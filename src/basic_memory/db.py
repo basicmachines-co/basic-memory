@@ -33,8 +33,9 @@ from basic_memory.repository.sqlite_search_repository import SQLiteSearchReposit
 # - "RuntimeError: Event loop is closed"
 # - "IndexError: pop from an empty deque"
 #
-# We don't rely on Proactor-only features (like subprocess pipes), so use the
-# more stable SelectorEventLoopPolicy everywhere on Windows.
+# The SelectorEventLoop doesn't support subprocess operations, so code that uses
+# asyncio.create_subprocess_shell() (like sync_service._quick_count_files) must
+# detect Windows and use fallback implementations.
 if sys.platform == "win32":  # pragma: no cover
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 

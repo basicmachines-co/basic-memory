@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     )
     if app_config.sync_changes and not is_test_env:
         logger.info(f"Sync changes enabled: {app_config.sync_changes}")
+
         # start file sync task in background
         async def _file_sync_runner() -> None:
             await initialize_file_sync(app_config)

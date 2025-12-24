@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -1027,12 +1028,22 @@ class SyncService:
         Uses subprocess to leverage OS-level file counting which is much faster
         than Python iteration, especially on network filesystems like TigrisFS.
 
+        On Windows, subprocess is not supported with SelectorEventLoop (which we use
+        to avoid aiosqlite cleanup issues), so we fall back to Python-based counting.
+
         Args:
             directory: Directory to count files in
 
         Returns:
             Number of files in directory (recursive)
         """
+        # Windows with SelectorEventLoop doesn't support subprocess
+        if sys.platform == "win32":
+            count = 0
+            async for _ in self.scan_directory(directory):
+                count += 1
+            return count
+
         process = await asyncio.create_subprocess_shell(
             f'find "{directory}" -type f | wc -l',
             stdout=asyncio.subprocess.PIPE,
@@ -1063,6 +1074,9 @@ class SyncService:
         This is dramatically faster than scanning all files and comparing mtimes,
         especially on network filesystems like TigrisFS where stat operations are expensive.
 
+        On Windows, subprocess is not supported with SelectorEventLoop (which we use
+        to avoid aiosqlite cleanup issues), so we fall back to a full directory scan.
+
         Args:
             directory: Directory to scan
             since_timestamp: Unix timestamp to find files newer than
@@ -1070,6 +1084,10 @@ class SyncService:
         Returns:
             List of relative file paths modified since the timestamp (respects .bmignore)
         """
+        # Windows with SelectorEventLoop doesn't support subprocess
+        if sys.platform == "win32":
+            return await self._scan_directory_full(directory)
+
         # Convert timestamp to find-compatible format
         since_date = datetime.fromtimestamp(since_timestamp).strftime("%Y-%m-%d %H:%M:%S")
 

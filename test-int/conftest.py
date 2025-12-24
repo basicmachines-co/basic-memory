@@ -146,6 +146,11 @@ async def engine_factory(
             autoflush=False,
         )
 
+        # Set module-level state to prevent MCP lifespan from re-initializing
+        # This ensures get_or_create_db() sees an existing engine and skips initialization
+        db._engine = engine
+        db._session_maker = session_maker
+
         # Drop and recreate all tables for test isolation
         async with engine.begin() as conn:
             await conn.execute(text("DROP TABLE IF EXISTS search_index CASCADE"))
@@ -158,7 +163,10 @@ async def engine_factory(
 
         yield engine, session_maker
 
+        # Clean up module-level state
         await engine.dispose()
+        db._engine = None
+        db._session_maker = None
 
     else:
         # SQLite: Create fresh database (fast with tmp files)
