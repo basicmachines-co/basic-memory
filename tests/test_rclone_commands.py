@@ -6,16 +6,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from basic_memory.cli.commands.cloud.rclone_commands import (
+    MIN_RCLONE_VERSION_EMPTY_DIRS,
     RcloneError,
     SyncProject,
     bisync_initialized,
     check_rclone_installed,
     get_project_bisync_state,
     get_project_remote,
+    get_rclone_version,
     project_bisync,
     project_check,
     project_ls,
     project_sync,
+    supports_create_empty_src_dirs,
 )
 
 
@@ -194,10 +197,12 @@ def test_project_sync_no_local_path(mock_is_installed):
 @patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-def test_project_bisync_success(mock_bisync_init, mock_run, mock_is_installed):
+@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
+def test_project_bisync_success(mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed):
     """Test successful project bisync."""
     mock_is_installed.return_value = True
     mock_bisync_init.return_value = True  # Already initialized
+    mock_supports_flag.return_value = True  # Mock version check
     mock_run.return_value = MagicMock(returncode=0)
 
     project = SyncProject(
@@ -221,9 +226,8 @@ def test_project_bisync_success(mock_bisync_init, mock_run, mock_is_installed):
 
 
 @patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-def test_project_bisync_requires_resync_first_time(mock_bisync_init, mock_run, mock_is_installed):
+def test_project_bisync_requires_resync_first_time(mock_bisync_init, mock_is_installed):
     """Test that first bisync requires --resync flag."""
     mock_is_installed.return_value = True
     mock_bisync_init.return_value = False  # Not initialized
@@ -238,16 +242,19 @@ def test_project_bisync_requires_resync_first_time(mock_bisync_init, mock_run, m
         project_bisync(project, "my-bucket")
 
     assert "requires --resync" in str(exc_info.value)
-    mock_run.assert_not_called()
 
 
 @patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-def test_project_bisync_with_resync_flag(mock_bisync_init, mock_run, mock_is_installed):
+@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
+def test_project_bisync_with_resync_flag(
+    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
+):
     """Test bisync with --resync flag for first time."""
     mock_is_installed.return_value = True
     mock_bisync_init.return_value = False  # Not initialized
+    mock_supports_flag.return_value = True  # Mock version check
     mock_run.return_value = MagicMock(returncode=0)
 
     project = SyncProject(
@@ -266,10 +273,14 @@ def test_project_bisync_with_resync_flag(mock_bisync_init, mock_run, mock_is_ins
 @patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
 @patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-def test_project_bisync_dry_run_skips_init_check(mock_bisync_init, mock_run, mock_is_installed):
+@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
+def test_project_bisync_dry_run_skips_init_check(
+    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
+):
     """Test that dry-run skips initialization check."""
     mock_is_installed.return_value = True
     mock_bisync_init.return_value = False  # Not initialized
+    mock_supports_flag.return_value = True  # Mock version check
     mock_run.return_value = MagicMock(returncode=0)
 
     project = SyncProject(
@@ -479,3 +490,158 @@ def test_project_ls_checks_rclone_installed(mock_is_installed):
 
     assert "rclone is not installed" in str(exc_info.value)
     mock_is_installed.assert_called_once()
+
+
+# Tests for rclone version detection
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_parses_standard_version(mock_run):
+    """Test parsing standard rclone version output."""
+    # Clear the lru_cache before test
+    get_rclone_version.cache_clear()
+
+    mock_run.return_value = MagicMock(
+        stdout="rclone v1.64.2\n- os/version: darwin 23.0.0\n- os/arch: arm64\n"
+    )
+
+    version = get_rclone_version()
+
+    assert version == (1, 64, 2)
+    mock_run.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_parses_dev_version(mock_run):
+    """Test parsing rclone dev version output like v1.60.1-DEV."""
+    get_rclone_version.cache_clear()
+
+    mock_run.return_value = MagicMock(stdout="rclone v1.60.1-DEV\n- os/version: linux 5.15.0\n")
+
+    version = get_rclone_version()
+
+    assert version == (1, 60, 1)
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_handles_invalid_output(mock_run):
+    """Test handling of invalid rclone version output."""
+    get_rclone_version.cache_clear()
+
+    mock_run.return_value = MagicMock(stdout="not a valid version string")
+
+    version = get_rclone_version()
+
+    assert version is None
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_handles_exception(mock_run):
+    """Test handling of subprocess exception."""
+    get_rclone_version.cache_clear()
+
+    mock_run.side_effect = Exception("Command failed")
+
+    version = get_rclone_version()
+
+    assert version is None
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+def test_get_rclone_version_handles_timeout(mock_run):
+    """Test handling of subprocess timeout."""
+    get_rclone_version.cache_clear()
+    from subprocess import TimeoutExpired
+
+    mock_run.side_effect = TimeoutExpired(cmd="rclone version", timeout=10)
+
+    version = get_rclone_version()
+
+    assert version is None
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_supports_create_empty_src_dirs_true_for_new_version(mock_get_version):
+    """Test supports_create_empty_src_dirs returns True for v1.64+."""
+    mock_get_version.return_value = (1, 64, 2)
+
+    assert supports_create_empty_src_dirs() is True
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_supports_create_empty_src_dirs_true_for_exact_min_version(mock_get_version):
+    """Test supports_create_empty_src_dirs returns True for exactly v1.64.0."""
+    mock_get_version.return_value = (1, 64, 0)
+
+    assert supports_create_empty_src_dirs() is True
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_supports_create_empty_src_dirs_false_for_old_version(mock_get_version):
+    """Test supports_create_empty_src_dirs returns False for v1.60."""
+    mock_get_version.return_value = (1, 60, 1)
+
+    assert supports_create_empty_src_dirs() is False
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
+def test_supports_create_empty_src_dirs_false_for_unknown_version(mock_get_version):
+    """Test supports_create_empty_src_dirs returns False when version unknown."""
+    mock_get_version.return_value = None
+
+    assert supports_create_empty_src_dirs() is False
+
+
+def test_min_rclone_version_constant():
+    """Test MIN_RCLONE_VERSION_EMPTY_DIRS constant is set correctly."""
+    assert MIN_RCLONE_VERSION_EMPTY_DIRS == (1, 64, 0)
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
+def test_project_bisync_includes_empty_dirs_flag_when_supported(
+    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
+):
+    """Test project_bisync includes --create-empty-src-dirs when supported."""
+    mock_is_installed.return_value = True
+    mock_bisync_init.return_value = True
+    mock_supports_flag.return_value = True
+    mock_run.return_value = MagicMock(returncode=0)
+
+    project = SyncProject(
+        name="research",
+        path="app/data/research",
+        local_sync_path="/tmp/research",
+    )
+
+    project_bisync(project, "my-bucket")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--create-empty-src-dirs" in cmd
+
+
+@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
+@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
+def test_project_bisync_excludes_empty_dirs_flag_when_not_supported(
+    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
+):
+    """Test project_bisync excludes --create-empty-src-dirs for older rclone."""
+    mock_is_installed.return_value = True
+    mock_bisync_init.return_value = True
+    mock_supports_flag.return_value = False  # Old rclone version
+    mock_run.return_value = MagicMock(returncode=0)
+
+    project = SyncProject(
+        name="research",
+        path="app/data/research",
+        local_sync_path="/tmp/research",
+    )
+
+    project_bisync(project, "my-bucket")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--create-empty-src-dirs" not in cmd

@@ -6,6 +6,7 @@ to ensure consistent application startup across all entry points.
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 
@@ -29,15 +30,12 @@ async def initialize_database(app_config: BasicMemoryConfig) -> None:
         Database migrations are now handled automatically when the database
         connection is first established via get_or_create_db().
     """
-    # Trigger database initialization and migrations by getting the database connection
     try:
         await db.get_or_create_db(app_config.database_path)
         logger.info("Database initialization completed")
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
-        # Allow application to continue - it might still work
-        # depending on what the error was, and will fail with a
-        # more specific error if the database is actually unusable
+        logger.error(f"Error during database initialization: {e}")
+        raise
 
 
 async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
@@ -51,31 +49,29 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
     """
     logger.info("Reconciling projects from config with database...")
 
-    # Get database session - migrations handled centrally
+    # Get database session (engine already created by initialize_database)
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path,
         db_type=db.DatabaseType.FILESYSTEM,
-        ensure_migrations=False,
     )
     project_repository = ProjectRepository(session_maker)
 
     # Import ProjectService here to avoid circular imports
     from basic_memory.services.project_service import ProjectService
 
+    # Create project service and synchronize projects
+    project_service = ProjectService(repository=project_repository)
     try:
-        # Create project service and synchronize projects
-        project_service = ProjectService(repository=project_repository)
         await project_service.synchronize_projects()
         logger.info("Projects successfully reconciled between config and database")
     except Exception as e:
-        # Log the error but continue with initialization
         logger.error(f"Error during project synchronization: {e}")
         logger.info("Continuing with initialization despite synchronization error")
 
 
 async def initialize_file_sync(
     app_config: BasicMemoryConfig,
-):
+) -> None:
     """Initialize file synchronization services. This function starts the watch service and does not return
 
     Args:
@@ -84,15 +80,26 @@ async def initialize_file_sync(
     Returns:
         The watch service task that's monitoring file changes
     """
+    # Never start file watching during tests. Even "background" watchers add tasks/threads
+    # and can interact badly with strict asyncio teardown (especially on Windows/aiosqlite).
+    #
+    # Note: Some tests patch ConfigManager.config with a minimal BasicMemoryConfig that
+    # may not set env="test". So also detect pytest via env vars.
+    if (
+        app_config.env == "test"
+        or os.getenv("BASIC_MEMORY_ENV", "").lower() == "test"
+        or os.getenv("PYTEST_CURRENT_TEST") is not None
+    ):
+        logger.info("Test environment detected - skipping file sync initialization")
+        return None
 
     # delay import
     from basic_memory.sync import WatchService
 
-    # Load app configuration - migrations handled centrally
+    # Get database session (migrations already run if needed)
     _, session_maker = await db.get_or_create_db(
         db_path=app_config.database_path,
         db_type=db.DatabaseType.FILESYSTEM,
-        ensure_migrations=False,
     )
     project_repository = ProjectRepository(session_maker)
 
@@ -139,12 +146,10 @@ async def initialize_file_sync(
 
     # Then start the watch service in the background
     logger.info("Starting watch service for all projects")
+
     # run the watch service
-    try:
-        await watch_service.run()
-        logger.info("Watch service started")
-    except Exception as e:  # pragma: no cover
-        logger.error(f"Error starting watch service: {e}")
+    await watch_service.run()
+    logger.info("Watch service started")
 
     return None
 
@@ -189,11 +194,24 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
         logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
         return
 
-    try:
-        result = asyncio.run(initialize_app(app_config))
-        logger.info(f"Initialization completed successfully: result={result}")
-    except Exception as e:  # pragma: no cover
-        logger.exception(f"Error during initialization: {e}")
-        # Continue execution even if initialization fails
-        # The command might still work, or will fail with a
-        # more specific error message
+    async def _init_and_cleanup():
+        """Initialize app and clean up database connections.
+
+        Database connections created during initialization must be cleaned up
+        before the event loop closes, otherwise the process will hang indefinitely.
+        """
+        try:
+            await initialize_app(app_config)
+        finally:
+            # Always cleanup database connections to prevent process hang
+            await db.shutdown_db()
+
+    # On Windows, use SelectorEventLoop to avoid ProactorEventLoop cleanup issues
+    # The ProactorEventLoop can raise "IndexError: pop from an empty deque" during
+    # event loop cleanup when there are pending handles. SelectorEventLoop is more
+    # stable for our use case (no subprocess pipes or named pipes needed).
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+    asyncio.run(_init_and_cleanup())
+    logger.info("Initialization completed successfully")

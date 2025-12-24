@@ -232,6 +232,8 @@ def setup_logging(
     if log_to_file:
         log_path = Path.home() / ".basic-memory" / "basic-memory.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep logging synchronous (enqueue=False) to avoid background logging threads.
+        # Background threads are a common source of "hang on exit" issues in CLI/test runs.
         logger.add(
             str(log_path),
             level=log_level,
@@ -239,7 +241,7 @@ def setup_logging(
             retention="10 days",
             backtrace=True,
             diagnose=True,
-            enqueue=True,  # Thread-safe async logging
+            enqueue=False,
             colorize=False,
         )
 

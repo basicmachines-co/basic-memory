@@ -9,17 +9,23 @@ This module provides simplified, project-scoped rclone operations:
 Replaces tenant-wide sync with project-scoped workflows.
 """
 
+import re
 import subprocess
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from loguru import logger
 from rich.console import Console
 
 from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
 from basic_memory.utils import normalize_project_path
 
 console = Console()
+
+# Minimum rclone version for --create-empty-src-dirs support
+MIN_RCLONE_VERSION_EMPTY_DIRS = (1, 64, 0)
 
 
 class RcloneError(Exception):
@@ -41,6 +47,42 @@ def check_rclone_installed() -> None:
             "Or install manually from: https://rclone.org/downloads/\n\n"
             "Windows users: Ensure you have a package manager installed (winget, chocolatey, or scoop)"
         )
+
+
+@lru_cache(maxsize=1)
+def get_rclone_version() -> tuple[int, int, int] | None:
+    """Get rclone version as (major, minor, patch) tuple.
+
+    Returns:
+        Version tuple like (1, 64, 2), or None if version cannot be determined.
+
+    Note:
+        Result is cached since rclone version won't change during runtime.
+    """
+    try:
+        result = subprocess.run(["rclone", "version"], capture_output=True, text=True, timeout=10)
+        # Parse "rclone v1.64.2" or "rclone v1.60.1-DEV"
+        match = re.search(r"v(\d+)\.(\d+)\.(\d+)", result.stdout)
+        if match:
+            version = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            logger.debug(f"Detected rclone version: {version}")
+            return version
+    except Exception as e:
+        logger.warning(f"Could not determine rclone version: {e}")
+    return None
+
+
+def supports_create_empty_src_dirs() -> bool:
+    """Check if installed rclone supports --create-empty-src-dirs flag.
+
+    Returns:
+        True if rclone version >= 1.64.0, False otherwise.
+    """
+    version = get_rclone_version()
+    if version is None:
+        # If we can't determine version, assume older and skip the flag
+        return False
+    return version >= MIN_RCLONE_VERSION_EMPTY_DIRS
 
 
 @dataclass
@@ -218,7 +260,6 @@ def project_bisync(
         "bisync",
         str(local_path),
         remote_path,
-        "--create-empty-src-dirs",
         "--resilient",
         "--conflict-resolve=newer",
         "--max-delete=25",
@@ -228,6 +269,10 @@ def project_bisync(
         "--workdir",
         str(state_path),
     ]
+
+    # Add --create-empty-src-dirs if rclone version supports it (v1.64+)
+    if supports_create_empty_src_dirs():
+        cmd.append("--create-empty-src-dirs")
 
     if verbose:
         cmd.append("--verbose")
