@@ -32,7 +32,6 @@ class ProjectRepository(Repository[Project]):
         query = self.select().where(Project.name == name)
         return await self.find_one(query)
 
-    @logfire.instrument()
     async def get_by_name_case_insensitive(self, name: str) -> Optional[Project]:
         """Get project by name (case-insensitive match).
 
@@ -45,7 +44,6 @@ class ProjectRepository(Repository[Project]):
         query = self.select().where(Project.name.ilike(name))
         return await self.find_one(query)
 
-    @logfire.instrument()
     async def get_by_permalink(self, permalink: str) -> Optional[Project]:
         """Get project by permalink.
 
