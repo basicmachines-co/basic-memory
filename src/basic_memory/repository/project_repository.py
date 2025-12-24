@@ -24,12 +24,24 @@ class ProjectRepository(Repository[Project]):
         super().__init__(session_maker, Project)
 
     async def get_by_name(self, name: str) -> Optional[Project]:
-        """Get project by name.
+        """Get project by name (exact match).
 
         Args:
             name: Unique name of the project
         """
         query = self.select().where(Project.name == name)
+        return await self.find_one(query)
+
+    async def get_by_name_case_insensitive(self, name: str) -> Optional[Project]:
+        """Get project by name (case-insensitive match).
+
+        Args:
+            name: Project name (case-insensitive)
+
+        Returns:
+            Project if found, None otherwise
+        """
+        query = self.select().where(Project.name.ilike(name))
         return await self.find_one(query)
 
     async def get_by_permalink(self, permalink: str) -> Optional[Project]:

@@ -355,14 +355,13 @@ async def search_notes(
 
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
-        project_url = active_project.project_url
 
         logger.info(f"Searching for {search_query} in project {active_project.name}")
 
         try:
             response = await call_post(
                 client,
-                f"{project_url}/search/",
+                f"/v2/projects/{active_project.id}/search/",
                 json=search_query.model_dump(),
                 params={"page": page, "page_size": page_size},
             )

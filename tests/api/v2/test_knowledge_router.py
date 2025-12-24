@@ -48,7 +48,7 @@ async def test_resolve_identifier_not_found(client: AsyncClient, v2_project_url)
     response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
 
     assert response.status_code == 404
-    assert "Could not resolve identifier" in response.json()["detail"]
+    assert "Entity not found" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

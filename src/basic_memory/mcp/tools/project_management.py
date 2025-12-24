@@ -179,11 +179,8 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
                 f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
             )
 
-        # Call API to delete project using URL encoding for special characters
-        from urllib.parse import quote
-
-        encoded_name = quote(target_project.name, safe="")
-        response = await call_delete(client, f"/projects/{encoded_name}")
+        # Call v2 API to delete project using project ID
+        response = await call_delete(client, f"/v2/projects/{target_project.id}")
         status_response = ProjectStatusResponse.model_validate(response.json())
 
         result = f"✓ {status_response.message}\n\n"

@@ -915,22 +915,19 @@ class TestMoveNoteErrorHandling:
             with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
                 mock_get_project.return_value.project_url = "http://test"
                 mock_get_project.return_value.name = "test-project"
+                mock_get_project.return_value.id = "test-project-id"
                 mock_get_project.return_value.home = Path("/tmp/test")
 
                 with patch(
-                    "basic_memory.mcp.tools.move_note.call_post",
+                    "basic_memory.mcp.tools.move_note.resolve_entity_id",
                     side_effect=Exception("entity not found"),
                 ):
-                    with patch(
-                        "basic_memory.mcp.tools.move_note.call_get",
-                        side_effect=Exception("not found"),
-                    ):
-                        result = await move_note.fn(
-                            "test-note", "target/file.md", project="test-project"
-                        )
+                    result = await move_note.fn(
+                        "test-note", "target/file.md", project="test-project"
+                    )
 
-                        assert isinstance(result, str)
-                        assert "# Move Failed - Note Not Found" in result
+                    assert isinstance(result, str)
+                    assert "# Move Failed - Note Not Found" in result
 
     @pytest.mark.asyncio
     async def test_move_note_permission_error_handling(self, mock_client):
@@ -941,19 +938,16 @@ class TestMoveNoteErrorHandling:
             with patch("basic_memory.mcp.tools.move_note.get_active_project") as mock_get_project:
                 mock_get_project.return_value.project_url = "http://test"
                 mock_get_project.return_value.name = "test-project"
+                mock_get_project.return_value.id = "test-project-id"
                 mock_get_project.return_value.home = Path("/tmp/test")
 
                 with patch(
-                    "basic_memory.mcp.tools.move_note.call_post",
+                    "basic_memory.mcp.tools.move_note.resolve_entity_id",
                     side_effect=Exception("permission denied"),
                 ):
-                    with patch(
-                        "basic_memory.mcp.tools.move_note.call_get",
-                        side_effect=Exception("not found"),
-                    ):
-                        result = await move_note.fn(
-                            "test-note", "target/file.md", project="test-project"
-                        )
+                    result = await move_note.fn(
+                        "test-note", "target/file.md", project="test-project"
+                    )
 
-                        assert isinstance(result, str)
-                        assert "# Move Failed - Permission Error" in result
+                    assert isinstance(result, str)
+                    assert "# Move Failed - Permission Error" in result

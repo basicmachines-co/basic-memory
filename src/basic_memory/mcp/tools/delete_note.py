@@ -3,9 +3,10 @@ from typing import Optional
 
 from loguru import logger
 from fastmcp import Context
+from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_active_project
-from basic_memory.mcp.tools.utils import call_delete
+from basic_memory.mcp.tools.utils import call_delete, resolve_entity_id
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import get_client
 from basic_memory.schemas import DeleteEntitiesResponse
@@ -204,10 +205,22 @@ async def delete_note(
     """
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
-        project_url = active_project.project_url
 
         try:
-            response = await call_delete(client, f"{project_url}/knowledge/entities/{identifier}")
+            # Resolve identifier to entity ID
+            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+        except ToolError as e:
+            # If entity not found, return False (note doesn't exist)
+            if "Entity not found" in str(e) or "not found" in str(e).lower():
+                logger.warning(f"Note not found for deletion: {identifier}")
+                return False
+            # For other resolution errors, return formatted error message
+            logger.error(f"Delete failed for '{identifier}': {e}, project: {active_project.name}")
+            return _format_delete_error_response(active_project.name, str(e), identifier)
+
+        try:
+            # Call the DELETE endpoint
+            response = await call_delete(client, f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}")
             result = DeleteEntitiesResponse.model_validate(response.json())
 
             if result.deleted:

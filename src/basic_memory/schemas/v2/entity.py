@@ -1,4 +1,4 @@
-"""V2 entity schemas with ID-first design."""
+"""V2 entity and project schemas with ID-first design."""
 
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
@@ -94,3 +94,36 @@ class EntityResponseV2(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectResolveRequest(BaseModel):
+    """Request to resolve a project identifier to a project ID.
+
+    Supports resolution of:
+    - Project names (e.g., "my-project")
+    - Permalinks (e.g., "my-project")
+    """
+
+    identifier: str = Field(
+        ...,
+        description="Project identifier to resolve (name or permalink)",
+        min_length=1,
+        max_length=255,
+    )
+
+
+class ProjectResolveResponse(BaseModel):
+    """Response from project identifier resolution.
+
+    Returns the project ID and associated metadata for the resolved project.
+    """
+
+    project_id: int = Field(..., description="Numeric project ID (primary identifier)")
+    name: str = Field(..., description="Project name")
+    permalink: str = Field(..., description="Project permalink")
+    path: str = Field(..., description="Project file path")
+    is_active: bool = Field(..., description="Whether the project is active")
+    is_default: bool = Field(..., description="Whether the project is the default")
+    resolution_method: Literal["id", "name", "permalink"] = Field(
+        ..., description="How the identifier was resolved"
+    )

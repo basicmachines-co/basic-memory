@@ -10,7 +10,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
-from basic_memory.mcp.tools.utils import call_get
+from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -97,23 +97,27 @@ async def read_note(
             )
             return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
 
-        project_url = active_project.project_url
-
-        # Get the file via REST API - first try direct permalink lookup
+        # Get the file via REST API - first try direct identifier resolution
         entity_path = memory_url_path(identifier)
-        path = f"{project_url}/resource/{entity_path}"
-        logger.info(f"Attempting to read note from Project: {active_project.name} URL: {path}")
+        logger.info(f"Attempting to read note from Project: {active_project.name} identifier: {entity_path}")
 
         try:
-            # Try direct lookup first
-            response = await call_get(client, path, params={"page": page, "page_size": page_size})
+            # Try to resolve identifier to entity ID
+            entity_id = await resolve_entity_id(client, active_project.id, entity_path)
+
+            # Fetch content using entity ID
+            response = await call_get(
+                client,
+                f"/v2/projects/{active_project.id}/resource/{entity_id}",
+                params={"page": page, "page_size": page_size}
+            )
 
             # If successful, return the content
             if response.status_code == 200:
                 logger.info("Returning read_note result from resource: {path}", path=entity_path)
                 return response.text
         except Exception as e:  # pragma: no cover
-            logger.info(f"Direct lookup failed for '{path}': {e}")
+            logger.info(f"Direct lookup failed for '{entity_path}': {e}")
             # Continue to fallback methods
 
         # Fallback 1: Try title search via API
@@ -127,10 +131,14 @@ async def read_note(
             result = title_results.results[0]  # Get the first/best match
             if result.permalink:
                 try:
-                    # Try to fetch the content using the found permalink
-                    path = f"{project_url}/resource/{result.permalink}"
+                    # Resolve the permalink to entity ID
+                    entity_id = await resolve_entity_id(client, active_project.id, result.permalink)
+
+                    # Fetch content using the entity ID
                     response = await call_get(
-                        client, path, params={"page": page, "page_size": page_size}
+                        client,
+                        f"/v2/projects/{active_project.id}/resource/{entity_id}",
+                        params={"page": page, "page_size": page_size}
                     )
 
                     if response.status_code == 200:

@@ -7,7 +7,7 @@ from loguru import logger
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_put
+from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 from basic_memory.schemas import EntityResponse
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
@@ -150,16 +150,33 @@ async def write_note(
             content=content,
             entity_metadata=metadata,
         )
-        project_url = active_project.permalink
 
-        # Create or update via knowledge API
-        logger.debug(f"Creating entity via API permalink={entity.permalink}")
-        url = f"{project_url}/knowledge/entities/{entity.permalink}"
-        response = await call_put(client, url, json=entity.model_dump())
-        result = EntityResponse.model_validate(response.json())
-
-        # Format semantic summary based on status code
-        action = "Created" if response.status_code == 201 else "Updated"
+        # Try to create the entity first (optimistic create)
+        logger.debug(f"Attempting to create entity permalink={entity.permalink}")
+        action = "Created"  # Default to created
+        try:
+            url = f"/v2/projects/{active_project.id}/knowledge/entities"
+            response = await call_post(client, url, json=entity.model_dump())
+            result = EntityResponse.model_validate(response.json())
+            action = "Created"
+        except Exception as e:
+            # If creation failed due to conflict (already exists), try to update
+            if "409" in str(e) or "conflict" in str(e).lower() or "already exists" in str(e).lower():
+                logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
+                try:
+                    if not entity.permalink:
+                        raise ValueError("Entity permalink is required for updates")
+                    entity_id = await resolve_entity_id(client, active_project.id, entity.permalink)
+                    url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+                    response = await call_put(client, url, json=entity.model_dump())
+                    result = EntityResponse.model_validate(response.json())
+                    action = "Updated"
+                except Exception as update_error:
+                    # Re-raise the original error if update also fails
+                    raise e from update_error
+            else:
+                # Re-raise if it's not a conflict error
+                raise
         summary = [
             f"# {action} note",
             f"project: {active_project.name}",

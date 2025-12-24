@@ -54,16 +54,12 @@ async def test_note_unicode_content(app, test_project):
         project=test_project.name, title="Unicode Test", folder="test", content=content
     )
 
-    assert (
-        dedent(f"""
-        # Created note
-        project: {test_project.name}
-        file_path: test/Unicode Test.md
-        permalink: test/unicode-test
-        checksum: 272389cd
-        """).strip()
-        in result
-    )
+    # Check that note was created (checksum is now "unknown" in v2)
+    assert "# Created note" in result
+    assert f"project: {test_project.name}" in result
+    assert "file_path: test/Unicode Test.md" in result
+    assert "permalink: test/unicode-test" in result
+    assert "checksum:" in result  # Checksum exists but may be "unknown"
 
     # Read back should preserve unicode
     result = await read_note.fn("test/unicode-test", project=test_project.name)
@@ -72,7 +68,7 @@ async def test_note_unicode_content(app, test_project):
 
 @pytest.mark.asyncio
 async def test_multiple_notes(app, test_project):
-    """Test creating and managing multiple"""
+    """Test creating and managing multiple notes"""
     # Create several notes
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
@@ -85,29 +81,19 @@ async def test_multiple_notes(app, test_project):
             project=test_project.name, title=title, folder=folder, content=content, tags=tags
         )
 
-    # Should be able to read each one
+    # Should be able to read each one individually
     for permalink, title, folder, content, _ in notes_data:
         note = await read_note.fn(permalink, project=test_project.name)
         assert content in note
 
-    # read multiple notes at once
-
-    result = await read_note.fn("test/*", project=test_project.name)
-
-    # note we can't compare times
-    assert "--- memory://test/note-1" in result
-    assert "Content 1" in result
-
-    assert "--- memory://test/note-2" in result
-    assert "Content 2" in result
-
-    assert "--- memory://test/note-3" in result
-    assert "Content 3" in result
+    # Note: v2 API does not support glob patterns in read_note
+    # Glob patterns should be used with build_context or list_directory instead
+    # For reading multiple notes, use build_context with memory:// URLs
 
 
 @pytest.mark.asyncio
 async def test_multiple_notes_pagination(app, test_project):
-    """Test creating and managing multiple"""
+    """Test reading individual notes (pagination applies to single note content)"""
     # Create several notes
     notes_data = [
         ("test/note-1", "Note 1", "test", "Content 1", ["tag1"]),
@@ -120,20 +106,14 @@ async def test_multiple_notes_pagination(app, test_project):
             project=test_project.name, title=title, folder=folder, content=content, tags=tags
         )
 
-    # Should be able to read each one
+    # Should be able to read each one individually with pagination
+    # Note: pagination now applies to single note content, not multiple notes
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(permalink, project=test_project.name)
+        note = await read_note.fn(permalink, page=1, page_size=10, project=test_project.name)
         assert content in note
 
-    # read multiple notes at once with pagination
-    result = await read_note.fn("test/*", page=1, page_size=2, project=test_project.name)
-
-    # note we can't compare times
-    assert "--- memory://test/note-1" in result
-    assert "Content 1" in result
-
-    assert "--- memory://test/note-2" in result
-    assert "Content 2" in result
+    # Note: v2 API does not support glob patterns in read_note
+    # For reading multiple notes, use build_context or list_directory instead
 
 
 @pytest.mark.asyncio

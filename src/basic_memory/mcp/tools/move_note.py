@@ -8,7 +8,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_post, call_get
+from basic_memory.mcp.tools.utils import call_get, call_put, resolve_entity_id
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.project_info import ProjectList
@@ -399,7 +399,6 @@ async def move_note(
         logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 
         active_project = await get_active_project(client, project, context)
-        project_url = active_project.project_url
 
         # Validate destination path to prevent path traversal attacks
         project_path = active_project.home
@@ -434,8 +433,10 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
         # Get the source entity information for extension validation
         source_ext = "md"  # Default to .md if we can't determine source extension
         try:
+            # Resolve identifier to entity ID
+            entity_id = await resolve_entity_id(client, active_project.id, identifier)
             # Fetch source entity information to get the current file extension
-            url = f"{project_url}/knowledge/entities/{identifier}"
+            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
             response = await call_get(client, url)
             source_entity = EntityResponse.model_validate(response.json())
             if "." in source_entity.file_path:
@@ -467,8 +468,10 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
 
         # Get the source entity to check its file extension
         try:
+            # Resolve identifier to entity ID (might already be cached from above)
+            entity_id = await resolve_entity_id(client, active_project.id, identifier)
             # Fetch source entity information
-            url = f"{project_url}/knowledge/entities/{identifier}"
+            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
             response = await call_get(client, url)
             source_entity = EntityResponse.model_validate(response.json())
 
@@ -505,16 +508,17 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
             logger.debug(f"Could not fetch source entity for extension check: {e}")
 
         try:
-            # Prepare move request
+            # Resolve identifier to entity ID for the move operation
+            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+
+            # Prepare move request (v2 API only needs destination_path)
             move_data = {
-                "identifier": identifier,
                 "destination_path": destination_path,
-                "project": active_project.name,
             }
 
-            # Call the move API endpoint
-            url = f"{project_url}/knowledge/move"
-            response = await call_post(client, url, json=move_data)
+            # Call the v2 move API endpoint (PUT method, entity_id in URL)
+            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}/move"
+            response = await call_put(client, url, json=move_data)
             result = EntityResponse.model_validate(response.json())
 
             # Build success message

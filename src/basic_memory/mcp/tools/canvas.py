@@ -12,7 +12,7 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_put
+from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 
 
 @mcp.tool(
@@ -96,7 +96,6 @@ async def canvas(
     """
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
-        project_url = active_project.project_url
 
         # Ensure path has .canvas extension
         file_title = title if title.endswith(".canvas") else f"{title}.canvas"
@@ -108,23 +107,40 @@ async def canvas(
         # Convert to JSON
         canvas_json = json.dumps(canvas_data, indent=2)
 
-        # Write the file using the resource API
+        # Try to create the canvas file first (optimistic create)
         logger.info(f"Creating canvas file: {file_path} in project {project}")
-        # Send canvas_json as content string, not as json parameter
-        # The resource endpoint expects Body() string content, not JSON-encoded data
-        response = await call_put(
-            client,
-            f"{project_url}/resource/{file_path}",
-            content=canvas_json,
-            headers={"Content-Type": "text/plain"},
-        )
+        try:
+            response = await call_post(
+                client,
+                f"/v2/projects/{active_project.id}/resource",
+                json={"file_path": file_path, "content": canvas_json},
+            )
+            action = "Created"
+        except Exception as e:
+            # If creation failed due to conflict (already exists), try to update
+            if "409" in str(e) or "conflict" in str(e).lower() or "already exists" in str(e).lower():
+                logger.info(f"Canvas file exists, updating instead: {file_path}")
+                try:
+                    entity_id = await resolve_entity_id(client, active_project.id, file_path)
+                    # For update, send content in JSON body
+                    response = await call_put(
+                        client,
+                        f"/v2/projects/{active_project.id}/resource/{entity_id}",
+                        json={"content": canvas_json},
+                    )
+                    action = "Updated"
+                except Exception as update_error:
+                    # Re-raise the original error if update also fails
+                    raise e from update_error
+            else:
+                # Re-raise if it's not a conflict error
+                raise
 
         # Parse response
         result = response.json()
         logger.debug(result)
 
         # Build summary
-        action = "Created" if response.status_code == 201 else "Updated"
         summary = [f"# {action}: {file_path}", "\nThe canvas is ready to open in Obsidian."]
 
         return "\n".join(summary)
