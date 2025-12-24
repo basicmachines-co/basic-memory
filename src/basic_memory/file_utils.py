@@ -74,6 +74,28 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
         raise FileError(f"Failed to compute checksum: {e}")
 
 
+# UTF-8 BOM character that can appear at the start of files
+UTF8_BOM = '\ufeff'
+
+
+def strip_bom(content: str) -> str:
+    """Strip UTF-8 BOM from the start of content if present.
+
+    BOM (Byte Order Mark) characters can be present in files created on Windows
+    or copied from certain sources. They should be stripped before processing
+    frontmatter. See issue #452.
+
+    Args:
+        content: Content that may start with BOM
+
+    Returns:
+        Content with BOM removed if present
+    """
+    if content and content.startswith(UTF8_BOM):
+        return content[1:]
+    return content
+
+
 async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     Write file with atomic operation using temporary file.
@@ -280,7 +302,8 @@ def has_frontmatter(content: str) -> bool:
     if not content:
         return False
 
-    content = content.strip()
+    # Strip BOM before checking for frontmatter markers
+    content = strip_bom(content).strip()
     if not content.startswith("---"):
         return False
 
@@ -301,6 +324,8 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
         ParseError: If frontmatter is invalid or parsing fails
     """
     try:
+        # Strip BOM before parsing frontmatter
+        content = strip_bom(content)
         if not content.strip().startswith("---"):
             raise ParseError("Content has no frontmatter")
 
@@ -342,7 +367,8 @@ def remove_frontmatter(content: str) -> str:
     Raises:
         ParseError: If content starts with frontmatter marker but is malformed
     """
-    content = content.strip()
+    # Strip BOM before processing
+    content = strip_bom(content).strip()
 
     # Return as-is if no frontmatter marker
     if not content.startswith("---"):

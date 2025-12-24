@@ -183,7 +183,7 @@ ObservationStr = Annotated[
     str,
     BeforeValidator(str.strip),  # Clean whitespace
     MinLen(1),  # Ensure non-empty after stripping
-    MaxLen(1000),  # Keep reasonable length
+    # No MaxLen - matches DB Text column which has no length restriction
 ]
 
 

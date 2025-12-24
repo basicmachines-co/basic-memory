@@ -610,6 +610,16 @@ class SyncService:
                 )
             return entity, checksum
 
+        except FileNotFoundError:
+            # File exists in database but not on filesystem
+            # This indicates a database/filesystem inconsistency - treat as deletion
+            logger.warning(
+                f"File not found during sync, treating as deletion: path={path}. "
+                "This may indicate a race condition or manual file deletion."
+            )
+            await self.handle_delete(path)
+            return None, None
+
         except Exception as e:
             # Check if this is a fatal error (or caused by one)
             # Fatal errors like project deletion should terminate sync immediately

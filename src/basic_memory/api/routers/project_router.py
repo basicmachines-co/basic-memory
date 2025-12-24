@@ -274,7 +274,7 @@ async def add_project(
             raise HTTPException(status_code=500, detail="Failed to retrieve newly created project")
 
         return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
-            message=f"Project '{project_data.name}' added successfully",
+            message=f"Project '{new_project.name}' added successfully",
             status="success",
             default=project_data.set_default,
             new_project=ProjectItem(
@@ -329,7 +329,7 @@ async def remove_project(
         await project_service.remove_project(name, delete_notes=delete_notes)
 
         return ProjectStatusResponse(
-            message=f"Project '{name}' removed successfully",
+            message=f"Project '{old_project.name}' removed successfully",
             status="success",
             default=False,
             old_project=ProjectItem(

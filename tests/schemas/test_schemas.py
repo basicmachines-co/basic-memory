@@ -466,3 +466,45 @@ class TestTimeframeParsing:
         # They should be approximately the same time (within an hour due to parsing differences)
         time_diff = abs((today_parsed - oneday_parsed).total_seconds())
         assert time_diff < 3600, f"'today' and '1d' should be similar times, diff: {time_diff}s"
+
+
+class TestObservationContentLength:
+    """Test observation content length validation matches DB schema."""
+
+    def test_observation_accepts_long_content(self):
+        """Observation content should accept unlimited length to match DB Text column."""
+        from basic_memory.schemas.base import Observation
+
+        # Very long content that would have failed with old MaxLen(1000) limit
+        long_content = "x" * 10000
+
+        obs = Observation(category="test", content=long_content)
+        assert len(obs.content) == 10000
+
+    def test_observation_accepts_very_long_content(self):
+        """Observation content should accept very long content like JSON schemas."""
+        from basic_memory.schemas.base import Observation
+
+        # Simulate the JSON schema content from issue #385 (1458+ chars)
+        json_schema_content = '{"$schema": "http://json-schema.org/draft-07/schema#"' + "x" * 50000
+
+        obs = Observation(category="schema", content=json_schema_content)
+        assert len(obs.content) > 50000
+
+    def test_observation_still_requires_non_empty_content(self):
+        """Observation content must still be non-empty after stripping."""
+        from basic_memory.schemas.base import Observation
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Observation(category="test", content="")
+
+        with pytest.raises(ValidationError):
+            Observation(category="test", content="   ")  # whitespace only
+
+    def test_observation_strips_whitespace(self):
+        """Observation content should have whitespace stripped."""
+        from basic_memory.schemas.base import Observation
+
+        obs = Observation(category="test", content="  some content  ")
+        assert obs.content == "some content"

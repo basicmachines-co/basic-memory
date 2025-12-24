@@ -2055,3 +2055,63 @@ async def test_file_service_checksum_correctness(
     expected = hashlib.sha256(small_content.encode("utf-8")).hexdigest()
     assert checksum == expected
     assert len(checksum) == 64  # SHA256 hex digest length
+
+
+@pytest.mark.asyncio
+async def test_sync_handles_file_not_found_gracefully(
+    sync_service: SyncService, project_config: ProjectConfig
+):
+    """Test that FileNotFoundError during sync is handled gracefully.
+
+    This tests the fix for issue #386 where files existing in the database
+    but missing from the filesystem would crash the sync worker.
+    """
+    from unittest.mock import patch
+
+    project_dir = project_config.home
+
+    # Create a test file
+    test_file = project_dir / "missing_file.md"
+    await create_test_file(
+        test_file,
+        dedent(
+            """
+            ---
+            type: knowledge
+            permalink: missing-file
+            ---
+            # Missing File
+            Content that will disappear
+            """
+        ),
+    )
+
+    # Sync to add entity to database
+    await sync_service.sync(project_dir)
+
+    # Verify entity was created
+    entity = await sync_service.entity_repository.get_by_file_path("missing_file.md")
+    assert entity is not None
+    assert entity.permalink == "missing-file"
+
+    # Delete the file but leave the entity in database (simulating inconsistency)
+    test_file.unlink()
+
+    # Mock file_service methods to raise FileNotFoundError
+    # (since the file doesn't exist, read operations will fail)
+    async def mock_read_that_fails(*args, **kwargs):
+        raise FileNotFoundError("Simulated file not found")
+
+    with patch.object(sync_service.file_service, "read_file_content", side_effect=mock_read_that_fails):
+        # Force full scan to detect the file
+        await force_full_scan(sync_service)
+
+        # Sync should handle the error gracefully and delete the orphaned entity
+        await sync_service.sync(project_dir)
+
+        # Should not crash and should not have errors (FileNotFoundError is handled specially)
+        # The file should be treated as deleted
+
+    # Entity should be deleted from database
+    entity = await sync_service.entity_repository.get_by_file_path("missing_file.md")
+    assert entity is None, "Orphaned entity should be deleted when file is not found"

@@ -1,10 +1,11 @@
 """Tests for file utilities."""
 
+import random
+import string
+import sys
 from pathlib import Path
 
 import pytest
-import random
-import string
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import (
@@ -20,6 +21,11 @@ from basic_memory.file_utils import (
     sanitize_for_filename,
     sanitize_for_folder,
     write_file_atomic,
+)
+
+# Skip marker for tests that use Unix-specific commands (cat, sh, sleep, /dev/null)
+skip_on_windows = pytest.mark.skipif(
+    sys.platform == "win32", reason="Test uses Unix-specific commands not available on Windows"
 )
 
 
@@ -264,6 +270,7 @@ async def test_format_file_no_formatter_for_non_markdown(tmp_path: Path):
     assert result is None
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_with_global_formatter(tmp_path: Path):
     """Test formatting with global formatter_command."""
@@ -281,6 +288,7 @@ async def test_format_file_with_global_formatter(tmp_path: Path):
     assert result == original_content
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_with_extension_specific_formatter(tmp_path: Path):
     """Test formatting with extension-specific formatter."""
@@ -298,6 +306,7 @@ async def test_format_file_with_extension_specific_formatter(tmp_path: Path):
     assert result == original_content
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_extension_specific_overrides_global(tmp_path: Path):
     """Test that extension-specific formatter takes precedence over global."""
@@ -317,6 +326,7 @@ async def test_format_file_extension_specific_overrides_global(tmp_path: Path):
     assert result == original_content
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_falls_back_to_global(tmp_path: Path):
     """Test that global formatter is used when no extension-specific one exists."""
@@ -349,6 +359,7 @@ async def test_format_file_handles_nonexistent_formatter(tmp_path: Path):
     assert result is None  # Should return None on error
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_handles_timeout(tmp_path: Path):
     """Test that format_file handles formatter timeout gracefully."""
@@ -365,6 +376,7 @@ async def test_format_file_handles_timeout(tmp_path: Path):
     assert result is None  # Should return None on timeout
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_handles_nonzero_exit(tmp_path: Path):
     """Test that format_file handles non-zero exit codes gracefully."""
@@ -382,6 +394,7 @@ async def test_format_file_handles_nonzero_exit(tmp_path: Path):
     assert result == original_content
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_returns_modified_content(tmp_path: Path):
     """Test that format_file returns the modified file content after formatting."""
@@ -400,6 +413,7 @@ async def test_format_file_returns_modified_content(tmp_path: Path):
     assert test_file.read_text() == "modified\n"
 
 
+@skip_on_windows
 @pytest.mark.asyncio
 async def test_format_file_with_spaces_in_path(tmp_path: Path):
     """Test formatting files with spaces in path."""
@@ -489,10 +503,48 @@ async def test_format_markdown_builtin_only_writes_if_changed(tmp_path: Path):
     # Already well-formatted content
     content = "# Title\n\nSome text.\n"
     test_file.write_text(content)
-    original_mtime = test_file.stat().st_mtime
+    test_file.stat().st_mtime
 
     result = await format_markdown_builtin(test_file)
 
     assert result is not None
     # File should not have been rewritten if content didn't change
     # (This is a best-effort check - mtime may or may not change depending on OS)
+
+
+# =============================================================================
+# BOM handling tests
+# =============================================================================
+
+
+class TestBOMHandling:
+    """Test handling of Byte Order Mark (BOM) in frontmatter.
+
+    BOM characters can be present in files created on Windows or copied
+    from certain sources. They should not break frontmatter detection
+    or parsing. See issue #452.
+    """
+
+    def test_has_frontmatter_with_bom(self):
+        """Test that has_frontmatter handles BOM correctly."""
+        # Content with UTF-8 BOM
+        content_with_bom = "\ufeff---\ntitle: Test\n---\nContent"
+        assert has_frontmatter(content_with_bom), "Should detect frontmatter even with BOM"
+
+    def test_has_frontmatter_with_bom_and_windows_crlf(self):
+        """Test BOM with Windows line endings."""
+        content = "\ufeff---\r\ntitle: Test\r\n---\r\nContent"
+        assert has_frontmatter(content), "Should detect frontmatter with BOM and CRLF"
+
+    def test_parse_frontmatter_with_bom(self):
+        """Test that parse_frontmatter handles BOM correctly."""
+        content_with_bom = "\ufeff---\ntitle: Test Title\ntype: note\n---\nContent"
+        result = parse_frontmatter(content_with_bom)
+        assert result["title"] == "Test Title"
+        assert result["type"] == "note"
+
+    def test_remove_frontmatter_with_bom(self):
+        """Test that remove_frontmatter handles BOM correctly."""
+        content_with_bom = "\ufeff---\ntitle: Test\n---\nContent here"
+        result = remove_frontmatter(content_with_bom)
+        assert result == "Content here"
