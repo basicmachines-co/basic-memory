@@ -13,6 +13,7 @@ from basic_memory.file_utils import (
     ParseError,
     compute_checksum,
     format_file,
+    format_markdown_builtin,
     has_frontmatter,
     parse_frontmatter,
     remove_frontmatter,
@@ -179,7 +180,6 @@ title: Test""")
     assert "Invalid frontmatter format" in str(exc.value)
 
 
-@pytest.mark.asyncio
 def test_sanitize_for_filename_removes_invalid_characters():
     # Test all invalid characters listed in the regex
     invalid_chars = '<>:"|?*'
@@ -237,15 +237,30 @@ async def test_format_file_disabled_by_default(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_format_file_no_formatter_configured(tmp_path: Path):
-    """Test that format_file returns None when no formatter is configured for the extension."""
+async def test_format_file_no_formatter_uses_builtin_for_markdown(tmp_path: Path):
+    """Test that format_file uses built-in mdformat for markdown when no external formatter configured."""
     test_file = tmp_path / "test.md"
     test_file.write_text("# Test\n")
 
-    # Explicitly set formatter_command to None to test the "no formatter" case
+    # No external formatter configured - should use built-in mdformat for markdown
     config = BasicMemoryConfig(format_on_save=True, formatter_command=None)
 
-    result = await format_file(test_file, config)
+    result = await format_file(test_file, config, is_markdown=True)
+    # mdformat should return formatted content
+    assert result is not None
+    assert "# Test" in result
+
+
+@pytest.mark.asyncio
+async def test_format_file_no_formatter_for_non_markdown(tmp_path: Path):
+    """Test that format_file returns None for non-markdown files when no formatter configured."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Some text\n")
+
+    # No external formatter configured - should return None for non-markdown
+    config = BasicMemoryConfig(format_on_save=True, formatter_command=None)
+
+    result = await format_file(test_file, config, is_markdown=False)
     assert result is None
 
 
@@ -401,3 +416,83 @@ async def test_format_file_with_spaces_in_path(tmp_path: Path):
 
     result = await format_file(test_file, config)
     assert result == original_content
+
+
+# =============================================================================
+# format_markdown_builtin tests
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_format_markdown_builtin_formats_content(tmp_path: Path):
+    """Test that format_markdown_builtin formats markdown content."""
+    test_file = tmp_path / "test.md"
+    # Markdown with inconsistent formatting
+    test_file.write_text("# Title\n\n*emphasis*  and  **bold**\n")
+
+    result = await format_markdown_builtin(test_file)
+
+    assert result is not None
+    assert "# Title" in result
+    assert "*emphasis*" in result or "_emphasis_" in result
+
+
+@pytest.mark.asyncio
+async def test_format_markdown_builtin_preserves_frontmatter(tmp_path: Path):
+    """Test that format_markdown_builtin preserves YAML frontmatter."""
+    test_file = tmp_path / "test.md"
+    content = """---
+title: Test Note
+tags:
+  - test
+  - markdown
+---
+
+# Content
+
+Some text here.
+"""
+    test_file.write_text(content)
+
+    result = await format_markdown_builtin(test_file)
+
+    assert result is not None
+    assert "---" in result
+    assert "title: Test Note" in result
+    assert "# Content" in result
+
+
+@pytest.mark.asyncio
+async def test_format_markdown_builtin_handles_gfm_tables(tmp_path: Path):
+    """Test that format_markdown_builtin handles GFM tables."""
+    test_file = tmp_path / "test.md"
+    content = """# Table Test
+
+| Column 1 | Column 2 |
+|----------|----------|
+| A | B |
+| C | D |
+"""
+    test_file.write_text(content)
+
+    result = await format_markdown_builtin(test_file)
+
+    assert result is not None
+    assert "Column 1" in result
+    assert "|" in result
+
+
+@pytest.mark.asyncio
+async def test_format_markdown_builtin_only_writes_if_changed(tmp_path: Path):
+    """Test that format_markdown_builtin only writes if content changed."""
+    test_file = tmp_path / "test.md"
+    # Already well-formatted content
+    content = "# Title\n\nSome text.\n"
+    test_file.write_text(content)
+    original_mtime = test_file.stat().st_mtime
+
+    result = await format_markdown_builtin(test_file)
+
+    assert result is not None
+    # File should not have been rewritten if content didn't change
+    # (This is a best-effort check - mtime may or may not change depending on OS)

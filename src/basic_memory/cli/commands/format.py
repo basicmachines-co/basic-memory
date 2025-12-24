@@ -16,6 +16,11 @@ from basic_memory.file_utils import format_file
 console = Console()
 
 
+def is_markdown_extension(path: Path) -> bool:
+    """Check if file has a markdown extension."""
+    return path.suffix.lower() in (".md", ".markdown")
+
+
 async def format_single_file(file_path: Path, app_config) -> tuple[Path, bool, Optional[str]]:
     """Format a single file.
 
@@ -23,7 +28,7 @@ async def format_single_file(file_path: Path, app_config) -> tuple[Path, bool, O
         Tuple of (path, success, error_message)
     """
     try:
-        result = await format_file(file_path, app_config)
+        result = await format_file(file_path, app_config, is_markdown=is_markdown_extension(file_path))
         if result is not None:
             return (file_path, True, None)
         else:

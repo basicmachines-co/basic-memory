@@ -188,7 +188,9 @@ class FileService:
             # Format file if configured
             final_content = content
             if self.app_config:
-                formatted_content = await file_utils.format_file(full_path, self.app_config)
+                formatted_content = await file_utils.format_file(
+                    full_path, self.app_config, is_markdown=self.is_markdown(path)
+                )
                 if formatted_content is not None:
                     final_content = formatted_content
 
@@ -424,7 +426,9 @@ class FileService:
             # Format file if configured
             content_for_checksum = final_content
             if self.app_config:
-                formatted_content = await file_utils.format_file(full_path, self.app_config)
+                formatted_content = await file_utils.format_file(
+                    full_path, self.app_config, is_markdown=self.is_markdown(path)
+                )
                 if formatted_content is not None:
                     content_for_checksum = formatted_content
 

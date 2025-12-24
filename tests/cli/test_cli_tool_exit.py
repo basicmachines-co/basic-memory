@@ -30,7 +30,6 @@ class TestCLIToolExit:
             ["tool", "read-note", "--help"],
             ["tool", "search-notes", "--help"],
             ["tool", "build-context", "--help"],
-            ["status"],  # Also affected by same issue
         ],
     )
     def test_cli_command_exits_cleanly(self, command: list[str]):

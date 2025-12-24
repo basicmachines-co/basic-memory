@@ -105,20 +105,82 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
 
+async def format_markdown_builtin(path: Path) -> Optional[str]:
+    """
+    Format a markdown file using the built-in mdformat formatter.
+
+    Uses mdformat with GFM (GitHub Flavored Markdown) support for consistent
+    formatting without requiring Node.js or external tools.
+
+    Args:
+        path: Path to the markdown file to format
+
+    Returns:
+        Formatted content if successful, None if formatting failed.
+    """
+    try:
+        import mdformat
+    except ImportError:
+        logger.warning(
+            "mdformat not installed, skipping built-in formatting",
+            path=str(path),
+        )
+        return None
+
+    try:
+        # Read original content
+        async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
+            content = await f.read()
+
+        # Format using mdformat with GFM and frontmatter extensions
+        # mdformat is synchronous, so we run it in a thread executor
+        loop = asyncio.get_event_loop()
+        formatted_content = await loop.run_in_executor(
+            None,
+            lambda: mdformat.text(
+                content,
+                extensions={"gfm", "frontmatter"},  # GFM + YAML frontmatter support
+                options={"wrap": "no"},  # Don't wrap lines
+            ),
+        )
+
+        # Only write if content changed
+        if formatted_content != content:
+            async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
+                await f.write(formatted_content)
+
+        logger.debug(
+            "Formatted file with mdformat",
+            path=str(path),
+            changed=formatted_content != content,
+        )
+        return formatted_content
+
+    except Exception as e:
+        logger.warning(
+            "mdformat formatting failed",
+            path=str(path),
+            error=str(e),
+        )
+        return None
+
+
 async def format_file(
     path: Path,
     config: "BasicMemoryConfig",
+    is_markdown: bool = False,
 ) -> Optional[str]:
     """
     Format a file using configured formatter.
 
-    Runs an external formatter (like prettier) on the file after it has been written.
-    The formatter command is determined by file extension, falling back to a global
-    formatter if no extension-specific one is configured.
+    By default, uses the built-in mdformat formatter for markdown files (pure Python,
+    no Node.js required). External formatters like Prettier can be configured via
+    formatter_command or per-extension formatters.
 
     Args:
         path: File to format
         config: Configuration with formatter settings
+        is_markdown: Whether this is a markdown file (caller should use FileService.is_markdown)
 
     Returns:
         Formatted content if successful, None if formatting was skipped or failed.
@@ -130,10 +192,15 @@ async def format_file(
     extension = path.suffix.lstrip(".")
     formatter = config.formatters.get(extension) or config.formatter_command
 
+    # Use built-in mdformat for markdown files when no external formatter configured
     if not formatter:
-        logger.debug("No formatter configured for extension", extension=extension)
-        return None
+        if is_markdown:
+            return await format_markdown_builtin(path)
+        else:
+            logger.debug("No formatter configured for extension", extension=extension)
+            return None
 
+    # Use external formatter
     # Replace {file} placeholder with the actual path
     cmd = formatter.replace("{file}", str(path))
 

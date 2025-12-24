@@ -132,10 +132,12 @@ class MarkdownProcessor:
         path.parent.mkdir(parents=True, exist_ok=True)
         await file_utils.write_file_atomic(path, final_content)
 
-        # Format file if configured
+        # Format file if configured (MarkdownProcessor always handles markdown files)
         content_for_checksum = final_content
         if self.app_config:
-            formatted_content = await file_utils.format_file(path, self.app_config)
+            formatted_content = await file_utils.format_file(
+                path, self.app_config, is_markdown=True
+            )
             if formatted_content is not None:
                 content_for_checksum = formatted_content
 

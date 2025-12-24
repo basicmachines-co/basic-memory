@@ -498,10 +498,10 @@ class TestFormattingConfig:
         config = BasicMemoryConfig(format_on_save=True)
         assert config.format_on_save is True
 
-    def test_formatter_command_defaults_to_npx_prettier(self):
-        """Test that formatter_command defaults to npx prettier."""
+    def test_formatter_command_defaults_to_none(self):
+        """Test that formatter_command defaults to None (uses built-in mdformat)."""
         config = BasicMemoryConfig()
-        assert config.formatter_command == "npx prettier --write {file}"
+        assert config.formatter_command is None
 
     def test_formatter_command_can_be_set(self):
         """Test that formatter_command can be configured."""
