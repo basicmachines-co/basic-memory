@@ -15,6 +15,7 @@ from basic_memory.schemas.project_info import (
     ProjectStatusResponse,
     ProjectInfoRequest,
 )
+from basic_memory.telemetry import track_mcp_tool
 from basic_memory.utils import generate_permalink
 
 
@@ -40,6 +41,7 @@ async def list_memory_projects(context: Context | None = None) -> str:
     Example:
         list_memory_projects()
     """
+    track_mcp_tool("list_memory_projects")
     async with get_client() as client:
         if context:  # pragma: no cover
             await context.info("Listing all available projects")
@@ -92,6 +94,7 @@ async def create_memory_project(
         create_memory_project("my-research", "~/Documents/research")
         create_memory_project("work-notes", "/home/user/work", set_default=True)
     """
+    track_mcp_tool("create_memory_project")
     async with get_client() as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
@@ -147,6 +150,7 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
         This action cannot be undone. The project will need to be re-added
         to access its content through Basic Memory again.
     """
+    track_mcp_tool("delete_project")
     async with get_client() as client:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")

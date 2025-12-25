@@ -20,6 +20,7 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
+from basic_memory.telemetry import track_mcp_tool
 from basic_memory.utils import validate_project_path
 
 
@@ -200,6 +201,7 @@ async def read_content(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If path attempts path traversal
     """
+    track_mcp_tool("read_content")
     logger.info("Reading file", path=path, project=project)
 
     async with get_client() as client:

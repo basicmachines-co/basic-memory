@@ -12,6 +12,7 @@ from basic_memory.mcp.tools.utils import call_get, call_put, resolve_entity_id
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas import EntityResponse
 from basic_memory.schemas.project_info import ProjectList
+from basic_memory.telemetry import track_mcp_tool
 from basic_memory.utils import validate_project_path
 
 
@@ -395,6 +396,7 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
+    track_mcp_tool("move_note")
     async with get_client() as client:
         logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 

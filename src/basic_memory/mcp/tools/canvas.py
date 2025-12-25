@@ -13,6 +13,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
+from basic_memory.telemetry import track_mcp_tool
 
 
 @mcp.tool(
@@ -94,6 +95,7 @@ async def canvas(
     Raises:
         ToolError: If project doesn't exist or folder path is invalid
     """
+    track_mcp_tool("canvas")
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
 

@@ -15,6 +15,7 @@ from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.schemas.search import SearchResponse
 from basic_memory.config import ConfigManager
+from basic_memory.telemetry import track_mcp_tool
 
 
 def _format_search_results_for_chatgpt(results: SearchResponse) -> List[Dict[str, Any]]:
@@ -88,6 +89,7 @@ async def search(
         List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
         where the JSON body contains `results`, `total_count`, and echo of `query`.
     """
+    track_mcp_tool("search")
     logger.info(f"ChatGPT search request: query='{query}'")
 
     try:
@@ -151,6 +153,7 @@ async def fetch(
         List with one dict: `{ "type": "text", "text": "{...JSON...}" }`
         where the JSON body includes `id`, `title`, `text`, `url`, and metadata.
     """
+    track_mcp_tool("fetch")
     logger.info(f"ChatGPT fetch request: id='{id}'")
 
     try:
