@@ -46,6 +46,13 @@ def app_callback(
     # Initialize logging for CLI (file only, no stdout)
     init_cli_logging()
 
+    # Track CLI startup and show telemetry notice if needed
+    if not version and ctx.invoked_subcommand is not None:
+        from basic_memory.telemetry import show_telemetry_notice, track
+
+        track("app_started", {"mode": "cli", "command": ctx.invoked_subcommand})
+        show_telemetry_notice()
+
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization
     # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py

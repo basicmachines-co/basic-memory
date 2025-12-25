@@ -221,6 +221,17 @@ class BasicMemoryConfig(BaseSettings):
         description="Cloud project sync configuration mapping project names to their local paths and sync state",
     )
 
+    # Telemetry configuration
+    telemetry_enabled: bool = Field(
+        default=True,
+        description="Enable anonymous usage telemetry (Homebrew-style opt-out)",
+    )
+
+    telemetry_notice_shown: bool = Field(
+        default=False,
+        description="Whether the telemetry notice has been shown to the user",
+    )
+
     @property
     def cloud_mode_enabled(self) -> bool:
         """Check if cloud mode is enabled.

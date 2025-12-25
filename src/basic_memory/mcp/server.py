@@ -26,6 +26,12 @@ async def lifespan(app: FastMCP):
     app_config = ConfigManager().config
     logger.info("Starting Basic Memory MCP server")
 
+    # Track MCP startup and show telemetry notice if needed
+    from basic_memory.telemetry import show_telemetry_notice, track
+
+    track("app_started", {"mode": "mcp"})
+    show_telemetry_notice()
+
     # Track if we created the engine (vs test fixtures providing it)
     # This prevents disposing an engine provided by test fixtures when
     # multiple Client connections are made in the same test
