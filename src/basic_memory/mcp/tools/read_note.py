@@ -11,6 +11,7 @@ from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
+from basic_memory.telemetry import track_mcp_tool
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -77,6 +78,7 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
+    track_mcp_tool("read_note")
     async with get_client() as client:
         # Get and validate the project
         active_project = await get_active_project(client, project, context)

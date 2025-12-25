@@ -15,6 +15,7 @@ from typing import Optional  # noqa: E402
 import typer  # noqa: E402
 
 from basic_memory.config import ConfigManager, init_cli_logging  # noqa: E402
+from basic_memory.telemetry import show_notice_if_needed, track_app_started  # noqa: E402
 
 
 def version_callback(value: bool) -> None:
@@ -45,6 +46,13 @@ def app_callback(
 
     # Initialize logging for CLI (file only, no stdout)
     init_cli_logging()
+
+    # Show telemetry notice and track CLI startup
+    # Skip for 'mcp' command - it handles its own telemetry in lifespan
+    # Skip for 'telemetry' command - avoid issues when user is managing telemetry
+    if ctx.invoked_subcommand not in {"mcp", "telemetry"}:
+        show_notice_if_needed()
+        track_app_started("cli")
 
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization

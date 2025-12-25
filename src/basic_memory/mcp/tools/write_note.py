@@ -8,6 +8,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
+from basic_memory.telemetry import track_mcp_tool
 from basic_memory.schemas import EntityResponse
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
@@ -116,6 +117,7 @@ async def write_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If folder path attempts path traversal
     """
+    track_mcp_tool("write_note")
     async with get_client() as client:
         logger.info(
             f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}"

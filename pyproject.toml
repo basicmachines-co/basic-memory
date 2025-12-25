@@ -41,6 +41,7 @@ dependencies = [
     "mdformat>=0.7.22",
     "mdformat-gfm>=0.3.7",
     "mdformat-frontmatter>=2.0.8",
+    "openpanel>=0.0.1",  # Anonymous usage telemetry (Homebrew-style opt-out)
 ]
 
 
