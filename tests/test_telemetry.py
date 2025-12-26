@@ -12,7 +12,8 @@ class TestGetInstallId:
 
     def test_creates_install_id_on_first_call(self, tmp_path, monkeypatch):
         """Test that a new install ID is created on first call."""
-        monkeypatch.setenv("HOME", str(tmp_path))
+        # Mock Path.home() to return tmp_path (works cross-platform)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         from basic_memory.telemetry import get_install_id
 
@@ -29,7 +30,8 @@ class TestGetInstallId:
 
     def test_returns_existing_install_id(self, tmp_path, monkeypatch):
         """Test that existing install ID is returned on subsequent calls."""
-        monkeypatch.setenv("HOME", str(tmp_path))
+        # Mock Path.home() to return tmp_path (works cross-platform)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
         # Create the ID file first
         id_file = tmp_path / ".basic-memory" / ".install_id"
