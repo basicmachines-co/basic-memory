@@ -1,10 +1,9 @@
 """Tests for telemetry module."""
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig
 
 
 class TestGetInstallId:
