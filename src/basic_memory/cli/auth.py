@@ -71,7 +71,7 @@ class CLIAuth:
             console.print(f"[red]Device authorization error: {e}[/red]")
             return None
 
-    def display_user_instructions(self, device_response: dict) -> None:
+    async def display_user_instructions(self, device_response: dict) -> None:
         """Display user instructions for device authorization."""
         user_code = device_response["user_code"]
         verification_uri = device_response["verification_uri"]
@@ -87,9 +87,15 @@ class CLIAuth:
             console.print(f"[bold green]{verification_uri_complete}[/bold green]")
 
             # Try to open browser automatically
+            # Python 3.14: Run webbrowser.open in executor to avoid weak reference issues
             try:
                 console.print("\n[dim]Opening browser automatically...[/dim]")
-                webbrowser.open(verification_uri_complete)
+                import asyncio
+                import concurrent.futures
+
+                loop = asyncio.get_event_loop()
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    await loop.run_in_executor(executor, webbrowser.open, verification_uri_complete)
             except Exception:
                 pass  # Silently fail if browser can't be opened
 
@@ -252,7 +258,7 @@ class CLIAuth:
             return False
 
         # Step 2: Display user instructions
-        self.display_user_instructions(device_response)
+        await self.display_user_instructions(device_response)
 
         # Step 3: Poll for token
         device_code = device_response["device_code"]
