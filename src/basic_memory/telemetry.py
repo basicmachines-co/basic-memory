@@ -20,6 +20,7 @@ Documentation: https://memory.basicmachines.co/telemetry
 """
 
 import platform
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,10 @@ def _get_client() -> OpenPanel:
 
         config = ConfigManager().config
 
+        # Trigger: first call to track an event
+        # Why: lazy init avoids work if telemetry never used; disabled flag
+        #      tells OpenPanel to skip network calls when user opts out
+        # Outcome: client ready to queue events (or silently discard if disabled)
         _client = OpenPanel(
             client_id=OPENPANEL_CLIENT_ID,
             client_secret=OPENPANEL_CLIENT_SECRET,
@@ -126,10 +131,11 @@ def track(event: str, properties: dict[str, Any] | None = None) -> None:
         event: Event name (e.g., "app_started", "mcp_tool_called")
         properties: Optional event properties
     """
+    # Constraint: telemetry must never break the application
+    # Even if OpenPanel API is down or config is corrupt, user's command must succeed
     try:
         _get_client().track(event, properties or {})
     except Exception as e:
-        # Telemetry must never break the app
         logger.opt(exception=False).debug(f"Telemetry failed: {e}")
 
 
@@ -225,8 +231,17 @@ def track_error(error_type: str, message: str) -> None:
 
     Args:
         error_type: Exception class name
-        message: Error message (should be sanitized, no paths)
+        message: Error message (will be sanitized to remove file paths)
     """
-    # Truncate message to avoid sending too much data
-    sanitized_message = message[:200] if message else ""
-    track("error", {"type": error_type, "message": sanitized_message})
+    if not message:
+        track("error", {"type": error_type, "message": ""})
+        return
+
+    # Sanitize file paths to prevent leaking user directory structure
+    # Unix paths: /Users/name/file.py, /home/user/notes/doc.md
+    sanitized = re.sub(r"/[\w/.+-]+\.\w+", "[FILE]", message)
+    # Windows paths: C:\Users\name\file.py, D:\projects\doc.md
+    sanitized = re.sub(r"[A-Z]:\\[\w\\.+-]+\.\w+", "[FILE]", sanitized, flags=re.IGNORECASE)
+
+    # Truncate to avoid sending too much data
+    track("error", {"type": error_type, "message": sanitized[:200]})

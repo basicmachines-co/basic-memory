@@ -246,3 +246,31 @@ class TestConvenienceFunctions:
             call_args = mock_client.track.call_args
             assert call_args[0][0] == "error"
             assert len(call_args[0][1]["message"]) == 200  # Truncated to 200 chars
+
+    def test_track_error_sanitizes_file_paths(self, config_home, monkeypatch):
+        """Test that track_error sanitizes file paths from messages."""
+        import basic_memory.config
+        import basic_memory.telemetry
+
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.telemetry._client = None
+        basic_memory.telemetry._initialized = False
+
+        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
+            mock_client = MagicMock()
+            mock_openpanel.return_value = mock_client
+
+            from basic_memory.telemetry import track_error
+
+            # Test Unix path sanitization
+            track_error("FileNotFoundError", "No such file: /Users/john/notes/secret.md")
+            call_args = mock_client.track.call_args
+            assert "/Users/john" not in call_args[0][1]["message"]
+            assert "[FILE]" in call_args[0][1]["message"]
+
+            # Test Windows path sanitization
+            mock_client.reset_mock()
+            track_error("FileNotFoundError", "Cannot open C:\\Users\\john\\docs\\private.txt")
+            call_args = mock_client.track.call_args
+            assert "C:\\Users\\john" not in call_args[0][1]["message"]
+            assert "[FILE]" in call_args[0][1]["message"]
