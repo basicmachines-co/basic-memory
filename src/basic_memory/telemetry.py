@@ -16,7 +16,7 @@ What we NEVER collect:
 - Personal information
 - IP addresses (OpenPanel doesn't store these)
 
-Documentation: https://memory.basicmachines.co/telemetry
+Documentation: https://basicmemory.com/telemetry
 """
 
 import platform
@@ -37,7 +37,7 @@ from basic_memory import __version__
 OPENPANEL_CLIENT_ID = "2e7b036d-c6e5-40aa-91eb-5c70a8ef21a3"
 OPENPANEL_CLIENT_SECRET = "sec_92f7f8328bd0368ff4c2"
 
-TELEMETRY_DOCS_URL = "https://memory.basicmachines.co/telemetry"
+TELEMETRY_DOCS_URL = "https://basicmemory.com/telemetry"
 
 TELEMETRY_NOTICE = f"""
 Basic Memory collects anonymous usage statistics to help improve the software.
