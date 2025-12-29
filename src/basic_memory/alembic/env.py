@@ -21,8 +21,12 @@ from alembic import context
 
 from basic_memory.config import ConfigManager
 
-# set config.env to "test" for pytest to prevent logging to file in utils.setup_logging()
-os.environ["BASIC_MEMORY_ENV"] = "test"
+# Trigger: only set test env when actually running under pytest
+# Why: alembic/env.py is imported during normal operations (MCP server startup, migrations)
+#      but we only want test behavior during actual test runs
+# Outcome: prevents is_test_env from returning True in production, enabling watch service
+if os.getenv("PYTEST_CURRENT_TEST") is not None:
+    os.environ["BASIC_MEMORY_ENV"] = "test"
 
 # Import after setting environment variable  # noqa: E402
 from basic_memory.models import Base  # noqa: E402
