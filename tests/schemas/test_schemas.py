@@ -91,6 +91,45 @@ def test_relation_response():
     assert relation.context is None
 
 
+def test_relation_response_with_null_permalink():
+    """Test RelationResponse handles null permalinks by falling back to file_path (fixes issue #483).
+
+    When entities are imported from environments without permalinks enabled,
+    the from_entity.permalink and to_entity.permalink can be None.
+    In this case, we fall back to file_path to ensure the API always returns
+    a usable identifier for the related entities.
+
+    We use file_path directly (not converted to permalink format) because if the
+    entity doesn't have a permalink, the system won't find it by a generated one.
+    """
+    data = {
+        "permalink": "test/relation/123",
+        "relation_type": "relates_to",
+        "from_entity": {"permalink": None, "file_path": "notes/source-note.md"},
+        "to_entity": {"permalink": None, "file_path": "notes/target-note.md", "title": "Target Note"},
+    }
+    relation = RelationResponse.model_validate(data)
+    # Falls back to file_path directly (not converted to permalink)
+    assert relation.from_id == "notes/source-note.md"
+    assert relation.to_id == "notes/target-note.md"
+    assert relation.to_name == "Target Note"
+    assert relation.relation_type == "relates_to"
+
+
+def test_relation_response_with_permalink_preferred_over_file_path():
+    """Test that permalink is preferred over file_path when both are available."""
+    data = {
+        "permalink": "test/relation/123",
+        "relation_type": "links_to",
+        "from_entity": {"permalink": "from-permalink", "file_path": "notes/from-file.md"},
+        "to_entity": {"permalink": "to-permalink", "file_path": "notes/to-file.md"},
+    }
+    relation = RelationResponse.model_validate(data)
+    # Prefers permalink over file_path
+    assert relation.from_id == "from-permalink"
+    assert relation.to_id == "to-permalink"
+
+
 def test_entity_out_from_attributes():
     """Test EntityOut creation from database model attributes."""
     # Simulate database model attributes
