@@ -106,7 +106,11 @@ def test_relation_response_with_null_permalink():
         "permalink": "test/relation/123",
         "relation_type": "relates_to",
         "from_entity": {"permalink": None, "file_path": "notes/source-note.md"},
-        "to_entity": {"permalink": None, "file_path": "notes/target-note.md", "title": "Target Note"},
+        "to_entity": {
+            "permalink": None,
+            "file_path": "notes/target-note.md",
+            "title": "Target Note",
+        },
     }
     relation = RelationResponse.model_validate(data)
     # Falls back to file_path directly (not converted to permalink)

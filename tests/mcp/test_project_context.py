@@ -17,9 +17,7 @@ class TestResolveProjectParameter:
         mock_config = MagicMock()
         mock_config.cloud_mode = True
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             with pytest.raises(ValueError) as exc_info:
@@ -36,9 +34,7 @@ class TestResolveProjectParameter:
         mock_config = MagicMock()
         mock_config.cloud_mode = True
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             result = await resolve_project_parameter(project=None, allow_discovery=True)
@@ -53,9 +49,7 @@ class TestResolveProjectParameter:
         mock_config = MagicMock()
         mock_config.cloud_mode = True
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             result = await resolve_project_parameter(project="my-project")
@@ -70,9 +64,7 @@ class TestResolveProjectParameter:
         mock_config = MagicMock()
         mock_config.cloud_mode = False
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             with patch.dict(os.environ, {"BASIC_MEMORY_MCP_PROJECT": "env-project"}):
@@ -90,9 +82,7 @@ class TestResolveProjectParameter:
         mock_config.cloud_mode = False
         mock_config.default_project_mode = False
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             with patch.dict(os.environ, {}, clear=True):
@@ -112,9 +102,7 @@ class TestResolveProjectParameter:
         mock_config.default_project_mode = True
         mock_config.default_project = "default-project"
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             with patch.dict(os.environ, {}, clear=True):
@@ -132,9 +120,7 @@ class TestResolveProjectParameter:
         mock_config.cloud_mode = False
         mock_config.default_project_mode = False
 
-        with patch(
-            "basic_memory.mcp.project_context.ConfigManager"
-        ) as mock_config_manager:
+        with patch("basic_memory.mcp.project_context.ConfigManager") as mock_config_manager:
             mock_config_manager.return_value.config = mock_config
 
             with patch.dict(os.environ, {}, clear=True):
