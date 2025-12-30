@@ -225,13 +225,13 @@ async def read_content(
 
         # Resolve path to entity ID
         try:
-            entity_id = await resolve_entity_id(client, active_project.id, url)
+            entity_id = await resolve_entity_id(client, active_project.external_id, url)
         except ToolError:
             # Convert resolution errors to "Resource not found" for consistency
             raise ToolError(f"Resource not found: {url}")
 
         # Call the v2 resource endpoint
-        response = await call_get(client, f"/v2/projects/{active_project.id}/resource/{entity_id}")
+        response = await call_get(client, f"/v2/projects/{active_project.external_id}/resource/{entity_id}")
         content_type = response.headers.get("content-type", "application/octet-stream")
         content_length = int(response.headers.get("content-length", 0))
 

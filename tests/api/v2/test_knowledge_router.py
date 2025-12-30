@@ -53,7 +53,7 @@ async def test_resolve_identifier_not_found(client: AsyncClient, v2_project_url)
 
 @pytest.mark.asyncio
 async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url, entity_repository):
-    """Test getting an entity by its numeric ID."""
+    """Test getting an entity by its external_id (UUID)."""
     # Create an entity first
     entity_data = {
         "title": "TestGetById",
@@ -64,24 +64,26 @@ async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url,
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id
-    assert created_entity.id is not None
-    entity_id = created_entity.id
+    # V2 create must return external_id
+    assert created_entity.external_id is not None
+    entity_external_id = created_entity.external_id
 
-    # Get it by ID using v2 endpoint
-    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_id}")
+    # Get it by external_id using v2 endpoint
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
 
     assert response.status_code == 200
     entity = EntityResponseV2.model_validate(response.json())
-    assert entity.id == entity_id
+    assert entity.external_id == entity_external_id
     assert entity.title == "TestGetById"
     assert entity.api_version == "v2"
 
 
 @pytest.mark.asyncio
 async def test_get_entity_by_id_not_found(client: AsyncClient, v2_project_url):
-    """Test getting a non-existent entity by ID returns 404."""
-    response = await client.get(f"{v2_project_url}/knowledge/entities/999999")
+    """Test getting a non-existent entity by external_id returns 404."""
+    # Use a UUID format that doesn't exist
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{fake_uuid}")
 
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
@@ -158,7 +160,7 @@ async def test_create_entity_with_observations_and_relations(
 async def test_update_entity_by_id(
     client: AsyncClient, file_service, v2_project_url, entity_repository
 ):
-    """Test updating an entity by ID using PUT (replace)."""
+    """Test updating an entity by external_id using PUT (replace)."""
     # Create an entity first
     create_data = {
         "title": "TestUpdate",
@@ -169,27 +171,26 @@ async def test_update_entity_by_id(
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id
-    assert created_entity.id is not None
-    original_id = created_entity.id
+    # V2 create must return external_id
+    assert created_entity.external_id is not None
+    original_external_id = created_entity.external_id
 
-    # Update it by ID
+    # Update it by external_id
     update_data = {
         "title": "TestUpdate",
         "folder": "test",
         "content": "Updated content via V2",
     }
     response = await client.put(
-        f"{v2_project_url}/knowledge/entities/{original_id}",
+        f"{v2_project_url}/knowledge/entities/{original_external_id}",
         json=update_data,
     )
 
     assert response.status_code == 200
     updated_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 update must return id field
-    assert updated_entity.id is not None
-    assert isinstance(updated_entity.id, int)
+    # V2 update must return external_id field
+    assert updated_entity.external_id is not None
     assert updated_entity.api_version == "v2"
 
     # Verify file was updated
@@ -203,7 +204,7 @@ async def test_update_entity_by_id(
 async def test_edit_entity_by_id_append(
     client: AsyncClient, file_service, v2_project_url, entity_repository
 ):
-    """Test editing an entity by ID using PATCH (append operation)."""
+    """Test editing an entity by external_id using PATCH (append operation)."""
     # Create an entity first
     create_data = {
         "title": "TestEdit",
@@ -214,9 +215,9 @@ async def test_edit_entity_by_id_append(
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id
-    assert created_entity.id is not None
-    original_id = created_entity.id
+    # V2 create must return external_id
+    assert created_entity.external_id is not None
+    original_external_id = created_entity.external_id
 
     # Edit it by appending
     edit_data = {
@@ -224,16 +225,15 @@ async def test_edit_entity_by_id_append(
         "content": "\n\n## New Section\n\nAppended content",
     }
     response = await client.patch(
-        f"{v2_project_url}/knowledge/entities/{original_id}",
+        f"{v2_project_url}/knowledge/entities/{original_external_id}",
         json=edit_data,
     )
 
     assert response.status_code == 200
     edited_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 patch must return id field
-    assert edited_entity.id is not None
-    assert isinstance(edited_entity.id, int)
+    # V2 patch must return external_id field
+    assert edited_entity.external_id is not None
     assert edited_entity.api_version == "v2"
 
     # Verify file has both original and appended content
@@ -247,7 +247,7 @@ async def test_edit_entity_by_id_append(
 async def test_edit_entity_by_id_find_replace(
     client: AsyncClient, file_service, v2_project_url, entity_repository
 ):
-    """Test editing an entity by ID using PATCH (find/replace operation)."""
+    """Test editing an entity by external_id using PATCH (find/replace operation)."""
     # Create an entity first
     create_data = {
         "title": "TestFindReplace",
@@ -258,9 +258,9 @@ async def test_edit_entity_by_id_find_replace(
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id
-    assert created_entity.id is not None
-    original_id = created_entity.id
+    # V2 create must return external_id
+    assert created_entity.external_id is not None
+    original_external_id = created_entity.external_id
 
     # Edit using find/replace
     edit_data = {
@@ -269,16 +269,15 @@ async def test_edit_entity_by_id_find_replace(
         "content": "New text",
     }
     response = await client.patch(
-        f"{v2_project_url}/knowledge/entities/{original_id}",
+        f"{v2_project_url}/knowledge/entities/{original_external_id}",
         json=edit_data,
     )
 
     assert response.status_code == 200
     edited_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 patch must return id field
-    assert edited_entity.id is not None
-    assert isinstance(edited_entity.id, int)
+    # V2 patch must return external_id field
+    assert edited_entity.external_id is not None
     assert edited_entity.api_version == "v2"
 
     # Verify replacement
@@ -292,7 +291,7 @@ async def test_edit_entity_by_id_find_replace(
 async def test_delete_entity_by_id(
     client: AsyncClient, file_service, v2_project_url, entity_repository
 ):
-    """Test deleting an entity by ID."""
+    """Test deleting an entity by external_id."""
     # Create an entity first
     create_data = {
         "title": "TestDelete",
@@ -303,26 +302,28 @@ async def test_delete_entity_by_id(
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id
-    assert created_entity.id is not None
-    entity_id = created_entity.id
+    # V2 create must return external_id
+    assert created_entity.external_id is not None
+    entity_external_id = created_entity.external_id
 
-    # Delete it by ID
-    response = await client.delete(f"{v2_project_url}/knowledge/entities/{entity_id}")
+    # Delete it by external_id
+    response = await client.delete(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
 
     assert response.status_code == 200
     delete_response = DeleteEntitiesResponse.model_validate(response.json())
     assert delete_response.deleted is True
 
     # Verify it's gone - trying to get it should return 404
-    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_id}")
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_entity_by_id_not_found(client: AsyncClient, v2_project_url):
     """Test deleting a non-existent entity returns deleted=False (idempotent)."""
-    response = await client.delete(f"{v2_project_url}/knowledge/entities/999999")
+    # Use a UUID format that doesn't exist
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await client.delete(f"{v2_project_url}/knowledge/entities/{fake_uuid}")
 
     # Delete is idempotent - returns 200 with deleted=False
     assert response.status_code == 200
@@ -343,39 +344,40 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id
-    assert created_entity.id is not None
-    original_id = created_entity.id
+    # V2 create must return external_id
+    assert created_entity.external_id is not None
+    original_external_id = created_entity.external_id
 
-    # Move it to a new folder (V2 uses entity ID in path)
+    # Move it to a new folder (V2 uses entity external_id in path)
     move_data = {
         "destination_path": "moved/MovedEntity.md",
     }
     response = await client.put(
-        f"{v2_project_url}/knowledge/entities/{created_entity.id}/move", json=move_data
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}/move", json=move_data
     )
 
     assert response.status_code == 200
     moved_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 move must return id field
-    assert moved_entity.id is not None
-    assert isinstance(moved_entity.id, int)
+    # V2 move must return external_id field
+    assert moved_entity.external_id is not None
+    assert isinstance(moved_entity.external_id, str)
     assert moved_entity.api_version == "v2"
 
-    # ID should remain the same (stable reference)
-    assert moved_entity.id == original_id
+    # external_id should remain the same (stable reference)
+    assert moved_entity.external_id == original_external_id
     assert moved_entity.file_path == "moved/MovedEntity.md"
 
 
 @pytest.mark.asyncio
 async def test_v2_endpoints_use_project_id_not_name(client: AsyncClient, test_project: Project):
-    """Verify v2 endpoints require project ID, not name."""
-    # Try using project name instead of ID - should fail
-    response = await client.get(f"/v2/{test_project.name}/knowledge/entities/1")
+    """Verify v2 endpoints require project external_id UUID, not name."""
+    # Try using project name instead of external_id - should fail
+    fake_entity_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await client.get(f"/v2/projects/{test_project.name}/knowledge/entities/{fake_entity_uuid}")
 
-    # Should get validation error or 404 because name is not a valid integer
-    assert response.status_code in [404, 422]
+    # Should get 404 because name is not a valid project external_id
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -393,15 +395,15 @@ async def test_entity_response_v2_has_api_version(
     assert response.status_code == 200
     created_entity = EntityResponseV2.model_validate(response.json())
 
-    # V2 create must return id and api_version
-    assert created_entity.id is not None
+    # V2 create must return external_id and api_version
+    assert created_entity.external_id is not None
     assert created_entity.api_version == "v2"
-    entity_id = created_entity.id
+    entity_external_id = created_entity.external_id
 
     # Get it via v2 endpoint
-    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_id}")
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{entity_external_id}")
     assert response.status_code == 200
 
     entity_v2 = EntityResponseV2.model_validate(response.json())
     assert entity_v2.api_version == "v2"
-    assert entity_v2.id == entity_id
+    assert entity_v2.external_id == entity_external_id

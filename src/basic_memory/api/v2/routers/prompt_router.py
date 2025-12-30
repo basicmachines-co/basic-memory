@@ -1,23 +1,22 @@
 """V2 Prompt Router - ID-based prompt generation operations.
 
-This router uses v2 dependencies for consistent project ID handling.
+This router uses v2 dependencies for consistent project handling with external_id UUIDs.
 Prompt endpoints are action-based (not resource-based), so they don't
 have entity IDs in URLs - they generate formatted prompts from queries.
 """
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Path
 from loguru import logger
 
 from basic_memory.api.routers.utils import to_graph_context, to_search_results
 from basic_memory.api.template_loader import template_loader
 from basic_memory.schemas.base import parse_timeframe
 from basic_memory.deps import (
-    ContextServiceV2Dep,
-    EntityRepositoryV2Dep,
-    SearchServiceV2Dep,
-    EntityServiceV2Dep,
-    ProjectIdPathDep,
+    ContextServiceV2ExternalDep,
+    EntityRepositoryV2ExternalDep,
+    SearchServiceV2ExternalDep,
+    EntityServiceV2ExternalDep,
 )
 from basic_memory.schemas.prompt import (
     ContinueConversationRequest,
@@ -32,12 +31,12 @@ router = APIRouter(prefix="/prompt", tags=["prompt-v2"])
 
 @router.post("/continue-conversation", response_model=PromptResponse)
 async def continue_conversation(
-    project_id: ProjectIdPathDep,
-    search_service: SearchServiceV2Dep,
-    entity_service: EntityServiceV2Dep,
-    context_service: ContextServiceV2Dep,
-    entity_repository: EntityRepositoryV2Dep,
+    search_service: SearchServiceV2ExternalDep,
+    entity_service: EntityServiceV2ExternalDep,
+    context_service: ContextServiceV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
     request: ContinueConversationRequest,
+    project_id: str = Path(..., description="Project external UUID"),
 ) -> PromptResponse:
     """Generate a prompt for continuing a conversation.
 
@@ -45,7 +44,7 @@ async def continue_conversation(
     relevant context from the knowledge base.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         request: The request parameters
 
     Returns:
@@ -197,10 +196,10 @@ async def continue_conversation(
 
 @router.post("/search", response_model=PromptResponse)
 async def search_prompt(
-    project_id: ProjectIdPathDep,
-    search_service: SearchServiceV2Dep,
-    entity_service: EntityServiceV2Dep,
+    search_service: SearchServiceV2ExternalDep,
+    entity_service: EntityServiceV2ExternalDep,
     request: SearchPromptRequest,
+    project_id: str = Path(..., description="Project external UUID"),
     page: int = 1,
     page_size: int = 10,
 ) -> PromptResponse:
@@ -210,7 +209,7 @@ async def search_prompt(
     prompt with context and suggestions.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         request: The search parameters
         page: The page number for pagination
         page_size: The number of results per page, defaults to 10

@@ -51,6 +51,7 @@ async def get_project(
 
     return ProjectItem(
         id=found_project.id,
+        external_id=found_project.external_id,
         name=found_project.name,
         path=normalize_project_path(found_project.path),
         is_default=found_project.is_default or False,
@@ -89,6 +90,7 @@ async def update_project(
 
         old_project_info = ProjectItem(
             id=old_project.id,
+            external_id=old_project.external_id,
             name=old_project.name,
             path=old_project.path,
             is_default=old_project.is_default or False,
@@ -111,6 +113,7 @@ async def update_project(
             old_project=old_project_info,
             new_project=ProjectItem(
                 id=updated_project.id,
+                external_id=updated_project.external_id,
                 name=updated_project.name,
                 path=updated_project.path,
                 is_default=updated_project.is_default or False,
@@ -203,6 +206,7 @@ async def list_projects(
     project_items = [
         ProjectItem(
             id=project.id,
+            external_id=project.external_id,
             name=project.name,
             path=normalize_project_path(project.path),
             is_default=project.is_default or False,
@@ -250,6 +254,7 @@ async def add_project(
                 default=existing_project.is_default or False,
                 new_project=ProjectItem(
                     id=existing_project.id,
+                    external_id=existing_project.external_id,
                     name=existing_project.name,
                     path=existing_project.path,
                     is_default=existing_project.is_default or False,
@@ -279,6 +284,7 @@ async def add_project(
             default=project_data.set_default,
             new_project=ProjectItem(
                 id=new_project.id,
+                external_id=new_project.external_id,
                 name=new_project.name,
                 path=new_project.path,
                 is_default=new_project.is_default or False,
@@ -334,6 +340,7 @@ async def remove_project(
             default=False,
             old_project=ProjectItem(
                 id=old_project.id,
+                external_id=old_project.external_id,
                 name=old_project.name,
                 path=old_project.path,
                 is_default=old_project.is_default or False,
@@ -382,12 +389,14 @@ async def set_default_project(
             default=True,
             old_project=ProjectItem(
                 id=default_project.id,
+                external_id=default_project.external_id,
                 name=default_name,
                 path=default_project.path,
                 is_default=False,
             ),
             new_project=ProjectItem(
                 id=new_default_project.id,
+                external_id=new_default_project.external_id,
                 name=name,
                 path=new_default_project.path,
                 is_default=True,
@@ -417,6 +426,7 @@ async def get_default_project(
 
     return ProjectItem(
         id=default_project.id,
+        external_id=default_project.external_id,
         name=default_project.name,
         path=default_project.path,
         is_default=True,

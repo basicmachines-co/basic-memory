@@ -183,8 +183,8 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
                 f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
             )
 
-        # Call v2 API to delete project using project ID
-        response = await call_delete(client, f"/v2/projects/{target_project.id}")
+        # Call v2 API to delete project using project external_id
+        response = await call_delete(client, f"/v2/projects/{target_project.external_id}")
         status_response = ProjectStatusResponse.model_validate(response.json())
 
         result = f"✓ {status_response.message}\n\n"

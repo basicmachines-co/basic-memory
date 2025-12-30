@@ -1,5 +1,6 @@
 """Knowledge graph models."""
 
+import uuid
 from datetime import datetime
 from basic_memory.utils import ensure_timezone_aware
 from typing import Optional
@@ -38,6 +39,7 @@ class Entity(Base):
         # Regular indexes
         Index("ix_entity_type", "entity_type"),
         Index("ix_entity_title", "title"),
+        Index("ix_entity_external_id", "external_id", unique=True),
         Index("ix_entity_created_at", "created_at"),  # For timeline queries
         Index("ix_entity_updated_at", "updated_at"),  # For timeline queries
         Index("ix_entity_project_id", "project_id"),  # For project filtering
@@ -59,6 +61,10 @@ class Entity(Base):
 
     # Core identity
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # External UUID for API references - stable identifier that won't change
+    external_id: Mapped[str] = mapped_column(
+        String, unique=True, default=lambda: str(uuid.uuid4())
+    )
     title: Mapped[str] = mapped_column(String)
     entity_type: Mapped[str] = mapped_column(String)
     entity_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -129,7 +135,7 @@ class Entity(Base):
         return value
 
     def __repr__(self) -> str:
-        return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}', checksum='{self.checksum}')"
+        return f"Entity(id={self.id}, external_id='{self.external_id}', name='{self.title}', type='{self.entity_type}', checksum='{self.checksum}')"
 
 
 class Observation(Base):

@@ -210,7 +210,7 @@ async def delete_note(
 
         try:
             # Resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
         except ToolError as e:
             # If entity not found, return False (note doesn't exist)
             if "Entity not found" in str(e) or "not found" in str(e).lower():
@@ -223,7 +223,7 @@ async def delete_note(
         try:
             # Call the DELETE endpoint
             response = await call_delete(
-                client, f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+                client, f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
             )
             result = DeleteEntitiesResponse.model_validate(response.json())
 

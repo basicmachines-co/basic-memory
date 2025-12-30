@@ -83,7 +83,7 @@ async def list_directory(
         # Call the API endpoint
         response = await call_get(
             client,
-            f"/v2/projects/{active_project.id}/directory/list",
+            f"/v2/projects/{active_project.external_id}/directory/list",
             params=params,
         )
 

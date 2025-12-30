@@ -252,7 +252,7 @@ async def recent_activity(
 
             response = await call_get(
                 client,
-                f"/v2/projects/{active_project.id}/memory/recent",
+                f"/v2/projects/{active_project.external_id}/memory/recent",
                 params=params,
             )
             activity_data = GraphContext.model_validate(response.json())
@@ -277,7 +277,7 @@ async def _get_project_activity(
     """
     activity_response = await call_get(
         client,
-        f"/v2/projects/{project_info.id}/memory/recent",
+        f"/v2/projects/{project_info.external_id}/memory/recent",
         params=params,
     )
     activity = GraphContext.model_validate(activity_response.json())

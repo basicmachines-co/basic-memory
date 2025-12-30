@@ -1,19 +1,19 @@
 """V2 Directory Router - ID-based directory tree operations.
 
 This router provides directory structure browsing for projects using
-integer project IDs instead of name-based identifiers.
+external_id UUIDs instead of name-based identifiers.
 
 Key improvements:
-- Direct project lookup via integer primary keys
+- Direct project lookup via external_id UUIDs
 - Consistent with other v2 endpoints
 - Better performance through indexed queries
 """
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Path
 
-from basic_memory.deps import DirectoryServiceV2Dep, ProjectIdPathDep
+from basic_memory.deps import DirectoryServiceV2ExternalDep
 from basic_memory.schemas.directory import DirectoryNode
 
 router = APIRouter(prefix="/directory", tags=["directory-v2"])
@@ -21,14 +21,14 @@ router = APIRouter(prefix="/directory", tags=["directory-v2"])
 
 @router.get("/tree", response_model=DirectoryNode, response_model_exclude_none=True)
 async def get_directory_tree(
-    directory_service: DirectoryServiceV2Dep,
-    project_id: ProjectIdPathDep,
+    directory_service: DirectoryServiceV2ExternalDep,
+    project_id: str = Path(..., description="Project external UUID"),
 ):
     """Get hierarchical directory structure from the knowledge base.
 
     Args:
         directory_service: Service for directory operations
-        project_id: Numeric project ID
+        project_id: Project external UUID
 
     Returns:
         DirectoryNode representing the root of the hierarchical tree structure
@@ -42,8 +42,8 @@ async def get_directory_tree(
 
 @router.get("/structure", response_model=DirectoryNode, response_model_exclude_none=True)
 async def get_directory_structure(
-    directory_service: DirectoryServiceV2Dep,
-    project_id: ProjectIdPathDep,
+    directory_service: DirectoryServiceV2ExternalDep,
+    project_id: str = Path(..., description="Project external UUID"),
 ):
     """Get folder structure for navigation (no files).
 
@@ -52,7 +52,7 @@ async def get_directory_structure(
 
     Args:
         directory_service: Service for directory operations
-        project_id: Numeric project ID
+        project_id: Project external UUID
 
     Returns:
         DirectoryNode tree containing only folders (type="directory")
@@ -63,8 +63,8 @@ async def get_directory_structure(
 
 @router.get("/list", response_model=List[DirectoryNode], response_model_exclude_none=True)
 async def list_directory(
-    directory_service: DirectoryServiceV2Dep,
-    project_id: ProjectIdPathDep,
+    directory_service: DirectoryServiceV2ExternalDep,
+    project_id: str = Path(..., description="Project external UUID"),
     dir_name: str = Query("/", description="Directory path to list"),
     depth: int = Query(1, ge=1, le=10, description="Recursion depth (1-10)"),
     file_name_glob: Optional[str] = Query(
@@ -75,7 +75,7 @@ async def list_directory(
 
     Args:
         directory_service: Service for directory operations
-        project_id: Numeric project ID
+        project_id: Project external UUID
         dir_name: Directory path to list (default: root "/")
         depth: Recursion depth (1-10, default: 1 for immediate children only)
         file_name_glob: Optional glob pattern for filtering file names (e.g., "*.md", "*meeting*")

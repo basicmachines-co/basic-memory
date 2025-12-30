@@ -363,7 +363,7 @@ async def search_notes(
         try:
             response = await call_post(
                 client,
-                f"/v2/projects/{active_project.id}/search/",
+                f"/v2/projects/{active_project.external_id}/search/",
                 json=search_query.model_dump(),
                 params={"page": page, "page_size": page_size},
             )

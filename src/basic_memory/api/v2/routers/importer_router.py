@@ -1,20 +1,19 @@
 """V2 Import Router - ID-based data import operations.
 
-This router uses v2 dependencies for consistent project ID handling.
+This router uses v2 dependencies for consistent project handling with external_id UUIDs.
 Import endpoints use project_id in the path for consistency with other v2 endpoints.
 """
 
 import json
 import logging
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Form, HTTPException, UploadFile, status, Path
 
 from basic_memory.deps import (
-    ChatGPTImporterV2Dep,
-    ClaudeConversationsImporterV2Dep,
-    ClaudeProjectsImporterV2Dep,
-    MemoryJsonImporterV2Dep,
-    ProjectIdPathDep,
+    ChatGPTImporterV2ExternalDep,
+    ClaudeConversationsImporterV2ExternalDep,
+    ClaudeProjectsImporterV2ExternalDep,
+    MemoryJsonImporterV2ExternalDep,
 )
 from basic_memory.importers import Importer
 from basic_memory.schemas.importer import (
@@ -30,15 +29,15 @@ router = APIRouter(prefix="/import", tags=["import-v2"])
 
 @router.post("/chatgpt", response_model=ChatImportResult)
 async def import_chatgpt(
-    project_id: ProjectIdPathDep,
-    importer: ChatGPTImporterV2Dep,
+    importer: ChatGPTImporterV2ExternalDep,
     file: UploadFile,
+    project_id: str = Path(..., description="Project external UUID"),
     folder: str = Form("conversations"),
 ) -> ChatImportResult:
     """Import conversations from ChatGPT JSON export.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         file: The ChatGPT conversations.json file.
         folder: The folder to place the files in.
         importer: ChatGPT importer instance.
@@ -55,15 +54,15 @@ async def import_chatgpt(
 
 @router.post("/claude/conversations", response_model=ChatImportResult)
 async def import_claude_conversations(
-    project_id: ProjectIdPathDep,
-    importer: ClaudeConversationsImporterV2Dep,
+    importer: ClaudeConversationsImporterV2ExternalDep,
     file: UploadFile,
+    project_id: str = Path(..., description="Project external UUID"),
     folder: str = Form("conversations"),
 ) -> ChatImportResult:
     """Import conversations from Claude conversations.json export.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         file: The Claude conversations.json file.
         folder: The folder to place the files in.
         importer: Claude conversations importer instance.
@@ -80,15 +79,15 @@ async def import_claude_conversations(
 
 @router.post("/claude/projects", response_model=ProjectImportResult)
 async def import_claude_projects(
-    project_id: ProjectIdPathDep,
-    importer: ClaudeProjectsImporterV2Dep,
+    importer: ClaudeProjectsImporterV2ExternalDep,
     file: UploadFile,
+    project_id: str = Path(..., description="Project external UUID"),
     folder: str = Form("projects"),
 ) -> ProjectImportResult:
     """Import projects from Claude projects.json export.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         file: The Claude projects.json file.
         folder: The base folder to place the files in.
         importer: Claude projects importer instance.
@@ -105,15 +104,15 @@ async def import_claude_projects(
 
 @router.post("/memory-json", response_model=EntityImportResult)
 async def import_memory_json(
-    project_id: ProjectIdPathDep,
-    importer: MemoryJsonImporterV2Dep,
+    importer: MemoryJsonImporterV2ExternalDep,
     file: UploadFile,
+    project_id: str = Path(..., description="Project external UUID"),
     folder: str = Form("conversations"),
 ) -> EntityImportResult:
     """Import entities and relations from a memory.json file.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         file: The memory.json file.
         folder: Optional destination folder within the project.
         importer: Memory JSON importer instance.

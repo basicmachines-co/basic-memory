@@ -157,7 +157,7 @@ async def write_note(
         logger.debug(f"Attempting to create entity permalink={entity.permalink}")
         action = "Created"  # Default to created
         try:
-            url = f"/v2/projects/{active_project.id}/knowledge/entities"
+            url = f"/v2/projects/{active_project.external_id}/knowledge/entities"
             response = await call_post(client, url, json=entity.model_dump())
             result = EntityResponse.model_validate(response.json())
             action = "Created"
@@ -172,8 +172,8 @@ async def write_note(
                 try:
                     if not entity.permalink:
                         raise ValueError("Entity permalink is required for updates")
-                    entity_id = await resolve_entity_id(client, active_project.id, entity.permalink)
-                    url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+                    entity_id = await resolve_entity_id(client, active_project.external_id, entity.permalink)
+                    url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
                     response = await call_put(client, url, json=entity.model_dump())
                     result = EntityResponse.model_validate(response.json())
                     action = "Updated"

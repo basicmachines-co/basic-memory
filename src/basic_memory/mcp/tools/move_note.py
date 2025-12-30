@@ -436,9 +436,9 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
         source_ext = "md"  # Default to .md if we can't determine source extension
         try:
             # Resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
             # Fetch source entity information to get the current file extension
-            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+            url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
             response = await call_get(client, url)
             source_entity = EntityResponse.model_validate(response.json())
             if "." in source_entity.file_path:
@@ -471,9 +471,9 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
         # Get the source entity to check its file extension
         try:
             # Resolve identifier to entity ID (might already be cached from above)
-            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
             # Fetch source entity information
-            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+            url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
             response = await call_get(client, url)
             source_entity = EntityResponse.model_validate(response.json())
 
@@ -511,7 +511,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
 
         try:
             # Resolve identifier to entity ID for the move operation
-            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
 
             # Prepare move request (v2 API only needs destination_path)
             move_data = {
@@ -519,7 +519,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
             }
 
             # Call the v2 move API endpoint (PUT method, entity_id in URL)
-            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}/move"
+            url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}/move"
             response = await call_put(client, url, json=move_data)
             result = EntityResponse.model_validate(response.json())
 

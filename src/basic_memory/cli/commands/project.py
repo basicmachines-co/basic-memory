@@ -259,7 +259,7 @@ def remove_project(
 
             # Use v2 API with project ID
             response = await call_delete(
-                client, f"/v2/projects/{target_project['project_id']}?delete_notes={delete_notes}"
+                client, f"/v2/projects/{target_project['external_id']}?delete_notes={delete_notes}"
             )
             return ProjectStatusResponse.model_validate(response.json())
 
@@ -342,7 +342,7 @@ def set_default_project(
 
             # Use v2 API with project ID
             response = await call_put(
-                client, f"/v2/projects/{target_project['project_id']}/default"
+                client, f"/v2/projects/{target_project['external_id']}/default"
             )
             return ProjectStatusResponse.model_validate(response.json())
 

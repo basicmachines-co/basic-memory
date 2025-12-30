@@ -436,6 +436,7 @@ async def test_write_note_project_path_validation(mcp_server, app, test_project)
     # Test the fix directly: ProjectItem.home should expand tilde paths
     project_with_tilde = ProjectItem(
         id=1,
+        external_id="test-project-with-tilde",
         name="Test BiSync",  # Name differs from path structure
         path="~/Documents/Test BiSync",  # Path with tilde
         is_default=False,

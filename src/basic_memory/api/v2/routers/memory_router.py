@@ -1,15 +1,15 @@
 """V2 routes for memory:// URI operations.
 
-This router uses integer project IDs for stable, efficient routing.
+This router uses external_id UUIDs for stable, API-friendly routing.
 V1 uses string-based project names which are less efficient and less stable.
 """
 
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Path
 from loguru import logger
 
-from basic_memory.deps import ContextServiceV2Dep, EntityRepositoryV2Dep, ProjectIdPathDep
+from basic_memory.deps import ContextServiceV2ExternalDep, EntityRepositoryV2ExternalDep
 from basic_memory.schemas.base import TimeFrame, parse_timeframe
 from basic_memory.schemas.memory import (
     GraphContext,
@@ -24,9 +24,9 @@ router = APIRouter(tags=["memory"])
 
 @router.get("/memory/recent", response_model=GraphContext)
 async def recent(
-    project_id: ProjectIdPathDep,
-    context_service: ContextServiceV2Dep,
-    entity_repository: EntityRepositoryV2Dep,
+    context_service: ContextServiceV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    project_id: str = Path(..., description="Project external UUID"),
     type: Annotated[list[SearchItemType] | None, Query()] = None,
     depth: int = 1,
     timeframe: TimeFrame = "7d",
@@ -37,7 +37,7 @@ async def recent(
     """Get recent activity context for a project.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         context_service: Context service scoped to project
         entity_repository: Entity repository scoped to project
         type: Types of items to include (entities, relations, observations)
@@ -81,10 +81,10 @@ async def recent(
 
 @router.get("/memory/{uri:path}", response_model=GraphContext)
 async def get_memory_context(
-    project_id: ProjectIdPathDep,
-    context_service: ContextServiceV2Dep,
-    entity_repository: EntityRepositoryV2Dep,
+    context_service: ContextServiceV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
     uri: str,
+    project_id: str = Path(..., description="Project external UUID"),
     depth: int = 1,
     timeframe: Optional[TimeFrame] = None,
     page: int = 1,
@@ -98,7 +98,7 @@ async def get_memory_context(
     - ID-based: memory://id/123 or memory://123
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         context_service: Context service scoped to project
         entity_repository: Entity repository scoped to project
         uri: Memory URI path (e.g., "id/123", "123", or "path/to/note")

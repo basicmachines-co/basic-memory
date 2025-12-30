@@ -237,7 +237,7 @@ async def edit_note(
         # Use the PATCH endpoint to edit the entity
         try:
             # Resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.id, identifier)
+            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
 
             # Prepare the edit request data
             edit_data = {
@@ -254,7 +254,7 @@ async def edit_note(
                 edit_data["expected_replacements"] = str(expected_replacements)
 
             # Call the PATCH endpoint
-            url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
+            url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
             response = await call_patch(client, url, json=edit_data)
             result = EntityResponse.model_validate(response.json())
 

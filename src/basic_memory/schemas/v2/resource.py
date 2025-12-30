@@ -38,7 +38,8 @@ class UpdateResourceRequest(BaseModel):
 class ResourceResponse(BaseModel):
     """Response from resource operations."""
 
-    entity_id: int = Field(..., description="Entity ID of the resource")
+    entity_id: int = Field(..., description="Internal entity ID of the resource")
+    external_id: str = Field(..., description="External UUID of the resource for API references")
     file_path: str = Field(..., description="File path of the resource")
     checksum: str = Field(..., description="File content checksum")
     size: int = Field(..., description="File size in bytes")
