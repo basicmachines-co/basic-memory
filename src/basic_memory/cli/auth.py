@@ -8,7 +8,8 @@ import secrets
 import time
 import webbrowser
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import AsyncContextManager
 
 import httpx
 from rich.console import Console
@@ -38,7 +39,7 @@ class CLIAuth:
         self._http_client_factory = http_client_factory
 
     @asynccontextmanager
-    async def _get_http_client(self) -> AsyncContextManager[httpx.AsyncClient]:
+    async def _get_http_client(self) -> AsyncIterator[httpx.AsyncClient]:
         """Create an AsyncClient, optionally via injected factory.
 
         Why: enables reliable tests without monkeypatching httpx internals while

@@ -1,5 +1,6 @@
 """Cloud API client utilities."""
 
+from collections.abc import AsyncIterator
 from typing import Optional
 from contextlib import asynccontextmanager
 from typing import AsyncContextManager, Callable
@@ -58,7 +59,7 @@ async def get_authenticated_headers(auth: CLIAuth | None = None) -> dict[str, st
 
 
 @asynccontextmanager
-async def _default_http_client(timeout: float) -> AsyncContextManager[httpx.AsyncClient]:
+async def _default_http_client(timeout: float) -> AsyncIterator[httpx.AsyncClient]:
     async with httpx.AsyncClient(timeout=timeout) as client:
         yield client
 
