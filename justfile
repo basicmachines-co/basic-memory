@@ -111,17 +111,17 @@ coverage:
     # See: https://github.com/jlowin/fastmcp/issues/1311
     TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests test-int' || test $? -eq 137
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests test-int' || test $? -eq 137
     else
         echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests test-int
+        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests test-int
     fi
     
     echo "🧩 Combining coverage data..."
     uv run coverage combine
     uv run coverage report -m
     uv run coverage html
-    @echo "Coverage report generated in htmlcov/index.html"
+    echo "Coverage report generated in htmlcov/index.html"
 
 # Lint and fix code (calls fix)
 lint: fix
