@@ -57,50 +57,21 @@ async def get_client() -> AsyncIterator[AsyncClient]:
     Raises:
         RuntimeError: If cloud mode is enabled but user is not authenticated
     """
-    if _client_factory:
-        # Use injected factory (cloud app, tests)
-        async with _client_factory() as client:
-            yield client
-    else:
-        # Default: create based on config
-        config = ConfigManager().config
-        timeout = Timeout(
-            connect=10.0,  # 10 seconds for connection
-            read=30.0,  # 30 seconds for reading response
-            write=30.0,  # 30 seconds for writing request
-            pool=30.0,  # 30 seconds for connection pool
-        )
+    # --- Composition Root Pattern ---
+    # Delegate to container for runtime mode selection
+    # Note: We create container each time but skip logging init since that's
+    # already done in the entrypoint (MCP server lifespan or CLI command)
+    from basic_memory.config import ConfigManager
+    from basic_memory.mcp.container import MCPContainer
 
-        if config.cloud_mode_enabled:
-            # CLI cloud mode: inject auth when creating client
-            from basic_memory.cli.auth import CLIAuth
+    # Create lightweight container without re-initializing logging
+    # Logging is initialized once at entrypoint startup
+    config = ConfigManager().config
+    container = MCPContainer(config=config)
+    factory = container.get_client_factory(override_factory=_client_factory)
 
-            auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-            token = await auth.get_valid_token()
-
-            if not token:
-                raise RuntimeError(
-                    "Cloud mode enabled but not authenticated. "
-                    "Run 'basic-memory cloud login' first."
-                )
-
-            # Auth header set ONCE at client creation
-            proxy_base_url = f"{config.cloud_host}/proxy"
-            logger.info(f"Creating HTTP client for cloud proxy at: {proxy_base_url}")
-            async with AsyncClient(
-                base_url=proxy_base_url,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=timeout,
-            ) as client:
-                yield client
-        else:
-            # Local mode: ASGI transport for in-process calls
-            # Note: ASGI transport does NOT trigger FastAPI lifespan, so no special handling needed
-            logger.info("Creating ASGI client for local Basic Memory API")
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-            ) as client:
-                yield client
+    async with factory() as client:
+        yield client
 
 
 def create_client() -> AsyncClient:

@@ -9,7 +9,7 @@ from fastmcp import FastMCP
 from loguru import logger
 
 from basic_memory import db
-from basic_memory.config import ConfigManager
+from basic_memory.mcp.container import MCPContainer
 from basic_memory.services.initialization import initialize_app, initialize_file_sync
 from basic_memory.telemetry import show_notice_if_needed, track_app_started
 
@@ -24,7 +24,10 @@ async def lifespan(app: FastMCP):
     - File sync in background (if enabled and not in cloud mode)
     - Proper cleanup on shutdown
     """
-    app_config = ConfigManager().config
+    # --- Composition Root ---
+    # Container handles: config loading, logging init, runtime mode selection
+    container = MCPContainer.create()
+    app_config = container.config
     logger.info("Starting Basic Memory MCP server")
 
     # Show telemetry notice (first run only) and track startup

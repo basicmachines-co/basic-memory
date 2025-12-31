@@ -30,7 +30,7 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
 )
-from basic_memory.config import ConfigManager, init_api_logging
+from basic_memory.api.container import APIContainer
 from basic_memory.services.initialization import initialize_file_sync, initialize_app
 
 
@@ -38,10 +38,10 @@ from basic_memory.services.initialization import initialize_file_sync, initializ
 async def lifespan(app: FastAPI):  # pragma: no cover
     """Lifecycle manager for the FastAPI app. Not called in stdio mcp mode"""
 
-    # Initialize logging for API (stdout in cloud mode, file otherwise)
-    init_api_logging()
-
-    app_config = ConfigManager().config
+    # --- Composition Root ---
+    # Container handles: config loading, logging init, runtime mode selection
+    container = APIContainer.create()
+    app_config = container.config
     logger.info("Starting Basic Memory API")
 
     await initialize_app(app_config)
