@@ -1,4 +1,3 @@
-from datetime import UTC, datetime
 
 from basic_memory.schemas.response import RelationResponse
 

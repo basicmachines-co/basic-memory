@@ -1,9 +1,7 @@
 """Tests for async_client configuration."""
 
-import os
 from httpx import AsyncClient, ASGITransport, Timeout
 
-from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import create_client
 
 

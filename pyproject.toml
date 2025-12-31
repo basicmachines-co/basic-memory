@@ -112,6 +112,8 @@ pythonVersion = "3.12"
 
 [tool.coverage.run]
 concurrency = ["thread", "gevent"]
+parallel = true
+source = ["basic_memory"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -138,12 +140,6 @@ omit = [
     "*/services/initialization.py", # Startup orchestration + background tasks (watchers); exercised indirectly in entrypoints
     "*/sync/sync_service.py",      # Heavy filesystem/db integration; covered by integration suite, not enforced in unit coverage
     "*/telemetry.py",              # External analytics; tested lightly, excluded from strict coverage target
-    "*/mcp/tools/recent_activity.py", # Prompt/tool composition; covered by prompt tests, excluded from strict coverage target
-    "*/mcp/tools/read_note.py",    # Thin tool wrapper; covered by integration tests
-    "*/mcp/tools/chatgpt_tools.py", # Optional import helpers; covered by integration tests
-    "*/repository/postgres_search_repository.py",  # Covered in separate Postgres-focused test run
-    "*/mcp/tools/project_management.py",  # Covered by integration tests
-    "*/mcp/tools/sync_status.py",  # Covered by integration tests
     "*/services/migration_service.py", # Complex migration scenarios
 ]
 

@@ -20,13 +20,11 @@ Current exclusions include:
 - `src/basic_memory/services/initialization.py`: startup orchestration/background tasks; covered indirectly by app/MCP entrypoints.
 - `src/basic_memory/sync/sync_service.py`: heavy filesystem↔DB integration; validated in integration suite (not enforced in unit coverage).
 - `src/basic_memory/telemetry.py`: external analytics; exercised lightly but excluded from strict coverage gate.
-- a few thin MCP wrappers (`mcp/tools/recent_activity.py`, `mcp/tools/read_note.py`, `mcp/tools/chatgpt_tools.py`).
-- `src/basic_memory/repository/postgres_search_repository.py`: covered in a separate Postgres-focused run.
 
 ### Recommended additional runs
 
 If you want extra confidence locally/CI:
-- **Postgres backend**: run integration tests with `BASIC_MEMORY_TEST_POSTGRES=1`.
-- **Strict integration coverage**: run coverage on `test-int/` with Postgres enabled (separately), then combine reports if desired.
+- **Postgres backend**: run tests with `BASIC_MEMORY_TEST_POSTGRES=1`.
+- **Strict backend-complete coverage**: run coverage on SQLite + Postgres and combine the results (recommended).
 
 

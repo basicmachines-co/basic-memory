@@ -5,6 +5,7 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note
+from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItemType
 from basic_memory.utils import normalize_newlines
 
 
@@ -19,6 +20,84 @@ async def test_read_note_by_title(app, test_project):
     # Should be able to read it by title
     content = await read_note.fn("Special Note", project=test_project.name)
     assert "Note content here" in content
+
+
+@pytest.mark.asyncio
+async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch, app, test_project):
+    """Force direct resolve to fail so we exercise the title-search + fetch fallback path."""
+    await write_note.fn(
+        project=test_project.name,
+        title="Fallback Title Note",
+        folder="test",
+        content="fallback content",
+    )
+
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    from basic_memory.mcp.tools.utils import resolve_entity_id as real_resolve_entity_id
+    from basic_memory.schemas.memory import memory_url_path
+
+    direct_identifier = memory_url_path("Fallback Title Note")
+
+    async def selective_resolve(client, project_id, identifier: str) -> int:
+        if identifier == direct_identifier:
+            raise RuntimeError("force direct lookup failure")
+        return await real_resolve_entity_id(client, project_id, identifier)
+
+    monkeypatch.setattr(read_note_module, "resolve_entity_id", selective_resolve)
+
+    content = await read_note.fn("Fallback Title Note", project=test_project.name)
+    assert "fallback content" in content
+
+
+@pytest.mark.asyncio
+async def test_read_note_returns_related_results_when_text_search_finds_matches(
+    monkeypatch, app, test_project
+):
+    """Exercise the related-results message when no exact note match exists."""
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+
+    async def fake_search_notes_fn(*, query, search_type, **kwargs):
+        if search_type == "title":
+            return SearchResponse(results=[], current_page=1, page_size=10)
+
+        return SearchResponse(
+            results=[
+                SearchResult(
+                    title="Related One",
+                    permalink="docs/related-one",
+                    content="",
+                    type=SearchItemType.ENTITY,
+                    score=1.0,
+                    file_path="docs/related-one.md",
+                ),
+                SearchResult(
+                    title="Related Two",
+                    permalink="docs/related-two",
+                    content="",
+                    type=SearchItemType.ENTITY,
+                    score=0.9,
+                    file_path="docs/related-two.md",
+                ),
+            ],
+            current_page=1,
+            page_size=10,
+        )
+
+    # Ensure direct resolution doesn't short-circuit the fallback logic.
+    async def boom(*args, **kwargs):
+        raise RuntimeError("force fallback")
+
+    monkeypatch.setattr(read_note_module, "resolve_entity_id", boom)
+    monkeypatch.setattr(read_note_module.search_notes, "fn", fake_search_notes_fn)
+
+    result = await read_note.fn("missing-note", project=test_project.name)
+    assert "I couldn't find an exact match" in result
+    assert "## 1. Related One" in result
+    assert "## 2. Related Two" in result
 
 
 @pytest.mark.asyncio

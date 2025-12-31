@@ -192,6 +192,20 @@ async def test_read_file_content_missing_file(tmp_path: Path, file_service: File
 
 
 @pytest.mark.asyncio
+async def test_read_file_content_raises_file_operation_error_for_directory(
+    tmp_path: Path, file_service: FileService
+):
+    """read_file_content should wrap non-FileNotFound errors in FileOperationError."""
+    dir_path = tmp_path / "not-a-file"
+    dir_path.mkdir()
+
+    with pytest.raises(FileOperationError) as exc_info:
+        await file_service.read_file_content(dir_path)
+
+    assert "Failed to read file" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_read_file_bytes(tmp_path: Path, file_service: FileService):
     """Test read_file_bytes for binary file reading."""
     test_path = tmp_path / "test.bin"

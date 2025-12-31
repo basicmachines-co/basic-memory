@@ -1,11 +1,31 @@
 """Tests for the move_note MCP tool."""
 
 import pytest
-from pathlib import Path
 
 from basic_memory.mcp.tools.move_note import move_note, _format_move_error_response
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.read_note import read_note
+
+
+@pytest.mark.asyncio
+async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monkeypatch):
+    """Cross-project detection should fail open (return None) if the projects API errors."""
+    import importlib
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(move_note_module, "call_get", boom)
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="somewhere/note",
+        current_project="test-project",
+    )
+    assert result is None
 
 
 @pytest.mark.asyncio

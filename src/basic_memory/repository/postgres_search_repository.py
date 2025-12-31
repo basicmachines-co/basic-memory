@@ -201,8 +201,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         # Single word
         cleaned_term = cleaned_term.strip()
-        if not cleaned_term:
-            return "NOSPECIALCHARS:*"
         if is_prefix:
             return f"{cleaned_term}:*"
         else:

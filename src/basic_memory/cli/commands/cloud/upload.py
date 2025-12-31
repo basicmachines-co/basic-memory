@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from contextlib import AbstractAsyncContextManager
-from typing import Callable, AsyncContextManager
+from typing import Callable
 
 import aiofiles
 import httpx

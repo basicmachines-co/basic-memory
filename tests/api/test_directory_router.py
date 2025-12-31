@@ -2,7 +2,6 @@
 
 import pytest
 
-from basic_memory.schemas.directory import DirectoryNode
 
 
 @pytest.mark.asyncio

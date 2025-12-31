@@ -1,5 +1,6 @@
 """Recent activity tool for Basic Memory MCP server."""
 
+from datetime import timezone
 from typing import List, Union, Optional
 
 from loguru import logger
@@ -196,33 +197,7 @@ async def recent_activity(
             # Generate guidance for the assistant
             guidance_lines = ["\n" + "─" * 40]
 
-            if most_active_project and most_active_count > 0:
-                guidance_lines.extend(
-                    [
-                        f"Suggested project: '{most_active_project}' (most active with {most_active_count} items)",
-                        f"Ask user: 'Should I use {most_active_project} for this task, or would you prefer a different project?'",
-                    ]
-                )
-            elif active_projects > 0:
-                # Has activity but no clear most active project
-                active_project_names = [
-                    name for name, activity in projects_activity.items() if activity.item_count > 0
-                ]
-                if len(active_project_names) == 1:
-                    guidance_lines.extend(
-                        [
-                            f"Suggested project: '{active_project_names[0]}' (only active project)",
-                            f"Ask user: 'Should I use {active_project_names[0]} for this task?'",
-                        ]
-                    )
-                else:
-                    guidance_lines.extend(
-                        [
-                            f"Multiple active projects found: {', '.join(active_project_names)}",
-                            "Ask user: 'Which project should I use for this task?'",
-                        ]
-                    )
-            else:
+            if active_projects == 0:
                 # No recent activity
                 guidance_lines.extend(
                     [
@@ -230,6 +205,23 @@ async def recent_activity(
                         "Consider: Ask which project to use or if they want to create a new one.",
                     ]
                 )
+            else:
+                # At least one project has activity: suggest the most active project.
+                suggested_project = most_active_project or next(
+                    (name for name, activity in projects_activity.items() if activity.item_count > 0),
+                    None,
+                )
+                if suggested_project:
+                    suffix = (
+                        f"(most active with {most_active_count} items)" if most_active_count > 0 else ""
+                    )
+                    guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
+                    if active_projects == 1:
+                        guidance_lines.append(f"Ask user: 'Should I use {suggested_project} for this task?'")
+                    else:
+                        guidance_lines.append(
+                            f"Ask user: 'Should I use {suggested_project} for this task, or would you prefer a different project?'"
+                        )
 
             guidance_lines.extend(
                 [
@@ -290,12 +282,13 @@ async def _get_project_activity(
     for result in activity.results:
         if result.primary_result.created_at:
             current_time = result.primary_result.created_at
-            try:
-                if last_activity is None or current_time > last_activity:
-                    last_activity = current_time
-            except TypeError:
-                # Handle timezone comparison issues by skipping this comparison
-                if last_activity is None:
+            if current_time.tzinfo is None:
+                current_time = current_time.replace(tzinfo=timezone.utc)
+
+            if last_activity is None:
+                last_activity = current_time
+            else:
+                if current_time > last_activity:
                     last_activity = current_time
 
         # Extract folder from file_path

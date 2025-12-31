@@ -171,3 +171,45 @@ def test_format_document_error_handling():
     assert result["title"] == "Missing Doc"
     assert result["text"] == error_content
     assert result["metadata"]["error"] == "Document not found"
+
+
+def test_format_document_untitled_fallback_for_empty_identifier():
+    """If identifier is empty and content has no H1, we still return a stable title."""
+    from basic_memory.mcp.tools.chatgpt_tools import _format_document_for_chatgpt
+
+    result = _format_document_for_chatgpt("no title here", "")
+    assert result["title"] == "Untitled Document"
+
+
+@pytest.mark.asyncio
+async def test_search_internal_exception_returns_error_payload(monkeypatch, client, test_project):
+    """search() should return a structured error payload if an unexpected exception occurs."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(chatgpt_tools.search_notes, "fn", boom)
+
+    result = await chatgpt_tools.search.fn("anything")
+    assert isinstance(result, list)
+    content = json.loads(result[0]["text"])
+    assert content["error"] == "Internal search error"
+    assert "error_message" in content
+
+
+@pytest.mark.asyncio
+async def test_fetch_internal_exception_returns_error_payload(monkeypatch, client, test_project):
+    """fetch() should return a structured error payload if an unexpected exception occurs."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(chatgpt_tools.read_note, "fn", boom)
+
+    result = await chatgpt_tools.fetch.fn("docs/test")
+    assert isinstance(result, list)
+    content = json.loads(result[0]["text"])
+    assert content["id"] == "docs/test"
+    assert content["metadata"]["error"] == "Fetch failed"
