@@ -34,8 +34,8 @@ class WatchEvent(BaseModel):
 class WatchServiceState(BaseModel):
     # Service status
     running: bool = False
-    start_time: datetime = datetime.now()  # Use directly with Pydantic model
-    pid: int = os.getpid()  # Use directly with Pydantic model
+    start_time: Optional[datetime] = None
+    pid: Optional[int] = None
 
     # Stats
     error_count: int = 0
@@ -46,7 +46,14 @@ class WatchServiceState(BaseModel):
     synced_files: int = 0
 
     # Recent activity
-    recent_events: List[WatchEvent] = []  # Use directly with Pydantic model
+    recent_events: List[WatchEvent] = []
+
+    def model_post_init(self, __context) -> None:
+        """Initialize dynamic defaults after model creation."""
+        if self.start_time is None:
+            self.start_time = datetime.now()
+        if self.pid is None:
+            self.pid = os.getpid()
 
     def add_event(
         self,
@@ -299,7 +306,8 @@ class WatchService:
         )
 
         # because of our atomic writes on updates, an add may be an existing file
-        for added_path in adds:  # pragma: no cover TODO add test
+        # Iterate over a copy to avoid mutation during iteration
+        for added_path in list(adds):  # pragma: no cover TODO add test
             entity = await sync_service.entity_repository.get_by_file_path(added_path)
             if entity is not None:
                 logger.debug(f"Existing file will be processed as modified, path={added_path}")
