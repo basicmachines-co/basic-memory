@@ -2,7 +2,6 @@
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import patch
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import search_notes, _format_search_error_response
@@ -288,30 +287,51 @@ class TestSearchToolErrorHandling:
     """Test search tool exception handling."""
 
     @pytest.mark.asyncio
-    async def test_search_notes_exception_handling(self):
+    async def test_search_notes_exception_handling(self, monkeypatch):
         """Test exception handling in search_notes."""
-        with patch("basic_memory.mcp.tools.search.get_active_project") as mock_get_project:
-            mock_get_project.return_value.project_url = "http://test"
+        import importlib
 
-            with patch(
-                "basic_memory.mcp.tools.search.call_post", side_effect=Exception("syntax error")
-            ):
-                result = await search_notes.fn(project="test-project", query="test query")
+        search_mod = importlib.import_module("basic_memory.mcp.tools.search")
 
-                assert isinstance(result, str)
-                assert "# Search Failed - Invalid Syntax" in result
+        class StubProject:
+            project_url = "http://test"
+            name = "test-project"
+            id = 1
+
+        async def fake_get_active_project(*args, **kwargs):
+            return StubProject()
+
+        async def fake_call_post(*args, **kwargs):
+            raise Exception("syntax error")
+
+        monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+        monkeypatch.setattr(search_mod, "call_post", fake_call_post)
+
+        result = await search_mod.search_notes.fn(project="test-project", query="test query")
+        assert isinstance(result, str)
+        assert "# Search Failed - Invalid Syntax" in result
 
     @pytest.mark.asyncio
-    async def test_search_notes_permission_error(self):
+    async def test_search_notes_permission_error(self, monkeypatch):
         """Test search_notes with permission error."""
-        with patch("basic_memory.mcp.tools.search.get_active_project") as mock_get_project:
-            mock_get_project.return_value.project_url = "http://test"
+        import importlib
 
-            with patch(
-                "basic_memory.mcp.tools.search.call_post",
-                side_effect=Exception("permission denied"),
-            ):
-                result = await search_notes.fn(project="test-project", query="test query")
+        search_mod = importlib.import_module("basic_memory.mcp.tools.search")
 
-                assert isinstance(result, str)
-                assert "# Search Failed - Access Error" in result
+        class StubProject:
+            project_url = "http://test"
+            name = "test-project"
+            id = 1
+
+        async def fake_get_active_project(*args, **kwargs):
+            return StubProject()
+
+        async def fake_call_post(*args, **kwargs):
+            raise Exception("permission denied")
+
+        monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+        monkeypatch.setattr(search_mod, "call_post", fake_call_post)
+
+        result = await search_mod.search_notes.fn(project="test-project", query="test query")
+        assert isinstance(result, str)
+        assert "# Search Failed - Access Error" in result

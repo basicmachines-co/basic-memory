@@ -1,7 +1,8 @@
 """Test project-scoped rclone commands."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,626 +23,438 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
 )
 
 
-def test_sync_project_dataclass():
-    """Test SyncProject dataclass."""
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/Users/test/research",
-    )
+class _RunResult:
+    def __init__(self, returncode: int = 0, stdout: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
 
+
+class _Runner:
+    def __init__(self, *, returncode: int = 0, stdout: str = ""):
+        self.calls: list[tuple[list[str], dict]] = []
+        self._returncode = returncode
+        self._stdout = stdout
+
+    def __call__(self, cmd: list[str], **kwargs):
+        self.calls.append((cmd, kwargs))
+        return _RunResult(returncode=self._returncode, stdout=self._stdout)
+
+
+def _write_filter_file(tmp_path: Path) -> Path:
+    p = tmp_path / "filters.txt"
+    p.write_text("- .git/**\n", encoding="utf-8")
+    return p
+
+
+def test_sync_project_dataclass():
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/Users/test/research")
     assert project.name == "research"
     assert project.path == "app/data/research"
     assert project.local_sync_path == "/Users/test/research"
 
 
 def test_sync_project_optional_local_path():
-    """Test SyncProject with optional local_sync_path."""
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-    )
-
+    project = SyncProject(name="research", path="app/data/research")
     assert project.name == "research"
     assert project.path == "app/data/research"
     assert project.local_sync_path is None
 
 
 def test_get_project_remote():
-    """Test building rclone remote path with normalized path."""
-    # Path comes from API already normalized (no /app/data/ prefix)
     project = SyncProject(name="research", path="/research")
-
-    remote = get_project_remote(project, "my-bucket")
-
-    assert remote == "basic-memory-cloud:my-bucket/research"
+    assert get_project_remote(project, "my-bucket") == "basic-memory-cloud:my-bucket/research"
 
 
 def test_get_project_remote_strips_app_data_prefix():
-    """Test that /app/data/ prefix is stripped from cloud path."""
-    # If API returns path with /app/data/, it should be stripped
     project = SyncProject(name="research", path="/app/data/research")
-
-    remote = get_project_remote(project, "my-bucket")
-
-    # Should strip /app/data/ prefix to get actual S3 path
-    assert remote == "basic-memory-cloud:my-bucket/research"
+    assert get_project_remote(project, "my-bucket") == "basic-memory-cloud:my-bucket/research"
 
 
 def test_get_project_bisync_state():
-    """Test getting bisync state directory path."""
     state_path = get_project_bisync_state("research")
-
     expected = Path.home() / ".basic-memory" / "bisync-state" / "research"
     assert state_path == expected
 
 
 def test_bisync_initialized_false_when_not_exists(tmp_path, monkeypatch):
-    """Test bisync_initialized returns False when state doesn't exist."""
-    # Patch to use tmp directory
     monkeypatch.setattr(
         "basic_memory.cli.commands.cloud.rclone_commands.get_project_bisync_state",
         lambda project_name: tmp_path / project_name,
     )
-
     assert bisync_initialized("research") is False
 
 
 def test_bisync_initialized_false_when_empty(tmp_path, monkeypatch):
-    """Test bisync_initialized returns False when state directory is empty."""
     state_dir = tmp_path / "research"
     state_dir.mkdir()
-
     monkeypatch.setattr(
         "basic_memory.cli.commands.cloud.rclone_commands.get_project_bisync_state",
         lambda project_name: tmp_path / project_name,
     )
-
     assert bisync_initialized("research") is False
 
 
 def test_bisync_initialized_true_when_has_files(tmp_path, monkeypatch):
-    """Test bisync_initialized returns True when state has files."""
     state_dir = tmp_path / "research"
     state_dir.mkdir()
     (state_dir / "state.lst").touch()
-
     monkeypatch.setattr(
         "basic_memory.cli.commands.cloud.rclone_commands.get_project_bisync_state",
         lambda project_name: tmp_path / project_name,
     )
-
     assert bisync_initialized("research") is True
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_sync_success(mock_run, mock_is_installed):
-    """Test successful project sync."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_sync_success(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
 
-    project = SyncProject(
-        name="research",
-        path="/research",  # Normalized path from API
-        local_sync_path="/tmp/research",
+    result = project_sync(
+        project,
+        "my-bucket",
+        dry_run=True,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
     )
-
-    result = project_sync(project, "my-bucket", dry_run=True)
 
     assert result is True
-    mock_run.assert_called_once()
-
-    # Check command arguments
-    cmd = mock_run.call_args[0][0]
-    assert cmd[0] == "rclone"
-    assert cmd[1] == "sync"
-    # Use Path for cross-platform comparison (Windows uses backslashes)
+    assert len(runner.calls) == 1
+    cmd, kwargs = runner.calls[0]
+    assert cmd[:2] == ["rclone", "sync"]
     assert Path(cmd[2]) == Path("/tmp/research")
     assert cmd[3] == "basic-memory-cloud:my-bucket/research"
+    assert "--filter-from" in cmd
+    assert str(filter_path) in cmd
     assert "--dry-run" in cmd
+    assert kwargs["text"] is True
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_sync_with_verbose(mock_run, mock_is_installed):
-    """Test project sync with verbose flag."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_sync_with_verbose(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
+    project_sync(project, "my-bucket", verbose=True, run=runner, is_installed=lambda: True, filter_path=filter_path)
 
-    project_sync(project, "my-bucket", verbose=True)
-
-    cmd = mock_run.call_args[0][0]
+    cmd, _ = runner.calls[0]
     assert "--verbose" in cmd
     assert "--progress" not in cmd
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_sync_with_progress(mock_run, mock_is_installed):
-    """Test project sync with progress (default)."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_sync_with_progress(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
+    project_sync(project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path)
 
-    project_sync(project, "my-bucket")
-
-    cmd = mock_run.call_args[0][0]
+    cmd, _ = runner.calls[0]
     assert "--progress" in cmd
     assert "--verbose" not in cmd
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_project_sync_no_local_path(mock_is_installed):
-    """Test project sync raises error when local_sync_path not configured."""
-    mock_is_installed.return_value = True
+def test_project_sync_no_local_path():
     project = SyncProject(name="research", path="app/data/research")
-
     with pytest.raises(RcloneError) as exc_info:
-        project_sync(project, "my-bucket")
-
+        project_sync(project, "my-bucket", is_installed=lambda: True)
     assert "no local_sync_path configured" in str(exc_info.value)
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
-def test_project_bisync_success(mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed):
-    """Test successful project bisync."""
-    mock_is_installed.return_value = True
-    mock_bisync_init.return_value = True  # Already initialized
-    mock_supports_flag.return_value = True  # Mock version check
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_sync_checks_rclone_installed():
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
+    with pytest.raises(RcloneError) as exc_info:
+        project_sync(project, "my-bucket", is_installed=lambda: False)
+    assert "rclone is not installed" in str(exc_info.value)
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
+
+def test_project_bisync_success(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
+
+    result = project_bisync(
+        project,
+        "my-bucket",
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 64, 2),
+        filter_path=filter_path,
+        state_path=state_path,
+        is_initialized=lambda _name: True,
     )
-
-    result = project_bisync(project, "my-bucket")
 
     assert result is True
-    mock_run.assert_called_once()
-
-    # Check command arguments
-    cmd = mock_run.call_args[0][0]
-    assert cmd[0] == "rclone"
-    assert cmd[1] == "bisync"
+    cmd, _ = runner.calls[0]
+    assert cmd[:2] == ["rclone", "bisync"]
+    assert "--resilient" in cmd
     assert "--conflict-resolve=newer" in cmd
     assert "--max-delete=25" in cmd
-    assert "--resilient" in cmd
+    assert "--compare=modtime" in cmd
+    assert "--workdir" in cmd
+    assert str(state_path) in cmd
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-def test_project_bisync_requires_resync_first_time(mock_bisync_init, mock_is_installed):
-    """Test that first bisync requires --resync flag."""
-    mock_is_installed.return_value = True
-    mock_bisync_init.return_value = False  # Not initialized
-
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
+def test_project_bisync_requires_resync_first_time(tmp_path):
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
 
     with pytest.raises(RcloneError) as exc_info:
-        project_bisync(project, "my-bucket")
+        project_bisync(
+            project,
+            "my-bucket",
+            is_installed=lambda: True,
+            version=(1, 64, 2),
+            filter_path=filter_path,
+            state_path=state_path,
+            is_initialized=lambda _name: False,
+        )
 
     assert "requires --resync" in str(exc_info.value)
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
-def test_project_bisync_with_resync_flag(
-    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
-):
-    """Test bisync with --resync flag for first time."""
-    mock_is_installed.return_value = True
-    mock_bisync_init.return_value = False  # Not initialized
-    mock_supports_flag.return_value = True  # Mock version check
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_bisync_with_resync_flag(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
+    result = project_bisync(
+        project,
+        "my-bucket",
+        resync=True,
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 64, 2),
+        filter_path=filter_path,
+        state_path=state_path,
+        is_initialized=lambda _name: False,
     )
 
-    result = project_bisync(project, "my-bucket", resync=True)
-
     assert result is True
-    cmd = mock_run.call_args[0][0]
+    cmd, _ = runner.calls[0]
     assert "--resync" in cmd
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
-def test_project_bisync_dry_run_skips_init_check(
-    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
-):
-    """Test that dry-run skips initialization check."""
-    mock_is_installed.return_value = True
-    mock_bisync_init.return_value = False  # Not initialized
-    mock_supports_flag.return_value = True  # Mock version check
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_bisync_dry_run_skips_init_check(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
+    result = project_bisync(
+        project,
+        "my-bucket",
+        dry_run=True,
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 64, 2),
+        filter_path=filter_path,
+        state_path=state_path,
+        is_initialized=lambda _name: False,
     )
 
-    # Should not raise error even though not initialized
-    result = project_bisync(project, "my-bucket", dry_run=True)
-
     assert result is True
-    cmd = mock_run.call_args[0][0]
+    cmd, _ = runner.calls[0]
     assert "--dry-run" in cmd
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_project_bisync_no_local_path(mock_is_installed):
-    """Test project bisync raises error when local_sync_path not configured."""
-    mock_is_installed.return_value = True
+def test_project_bisync_no_local_path():
     project = SyncProject(name="research", path="app/data/research")
-
     with pytest.raises(RcloneError) as exc_info:
-        project_bisync(project, "my-bucket")
-
+        project_bisync(project, "my-bucket", is_installed=lambda: True)
     assert "no local_sync_path configured" in str(exc_info.value)
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_check_success(mock_run, mock_is_installed):
-    """Test successful project check."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_bisync_checks_rclone_installed(tmp_path):
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
+    with pytest.raises(RcloneError) as exc_info:
+        project_bisync(
+            project,
+            "my-bucket",
+            is_installed=lambda: False,
+            filter_path=_write_filter_file(tmp_path),
+            state_path=tmp_path / "state",
+            is_initialized=lambda _name: True,
+        )
+    assert "rclone is not installed" in str(exc_info.value)
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
+
+def test_project_bisync_includes_empty_dirs_flag_when_supported(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
+
+    project_bisync(
+        project,
+        "my-bucket",
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 64, 2),
+        filter_path=filter_path,
+        state_path=state_path,
+        is_initialized=lambda _name: True,
     )
 
-    result = project_check(project, "my-bucket")
+    cmd, _ = runner.calls[0]
+    assert "--create-empty-src-dirs" in cmd
 
+
+def test_project_bisync_excludes_empty_dirs_flag_when_not_supported(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
+
+    project_bisync(
+        project,
+        "my-bucket",
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 60, 1),
+        filter_path=filter_path,
+        state_path=state_path,
+        is_initialized=lambda _name: True,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--create-empty-src-dirs" not in cmd
+
+
+def test_project_check_success(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
+
+    result = project_check(project, "my-bucket", run=runner, is_installed=lambda: True, filter_path=filter_path)
     assert result is True
-    cmd = mock_run.call_args[0][0]
-    assert cmd[0] == "rclone"
-    assert cmd[1] == "check"
+    cmd, kwargs = runner.calls[0]
+    assert cmd[:2] == ["rclone", "check"]
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_check_with_one_way(mock_run, mock_is_installed):
-    """Test project check with one-way flag."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0)
+def test_project_check_with_one_way(tmp_path):
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
 
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
+    project_check(
+        project,
+        "my-bucket",
+        one_way=True,
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
     )
 
-    project_check(project, "my-bucket", one_way=True)
-
-    cmd = mock_run.call_args[0][0]
+    cmd, _ = runner.calls[0]
     assert "--one-way" in cmd
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_project_check_no_local_path(mock_is_installed):
-    """Test project check raises error when local_sync_path not configured."""
-    mock_is_installed.return_value = True
-    project = SyncProject(name="research", path="app/data/research")
-
+def test_project_check_checks_rclone_installed():
+    project = SyncProject(name="research", path="app/data/research", local_sync_path="/tmp/research")
     with pytest.raises(RcloneError) as exc_info:
-        project_check(project, "my-bucket")
+        project_check(project, "my-bucket", is_installed=lambda: False)
+    assert "rclone is not installed" in str(exc_info.value)
 
-    assert "no local_sync_path configured" in str(exc_info.value)
 
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_ls_success(mock_run, mock_is_installed):
-    """Test successful project ls."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0, stdout="file1.md\nfile2.md\nsubdir/file3.md\n")
-
+def test_project_ls_success():
+    runner = _Runner(returncode=0, stdout="file1.md\nfile2.md\nsubdir/file3.md\n")
     project = SyncProject(name="research", path="app/data/research")
-
-    files = project_ls(project, "my-bucket")
-
-    assert len(files) == 3
-    assert "file1.md" in files
-    assert "file2.md" in files
-    assert "subdir/file3.md" in files
+    files = project_ls(project, "my-bucket", run=runner, is_installed=lambda: True)
+    assert files == ["file1.md", "file2.md", "subdir/file3.md"]
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_project_ls_with_subpath(mock_run, mock_is_installed):
-    """Test project ls with subdirectory."""
-    mock_is_installed.return_value = True
-    mock_run.return_value = MagicMock(returncode=0, stdout="")
+def test_project_ls_with_subpath():
+    runner = _Runner(returncode=0, stdout="")
+    project = SyncProject(name="research", path="/research")
+    project_ls(project, "my-bucket", path="subdir", run=runner, is_installed=lambda: True)
 
-    project = SyncProject(name="research", path="/research")  # Normalized path
-
-    project_ls(project, "my-bucket", path="subdir")
-
-    cmd = mock_run.call_args[0][0]
+    cmd, kwargs = runner.calls[0]
     assert cmd[-1] == "basic-memory-cloud:my-bucket/research/subdir"
+    assert kwargs["check"] is True
 
 
-# Tests for rclone installation check
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_check_rclone_installed_success(mock_is_installed):
-    """Test check_rclone_installed when rclone is installed."""
-    mock_is_installed.return_value = True
-
-    # Should not raise any error
-    check_rclone_installed()
-
-    mock_is_installed.assert_called_once()
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_check_rclone_installed_not_found(mock_is_installed):
-    """Test check_rclone_installed raises error when rclone not installed."""
-    mock_is_installed.return_value = False
-
+def test_project_ls_checks_rclone_installed():
+    project = SyncProject(name="research", path="app/data/research")
     with pytest.raises(RcloneError) as exc_info:
-        check_rclone_installed()
+        project_ls(project, "my-bucket", is_installed=lambda: False)
+    assert "rclone is not installed" in str(exc_info.value)
+
+
+def test_check_rclone_installed_success():
+    check_rclone_installed(is_installed=lambda: True)
+
+
+def test_check_rclone_installed_not_found():
+    with pytest.raises(RcloneError) as exc_info:
+        check_rclone_installed(is_installed=lambda: False)
 
     error_msg = str(exc_info.value)
     assert "rclone is not installed" in error_msg
     assert "bm cloud setup" in error_msg
     assert "https://rclone.org/downloads/" in error_msg
-    mock_is_installed.assert_called_once()
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_project_sync_checks_rclone_installed(mock_is_installed):
-    """Test project_sync checks rclone is installed before running."""
-    mock_is_installed.return_value = False
-
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
-
-    with pytest.raises(RcloneError) as exc_info:
-        project_sync(project, "my-bucket")
-
-    assert "rclone is not installed" in str(exc_info.value)
-    mock_is_installed.assert_called_once()
+def test_get_rclone_version_parses_standard_version():
+    get_rclone_version.cache_clear()
+    runner = _Runner(stdout="rclone v1.64.2\n- os/version: darwin 23.0.0\n- os/arch: arm64\n")
+    assert get_rclone_version(run=runner) == (1, 64, 2)
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-def test_project_bisync_checks_rclone_installed(mock_bisync_init, mock_is_installed):
-    """Test project_bisync checks rclone is installed before running."""
-    mock_is_installed.return_value = False
-    mock_bisync_init.return_value = True
-
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
-
-    with pytest.raises(RcloneError) as exc_info:
-        project_bisync(project, "my-bucket")
-
-    assert "rclone is not installed" in str(exc_info.value)
-    mock_is_installed.assert_called_once()
+def test_get_rclone_version_parses_dev_version():
+    get_rclone_version.cache_clear()
+    runner = _Runner(stdout="rclone v1.60.1-DEV\n- os/version: linux 5.15.0\n")
+    assert get_rclone_version(run=runner) == (1, 60, 1)
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_project_check_checks_rclone_installed(mock_is_installed):
-    """Test project_check checks rclone is installed before running."""
-    mock_is_installed.return_value = False
-
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
-
-    with pytest.raises(RcloneError) as exc_info:
-        project_check(project, "my-bucket")
-
-    assert "rclone is not installed" in str(exc_info.value)
-    mock_is_installed.assert_called_once()
+def test_get_rclone_version_handles_invalid_output():
+    get_rclone_version.cache_clear()
+    runner = _Runner(stdout="not a valid version string")
+    assert get_rclone_version(run=runner) is None
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-def test_project_ls_checks_rclone_installed(mock_is_installed):
-    """Test project_ls checks rclone is installed before running."""
-    mock_is_installed.return_value = False
-
-    project = SyncProject(name="research", path="app/data/research")
-
-    with pytest.raises(RcloneError) as exc_info:
-        project_ls(project, "my-bucket")
-
-    assert "rclone is not installed" in str(exc_info.value)
-    mock_is_installed.assert_called_once()
-
-
-# Tests for rclone version detection
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_get_rclone_version_parses_standard_version(mock_run):
-    """Test parsing standard rclone version output."""
-    # Clear the lru_cache before test
+def test_get_rclone_version_handles_exception():
     get_rclone_version.cache_clear()
 
-    mock_run.return_value = MagicMock(
-        stdout="rclone v1.64.2\n- os/version: darwin 23.0.0\n- os/arch: arm64\n"
-    )
+    def bad_run(_cmd, **_kwargs):
+        raise Exception("Command failed")
 
-    version = get_rclone_version()
-
-    assert version == (1, 64, 2)
-    mock_run.assert_called_once()
+    assert get_rclone_version(run=bad_run) is None
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_get_rclone_version_parses_dev_version(mock_run):
-    """Test parsing rclone dev version output like v1.60.1-DEV."""
-    get_rclone_version.cache_clear()
-
-    mock_run.return_value = MagicMock(stdout="rclone v1.60.1-DEV\n- os/version: linux 5.15.0\n")
-
-    version = get_rclone_version()
-
-    assert version == (1, 60, 1)
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_get_rclone_version_handles_invalid_output(mock_run):
-    """Test handling of invalid rclone version output."""
-    get_rclone_version.cache_clear()
-
-    mock_run.return_value = MagicMock(stdout="not a valid version string")
-
-    version = get_rclone_version()
-
-    assert version is None
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_get_rclone_version_handles_exception(mock_run):
-    """Test handling of subprocess exception."""
-    get_rclone_version.cache_clear()
-
-    mock_run.side_effect = Exception("Command failed")
-
-    version = get_rclone_version()
-
-    assert version is None
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-def test_get_rclone_version_handles_timeout(mock_run):
-    """Test handling of subprocess timeout."""
+def test_get_rclone_version_handles_timeout():
     get_rclone_version.cache_clear()
     from subprocess import TimeoutExpired
 
-    mock_run.side_effect = TimeoutExpired(cmd="rclone version", timeout=10)
+    def bad_run(_cmd, **_kwargs):
+        raise TimeoutExpired(cmd="rclone version", timeout=10)
 
-    version = get_rclone_version()
-
-    assert version is None
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
-def test_supports_create_empty_src_dirs_true_for_new_version(mock_get_version):
-    """Test supports_create_empty_src_dirs returns True for v1.64+."""
-    mock_get_version.return_value = (1, 64, 2)
-
-    assert supports_create_empty_src_dirs() is True
+    assert get_rclone_version(run=bad_run) is None
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
-def test_supports_create_empty_src_dirs_true_for_exact_min_version(mock_get_version):
-    """Test supports_create_empty_src_dirs returns True for exactly v1.64.0."""
-    mock_get_version.return_value = (1, 64, 0)
-
-    assert supports_create_empty_src_dirs() is True
+def test_supports_create_empty_src_dirs_true_for_new_version():
+    assert supports_create_empty_src_dirs((1, 64, 2)) is True
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
-def test_supports_create_empty_src_dirs_false_for_old_version(mock_get_version):
-    """Test supports_create_empty_src_dirs returns False for v1.60."""
-    mock_get_version.return_value = (1, 60, 1)
-
-    assert supports_create_empty_src_dirs() is False
+def test_supports_create_empty_src_dirs_true_for_exact_min_version():
+    assert supports_create_empty_src_dirs((1, 64, 0)) is True
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.get_rclone_version")
-def test_supports_create_empty_src_dirs_false_for_unknown_version(mock_get_version):
-    """Test supports_create_empty_src_dirs returns False when version unknown."""
-    mock_get_version.return_value = None
+def test_supports_create_empty_src_dirs_false_for_old_version():
+    assert supports_create_empty_src_dirs((1, 60, 1)) is False
 
-    assert supports_create_empty_src_dirs() is False
+
+def test_supports_create_empty_src_dirs_false_for_unknown_version():
+    assert supports_create_empty_src_dirs(None) is False
 
 
 def test_min_rclone_version_constant():
-    """Test MIN_RCLONE_VERSION_EMPTY_DIRS constant is set correctly."""
     assert MIN_RCLONE_VERSION_EMPTY_DIRS == (1, 64, 0)
 
 
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
-def test_project_bisync_includes_empty_dirs_flag_when_supported(
-    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
-):
-    """Test project_bisync includes --create-empty-src-dirs when supported."""
-    mock_is_installed.return_value = True
-    mock_bisync_init.return_value = True
-    mock_supports_flag.return_value = True
-    mock_run.return_value = MagicMock(returncode=0)
-
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
-
-    project_bisync(project, "my-bucket")
-
-    cmd = mock_run.call_args[0][0]
-    assert "--create-empty-src-dirs" in cmd
-
-
-@patch("basic_memory.cli.commands.cloud.rclone_commands.is_rclone_installed")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.subprocess.run")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.bisync_initialized")
-@patch("basic_memory.cli.commands.cloud.rclone_commands.supports_create_empty_src_dirs")
-def test_project_bisync_excludes_empty_dirs_flag_when_not_supported(
-    mock_supports_flag, mock_bisync_init, mock_run, mock_is_installed
-):
-    """Test project_bisync excludes --create-empty-src-dirs for older rclone."""
-    mock_is_installed.return_value = True
-    mock_bisync_init.return_value = True
-    mock_supports_flag.return_value = False  # Old rclone version
-    mock_run.return_value = MagicMock(returncode=0)
-
-    project = SyncProject(
-        name="research",
-        path="app/data/research",
-        local_sync_path="/tmp/research",
-    )
-
-    project_bisync(project, "my-bucket")
-
-    cmd = mock_run.call_args[0][0]
-    assert "--create-empty-src-dirs" not in cmd

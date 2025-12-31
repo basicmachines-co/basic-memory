@@ -657,19 +657,18 @@ class TestSearchTermPreparation:
     @pytest.mark.asyncio
     async def test_fts5_error_handling_database_error(self, search_repository):
         """Test that non-FTS5 database errors are properly re-raised."""
-        import unittest.mock
+        # Force a real database error (not an FTS5 syntax error) by removing the search index.
+        # The repository should re-raise the error rather than returning an empty list.
+        async with db.scoped_session(search_repository.session_maker) as session:
+            await session.execute(text("DROP TABLE IF EXISTS search_index"))
+            await session.commit()
 
-        # Mock the scoped_session to raise a non-FTS5 error
-        with unittest.mock.patch("basic_memory.db.scoped_session") as mock_scoped_session:
-            mock_session = unittest.mock.AsyncMock()
-            mock_scoped_session.return_value.__aenter__.return_value = mock_session
-
-            # Simulate a database error that's NOT an FTS5 syntax error
-            mock_session.execute.side_effect = Exception("Database connection failed")
-
-            # This should re-raise the exception (not return empty list)
-            with pytest.raises(Exception, match="Database connection failed"):
+        try:
+            with pytest.raises(Exception):
                 await search_repository.search(search_text="test")
+        finally:
+            # Restore index so later tests in this module keep working.
+            await search_repository.init_search_index()
 
     @pytest.mark.asyncio
     async def test_version_string_search_integration(self, search_repository, search_entity):

@@ -518,7 +518,6 @@ async def test_extract_entity_tags_no_tags_key(search_service, session_maker):
 async def test_search_by_frontmatter_tags(search_service, session_maker, test_project):
     """Test that entities can be found by searching for their frontmatter tags."""
     from basic_memory.repository import EntityRepository
-    from unittest.mock import AsyncMock
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
@@ -539,10 +538,7 @@ async def test_search_by_frontmatter_tags(search_service, session_maker, test_pr
 
     entity = await entity_repo.create(entity_data)
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Search for entities by tag
     results = await search_service.search(SearchQuery(text="business"))
@@ -574,7 +570,6 @@ async def test_search_by_frontmatter_tags_string_format(
 ):
     """Test that entities with string format tags can be found in search."""
     from basic_memory.repository import EntityRepository
-    from unittest.mock import AsyncMock
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
@@ -595,10 +590,7 @@ async def test_search_by_frontmatter_tags_string_format(
 
     entity = await entity_repo.create(entity_data)
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Search for entities by tag
     results = await search_service.search(SearchQuery(text="documentation"))
@@ -617,7 +609,6 @@ async def test_search_by_frontmatter_tags_string_format(
 async def test_search_special_characters_in_title(search_service, session_maker, test_project):
     """Test that entities with special characters in titles can be searched without FTS5 syntax errors."""
     from basic_memory.repository import EntityRepository
-    from unittest.mock import AsyncMock
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
@@ -653,12 +644,9 @@ async def test_search_special_characters_in_title(search_service, session_maker,
         entity = await entity_repo.create(entity_data)
         entities.append(entity)
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
     # Index all entities
     for entity in entities:
-        await search_service.index_entity(entity)
+        await search_service.index_entity(entity, content="")
 
     # Test searching for each title - this should not cause FTS5 syntax errors
     for title in special_titles:
@@ -678,7 +666,6 @@ async def test_search_special_characters_in_title(search_service, session_maker,
 async def test_search_title_with_parentheses_specific(search_service, session_maker, test_project):
     """Test searching specifically for title with parentheses to reproduce FTS5 error."""
     from basic_memory.repository import EntityRepository
-    from unittest.mock import AsyncMock
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
@@ -699,11 +686,8 @@ async def test_search_title_with_parentheses_specific(search_service, session_ma
 
     entity = await entity_repo.create(entity_data)
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
     # Index the entity
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Test searching for the title - this should not cause FTS5 syntax errors
     search_query = SearchQuery(title="Note (with parentheses)")
@@ -718,7 +702,6 @@ async def test_search_title_with_parentheses_specific(search_service, session_ma
 async def test_search_title_via_repository_direct(search_service, session_maker, test_project):
     """Test searching via search repository directly to isolate the FTS5 error."""
     from basic_memory.repository import EntityRepository
-    from unittest.mock import AsyncMock
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
@@ -739,11 +722,8 @@ async def test_search_title_via_repository_direct(search_service, session_maker,
 
     entity = await entity_repo.create(entity_data)
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
     # Index the entity
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Test searching via repository directly - this reproduces the error path
     results = await search_service.repository.search(
@@ -770,7 +750,6 @@ async def test_index_entity_with_duplicate_observations(
     which would violate the unique constraint on the search_index table.
     """
     from basic_memory.repository import EntityRepository, ObservationRepository
-    from unittest.mock import AsyncMock
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
@@ -807,11 +786,8 @@ async def test_index_entity_with_duplicate_observations(
     assert len(entity.observations) == 2
     assert entity.observations[0].permalink == entity.observations[1].permalink
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
     # This should not raise a unique constraint violation
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Verify entity is searchable
     results = await search_service.search(SearchQuery(text="Duplicate Observations"))
@@ -829,7 +805,6 @@ async def test_index_entity_dedupes_observations_by_permalink(
     should be indexed to avoid unique constraint violations.
     """
     from basic_memory.repository import EntityRepository, ObservationRepository
-    from unittest.mock import AsyncMock
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
@@ -866,11 +841,8 @@ async def test_index_entity_dedupes_observations_by_permalink(
     entity = await entity_repo.get_by_permalink("test/dedupe-test")
     assert len(entity.observations) == 3
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
     # Index the entity
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Search for the unique observation - should find it
     results = await search_service.search(SearchQuery(text="Unique observation"))
@@ -891,7 +863,6 @@ async def test_index_entity_multiple_categories_same_content(
     but same content should have different permalinks and both be indexed.
     """
     from basic_memory.repository import EntityRepository, ObservationRepository
-    from unittest.mock import AsyncMock
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
@@ -925,11 +896,8 @@ async def test_index_entity_multiple_categories_same_content(
     permalinks = {obs.permalink for obs in entity.observations}
     assert len(permalinks) == 2  # Should be 2 unique permalinks
 
-    # Mock file service to avoid file I/O
-    search_service.file_service.read_entity_content = AsyncMock(return_value="")
-
     # Index the entity - both should be indexed since permalinks differ
-    await search_service.index_entity(entity)
+    await search_service.index_entity(entity, content="")
 
     # Search for the shared content - should find both observations
     results = await search_service.search(SearchQuery(text="Shared content"))

@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
 
 import pytest
 from typer.testing import CliRunner
@@ -44,28 +44,39 @@ def mock_config(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def mock_api_client():
-    """Mock the API client for project add."""
-    with patch("basic_memory.cli.commands.project.get_client"):
-        # Mock call_post to return a proper response
-        mock_response = AsyncMock()
-        mock_response.json = lambda: {
-            "message": "Project 'test-project' added successfully",
-            "status": "success",
-            "default": False,
-            "old_project": None,
-            "new_project": {
-                "id": 1,
-                "name": "test-project",
-                "path": "/test-project",
-                "is_default": False,
-            },
-        }
+def mock_api_client(monkeypatch):
+    """Stub the API client for project add without stdlib mocks."""
+    import basic_memory.cli.commands.project as project_cmd
 
-        with patch(
-            "basic_memory.cli.commands.project.call_post", return_value=mock_response
-        ) as mock_post:
-            yield mock_post
+    @asynccontextmanager
+    async def fake_get_client():
+        yield object()
+
+    class _Resp:
+        def json(self):
+            return {
+                "message": "Project 'test-project' added successfully",
+                "status": "success",
+                "default": False,
+                "old_project": None,
+                "new_project": {
+                    "id": 1,
+                    "name": "test-project",
+                    "path": "/test-project",
+                    "is_default": False,
+                },
+            }
+
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_call_post(client, path: str, json: dict, **kwargs):
+        calls.append((path, json))
+        return _Resp()
+
+    monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
+    monkeypatch.setattr(project_cmd, "call_post", fake_call_post)
+
+    return calls
 
 
 def test_project_add_with_local_path_saves_to_config(

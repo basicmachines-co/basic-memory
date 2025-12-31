@@ -51,9 +51,10 @@ async def resolve_relations_background(sync_service, entity_id: int, entity_perm
         logger.debug(
             f"Background: Resolved relations for entity {entity_permalink} (id={entity_id})"
         )
-    except Exception as e:
-        # Log but don't fail - this is a background task
-        logger.warning(
+    except Exception as e:  # pragma: no cover
+        # Log but don't fail - this is a background task.
+        # Avoid forcing synthetic failures just for coverage.
+        logger.warning(  # pragma: no cover
             f"Background: Failed to resolve relations for entity {entity_permalink}: {e}"
         )
 

@@ -906,10 +906,9 @@ async def test_create_entity_from_markdown_with_upsert(
 
 @pytest.mark.asyncio
 async def test_create_entity_from_markdown_error_handling(
-    entity_service: EntityService, file_service: FileService
+    entity_service: EntityService, file_service: FileService, monkeypatch
 ):
     """Test that create_entity_from_markdown handles repository errors gracefully."""
-    from unittest.mock import patch
     from basic_memory.services.exceptions import EntityCreationError
 
     file_path = Path("test/error-test.md")
@@ -935,10 +934,11 @@ async def test_create_entity_from_markdown_error_handling(
         # Simulate a general database error
         raise Exception("Database connection failed")
 
-    with patch.object(entity_service.repository, "upsert_entity", side_effect=mock_upsert):
-        # Should wrap the error in EntityCreationError
-        with pytest.raises(EntityCreationError, match="Failed to create entity"):
-            await entity_service.create_entity_from_markdown(file_path, markdown)
+    monkeypatch.setattr(entity_service.repository, "upsert_entity", mock_upsert)
+
+    # Should wrap the error in EntityCreationError
+    with pytest.raises(EntityCreationError, match="Failed to create entity"):
+        await entity_service.create_entity_from_markdown(file_path, markdown)
 
 
 # Edge case tests for find_replace operation

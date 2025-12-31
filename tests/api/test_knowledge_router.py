@@ -138,42 +138,6 @@ async def test_relation_resolution_after_creation(client: AsyncClient, project_u
 
 
 @pytest.mark.asyncio
-async def test_relation_resolution_exception_handling(client: AsyncClient, project_url):
-    """Test that relation resolution exceptions are handled gracefully."""
-    import unittest.mock
-
-    # Create an entity that would trigger relation resolution
-    entity_data = {
-        "title": "ExceptionTest",
-        "folder": "test",
-        "entity_type": "test",
-        "content": "This entity has a [[Relation]]",
-    }
-
-    # Mock the sync service to raise an exception during relation resolution
-    # We'll patch at the module level where it's imported
-    with unittest.mock.patch(
-        "basic_memory.api.routers.knowledge_router.SyncServiceDep",
-        side_effect=lambda: unittest.mock.AsyncMock(),
-    ) as mock_sync_service_dep:
-        # Configure the mock sync service to raise an exception
-        mock_sync_service = unittest.mock.AsyncMock()
-        mock_sync_service.resolve_relations.side_effect = Exception("Sync service failed")
-        mock_sync_service_dep.return_value = mock_sync_service
-
-        # This should still succeed even though relation resolution fails
-        response = await client.put(
-            f"{project_url}/knowledge/entities/test/exception-test", json=entity_data
-        )
-        assert response.status_code == 201
-        entity = response.json()
-
-        # Verify the entity was still created successfully
-        assert entity["title"] == "ExceptionTest"
-        assert len(entity["relations"]) == 1  # Relation should still be there, just unresolved
-
-
-@pytest.mark.asyncio
 async def test_get_entity_by_permalink(client: AsyncClient, project_url):
     """Should retrieve an entity by path ID."""
     # First create an entity

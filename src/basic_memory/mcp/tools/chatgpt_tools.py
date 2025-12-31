@@ -56,7 +56,7 @@ def _format_document_for_chatgpt(
         title = "Untitled Document"
 
     # Handle error cases
-    if isinstance(content, str) and content.startswith("# Note Not Found"):
+    if isinstance(content, str) and content.lstrip().startswith("# Note Not Found"):
         return {
             "id": identifier,
             "title": title or "Document Not Found",

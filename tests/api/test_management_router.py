@@ -1,6 +1,10 @@
-"""Tests for management router API endpoints."""
+"""Tests for management router API endpoints (minimal mocking).
 
-from unittest.mock import AsyncMock, MagicMock, patch
+These endpoints are mostly simple state checks and wiring; we use stub objects
+and pytest monkeypatch instead of standard-library mocks.
+"""
+
+from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI
@@ -13,199 +17,107 @@ from basic_memory.api.routers.management_router import (
 )
 
 
-class MockRequest:
-    """Mock FastAPI request with app state."""
-
-    def __init__(self, app):
+class _Request:
+    def __init__(self, app: FastAPI):
         self.app = app
 
 
+class _Task:
+    def __init__(self, *, done: bool):
+        self._done = done
+        self.cancel_called = False
+
+    def done(self) -> bool:
+        return self._done
+
+    def cancel(self) -> None:
+        self.cancel_called = True
+
+
 @pytest.fixture
-def mock_app():
-    """Create a mock FastAPI app with state."""
-    app = MagicMock(spec=FastAPI)
-    app.state = MagicMock()
+def app_with_state() -> FastAPI:
+    app = FastAPI()
     app.state.watch_task = None
     return app
 
 
 @pytest.mark.asyncio
-async def test_get_watch_status_not_running(mock_app):
-    """Test getting watch status when watch service is not running."""
-    # Set up app state
-    mock_app.state.watch_task = None
-
-    # Create mock request
-    mock_request = MockRequest(mock_app)
-
-    # Call endpoint directly
-    response = await get_watch_status(mock_request)
-
-    # Verify response
-    assert isinstance(response, WatchStatusResponse)
-    assert response.running is False
+async def test_get_watch_status_not_running(app_with_state: FastAPI):
+    app_with_state.state.watch_task = None
+    resp = await get_watch_status(_Request(app_with_state))
+    assert isinstance(resp, WatchStatusResponse)
+    assert resp.running is False
 
 
 @pytest.mark.asyncio
-async def test_get_watch_status_running(mock_app):
-    """Test getting watch status when watch service is running."""
-    # Create a mock task that is running
-    mock_task = MagicMock()
-    mock_task.done.return_value = False
-
-    # Set up app state
-    mock_app.state.watch_task = mock_task
-
-    # Create mock request
-    mock_request = MockRequest(mock_app)
-
-    # Call endpoint directly
-    response = await get_watch_status(mock_request)
-
-    # Verify response
-    assert isinstance(response, WatchStatusResponse)
-    assert response.running is True
-
-
-@pytest.fixture
-def mock_sync_service():
-    """Create a mock SyncService."""
-    mock_service = AsyncMock()
-    mock_service.entity_service = MagicMock()
-    mock_service.entity_service.file_service = MagicMock()
-    return mock_service
-
-
-@pytest.fixture
-def mock_project_repository():
-    """Create a mock ProjectRepository."""
-    mock_repository = AsyncMock()
-    return mock_repository
+async def test_get_watch_status_running(app_with_state: FastAPI):
+    app_with_state.state.watch_task = _Task(done=False)
+    resp = await get_watch_status(_Request(app_with_state))
+    assert resp.running is True
 
 
 @pytest.mark.asyncio
-async def test_start_watch_service_when_not_running(
-    mock_app, mock_sync_service, mock_project_repository
-):
-    """Test starting watch service when it's not running."""
-    # Set up app state
-    mock_app.state.watch_task = None
+async def test_start_watch_service_when_not_running(monkeypatch, app_with_state: FastAPI):
+    app_with_state.state.watch_task = None
 
-    # Create mock request
-    mock_request = MockRequest(mock_app)
+    created = {"watch_service": None, "task": None}
 
-    # Mock the create_background_sync_task function
-    with (
-        patch("basic_memory.sync.WatchService") as mock_watch_service_class,
-        patch("basic_memory.sync.background_sync.create_background_sync_task") as mock_create_task,
-    ):
-        # Create a mock task
-        mock_task = MagicMock()
-        mock_task.done.return_value = False
-        mock_create_task.return_value = mock_task
+    class _StubWatchService:
+        def __init__(self, *, app_config, project_repository):
+            self.app_config = app_config
+            self.project_repository = project_repository
+            created["watch_service"] = self
 
-        # Setup mock watch service
-        mock_watch_service = MagicMock()
-        mock_watch_service_class.return_value = mock_watch_service
+    def _create_background_sync_task(sync_service, watch_service):
+        created["task"] = _Task(done=False)
+        return created["task"]
 
-        # Call endpoint directly
-        response = await start_watch_service(
-            mock_request, mock_project_repository, mock_sync_service
-        )  # pyright: ignore [reportCallIssue]
+    # start_watch_service imports these inside the function, so patch at the source modules.
+    monkeypatch.setattr("basic_memory.sync.WatchService", _StubWatchService)
+    monkeypatch.setattr(
+        "basic_memory.sync.background_sync.create_background_sync_task",
+        _create_background_sync_task,
+    )
 
-        # Verify response
-        assert isinstance(response, WatchStatusResponse)
-        assert response.running is True
+    project_repository = object()
+    sync_service = object()
 
-        # Verify that the task was created
-        assert mock_create_task.called
+    resp = await start_watch_service(_Request(app_with_state), project_repository, sync_service)
+    assert resp.running is True
+    assert app_with_state.state.watch_task is created["task"]
+    assert created["watch_service"] is not None
+    assert created["watch_service"].project_repository is project_repository
 
 
 @pytest.mark.asyncio
-async def test_start_watch_service_already_running(
-    mock_app, mock_sync_service, mock_project_repository
-):
-    """Test starting watch service when it's already running."""
-    # Create a mock task that reports as running
-    mock_task = MagicMock()
-    mock_task.done.return_value = False
+async def test_start_watch_service_already_running(monkeypatch, app_with_state: FastAPI):
+    existing = _Task(done=False)
+    app_with_state.state.watch_task = existing
 
-    # Set up app state with a "running" task
-    mock_app.state.watch_task = mock_task
+    def _should_not_be_called(*_args, **_kwargs):
+        raise AssertionError("create_background_sync_task should not be called if already running")
 
-    # Create mock request
-    mock_request = MockRequest(mock_app)
+    monkeypatch.setattr(
+        "basic_memory.sync.background_sync.create_background_sync_task",
+        _should_not_be_called,
+    )
 
-    with patch("basic_memory.sync.background_sync.create_background_sync_task") as mock_create_task:
-        # Call endpoint directly
-        response = await start_watch_service(
-            mock_request, mock_project_repository, mock_sync_service
-        )
-
-        # Verify response
-        assert isinstance(response, WatchStatusResponse)
-        assert response.running is True
-
-        # Verify that no new task was created
-        assert not mock_create_task.called
-
-        # Verify app state was not changed
-        assert mock_app.state.watch_task is mock_task
+    resp = await start_watch_service(_Request(app_with_state), object(), object())
+    assert resp.running is True
+    assert app_with_state.state.watch_task is existing
 
 
 @pytest.mark.asyncio
-async def test_stop_watch_service_when_running():
-    """Test stopping the watch service when it's running.
-
-    This test directly tests parts of the code without actually awaiting the task.
-    """
-    from basic_memory.api.routers.management_router import WatchStatusResponse
-
-    # Create a response object directly
-    response = WatchStatusResponse(running=False)
-
-    # We're just testing that the response model works correctly
-    assert isinstance(response, WatchStatusResponse)
-    assert response.running is False
-
-    # The actual functionality is simple enough that other tests
-    # indirectly cover the basic behavior, and the error paths
-    # are directly tested in the other test cases
+async def test_stop_watch_service_not_running(app_with_state: FastAPI):
+    app_with_state.state.watch_task = None
+    resp = await stop_watch_service(_Request(app_with_state))
+    assert resp.running is False
 
 
 @pytest.mark.asyncio
-async def test_stop_watch_service_not_running(mock_app):
-    """Test stopping the watch service when it's not running."""
-    # Set up app state with no task
-    mock_app.state.watch_task = None
-
-    # Create mock request
-    mock_request = MockRequest(mock_app)
-
-    # Call endpoint directly
-    response = await stop_watch_service(mock_request)
-
-    # Verify response
-    assert isinstance(response, WatchStatusResponse)
-    assert response.running is False
+async def test_stop_watch_service_already_done(app_with_state: FastAPI):
+    app_with_state.state.watch_task = _Task(done=True)
+    resp = await stop_watch_service(_Request(app_with_state))
+    assert resp.running is False
 
 
-@pytest.mark.asyncio
-async def test_stop_watch_service_already_done(mock_app):
-    """Test stopping the watch service when it's already done."""
-    # Create a mock task that reports as done
-    mock_task = MagicMock()
-    mock_task.done.return_value = True
-
-    # Set up app state
-    mock_app.state.watch_task = mock_task
-
-    # Create mock request
-    mock_request = MockRequest(mock_app)
-
-    # Call endpoint directly
-    response = await stop_watch_service(mock_request)  # pyright: ignore [reportArgumentType]
-
-    # Verify response
-    assert isinstance(response, WatchStatusResponse)
-    assert response.running is False

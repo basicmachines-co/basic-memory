@@ -363,8 +363,6 @@ Test content for rapid moves
 async def test_handle_directory_rename(watch_service, project_config, test_project, sync_service):
     """Test handling directory rename operations - regression test for the bug where directories
     were being processed as files, causing errors."""
-    from unittest.mock import AsyncMock
-
     project_dir = project_config.home
 
     # Create a directory with a file inside
@@ -394,17 +392,21 @@ This is a test file in a directory
         (Change.added, str(new_dir_path)),
     }
 
-    # Create a mocked version of sync_file to track calls
+    # Spy on sync_file calls without using stdlib mocks.
     original_sync_file = sync_service.sync_file
-    mock_sync_file = AsyncMock(side_effect=original_sync_file)
-    sync_service.sync_file = mock_sync_file
+    calls: list[tuple[tuple, dict]] = []
+
+    async def spy_sync_file(*args, **kwargs):
+        calls.append((args, kwargs))
+        return await original_sync_file(*args, **kwargs)
+
+    sync_service.sync_file = spy_sync_file
 
     # Handle changes - this should not throw an exception
     await watch_service.handle_changes(test_project, changes)
 
-    # Check if our mock was called with any directory paths
-    for call in mock_sync_file.call_args_list:
-        args, kwargs = call
+    # Check if sync_file was called with any directory paths
+    for args, kwargs in calls:
         path = args[0]
         full_path = project_dir / path
         assert not full_path.is_dir(), f"sync_file should not be called with directory path: {path}"

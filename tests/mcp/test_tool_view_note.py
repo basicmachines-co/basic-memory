@@ -1,33 +1,10 @@
 """Tests for view_note tool that exercise the full stack with SQLite."""
 
 from textwrap import dedent
-from unittest.mock import MagicMock, patch
 
 import pytest
-import pytest_asyncio
 
 from basic_memory.mcp.tools import write_note, view_note
-from basic_memory.schemas.search import SearchResponse
-
-
-@pytest_asyncio.fixture
-async def mock_call_get():
-    """Mock for call_get to simulate different responses."""
-    with patch("basic_memory.mcp.tools.read_note.call_get") as mock:
-        # Default to 404 - not found
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        mock.return_value = mock_response
-        yield mock
-
-
-@pytest_asyncio.fixture
-async def mock_search():
-    """Mock for search tool."""
-    with patch("basic_memory.mcp.tools.read_note.search_notes.fn") as mock:
-        # Default to empty results
-        mock.return_value = SearchResponse(results=[], current_page=1, page_size=1)
-        yield mock
 
 
 @pytest.mark.asyncio
@@ -251,38 +228,16 @@ async def test_view_note_fallback_identifier_as_title(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_view_note_direct_success(app, test_project, mock_call_get):
-    """Test view_note with successful direct permalink lookup."""
-    # Setup mock for successful response with frontmatter
-    note_content = dedent("""
-        ---
-        title: "Test Note"
-        ---
-        # Test Note
+async def test_view_note_direct_success(app, test_project):
+    """Direct permalink lookup should succeed without mocks via the full integration path."""
+    await write_note.fn(
+        project=test_project.name,
+        title="Test Note",
+        folder="test",
+        content="# Test Note\n\nThis is a test note.",
+    )
 
-        This is a test note.
-    """).strip()
-
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = note_content
-    mock_call_get.return_value = mock_response
-
-    # Mock resolve_entity_id for v2 API
-    with patch("basic_memory.mcp.tools.read_note.resolve_entity_id") as mock_resolve:
-        mock_resolve.return_value = 123
-
-        # Call the function
-        result = await view_note.fn("test/test-note", project=test_project.name)
-
-        # Verify direct lookup was used
-        mock_call_get.assert_called_once()
-        assert (
-            "test/test-note" in mock_call_get.call_args[0][1]
-            or "/resource/123" in mock_call_get.call_args[0][1]
-        )
-
-        # Verify result contains note content
-        assert 'Note retrieved: "test/test-note"' in result
-        assert "Display this note as a markdown artifact for the user" in result
-        assert "This is a test note." in result
+    # This should take the direct permalink path (no title search needed).
+    result = await view_note.fn("test/test-note", project=test_project.name)
+    assert 'Note retrieved: "test/test-note"' in result
+    assert "This is a test note." in result

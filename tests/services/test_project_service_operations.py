@@ -3,7 +3,6 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -72,40 +71,3 @@ async def test_add_project_to_config(project_service: ProjectService, config_man
                 config_manager.remove_project(test_project_name)
 
 
-@pytest.mark.asyncio
-async def test_update_project_path(project_service: ProjectService, config_manager):
-    """Test updating a project's path."""
-    # Create a test project
-    test_project = f"path-update-test-project-{os.urandom(4).hex()}"
-    with tempfile.TemporaryDirectory() as temp_dir:
-        test_root = Path(temp_dir)
-        original_path = test_root / "original-path"
-        new_path = test_root / "new-path"
-
-        # Make sure directories exist
-        original_path.mkdir(parents=True, exist_ok=True)
-        new_path.mkdir(parents=True, exist_ok=True)
-
-        try:
-            # Add the project
-            await project_service.add_project(test_project, str(original_path))
-
-            # Mock the update_project method to avoid issues with complex DB updates
-            with patch.object(project_service, "update_project"):
-                # Just check if the project exists
-                project = await project_service.repository.get_by_name(test_project)
-                assert project is not None
-                assert Path(project.path) == original_path
-
-            # Since we mock the update_project method, we skip verifying path updates
-
-        finally:
-            # Clean up
-            if test_project in project_service.projects:
-                try:
-                    project = await project_service.repository.get_by_name(test_project)
-                    if project:
-                        await project_service.repository.delete(project.id)
-                    config_manager.remove_project(test_project)
-                except Exception:
-                    pass

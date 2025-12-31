@@ -1,276 +1,268 @@
-"""Tests for telemetry module."""
+"""Tests for telemetry module (minimal mocking).
+
+We avoid standard-library mocks and instead use small stub objects + pytest monkeypatch.
+"""
+
+from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from basic_memory.config import BasicMemoryConfig
 
 
+class _StubOpenPanel:
+    def __init__(self, *, client_id: str, client_secret: str, disabled: bool = False):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.disabled = disabled
+        self.global_properties: dict | None = None
+        self.events: list[tuple[str, dict]] = []
+        self.raise_on_track: Exception | None = None
+
+    def set_global_properties(self, props: dict) -> None:
+        self.global_properties = props
+
+    def track(self, event: str, properties: dict) -> None:
+        if self.raise_on_track:
+            raise self.raise_on_track
+        self.events.append((event, properties))
+
+
+class _StubConsole:
+    def __init__(self, *args, **kwargs):
+        self.print_calls: list[tuple[tuple, dict]] = []
+
+    def print(self, *args, **kwargs):
+        self.print_calls.append((args, kwargs))
+
+
 class TestGetInstallId:
-    """Tests for get_install_id function."""
-
     def test_creates_install_id_on_first_call(self, tmp_path, monkeypatch):
-        """Test that a new install ID is created on first call."""
-        # Mock Path.home() to return tmp_path (works cross-platform)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
         from basic_memory.telemetry import get_install_id
 
         install_id = get_install_id()
-
-        # Should be a valid UUID format (36 chars with hyphens)
         assert len(install_id) == 36
         assert install_id.count("-") == 4
 
-        # File should exist
         id_file = tmp_path / ".basic-memory" / ".install_id"
         assert id_file.exists()
         assert id_file.read_text().strip() == install_id
 
     def test_returns_existing_install_id(self, tmp_path, monkeypatch):
-        """Test that existing install ID is returned on subsequent calls."""
-        # Mock Path.home() to return tmp_path (works cross-platform)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        # Create the ID file first
         id_file = tmp_path / ".basic-memory" / ".install_id"
         id_file.parent.mkdir(parents=True, exist_ok=True)
-        existing_id = "test-uuid-12345"
-        id_file.write_text(existing_id)
+        id_file.write_text("test-uuid-12345")
 
         from basic_memory.telemetry import get_install_id
 
-        install_id = get_install_id()
-
-        assert install_id == existing_id
+        assert get_install_id() == "test-uuid-12345"
 
 
 class TestTelemetryConfig:
-    """Tests for telemetry configuration fields."""
-
     def test_telemetry_enabled_defaults_to_true(self, config_home, monkeypatch):
-        """Test that telemetry is enabled by default (Homebrew model)."""
-        # Clear config cache
         import basic_memory.config
 
         basic_memory.config._CONFIG_CACHE = None
-
-        config = BasicMemoryConfig()
-        assert config.telemetry_enabled is True
+        assert BasicMemoryConfig().telemetry_enabled is True
 
     def test_telemetry_notice_shown_defaults_to_false(self, config_home, monkeypatch):
-        """Test that telemetry notice starts as not shown."""
-        # Clear config cache
         import basic_memory.config
 
         basic_memory.config._CONFIG_CACHE = None
-
-        config = BasicMemoryConfig()
-        assert config.telemetry_notice_shown is False
+        assert BasicMemoryConfig().telemetry_notice_shown is False
 
     def test_telemetry_enabled_via_env_var(self, config_home, monkeypatch):
-        """Test that telemetry can be disabled via environment variable."""
         import basic_memory.config
 
         basic_memory.config._CONFIG_CACHE = None
-
         monkeypatch.setenv("BASIC_MEMORY_TELEMETRY_ENABLED", "false")
-
-        config = BasicMemoryConfig()
-        assert config.telemetry_enabled is False
+        assert BasicMemoryConfig().telemetry_enabled is False
 
 
 class TestTrack:
-    """Tests for the track function."""
-
     def test_track_does_not_raise_on_error(self, config_home, monkeypatch):
-        """Test that track never raises exceptions."""
+        import basic_memory.telemetry as telemetry
         import basic_memory.config
-        import basic_memory.telemetry
 
         basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        telemetry.reset_client()
 
-        # Mock OpenPanel to raise an exception
-        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
-            mock_client = MagicMock()
-            mock_client.track.side_effect = Exception("Network error")
-            mock_openpanel.return_value = mock_client
+        # Replace OpenPanel with a stub that raises on track
+        stub_client = _StubOpenPanel(client_id="id", client_secret="sec", disabled=False)
+        stub_client.raise_on_track = Exception("Network error")
 
-            from basic_memory.telemetry import track
+        def openpanel_factory(*, client_id, client_secret, disabled=False):
+            stub_client.client_id = client_id
+            stub_client.client_secret = client_secret
+            stub_client.disabled = disabled
+            return stub_client
 
-            # Should not raise
-            track("test_event", {"key": "value"})
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+
+        # Should not raise
+        telemetry.track("test_event", {"key": "value"})
 
     def test_track_respects_disabled_config(self, config_home, monkeypatch):
-        """Test that track does nothing when telemetry is disabled."""
+        import basic_memory.telemetry as telemetry
         import basic_memory.config
-        import basic_memory.telemetry
 
         basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        telemetry.reset_client()
 
         monkeypatch.setenv("BASIC_MEMORY_TELEMETRY_ENABLED", "false")
 
-        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
-            mock_client = MagicMock()
-            mock_openpanel.return_value = mock_client
+        created: list[_StubOpenPanel] = []
 
-            from basic_memory.telemetry import track, reset_client
+        def openpanel_factory(*, client_id, client_secret, disabled=False):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+            created.append(client)
+            return client
 
-            reset_client()
-            track("test_event")
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
 
-            # OpenPanel should have been initialized with disabled=True
-            mock_openpanel.assert_called_once()
-            call_kwargs = mock_openpanel.call_args[1]
-            assert call_kwargs["disabled"] is True
+        telemetry.track("test_event")
+        assert len(created) == 1
+        assert created[0].disabled is True
 
 
 class TestShowNoticeIfNeeded:
-    """Tests for show_notice_if_needed function."""
+    def test_shows_notice_when_enabled_and_not_shown(self, config_manager, monkeypatch):
+        import basic_memory.telemetry as telemetry
 
-    def test_shows_notice_when_enabled_and_not_shown(self, config_home, tmp_path, monkeypatch):
-        """Test that notice is shown on first run with telemetry enabled."""
-        import basic_memory.config
-        import basic_memory.telemetry
+        telemetry.reset_client()
 
-        # Reset state
-        basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        # Ensure config state: enabled + not yet shown
+        cfg = config_manager.load_config()
+        cfg.telemetry_enabled = True
+        cfg.telemetry_notice_shown = False
+        config_manager.save_config(cfg)
 
-        # Set up config directory
-        config_dir = tmp_path / ".basic-memory"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(config_dir))
+        instances: list[_StubConsole] = []
 
-        # Create config with telemetry enabled but notice not shown
-        from basic_memory.telemetry import show_notice_if_needed
+        def console_factory(*_args, **_kwargs):
+            c = _StubConsole()
+            instances.append(c)
+            return c
 
-        with patch("rich.console.Console") as mock_console_class:
-            mock_console = MagicMock()
-            mock_console_class.return_value = mock_console
+        monkeypatch.setattr("rich.console.Console", console_factory)
 
-            show_notice_if_needed()
+        telemetry.show_notice_if_needed()
 
-            # Console should have been called to print the notice
-            mock_console.print.assert_called_once()
+        assert len(instances) == 1
+        assert len(instances[0].print_calls) == 1
 
-    def test_does_not_show_notice_when_disabled(self, config_home, tmp_path, monkeypatch):
-        """Test that notice is not shown when telemetry is disabled."""
-        import basic_memory.config
-        import basic_memory.telemetry
+        cfg2 = config_manager.load_config()
+        assert cfg2.telemetry_notice_shown is True
 
-        # Reset state
-        basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+    def test_does_not_show_notice_when_disabled(self, config_manager, monkeypatch):
+        import basic_memory.telemetry as telemetry
 
-        monkeypatch.setenv("BASIC_MEMORY_TELEMETRY_ENABLED", "false")
+        telemetry.reset_client()
 
-        config_dir = tmp_path / ".basic-memory"
-        config_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(config_dir))
+        cfg = config_manager.load_config()
+        cfg.telemetry_enabled = False
+        cfg.telemetry_notice_shown = False
+        config_manager.save_config(cfg)
 
-        from basic_memory.telemetry import show_notice_if_needed
+        def console_factory(*_args, **_kwargs):
+            raise AssertionError("Console should not be constructed when telemetry is disabled")
 
-        with patch("rich.console.Console") as mock_console_class:
-            show_notice_if_needed()
+        monkeypatch.setattr("rich.console.Console", console_factory)
 
-            # Console should not have been instantiated
-            mock_console_class.assert_not_called()
+        telemetry.show_notice_if_needed()
 
 
 class TestConvenienceFunctions:
-    """Tests for convenience tracking functions."""
-
     def test_track_app_started(self, config_home, monkeypatch):
-        """Test track_app_started function."""
+        import basic_memory.telemetry as telemetry
         import basic_memory.config
-        import basic_memory.telemetry
 
         basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        telemetry.reset_client()
 
-        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
-            mock_client = MagicMock()
-            mock_openpanel.return_value = mock_client
+        created: list[_StubOpenPanel] = []
 
-            from basic_memory.telemetry import track_app_started
+        def openpanel_factory(*, client_id, client_secret, disabled=False):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+            created.append(client)
+            return client
 
-            track_app_started("cli")
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
 
-            mock_client.track.assert_called_once_with("app_started", {"mode": "cli"})
+        telemetry.track_app_started("cli")
+        assert created
+        assert created[0].events[-1] == ("app_started", {"mode": "cli"})
 
     def test_track_mcp_tool(self, config_home, monkeypatch):
-        """Test track_mcp_tool function."""
+        import basic_memory.telemetry as telemetry
         import basic_memory.config
-        import basic_memory.telemetry
 
         basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        telemetry.reset_client()
 
-        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
-            mock_client = MagicMock()
-            mock_openpanel.return_value = mock_client
+        created: list[_StubOpenPanel] = []
 
-            from basic_memory.telemetry import track_mcp_tool
+        def openpanel_factory(*, client_id, client_secret, disabled=False):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+            created.append(client)
+            return client
 
-            track_mcp_tool("write_note")
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
 
-            mock_client.track.assert_called_once_with("mcp_tool_called", {"tool": "write_note"})
+        telemetry.track_mcp_tool("write_note")
+        assert created
+        assert created[0].events[-1] == ("mcp_tool_called", {"tool": "write_note"})
 
     def test_track_error_truncates_message(self, config_home, monkeypatch):
-        """Test that track_error truncates long messages."""
+        import basic_memory.telemetry as telemetry
         import basic_memory.config
-        import basic_memory.telemetry
 
         basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        telemetry.reset_client()
 
-        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
-            mock_client = MagicMock()
-            mock_openpanel.return_value = mock_client
+        created: list[_StubOpenPanel] = []
 
-            from basic_memory.telemetry import track_error
+        def openpanel_factory(*, client_id, client_secret, disabled=False):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+            created.append(client)
+            return client
 
-            long_message = "x" * 500
-            track_error("ValueError", long_message)
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
 
-            call_args = mock_client.track.call_args
-            assert call_args[0][0] == "error"
-            assert len(call_args[0][1]["message"]) == 200  # Truncated to 200 chars
+        telemetry.track_error("ValueError", "x" * 500)
+        _, props = created[0].events[-1]
+        assert len(props["message"]) == 200
 
     def test_track_error_sanitizes_file_paths(self, config_home, monkeypatch):
-        """Test that track_error sanitizes file paths from messages."""
+        import basic_memory.telemetry as telemetry
         import basic_memory.config
-        import basic_memory.telemetry
 
         basic_memory.config._CONFIG_CACHE = None
-        basic_memory.telemetry._client = None
-        basic_memory.telemetry._initialized = False
+        telemetry.reset_client()
 
-        with patch("basic_memory.telemetry.OpenPanel") as mock_openpanel:
-            mock_client = MagicMock()
-            mock_openpanel.return_value = mock_client
+        created: list[_StubOpenPanel] = []
 
-            from basic_memory.telemetry import track_error
+        def openpanel_factory(*, client_id, client_secret, disabled=False):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+            created.append(client)
+            return client
 
-            # Test Unix path sanitization
-            track_error("FileNotFoundError", "No such file: /Users/john/notes/secret.md")
-            call_args = mock_client.track.call_args
-            assert "/Users/john" not in call_args[0][1]["message"]
-            assert "[FILE]" in call_args[0][1]["message"]
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
 
-            # Test Windows path sanitization
-            mock_client.reset_mock()
-            track_error("FileNotFoundError", "Cannot open C:\\Users\\john\\docs\\private.txt")
-            call_args = mock_client.track.call_args
-            assert "C:\\Users\\john" not in call_args[0][1]["message"]
-            assert "[FILE]" in call_args[0][1]["message"]
+        telemetry.track_error("FileNotFoundError", "No such file: /Users/john/notes/secret.md")
+        _, props = created[0].events[-1]
+        assert "/Users/john" not in props["message"]
+        assert "[FILE]" in props["message"]
+
+        telemetry.reset_client()
+        created.clear()
+
+        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        telemetry.track_error("FileNotFoundError", "Cannot open C:\\Users\\john\\docs\\private.txt")
+        _, props = created[0].events[-1]
+        assert "C:\\Users\\john" not in props["message"]
+        assert "[FILE]" in props["message"]
+
+

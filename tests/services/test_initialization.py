@@ -1,9 +1,16 @@
-"""Tests for the initialization service."""
+"""Integration-style tests for the initialization service.
 
-from unittest.mock import patch, MagicMock, AsyncMock
+Goal: avoid brittle deep mocking; assert real behavior using the existing
+test config + dual-backend fixtures.
+"""
+
+from __future__ import annotations
 
 import pytest
 
+from basic_memory import db
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
     initialize_database,
@@ -12,118 +19,102 @@ from basic_memory.services.initialization import (
 
 
 @pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.get_or_create_db")
-async def test_initialize_database(mock_get_or_create_db, app_config):
-    """Test initializing the database."""
-    mock_get_or_create_db.return_value = (MagicMock(), MagicMock())
-    await initialize_database(app_config)
-    mock_get_or_create_db.assert_called_once_with(app_config.database_path)
-
-
-@pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.get_or_create_db")
-async def test_initialize_database_error(mock_get_or_create_db, app_config):
-    """Test handling errors during database initialization."""
-    mock_get_or_create_db.side_effect = Exception("Test error")
-    with pytest.raises(Exception, match="Test error"):
+async def test_initialize_database_creates_engine_and_allows_queries(app_config: BasicMemoryConfig):
+    await db.shutdown_db()
+    try:
         await initialize_database(app_config)
-    mock_get_or_create_db.assert_called_once_with(app_config.database_path)
+
+        engine, session_maker = await db.get_or_create_db(app_config.database_path)
+        assert engine is not None
+        assert session_maker is not None
+
+        # Smoke query on the initialized DB
+        async with db.scoped_session(session_maker) as session:
+            result = await session.execute(db.text("SELECT 1"))
+            assert result.scalar() == 1
+    finally:
+        await db.shutdown_db()
 
 
-@patch("basic_memory.services.initialization.asyncio.run")
-def test_ensure_initialization(mock_run, app_config):
-    """Test synchronous initialization wrapper."""
-    # ensure_initialization() passes a coroutine into asyncio.run().
-    # If asyncio.run is mocked, we must close that coroutine to avoid
-    # "coroutine was never awaited" warnings at test teardown.
-    def _run_and_close(coro):
-        coro.close()
+@pytest.mark.asyncio
+async def test_initialize_database_raises_on_invalid_postgres_config(app_config: BasicMemoryConfig, config_manager):
+    """If config selects Postgres but has no DATABASE_URL, initialization should fail."""
+    await db.shutdown_db()
+    try:
+        bad_config = app_config.model_copy(update={"database_backend": DatabaseBackend.POSTGRES, "database_url": None})
+        config_manager.save_config(bad_config)
 
-    mock_run.side_effect = _run_and_close
+        with pytest.raises(ValueError):
+            await initialize_database(bad_config)
+    finally:
+        await db.shutdown_db()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_projects_with_config_creates_projects_and_default(
+    app_config: BasicMemoryConfig, config_manager, config_home
+):
+    await db.shutdown_db()
+    try:
+        # Ensure the configured paths exist
+        proj_a = config_home / "proj-a"
+        proj_b = config_home / "proj-b"
+        proj_a.mkdir(parents=True, exist_ok=True)
+        proj_b.mkdir(parents=True, exist_ok=True)
+
+        updated = app_config.model_copy(
+            update={
+                "projects": {"proj-a": str(proj_a), "proj-b": str(proj_b)},
+                "default_project": "proj-b",
+            }
+        )
+        config_manager.save_config(updated)
+
+        # Real DB init + reconcile
+        await initialize_database(updated)
+        await reconcile_projects_with_config(updated)
+
+        _, session_maker = await db.get_or_create_db(updated.database_path, db_type=db.DatabaseType.FILESYSTEM)
+        repo = ProjectRepository(session_maker)
+
+        active = await repo.get_active_projects()
+        names = {p.name for p in active}
+        assert names.issuperset({"proj-a", "proj-b"})
+
+        default = await repo.get_default_project()
+        assert default is not None
+        assert default.name == "proj-b"
+    finally:
+        await db.shutdown_db()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_projects_with_config_swallow_errors(monkeypatch, app_config: BasicMemoryConfig):
+    """reconcile_projects_with_config should not raise if ProjectService sync fails."""
+    await db.shutdown_db()
+    try:
+        await initialize_database(app_config)
+
+        async def boom(self):  # noqa: ANN001
+            raise ValueError("Project synchronization error")
+
+        monkeypatch.setattr(
+            "basic_memory.services.project_service.ProjectService.synchronize_projects",
+            boom,
+        )
+
+        # Should not raise
+        await reconcile_projects_with_config(app_config)
+    finally:
+        await db.shutdown_db()
+
+
+def test_ensure_initialization_runs_and_cleans_up(app_config: BasicMemoryConfig, config_manager):
+    # ensure_initialization uses asyncio.run; keep this test synchronous.
     ensure_initialization(app_config)
-    mock_run.assert_called_once()
+
+    # Must be cleaned up to avoid hanging processes.
+    assert db._engine is None  # pyright: ignore [reportPrivateUsage]
+    assert db._session_maker is None  # pyright: ignore [reportPrivateUsage]
 
 
-@pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.get_or_create_db")
-async def test_reconcile_projects_with_config(mock_get_db, app_config):
-    """Test reconciling projects from config with database using ProjectService."""
-    # Setup mocks
-    mock_session_maker = AsyncMock()
-    mock_get_db.return_value = (None, mock_session_maker)
-
-    mock_repository = AsyncMock()
-    mock_project_service = AsyncMock()
-    mock_project_service.synchronize_projects = AsyncMock()
-
-    # Mock the repository and project service
-    with (
-        patch("basic_memory.services.initialization.ProjectRepository") as mock_repo_class,
-        patch(
-            "basic_memory.services.project_service.ProjectService",
-            return_value=mock_project_service,
-        ),
-    ):
-        mock_repo_class.return_value = mock_repository
-
-        # Set up app_config projects as a dictionary
-        app_config.projects = {"test_project": "/path/to/project", "new_project": "/path/to/new"}
-        app_config.default_project = "test_project"
-
-        # Run the function
-        await reconcile_projects_with_config(app_config)
-
-        # Assertions
-        mock_get_db.assert_called_once()
-        mock_repo_class.assert_called_once_with(mock_session_maker)
-        mock_project_service.synchronize_projects.assert_called_once()
-
-        # We should no longer be calling these directly since we're using the service
-        mock_repository.find_all.assert_not_called()
-        mock_repository.set_as_default.assert_not_called()
-
-
-@pytest.mark.asyncio
-@patch("basic_memory.services.initialization.db.get_or_create_db")
-async def test_reconcile_projects_with_error_handling(mock_get_db, app_config):
-    """Test error handling during project synchronization."""
-    # Setup mocks
-    mock_session_maker = AsyncMock()
-    mock_get_db.return_value = (None, mock_session_maker)
-
-    mock_repository = AsyncMock()
-    mock_project_service = AsyncMock()
-    mock_project_service.synchronize_projects = AsyncMock(
-        side_effect=ValueError("Project synchronization error")
-    )
-
-    # Mock the repository and project service
-    with (
-        patch("basic_memory.services.initialization.ProjectRepository") as mock_repo_class,
-        patch(
-            "basic_memory.services.project_service.ProjectService",
-            return_value=mock_project_service,
-        ),
-        patch("basic_memory.services.initialization.logger") as mock_logger,
-    ):
-        mock_repo_class.return_value = mock_repository
-
-        # Set up app_config projects as a dictionary
-        app_config.projects = {"test_project": "/path/to/project"}
-        app_config.default_project = "missing_project"
-
-        # Run the function which now has error handling
-        await reconcile_projects_with_config(app_config)
-
-        # Assertions
-        mock_get_db.assert_called_once()
-        mock_repo_class.assert_called_once_with(mock_session_maker)
-        mock_project_service.synchronize_projects.assert_called_once()
-
-        # Verify error was logged
-        mock_logger.error.assert_called_once_with(
-            "Error during project synchronization: Project synchronization error"
-        )
-        mock_logger.info.assert_any_call(
-            "Continuing with initialization despite synchronization error"
-        )

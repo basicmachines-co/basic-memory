@@ -62,19 +62,15 @@ class TestEnsureTimezoneAware:
         result_local = ensure_timezone_aware(naive_dt, cloud_mode=False)
         assert result_local.tzinfo is not None
 
-    def test_none_cloud_mode_falls_back_to_config(self):
+    def test_none_cloud_mode_falls_back_to_config(self, config_manager):
         """When cloud_mode is None, should load from config."""
-        from unittest.mock import patch, MagicMock
-
         naive_dt = datetime(2024, 1, 15, 12, 30, 0)
+        # Use the real config file (via test fixtures) rather than mocking.
+        cfg = config_manager.config
+        cfg.cloud_mode = True
+        config_manager.save_config(cfg)
 
-        # Mock ConfigManager to return cloud_mode_enabled=True
-        mock_config = MagicMock()
-        mock_config.cloud_mode_enabled = True
-
-        with patch("basic_memory.config.ConfigManager") as mock_manager:
-            mock_manager.return_value.config = mock_config
-            result = ensure_timezone_aware(naive_dt, cloud_mode=None)
+        result = ensure_timezone_aware(naive_dt, cloud_mode=None)
 
         # Should have used cloud mode (UTC)
         assert result.tzinfo == timezone.utc

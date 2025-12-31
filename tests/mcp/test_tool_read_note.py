@@ -5,32 +5,7 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note
-
-import pytest_asyncio
-from unittest.mock import MagicMock, patch
-
-from basic_memory.schemas.search import SearchResponse
 from basic_memory.utils import normalize_newlines
-
-
-@pytest_asyncio.fixture
-async def mock_call_get():
-    """Mock for call_get to simulate different responses."""
-    with patch("basic_memory.mcp.tools.read_note.call_get") as mock:
-        # Default to 404 - not found
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-        mock.return_value = mock_response
-        yield mock
-
-
-@pytest_asyncio.fixture
-async def mock_search():
-    """Mock for search tool."""
-    with patch("basic_memory.mcp.tools.read_note.search_notes.fn") as mock:
-        # Default to empty results
-        mock.return_value = SearchResponse(results=[], current_page=1, page_size=1)
-        yield mock
 
 
 @pytest.mark.asyncio

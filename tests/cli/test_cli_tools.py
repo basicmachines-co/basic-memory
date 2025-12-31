@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 import json
 from textwrap import dedent
 from typing import AsyncGenerator
-from unittest.mock import patch
 
 import nest_asyncio
 import pytest
@@ -173,10 +172,13 @@ def test_write_note_content_param_priority(cli_env, project_config):
     param_content = "This explicit content parameter should be used"
 
     # Mock stdin but provide explicit content parameter
-    with (
-        patch("sys.stdin", io.StringIO(stdin_content)),
-        patch("sys.stdin.isatty", return_value=False),
-    ):  # Simulate piped input
+    import sys
+
+    old_stdin = sys.stdin
+    try:
+        sys.stdin = io.StringIO(stdin_content)
+        sys.stdin.isatty = lambda: False  # type: ignore[attr-defined]
+
         result = runner.invoke(
             tool_app,
             [
@@ -189,34 +191,33 @@ def test_write_note_content_param_priority(cli_env, project_config):
                 "test",
             ],
         )
+    finally:
+        sys.stdin = old_stdin
 
-        assert result.exit_code == 0
-
-        # Check the note was created with the content from parameter, not stdin
-        # We can't directly check file contents in this test approach
-        # but we can verify the command succeeded
-        assert "Priority Test Note" in result.stdout
-        assert "Created" in result.stdout or "Updated" in result.stdout
+    assert result.exit_code == 0
+    assert "Priority Test Note" in result.stdout
+    assert "Created" in result.stdout or "Updated" in result.stdout
 
 
-def test_write_note_no_content(cli_env, project_config):
+def test_write_note_no_content(cli_env, project_config, monkeypatch):
     """Test error handling when no content is provided."""
     # Mock stdin to appear as a terminal, not a pipe
-    with patch("sys.stdin.isatty", return_value=True):
-        result = runner.invoke(
-            tool_app,
-            [
-                "write-note",
-                "--title",
-                "No Content Note",
-                "--folder",
-                "test",
-            ],
-        )
+    import sys
 
-        # Should exit with an error
-        assert result.exit_code == 1
-        # assert "No content provided" in result.stderr
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    result = runner.invoke(
+        tool_app,
+        [
+            "write-note",
+            "--title",
+            "No Content Note",
+            "--folder",
+            "test",
+        ],
+    )
+
+    # Should exit with an error
+    assert result.exit_code == 1
 
 
 def test_read_note(cli_env, setup_test_note):
@@ -472,26 +473,28 @@ def test_continue_conversation_no_results(cli_env):
     assert "The supplied query did not return any information" in result.stdout
 
 
-@patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_functionality(mock_initialize_database, app_config, monkeypatch):
+def test_ensure_migrations_functionality(app_config, monkeypatch):
     """Test the database initialization functionality."""
-    from basic_memory.services.initialization import ensure_initialization
+    import basic_memory.services.initialization as init_mod
 
-    # Call the function
-    ensure_initialization(app_config)
+    calls = {"count": 0}
 
-    # The underlying asyncio.run should call our mocked function
-    mock_initialize_database.assert_called_once()
+    async def fake_initialize_database(*args, **kwargs):
+        calls["count"] += 1
+
+    monkeypatch.setattr(init_mod, "initialize_database", fake_initialize_database)
+    init_mod.ensure_initialization(app_config)
+    assert calls["count"] == 1
 
 
-@patch("basic_memory.services.initialization.initialize_database")
-def test_ensure_migrations_propagates_errors(mock_initialize_database, app_config, monkeypatch):
+def test_ensure_migrations_propagates_errors(app_config, monkeypatch):
     """Test that initialization errors propagate to caller."""
-    from basic_memory.services.initialization import ensure_initialization
+    import basic_memory.services.initialization as init_mod
 
-    # Configure mock to raise an exception
-    mock_initialize_database.side_effect = Exception("Test error")
+    async def fake_initialize_database(*args, **kwargs):
+        raise Exception("Test error")
 
-    # Call the function - should raise exception
+    monkeypatch.setattr(init_mod, "initialize_database", fake_initialize_database)
+
     with pytest.raises(Exception, match="Test error"):
-        ensure_initialization(app_config)
+        init_mod.ensure_initialization(app_config)

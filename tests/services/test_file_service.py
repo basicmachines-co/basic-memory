@@ -1,7 +1,6 @@
 """Tests for file operations service."""
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -28,18 +27,19 @@ async def test_exists(tmp_path: Path, file_service: FileService):
 
 
 @pytest.mark.asyncio
-async def test_exists_error_handling(tmp_path: Path, file_service: FileService):
+async def test_exists_error_handling(tmp_path: Path, file_service: FileService, monkeypatch):
     """Test error handling in exists() method."""
     test_path = tmp_path / "test.md"
 
-    # Mock Path.exists to raise an error
-    with patch.object(Path, "exists") as mock_exists:
-        mock_exists.side_effect = PermissionError("Access denied")
+    def boom(*args, **kwargs):
+        raise PermissionError("Access denied")
 
-        with pytest.raises(FileOperationError) as exc_info:
-            await file_service.exists(test_path)
+    monkeypatch.setattr(Path, "exists", boom)
 
-        assert "Failed to check file existence" in str(exc_info.value)
+    with pytest.raises(FileOperationError) as exc_info:
+        await file_service.exists(test_path)
+
+    assert "Failed to check file existence" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -71,22 +71,25 @@ async def test_write_creates_directories(tmp_path: Path, file_service: FileServi
 
 
 @pytest.mark.asyncio
-async def test_write_atomic(tmp_path: Path, file_service: FileService):
+async def test_write_atomic(tmp_path: Path, file_service: FileService, monkeypatch):
     """Test atomic write with no partial files."""
     test_path = tmp_path / "test.md"
     temp_path = test_path.with_suffix(".tmp")
 
-    # Mock write_file_atomic to raise an error
-    with patch("basic_memory.file_utils.write_file_atomic") as mock_write:
-        mock_write.side_effect = Exception("Write failed")
+    from basic_memory import file_utils
 
-        # Attempt write that will fail
-        with pytest.raises(FileOperationError):
-            await file_service.write_file(test_path, "test content")
+    async def fake_write_file_atomic(*args, **kwargs):
+        raise Exception("Write failed")
 
-        # No partial files should exist
-        assert not test_path.exists()
-        assert not temp_path.exists()
+    monkeypatch.setattr(file_utils, "write_file_atomic", fake_write_file_atomic)
+
+    # Attempt write that will fail
+    with pytest.raises(FileOperationError):
+        await file_service.write_file(test_path, "test content")
+
+    # No partial files should exist
+    assert not test_path.exists()
+    assert not temp_path.exists()
 
 
 @pytest.mark.asyncio
@@ -183,7 +186,8 @@ async def test_read_file_content_missing_file(tmp_path: Path, file_service: File
     """Test read_file_content raises error for missing files."""
     test_path = tmp_path / "missing.md"
 
-    with pytest.raises(FileOperationError):
+    # FileNotFoundError is preserved so callers can treat missing files specially (e.g. sync).
+    with pytest.raises(FileNotFoundError):
         await file_service.read_file_content(test_path)
 
 
