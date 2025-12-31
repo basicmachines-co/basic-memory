@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Dict, List, Set
 from pydantic import BaseModel, Field
 
 # avoid cirular imports
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.sync.sync_service import SyncReport
 
 

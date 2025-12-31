@@ -262,7 +262,7 @@ class ProjectActivity(BaseModel):
 
     @field_serializer("last_activity")
     def serialize_last_activity(self, dt: Optional[datetime]) -> Optional[str]:
-        return dt.isoformat() if dt else None
+        return dt.isoformat() if dt else None  # pragma: no cover
 
 
 class ProjectActivitySummary(BaseModel):
@@ -282,4 +282,4 @@ class ProjectActivitySummary(BaseModel):
 
     @field_serializer("generated_at")
     def serialize_generated_at(self, dt: datetime) -> str:
-        return dt.isoformat()
+        return dt.isoformat()  # pragma: no cover

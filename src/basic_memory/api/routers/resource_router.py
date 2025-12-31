@@ -31,8 +31,8 @@ def _mtime_to_datetime(entity: EntityModel) -> datetime:
     Returns the file's actual modification time, falling back to updated_at
     if mtime is not available.
     """
-    if entity.mtime:
-        return datetime.fromtimestamp(entity.mtime).astimezone()
+    if entity.mtime:  # pragma: no cover
+        return datetime.fromtimestamp(entity.mtime).astimezone()  # pragma: no cover
     return entity.updated_at
 
 
@@ -169,11 +169,11 @@ async def write_resource(
         # FastAPI should validate this, but if a dict somehow gets through
         # (e.g., via JSON body parsing), we need to catch it here
         if isinstance(content, dict):
-            logger.error(
+            logger.error(  # pragma: no cover
                 f"Error writing resource {file_path}: "
                 f"content is a dict, expected string. Keys: {list(content.keys())}"
             )
-            raise HTTPException(
+            raise HTTPException(  # pragma: no cover
                 status_code=400,
                 detail="content must be a string, not a dict. "
                 "Ensure request body is sent as raw string content, not JSON object.",

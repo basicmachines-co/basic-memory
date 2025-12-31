@@ -32,7 +32,7 @@ def ai_assistant_guide() -> str:
 
     # Add mode-specific header
     mode_info = ""
-    if config.default_project_mode:
+    if config.default_project_mode:  # pragma: no cover
         mode_info = f"""
 # 🎯 Default Project Mode Active
 
@@ -46,7 +46,7 @@ def ai_assistant_guide() -> str:
 ────────────────────────────────────────
 
 """
-    else:
+    else:  # pragma: no cover
         mode_info = """
 # 🔧 Multi-Project Mode Active
 

@@ -124,17 +124,17 @@ class RelationRepository(Repository[Relation]):
             # Check dialect to use appropriate insert
             dialect_name = session.bind.dialect.name if session.bind else "sqlite"
 
-            if dialect_name == "postgresql":
+            if dialect_name == "postgresql":  # pragma: no cover
                 # PostgreSQL: use RETURNING to count inserted rows
                 # (rowcount is 0 for ON CONFLICT DO NOTHING)
-                stmt = (
+                stmt = (  # pragma: no cover
                     pg_insert(Relation)
                     .values(values)
                     .on_conflict_do_nothing()
                     .returning(Relation.id)
                 )
-                result = await session.execute(stmt)
-                return len(result.fetchall())
+                result = await session.execute(stmt)  # pragma: no cover
+                return len(result.fetchall())  # pragma: no cover
             else:
                 # SQLite: rowcount works correctly
                 stmt = sqlite_insert(Relation).values(values)

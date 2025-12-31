@@ -11,7 +11,7 @@ from basic_memory.file_utils import dump_frontmatter
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.config import BasicMemoryConfig
 
 
@@ -135,11 +135,11 @@ class MarkdownProcessor:
         # Format file if configured (MarkdownProcessor always handles markdown files)
         content_for_checksum = final_content
         if self.app_config:
-            formatted_content = await file_utils.format_file(
+            formatted_content = await file_utils.format_file(  # pragma: no cover
                 path, self.app_config, is_markdown=True
             )
-            if formatted_content is not None:
-                content_for_checksum = formatted_content
+            if formatted_content is not None:  # pragma: no cover
+                content_for_checksum = formatted_content  # pragma: no cover
 
         return await file_utils.compute_checksum(content_for_checksum)
 

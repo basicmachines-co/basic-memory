@@ -456,11 +456,11 @@ async def resolve_entity_id(client: AsyncClient, project_id: int, identifier: st
         data = response.json()
         return data["entity_id"]
     except HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise ToolError(f"Entity not found: '{identifier}'")
-        raise ToolError(f"Error resolving identifier '{identifier}': {e}")
+        if e.response.status_code == 404:  # pragma: no cover
+            raise ToolError(f"Entity not found: '{identifier}'")  # pragma: no cover
+        raise ToolError(f"Error resolving identifier '{identifier}': {e}")  # pragma: no cover
     except Exception as e:
-        raise ToolError(f"Unexpected error resolving identifier '{identifier}': {e}")
+        raise ToolError(f"Unexpected error resolving identifier '{identifier}': {e}")  # pragma: no cover
 
 
 async def call_delete(

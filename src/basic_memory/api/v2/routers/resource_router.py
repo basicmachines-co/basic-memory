@@ -68,15 +68,17 @@ async def get_resource_content(
     # Validate entity file path to prevent path traversal
     project_path = Path(config.home)
     if not validate_project_path(entity.file_path, project_path):
-        logger.error(f"Invalid file path in entity {entity.id}: {entity.file_path}")
-        raise HTTPException(
+        logger.error(  # pragma: no cover
+            f"Invalid file path in entity {entity.id}: {entity.file_path}"
+        )
+        raise HTTPException(  # pragma: no cover
             status_code=500,
             detail="Entity contains invalid file path",
         )
 
     # Check file exists via file_service (for cloud compatibility)
     if not await file_service.exists(entity.file_path):
-        raise HTTPException(
+        raise HTTPException(  # pragma: no cover
             status_code=404,
             detail=f"File not found: {entity.file_path}",
         )

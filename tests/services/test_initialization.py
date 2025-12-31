@@ -33,6 +33,13 @@ async def test_initialize_database_error(mock_get_or_create_db, app_config):
 @patch("basic_memory.services.initialization.asyncio.run")
 def test_ensure_initialization(mock_run, app_config):
     """Test synchronous initialization wrapper."""
+    # ensure_initialization() passes a coroutine into asyncio.run().
+    # If asyncio.run is mocked, we must close that coroutine to avoid
+    # "coroutine was never awaited" warnings at test teardown.
+    def _run_and_close(coro):
+        coro.close()
+
+    mock_run.side_effect = _run_and_close
     ensure_initialization(app_config)
     mock_run.assert_called_once()
 

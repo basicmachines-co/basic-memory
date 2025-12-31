@@ -9,7 +9,7 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.schemas.importer import ImportResult
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.services.file_service import FileService
 
 logger = logging.getLogger(__name__)

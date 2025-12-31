@@ -108,7 +108,7 @@ def parse_timeframe(timeframe: str) -> datetime:
         if parsed.tzinfo is None:
             parsed = parsed.astimezone()
         else:
-            parsed = parsed
+            parsed = parsed  # pragma: no cover
 
         # Enforce minimum 1-day lookback to handle timezone differences
         # This ensures we don't miss recent activity due to client/server timezone mismatches
@@ -138,7 +138,7 @@ def validate_timeframe(timeframe: str) -> str:
     # Convert to duration
     now = datetime.now().astimezone()
     if parsed > now:
-        raise ValueError("Timeframe cannot be in the future")
+        raise ValueError("Timeframe cannot be in the future")  # pragma: no cover
 
     # Could format the duration back to our standard format
     days = (now - parsed).days

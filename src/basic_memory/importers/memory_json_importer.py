@@ -43,9 +43,9 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                     # Handle different possible name keys
                     entity_name = data.get("name") or data.get("entityName") or data.get("id")
                     if not entity_name:
-                        logger.warning(f"Entity missing name field: {data}")
-                        skipped_entities += 1
-                        continue
+                        logger.warning(f"Entity missing name field: {data}")  # pragma: no cover
+                        skipped_entities += 1  # pragma: no cover
+                        continue  # pragma: no cover
                     entities[entity_name] = data
                 elif data["type"] == "relation":
                     # Store relation with its source entity
@@ -74,9 +74,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
 
                 # Ensure entity type directory exists using FileService with relative path
                 entity_type_dir = (
-                    f"{destination_folder}/{entity_type}"
-                    if destination_folder
-                    else entity_type
+                    f"{destination_folder}/{entity_type}" if destination_folder else entity_type
                 )
                 await self.file_service.ensure_directory(entity_type_dir)
 

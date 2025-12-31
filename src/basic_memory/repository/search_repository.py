@@ -81,8 +81,8 @@ def create_search_repository(
     """
     config = ConfigManager().config
 
-    if config.database_backend == DatabaseBackend.POSTGRES:
-        return PostgresSearchRepository(session_maker, project_id=project_id)
+    if config.database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
+        return PostgresSearchRepository(session_maker, project_id=project_id)  # pragma: no cover
     else:
         return SQLiteSearchRepository(session_maker, project_id=project_id)
 

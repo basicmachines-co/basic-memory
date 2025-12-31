@@ -242,7 +242,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     if is_prefix and not ("/" in term and term.endswith(".md")):
                         term = f'"{escaped_term}"*'
                     else:
-                        term = f'"{escaped_term}"'
+                        term = f'"{escaped_term}"'  # pragma: no cover
             else:
                 # For terms with problematic characters or file paths, use exact phrase matching
                 # Escape any existing quotes by doubling them

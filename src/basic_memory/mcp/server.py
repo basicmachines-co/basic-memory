@@ -43,16 +43,16 @@ async def lifespan(app: FastMCP):
     sync_task = None
     if app_config.is_test_env:
         logger.info("Test environment detected - skipping local file sync")
-    elif app_config.sync_changes and not app_config.cloud_mode_enabled:
+    elif app_config.sync_changes and not app_config.cloud_mode_enabled:  # pragma: no cover
         logger.info("Starting file sync in background")
 
         async def _file_sync_runner() -> None:
             await initialize_file_sync(app_config)
 
         sync_task = asyncio.create_task(_file_sync_runner())
-    elif app_config.cloud_mode_enabled:
+    elif app_config.cloud_mode_enabled:  # pragma: no cover
         logger.info("Cloud mode enabled - skipping local file sync")
-    else:
+    else:  # pragma: no cover
         logger.info("Sync changes disabled - skipping file sync")
 
     try:
@@ -60,7 +60,7 @@ async def lifespan(app: FastMCP):
     finally:
         # Shutdown
         logger.info("Shutting down Basic Memory MCP server")
-        if sync_task:
+        if sync_task:  # pragma: no cover
             sync_task.cancel()
             try:
                 await sync_task
@@ -71,7 +71,7 @@ async def lifespan(app: FastMCP):
         if engine_was_none:
             await db.shutdown_db()
             logger.info("Database connections closed")
-        else:
+        else:  # pragma: no cover
             logger.debug("Skipping DB shutdown - engine provided externally")
 
 

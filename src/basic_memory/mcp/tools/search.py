@@ -206,8 +206,8 @@ async def search_notes(
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
-    types: List[str] = [],
-    entity_types: List[str] = [],
+    types: List[str] | None = None,
+    entity_types: List[str] | None = None,
     after_date: Optional[str] = None,
     context: Context | None = None,
 ) -> SearchResponse | str:
@@ -332,6 +332,10 @@ async def search_notes(
         results = await search_notes("project planning", project="my-project")
     """
     track_mcp_tool("search_notes")
+    # Avoid mutable-default-argument footguns. Treat None as "no filter".
+    types = types or []
+    entity_types = entity_types or []
+
     # Create a SearchQuery object based on the parameters
     search_query = SearchQuery()
 

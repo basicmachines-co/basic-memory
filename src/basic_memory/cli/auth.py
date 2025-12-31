@@ -7,6 +7,8 @@ import os
 import secrets
 import time
 import webbrowser
+from contextlib import asynccontextmanager
+from typing import AsyncContextManager, Callable
 
 import httpx
 from rich.console import Console
@@ -19,7 +21,12 @@ console = Console()
 class CLIAuth:
     """Handles WorkOS OAuth Device Authorization for CLI tools."""
 
-    def __init__(self, client_id: str, authkit_domain: str):
+    def __init__(
+        self,
+        client_id: str,
+        authkit_domain: str,
+        http_client_factory: Callable[[], AsyncContextManager[httpx.AsyncClient]] | None = None,
+    ):
         self.client_id = client_id
         self.authkit_domain = authkit_domain
         app_config = ConfigManager().config
@@ -28,6 +35,21 @@ class CLIAuth:
         # PKCE parameters
         self.code_verifier = None
         self.code_challenge = None
+        self._http_client_factory = http_client_factory
+
+    @asynccontextmanager
+    async def _get_http_client(self) -> AsyncContextManager[httpx.AsyncClient]:
+        """Create an AsyncClient, optionally via injected factory.
+
+        Why: enables reliable tests without monkeypatching httpx internals while
+        still using real httpx request/response objects.
+        """
+        if self._http_client_factory:
+            async with self._http_client_factory() as client:
+                yield client
+        else:
+            async with httpx.AsyncClient() as client:
+                yield client
 
     def generate_pkce_pair(self) -> tuple[str, str]:
         """Generate PKCE code verifier and challenge."""
@@ -57,7 +79,7 @@ class CLIAuth:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with self._get_http_client() as client:
                 response = await client.post(device_auth_url, data=data)
 
                 if response.status_code == 200:
@@ -111,7 +133,7 @@ class CLIAuth:
 
         for _attempt in range(max_attempts):
             try:
-                async with httpx.AsyncClient() as client:
+                async with self._get_http_client() as client:
                     response = await client.post(token_url, data=data)
 
                     if response.status_code == 200:
@@ -201,7 +223,7 @@ class CLIAuth:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with self._get_http_client() as client:
                 response = await client.post(token_url, data=data)
 
                 if response.status_code == 200:

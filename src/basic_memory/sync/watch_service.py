@@ -15,7 +15,7 @@ from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_pat
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rich.console import Console
 from watchfiles import awatch
 from watchfiles.main import FileChange, Change
@@ -34,8 +34,8 @@ class WatchEvent(BaseModel):
 class WatchServiceState(BaseModel):
     # Service status
     running: bool = False
-    start_time: datetime = datetime.now()  # Use directly with Pydantic model
-    pid: int = os.getpid()  # Use directly with Pydantic model
+    start_time: datetime = Field(default_factory=datetime.now)
+    pid: int = Field(default_factory=os.getpid)
 
     # Stats
     error_count: int = 0
@@ -46,7 +46,7 @@ class WatchServiceState(BaseModel):
     synced_files: int = 0
 
     # Recent activity
-    recent_events: List[WatchEvent] = []  # Use directly with Pydantic model
+    recent_events: List[WatchEvent] = Field(default_factory=list)
 
     def add_event(
         self,
@@ -299,12 +299,17 @@ class WatchService:
         )
 
         # because of our atomic writes on updates, an add may be an existing file
-        for added_path in adds:  # pragma: no cover TODO add test
+        # Avoid mutating `adds` while iterating (can skip items).
+        reclassified_as_modified: List[str] = []
+        for added_path in list(adds):  # pragma: no cover TODO add test
             entity = await sync_service.entity_repository.get_by_file_path(added_path)
             if entity is not None:
                 logger.debug(f"Existing file will be processed as modified, path={added_path}")
-                adds.remove(added_path)
-                modifies.append(added_path)
+                reclassified_as_modified.append(added_path)
+
+        if reclassified_as_modified:
+            adds = [p for p in adds if p not in reclassified_as_modified]
+            modifies.extend(reclassified_as_modified)
 
         # Track processed files to avoid duplicates
         processed: Set[str] = set()

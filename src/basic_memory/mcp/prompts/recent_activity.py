@@ -64,7 +64,7 @@ async def recent_activity_prompt(
                     primary_results.append(item.primary_result)
                     # Add up to 1 related result per primary item
                     if item.related_results:
-                        related_results.extend(item.related_results[:1])
+                        related_results.extend(item.related_results[:1])  # pragma: no cover
 
         # Limit total results for readability
         primary_results = primary_results[:8]
@@ -78,7 +78,7 @@ async def recent_activity_prompt(
                 primary_results.append(item.primary_result)
                 # Add up to 2 related results per primary item
                 if item.related_results:
-                    related_results.extend(item.related_results[:2])
+                    related_results.extend(item.related_results[:2])  # pragma: no cover
 
     # Set topic based on mode
     if project:

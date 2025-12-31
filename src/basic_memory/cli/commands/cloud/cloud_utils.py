@@ -16,7 +16,10 @@ class CloudUtilsError(Exception):
     pass
 
 
-async def fetch_cloud_projects() -> CloudProjectList:
+async def fetch_cloud_projects(
+    *,
+    api_request=make_api_request,
+) -> CloudProjectList:
     """Fetch list of projects from cloud API.
 
     Returns:
@@ -27,14 +30,18 @@ async def fetch_cloud_projects() -> CloudProjectList:
         config = config_manager.config
         host_url = config.cloud_host.rstrip("/")
 
-        response = await make_api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
+        response = await api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
 
         return CloudProjectList.model_validate(response.json())
     except Exception as e:
         raise CloudUtilsError(f"Failed to fetch cloud projects: {e}") from e
 
 
-async def create_cloud_project(project_name: str) -> CloudProjectCreateResponse:
+async def create_cloud_project(
+    project_name: str,
+    *,
+    api_request=make_api_request,
+) -> CloudProjectCreateResponse:
     """Create a new project on cloud.
 
     Args:
@@ -57,7 +64,7 @@ async def create_cloud_project(project_name: str) -> CloudProjectCreateResponse:
             set_default=False,
         )
 
-        response = await make_api_request(
+        response = await api_request(
             method="POST",
             url=f"{host_url}/proxy/projects/projects",
             headers={"Content-Type": "application/json"},
@@ -84,7 +91,7 @@ async def sync_project(project_name: str, force_full: bool = False) -> None:
         raise CloudUtilsError(f"Failed to sync project '{project_name}': {e}") from e
 
 
-async def project_exists(project_name: str) -> bool:
+async def project_exists(project_name: str, *, api_request=make_api_request) -> bool:
     """Check if a project exists on cloud.
 
     Args:
@@ -94,7 +101,7 @@ async def project_exists(project_name: str) -> bool:
         True if project exists, False otherwise
     """
     try:
-        projects = await fetch_cloud_projects()
+        projects = await fetch_cloud_projects(api_request=api_request)
         project_names = {p.name for p in projects.projects}
         return project_name in project_names
     except Exception:

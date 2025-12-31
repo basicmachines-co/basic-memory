@@ -1,6 +1,8 @@
 """Cloud API client utilities."""
 
 from typing import Optional
+from contextlib import asynccontextmanager
+from typing import AsyncContextManager, Callable
 
 import httpx
 import typer
@@ -10,6 +12,8 @@ from basic_memory.cli.auth import CLIAuth
 from basic_memory.config import ConfigManager
 
 console = Console()
+
+HttpClientFactory = Callable[[], AsyncContextManager[httpx.AsyncClient]]
 
 
 class CloudAPIError(Exception):
@@ -38,19 +42,25 @@ def get_cloud_config() -> tuple[str, str, str]:
     return config.cloud_client_id, config.cloud_domain, config.cloud_host
 
 
-async def get_authenticated_headers() -> dict[str, str]:
+async def get_authenticated_headers(auth: CLIAuth | None = None) -> dict[str, str]:
     """
     Get authentication headers with JWT token.
     handles jwt refresh if needed.
     """
     client_id, domain, _ = get_cloud_config()
-    auth = CLIAuth(client_id=client_id, authkit_domain=domain)
-    token = await auth.get_valid_token()
+    auth_obj = auth or CLIAuth(client_id=client_id, authkit_domain=domain)
+    token = await auth_obj.get_valid_token()
     if not token:
         console.print("[red]Not authenticated. Please run 'basic-memory cloud login' first.[/red]")
         raise typer.Exit(1)
 
     return {"Authorization": f"Bearer {token}"}
+
+
+@asynccontextmanager
+async def _default_http_client(timeout: float) -> AsyncContextManager[httpx.AsyncClient]:
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        yield client
 
 
 async def make_api_request(
@@ -59,15 +69,19 @@ async def make_api_request(
     headers: Optional[dict] = None,
     json_data: Optional[dict] = None,
     timeout: float = 30.0,
+    *,
+    auth: CLIAuth | None = None,
+    http_client_factory: HttpClientFactory | None = None,
 ) -> httpx.Response:
     """Make an API request to the cloud service."""
     headers = headers or {}
-    auth_headers = await get_authenticated_headers()
+    auth_headers = await get_authenticated_headers(auth=auth)
     headers.update(auth_headers)
     # Add debug headers to help with compression issues
     headers.setdefault("Accept-Encoding", "identity")  # Disable compression for debugging
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    client_factory = http_client_factory or (lambda: _default_http_client(timeout))
+    async with client_factory() as client:
         try:
             response = await client.request(method=method, url=url, headers=headers, json=json_data)
             response.raise_for_status()

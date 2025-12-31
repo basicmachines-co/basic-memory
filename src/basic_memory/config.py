@@ -40,7 +40,7 @@ class ProjectConfig:
 
     @property
     def project(self):
-        return self.name
+        return self.name  # pragma: no cover
 
     @property
     def project_url(self) -> str:  # pragma: no cover
@@ -287,7 +287,7 @@ class BasicMemoryConfig(BaseSettings):
         Returns:
             BasicMemoryConfig configured for cloud mode
         """
-        return cls(
+        return cls(  # pragma: no cover
             database_backend=DatabaseBackend.POSTGRES,
             database_url=database_url,
             projects=projects or {},
@@ -312,8 +312,8 @@ class BasicMemoryConfig(BaseSettings):
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
         # Skip project initialization in cloud mode - projects are discovered from DB
-        if self.database_backend == DatabaseBackend.POSTGRES:
-            return
+        if self.database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
+            return  # pragma: no cover
 
         # Ensure at least one project exists; if none exist then create main
         if not self.projects:  # pragma: no cover

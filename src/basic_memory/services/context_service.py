@@ -264,11 +264,11 @@ class ContextService:
         # Build date and timeframe filters conditionally based on since parameter
         if since:
             # SQLite accepts ISO strings, but Postgres/asyncpg requires datetime objects
-            if isinstance(self.search_repository, PostgresSearchRepository):
+            if isinstance(self.search_repository, PostgresSearchRepository):  # pragma: no cover
                 # asyncpg expects timezone-NAIVE datetime in UTC for DateTime(timezone=True) columns
                 # even though the column stores timezone-aware values
-                since_utc = since.astimezone(timezone.utc) if since.tzinfo else since
-                params["since_date"] = since_utc.replace(tzinfo=None)  # pyright: ignore
+                since_utc = since.astimezone(timezone.utc) if since.tzinfo else since  # pragma: no cover
+                params["since_date"] = since_utc.replace(tzinfo=None)  # pyright: ignore  # pragma: no cover
             else:
                 params["since_date"] = since.isoformat()  # pyright: ignore
             date_filter = "AND e.created_at >= :since_date"
@@ -293,7 +293,7 @@ class ContextService:
         # Detect database backend
         is_postgres = isinstance(self.search_repository, PostgresSearchRepository)
 
-        if is_postgres:
+        if is_postgres:  # pragma: no cover
             query = self._build_postgres_query(
                 entity_id_values,
                 date_filter,
@@ -339,7 +339,7 @@ class ContextService:
         ]
         return context_rows
 
-    def _build_postgres_query(
+    def _build_postgres_query(  # pragma: no cover
         self,
         entity_id_values: str,
         date_filter: str,

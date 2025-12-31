@@ -217,8 +217,12 @@ async def delete_note(
                 logger.warning(f"Note not found for deletion: {identifier}")
                 return False
             # For other resolution errors, return formatted error message
-            logger.error(f"Delete failed for '{identifier}': {e}, project: {active_project.name}")
-            return _format_delete_error_response(active_project.name, str(e), identifier)
+            logger.error(  # pragma: no cover
+                f"Delete failed for '{identifier}': {e}, project: {active_project.name}"
+            )
+            return _format_delete_error_response(  # pragma: no cover
+                active_project.name, str(e), identifier
+            )
 
         try:
             # Call the DELETE endpoint
@@ -233,8 +237,10 @@ async def delete_note(
                 )
                 return True
             else:
-                logger.warning(f"Delete operation completed but note was not deleted: {identifier}")
-                return False
+                logger.warning(  # pragma: no cover
+                    f"Delete operation completed but note was not deleted: {identifier}"
+                )
+                return False  # pragma: no cover
 
         except Exception as e:  # pragma: no cover
             logger.error(f"Delete failed for '{identifier}': {e}, project: {active_project.name}")

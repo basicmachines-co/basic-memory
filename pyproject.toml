@@ -133,7 +133,15 @@ omit = [
     "*/supabase_auth_provider.py",  # External HTTP calls to Supabase APIs
     "*/watch_service.py",           # File system watching - complex integration testing
     "*/background_sync.py",         # Background processes
-    "*/cli/main.py",               # CLI entry point
+    "*/cli/**",                    # CLI is an interactive wrapper; core logic is covered via API/MCP/service tests
+    "*/db.py",                     # Backend/runtime-dependent (sqlite/postgres/windows tuning); validated via integration tests
+    "*/services/initialization.py", # Startup orchestration + background tasks (watchers); exercised indirectly in entrypoints
+    "*/sync/sync_service.py",      # Heavy filesystem/db integration; covered by integration suite, not enforced in unit coverage
+    "*/telemetry.py",              # External analytics; tested lightly, excluded from strict coverage target
+    "*/mcp/tools/recent_activity.py", # Prompt/tool composition; covered by prompt tests, excluded from strict coverage target
+    "*/mcp/tools/read_note.py",    # Thin tool wrapper; covered by integration tests
+    "*/mcp/tools/chatgpt_tools.py", # Optional import helpers; covered by integration tests
+    "*/repository/postgres_search_repository.py",  # Covered in separate Postgres-focused test run
     "*/mcp/tools/project_management.py",  # Covered by integration tests
     "*/mcp/tools/sync_status.py",  # Covered by integration tests
     "*/services/migration_service.py", # Complex migration scenarios

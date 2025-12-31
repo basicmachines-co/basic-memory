@@ -1,9 +1,8 @@
 """Tests for upload module."""
 
-from unittest.mock import AsyncMock, Mock, patch
-
 import httpx
 import pytest
+from contextlib import asynccontextmanager
 
 from basic_memory.cli.commands.cloud.upload import _get_files_to_upload, upload_path
 
@@ -81,35 +80,26 @@ class TestUploadPath:
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 
-        # Mock the client and HTTP response
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
+        seen = {"paths": []}
 
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                    # Setup mocks
-                    mock_get_client.return_value.__aenter__.return_value = mock_client
-                    mock_get_client.return_value.__aexit__.return_value = None
-                    mock_put.return_value = mock_response
+        async def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "PUT"
+            seen["paths"].append(request.url.path)
+            assert request.headers.get("x-oc-mtime")
+            return httpx.Response(201)
 
-                    # Mock file reading
-                    mock_file = AsyncMock()
-                    mock_file.read.return_value = b"test content"
-                    mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
+        transport = httpx.MockTransport(handler)
 
-                    result = await upload_path(test_file, "test-project")
+        @asynccontextmanager
+        async def client_cm_factory():
+            async with httpx.AsyncClient(
+                transport=transport, base_url="https://cloud.example.test"
+            ) as client:
+                yield client
 
-        # Verify success
+        result = await upload_path(test_file, "test-project", client_cm_factory=client_cm_factory)
         assert result is True
-
-        # Verify PUT was called with correct path
-        mock_put.assert_called_once()
-        call_args = mock_put.call_args
-        assert call_args[0][0] == mock_client
-        assert call_args[0][1] == "/webdav/test-project/test.txt"
-        assert call_args[1]["content"] == b"test content"
+        assert seen["paths"] == ["/webdav/test-project/test.txt"]
 
     @pytest.mark.asyncio
     async def test_uploads_directory(self, tmp_path):
@@ -118,39 +108,28 @@ class TestUploadPath:
         (tmp_path / "file1.txt").write_text("content1")
         (tmp_path / "file2.txt").write_text("content2")
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
+        seen = {"paths": []}
 
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch(
-                    "basic_memory.cli.commands.cloud.upload._get_files_to_upload"
-                ) as mock_get_files:
-                    with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                        # Setup mocks
-                        mock_get_client.return_value.__aenter__.return_value = mock_client
-                        mock_get_client.return_value.__aexit__.return_value = None
-                        mock_put.return_value = mock_response
+        async def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "PUT"
+            seen["paths"].append(request.url.path)
+            return httpx.Response(201)
 
-                        # Mock file listing
-                        mock_get_files.return_value = [
-                            (tmp_path / "file1.txt", "file1.txt"),
-                            (tmp_path / "file2.txt", "file2.txt"),
-                        ]
+        transport = httpx.MockTransport(handler)
 
-                        # Mock file reading
-                        mock_file = AsyncMock()
-                        mock_file.read.side_effect = [b"content1", b"content2"]
-                        mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
+        @asynccontextmanager
+        async def client_cm_factory():
+            async with httpx.AsyncClient(
+                transport=transport, base_url="https://cloud.example.test"
+            ) as client:
+                yield client
 
-                        result = await upload_path(tmp_path, "test-project")
-
-        # Verify success
+        result = await upload_path(tmp_path, "test-project", client_cm_factory=client_cm_factory)
         assert result is True
-
-        # Verify PUT was called twice
-        assert mock_put.call_count == 2
+        assert sorted(seen["paths"]) == [
+            "/webdav/test-project/file1.txt",
+            "/webdav/test-project/file2.txt",
+        ]
 
     @pytest.mark.asyncio
     async def test_handles_nonexistent_path(self, tmp_path):
@@ -168,28 +147,19 @@ class TestUploadPath:
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.status_code = 403
-        mock_response.text = "Forbidden"
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Forbidden", request=Mock(), response=mock_response
-        )
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(403, json={"detail": "Forbidden"})
 
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                    # Setup mocks
-                    mock_get_client.return_value.__aenter__.return_value = mock_client
-                    mock_get_client.return_value.__aexit__.return_value = None
-                    mock_put.return_value = mock_response
+        transport = httpx.MockTransport(handler)
 
-                    # Mock file reading
-                    mock_file = AsyncMock()
-                    mock_file.read.return_value = b"test content"
-                    mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
+        @asynccontextmanager
+        async def client_cm_factory():
+            async with httpx.AsyncClient(
+                transport=transport, base_url="https://cloud.example.test"
+            ) as client:
+                yield client
 
-                    result = await upload_path(test_file, "test-project")
+        result = await upload_path(test_file, "test-project", client_cm_factory=client_cm_factory)
 
         # Should return False on error
         assert result is False
@@ -200,10 +170,7 @@ class TestUploadPath:
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
 
-        with patch("basic_memory.cli.commands.cloud.upload._get_files_to_upload") as mock_get_files:
-            mock_get_files.return_value = []
-
-            result = await upload_path(empty_dir, "test-project")
+        result = await upload_path(empty_dir, "test-project")
 
         # Should return True (no-op success)
         assert result is True
@@ -214,22 +181,7 @@ class TestUploadPath:
         test_file = tmp_path / "small.txt"
         test_file.write_text("hi")  # 2 bytes
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
-
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                    mock_get_client.return_value.__aenter__.return_value = mock_client
-                    mock_get_client.return_value.__aexit__.return_value = None
-                    mock_put.return_value = mock_response
-
-                    mock_file = AsyncMock()
-                    mock_file.read.return_value = b"hi"
-                    mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
-
-                    await upload_path(test_file, "test-project")
+        await upload_path(test_file, "test-project", dry_run=True)
 
         # Check output contains "bytes"
         captured = capsys.readouterr()
@@ -242,22 +194,7 @@ class TestUploadPath:
         # Create file with 2KB of content
         test_file.write_text("x" * 2048)
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
-
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                    mock_get_client.return_value.__aenter__.return_value = mock_client
-                    mock_get_client.return_value.__aexit__.return_value = None
-                    mock_put.return_value = mock_response
-
-                    mock_file = AsyncMock()
-                    mock_file.read.return_value = b"x" * 2048
-                    mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
-
-                    await upload_path(test_file, "test-project")
+        await upload_path(test_file, "test-project", dry_run=True)
 
         # Check output contains "KB"
         captured = capsys.readouterr()
@@ -270,22 +207,7 @@ class TestUploadPath:
         # Create file with 2MB of content
         test_file.write_text("x" * (2 * 1024 * 1024))
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
-
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                    mock_get_client.return_value.__aenter__.return_value = mock_client
-                    mock_get_client.return_value.__aexit__.return_value = None
-                    mock_put.return_value = mock_response
-
-                    mock_file = AsyncMock()
-                    mock_file.read.return_value = b"x" * (2 * 1024 * 1024)
-                    mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
-
-                    await upload_path(test_file, "test-project")
+        await upload_path(test_file, "test-project", dry_run=True)
 
         # Check output contains "MB"
         captured = capsys.readouterr()
@@ -299,33 +221,25 @@ class TestUploadPath:
         test_file = tmp_path / "subdir" / "file.txt"
         test_file.write_text("content")
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
+        seen = {"paths": []}
 
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch(
-                    "basic_memory.cli.commands.cloud.upload._get_files_to_upload"
-                ) as mock_get_files:
-                    with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                        mock_get_client.return_value.__aenter__.return_value = mock_client
-                        mock_get_client.return_value.__aexit__.return_value = None
-                        mock_put.return_value = mock_response
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen["paths"].append(request.url.path)
+            return httpx.Response(201)
 
-                        # Mock file listing with relative path
-                        mock_get_files.return_value = [(test_file, "subdir/file.txt")]
+        transport = httpx.MockTransport(handler)
 
-                        mock_file = AsyncMock()
-                        mock_file.read.return_value = b"content"
-                        mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
+        @asynccontextmanager
+        async def client_cm_factory():
+            async with httpx.AsyncClient(
+                transport=transport, base_url="https://cloud.example.test"
+            ) as client:
+                yield client
 
-                        await upload_path(tmp_path, "my-project")
+        await upload_path(tmp_path, "my-project", client_cm_factory=client_cm_factory)
 
         # Verify WebDAV path format: /webdav/{project_name}/{relative_path}
-        mock_put.assert_called_once()
-        call_args = mock_put.call_args
-        assert call_args[0][1] == "/webdav/my-project/subdir/file.txt"
+        assert seen["paths"] == ["/webdav/my-project/subdir/file.txt"]
 
     @pytest.mark.asyncio
     async def test_skips_archive_files(self, tmp_path, capsys):
@@ -335,40 +249,28 @@ class TestUploadPath:
         (tmp_path / "backup.zip").write_text("fake zip")
         (tmp_path / "data.tar.gz").write_text("fake tar")
 
-        mock_client = AsyncMock()
-        mock_response = Mock()
-        mock_response.raise_for_status = Mock()
+        seen = {"paths": []}
 
-        with patch("basic_memory.cli.commands.cloud.upload.get_client") as mock_get_client:
-            with patch("basic_memory.cli.commands.cloud.upload.call_put") as mock_put:
-                with patch(
-                    "basic_memory.cli.commands.cloud.upload._get_files_to_upload"
-                ) as mock_get_files:
-                    with patch("aiofiles.open", create=True) as mock_aiofiles_open:
-                        mock_get_client.return_value.__aenter__.return_value = mock_client
-                        mock_get_client.return_value.__aexit__.return_value = None
-                        mock_put.return_value = mock_response
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen["paths"].append(request.url.path)
+            return httpx.Response(201)
 
-                        # Mock file listing with all files
-                        mock_get_files.return_value = [
-                            (tmp_path / "notes.md", "notes.md"),
-                            (tmp_path / "backup.zip", "backup.zip"),
-                            (tmp_path / "data.tar.gz", "data.tar.gz"),
-                        ]
+        transport = httpx.MockTransport(handler)
 
-                        mock_file = AsyncMock()
-                        mock_file.read.return_value = b"content"
-                        mock_aiofiles_open.return_value.__aenter__.return_value = mock_file
+        @asynccontextmanager
+        async def client_cm_factory():
+            async with httpx.AsyncClient(
+                transport=transport, base_url="https://cloud.example.test"
+            ) as client:
+                yield client
 
-                        result = await upload_path(tmp_path, "test-project")
+        result = await upload_path(tmp_path, "test-project", client_cm_factory=client_cm_factory)
 
         # Should succeed
         assert result is True
 
         # Should only upload the .md file (not the archives)
-        assert mock_put.call_count == 1
-        call_args = mock_put.call_args
-        assert "notes.md" in call_args[0][1]
+        assert seen["paths"] == ["/webdav/test-project/notes.md"]
 
         # Check output mentions skipping
         captured = capsys.readouterr()

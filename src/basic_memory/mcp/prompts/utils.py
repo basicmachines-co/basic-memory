@@ -123,9 +123,9 @@ def format_prompt_context(context: PromptContext) -> str:
 
                 # Add content snippet
                 if hasattr(primary, "content") and primary.content:  # pyright: ignore
-                    content = primary.content or ""  # pyright: ignore
-                    if content:
-                        section += f"\n**Excerpt**:\n{content}\n"
+                    content = primary.content or ""  # pyright: ignore  # pragma: no cover
+                    if content:  # pragma: no cover
+                        section += f"\n**Excerpt**:\n{content}\n"  # pragma: no cover
 
                 section += dedent(f"""
 

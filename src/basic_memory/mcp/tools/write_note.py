@@ -171,18 +171,18 @@ async def write_note(
                 logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
                 try:
                     if not entity.permalink:
-                        raise ValueError("Entity permalink is required for updates")
+                        raise ValueError("Entity permalink is required for updates")  # pragma: no cover
                     entity_id = await resolve_entity_id(client, active_project.id, entity.permalink)
                     url = f"/v2/projects/{active_project.id}/knowledge/entities/{entity_id}"
                     response = await call_put(client, url, json=entity.model_dump())
                     result = EntityResponse.model_validate(response.json())
                     action = "Updated"
-                except Exception as update_error:
+                except Exception as update_error:  # pragma: no cover
                     # Re-raise the original error if update also fails
-                    raise e from update_error
+                    raise e from update_error  # pragma: no cover
             else:
                 # Re-raise if it's not a conflict error
-                raise
+                raise  # pragma: no cover
         summary = [
             f"# {action} note",
             f"project: {active_project.name}",

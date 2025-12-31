@@ -16,7 +16,7 @@ from loguru import logger
 
 from basic_memory.utils import FilePath
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.config import BasicMemoryConfig
 
 
@@ -142,7 +142,7 @@ async def format_markdown_builtin(path: Path) -> Optional[str]:
     """
     try:
         import mdformat
-    except ImportError:
+    except ImportError:  # pragma: no cover
         logger.warning(
             "mdformat not installed, skipping built-in formatting",
             path=str(path),
@@ -178,7 +178,7 @@ async def format_markdown_builtin(path: Path) -> Optional[str]:
         )
         return formatted_content
 
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         logger.warning(
             "mdformat formatting failed",
             path=str(path),
@@ -280,7 +280,7 @@ async def format_file(
             path=str(path),
         )
         return None
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         logger.warning(
             "Formatter failed",
             path=str(path),

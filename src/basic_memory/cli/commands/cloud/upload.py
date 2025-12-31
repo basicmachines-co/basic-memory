@@ -2,6 +2,8 @@
 
 import os
 from pathlib import Path
+from contextlib import AbstractAsyncContextManager
+from typing import Callable, AsyncContextManager
 
 import aiofiles
 import httpx
@@ -20,6 +22,9 @@ async def upload_path(
     verbose: bool = False,
     use_gitignore: bool = True,
     dry_run: bool = False,
+    *,
+    client_cm_factory: Callable[[], AbstractAsyncContextManager[httpx.AsyncClient]] | None = None,
+    put_func=call_put,
 ) -> bool:
     """
     Upload a file or directory to cloud project via WebDAV.
@@ -85,8 +90,10 @@ async def upload_path(
                     size_str = f"{size / (1024 * 1024):.1f} MB"
                 print(f"  {relative_path} ({size_str})")
         else:
-            # Upload files using httpx
-            async with get_client() as client:
+            # Upload files using httpx.
+            # Allow injection for tests (MockTransport) while keeping production default.
+            cm_factory = client_cm_factory or get_client
+            async with cm_factory() as client:
                 for i, (file_path, relative_path) in enumerate(files_to_upload, 1):
                     # Skip archive files (zip, tar, gz, etc.)
                     if _is_archive_file(file_path):
@@ -110,7 +117,7 @@ async def upload_path(
 
                     # Upload via HTTP PUT to WebDAV endpoint with mtime header
                     # Using X-OC-Mtime (ownCloud/Nextcloud standard)
-                    response = await call_put(
+                    response = await put_func(
                         client, remote_path, content=content, headers={"X-OC-Mtime": str(mtime)}
                     )
                     response.raise_for_status()

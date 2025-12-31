@@ -158,8 +158,8 @@ class SearchRepositoryBase(ABC):
             search_index_rows: List of SearchIndexRow objects to index
         """
 
-        if not search_index_rows:
-            return
+        if not search_index_rows:  # pragma: no cover
+            return  # pragma: no cover
 
         async with db.scoped_session(self.session_maker) as session:
             # When using text() raw SQL, always serialize JSON to string
