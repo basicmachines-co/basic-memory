@@ -111,3 +111,57 @@ jobs:
         run: |
           uv pip install pytest pytest-cov
           just test-postgres
+
+  coverage:
+    name: Coverage Summary (combined, Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e .[dev]
+
+      - name: Run combined coverage (SQLite + Postgres)
+        run: |
+          uv pip install pytest pytest-cov
+          just coverage
+
+      - name: Add coverage report to job summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage"
+            echo ""
+            echo '```'
+            uv run coverage report -m
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: htmlcov
+          path: htmlcov/
