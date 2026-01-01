@@ -206,6 +206,13 @@ async def engine_factory(
             autoflush=False,
         )
 
+        # Important: wire the engine/session into the global db module state.
+        # Some codepaths (e.g. app initialization / MCP lifespan) call db.get_or_create_db(),
+        # which would otherwise create a separate engine and run migrations, conflicting with
+        # our test-created schema (and causing DuplicateTableError).
+        db._engine = engine
+        db._session_maker = session_maker
+
         from basic_memory.models.search import (
             CREATE_POSTGRES_SEARCH_INDEX_TABLE,
             CREATE_POSTGRES_SEARCH_INDEX_FTS,
@@ -229,6 +236,8 @@ async def engine_factory(
         yield engine, session_maker
 
         await engine.dispose()
+        db._engine = None
+        db._session_maker = None
     else:
         # SQLite mode
         db_type = DatabaseType.MEMORY

@@ -329,15 +329,21 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 result = await session.execute(text(sql), params)
                 rows = result.fetchall()
         except Exception as e:
-            # Handle tsquery syntax errors
-            if "tsquery" in str(e).lower() or "syntax error" in str(e).lower():  # pragma: no cover
+            # Handle tsquery syntax errors (and only those).
+            #
+            # Important: Postgres errors for other failures (e.g. missing table) will still mention
+            # `to_tsquery(...)` in the SQL text, so checking for the substring "tsquery" is too broad.
+            msg = str(e).lower()
+            if (
+                "syntax error in tsquery" in msg
+                or "invalid input syntax for type tsquery" in msg
+            ):  # pragma: no cover
                 logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
-                # Return empty results rather than crashing
                 return []
-            else:
-                # Re-raise other database errors
-                logger.error(f"Database error during search: {e}")
-                raise
+
+            # Re-raise other database errors
+            logger.error(f"Database error during search: {e}")
+            raise
 
         results = [
             SearchIndexRow(

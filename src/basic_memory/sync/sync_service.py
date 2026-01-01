@@ -766,7 +766,13 @@ class SyncService:
                 return entity, checksum
             except IntegrityError as e:
                 # Handle race condition where entity was created by another process
-                if "UNIQUE constraint failed: entity.file_path" in str(e):
+                msg = str(e)
+                if (
+                    "UNIQUE constraint failed: entity.file_path" in msg
+                    or "uix_entity_file_path_project" in msg
+                    or "duplicate key value violates unique constraint" in msg
+                    and "file_path" in msg
+                ):
                     logger.info(
                         f"Entity already exists for file_path={path}, updating instead of creating"
                     )
