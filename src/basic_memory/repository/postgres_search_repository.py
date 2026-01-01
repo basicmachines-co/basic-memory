@@ -337,7 +337,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
             if (
                 "syntax error in tsquery" in msg
                 or "invalid input syntax for type tsquery" in msg
-            ):  # pragma: no cover
+                or "no operand in tsquery" in msg
+                or "no operator in tsquery" in msg
+            ):
                 logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
                 return []
 
