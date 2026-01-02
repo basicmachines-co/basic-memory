@@ -297,6 +297,7 @@ class TestSearchToolErrorHandling:
             project_url = "http://test"
             name = "test-project"
             id = 1
+            external_id = "test-external-id"
 
         async def fake_get_active_project(*args, **kwargs):
             return StubProject()
@@ -322,6 +323,7 @@ class TestSearchToolErrorHandling:
             project_url = "http://test"
             name = "test-project"
             id = 1
+            external_id = "test-external-id"
 
         async def fake_get_active_project(*args, **kwargs):
             return StubProject()

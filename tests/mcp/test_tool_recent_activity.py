@@ -267,6 +267,7 @@ async def test_recent_activity_get_project_activity_timezone_normalization(monke
 
     class P:
         id = 1
+        external_id = "test-external-id"
         name = "p"
         path = "/tmp/p"
 
