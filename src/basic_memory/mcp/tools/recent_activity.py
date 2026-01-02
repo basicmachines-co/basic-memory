@@ -135,7 +135,8 @@ async def recent_activity(
             params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
         # Resolve project parameter using the three-tier hierarchy
-        resolved_project = await resolve_project_parameter(project)
+        # allow_discovery=True enables Discovery Mode, so a project is not required
+        resolved_project = await resolve_project_parameter(project, allow_discovery=True)
 
         if resolved_project is None:
             # Discovery Mode: Get activity across all projects

@@ -284,7 +284,7 @@ async def test_get_project_method(project_service: ProjectService):
 async def test_set_default_project_config_db_mismatch(
     project_service: ProjectService, config_manager: ConfigManager
 ):
-    """Test set_default_project when project exists in config but not in database."""
+    """Test set_default_project raises error when project exists in config but not in database."""
     test_project_name = f"test-mismatch-project-{os.urandom(4).hex()}"
     with tempfile.TemporaryDirectory() as temp_dir:
         test_root = Path(temp_dir)
@@ -292,8 +292,6 @@ async def test_set_default_project_config_db_mismatch(
 
         # Make sure the test directory exists
         os.makedirs(test_project_path, exist_ok=True)
-
-        original_default = project_service.default_project
 
         try:
             # Add project to config only (not to database)
@@ -304,17 +302,11 @@ async def test_set_default_project_config_db_mismatch(
             db_project = await project_service.repository.get_by_name(test_project_name)
             assert db_project is None
 
-            # Try to set as default - this should trigger the error log on line 142
-            await project_service.set_default_project(test_project_name)
-
-            # Should still update config despite database mismatch
-            assert project_service.default_project == test_project_name
+            # Try to set as default - should raise ValueError since project not in database
+            with pytest.raises(ValueError, match=f"Project '{test_project_name}' not found"):
+                await project_service.set_default_project(test_project_name)
 
         finally:
-            # Restore original default
-            if original_default:
-                config_manager.set_default_project(original_default)
-
             # Clean up
             if test_project_name in project_service.projects:
                 config_manager.remove_project(test_project_name)

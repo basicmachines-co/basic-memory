@@ -283,15 +283,17 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for set_default_project")
 
-        # First update config file (this will validate the project exists)
-        self.config_manager.set_default_project(name)
-
-        # Then update database using the same lookup logic as get_project
+        # Look up project in database first to validate it exists
         project = await self.get_project(name)
-        if project:
-            await self.repository.set_as_default(project.id)
-        else:
-            logger.error(f"Project '{name}' exists in config but not in database")
+        if not project:
+            raise ValueError(f"Project '{name}' not found")
+
+        # Update database
+        await self.repository.set_as_default(project.id)
+
+        # Update config file only in local mode (cloud mode uses database only)
+        if not self.config_manager.config.cloud_mode:
+            self.config_manager.set_default_project(name)
 
         logger.info(f"Project '{name}' set as default in configuration and database")
 

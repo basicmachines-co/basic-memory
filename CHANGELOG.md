@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.17.2 (2025-12-29)
+
+### Bug Fixes
+
+- Allow recent_activity discovery mode in cloud mode
+  ([`0bcda4a`](https://github.com/basicmachines-co/basic-memory/commit/0bcda4a))
+  - Add `allow_discovery` parameter to `resolve_project_parameter()`
+  - Tools like `recent_activity` can now work across all projects in cloud mode
+  - Fix circular import in project_context module
+
+### Internal
+
+- Optimize release workflow by running lint/typecheck only (skip full tests)
+  ([`0b5425f`](https://github.com/basicmachines-co/basic-memory/commit/0b5425f))
+
 ## v0.17.1 (2025-12-29)
 
 ### Bug Fixes

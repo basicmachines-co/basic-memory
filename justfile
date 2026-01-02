@@ -182,8 +182,9 @@ release version:
     fi
     
     # Run quality checks
-    echo "🔍 Running quality checks..."
-    just check
+    echo "🔍 Running lint  checks..."
+    just lint
+    just typecheck
     
     # Update version in __init__.py
     echo "📝 Updating version in __init__.py..."

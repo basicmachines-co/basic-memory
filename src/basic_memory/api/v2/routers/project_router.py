@@ -211,7 +211,7 @@ async def update_project_by_id(
         return ProjectStatusResponse(
             message=f"Project '{updated_project.name}' updated successfully",
             status="success",
-            default=(old_project.name == project_service.default_project),
+            default=old_project.is_default or False,
             old_project=old_project_info,
             new_project=ProjectItem(
                 id=updated_project.id,
@@ -261,7 +261,8 @@ async def delete_project_by_id(
             )
 
         # Check if trying to delete the default project
-        if old_project.name == project_service.default_project:
+        # Use is_default from database, not ConfigManager (which doesn't work in cloud mode)
+        if old_project.is_default:
             available_projects = await project_service.list_projects()
             other_projects = [
                 p.name for p in available_projects if p.external_id != project_id
@@ -318,12 +319,11 @@ async def set_default_project_by_id(
     logger.info(f"API v2 request: set_default_project_by_id for project_id={project_id}")
 
     try:
-        # Get the old default project
-        default_name = project_service.default_project
-        default_project = await project_service.get_project(default_name)
+        # Get the old default project from database
+        default_project = await project_repository.get_default_project()
         if not default_project:
             raise HTTPException(
-                status_code=404, detail=f"Default Project: '{default_name}' does not exist"
+                status_code=404, detail="No default project is currently set"
             )
 
         # Get the new default project by external_id
@@ -343,7 +343,7 @@ async def set_default_project_by_id(
             old_project=ProjectItem(
                 id=default_project.id,
                 external_id=default_project.external_id,
-                name=default_name,
+                name=default_project.name,
                 path=default_project.path,
                 is_default=False,
             ),

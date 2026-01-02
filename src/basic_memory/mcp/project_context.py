@@ -14,16 +14,17 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
 
-async def resolve_project_parameter(project: Optional[str] = None) -> Optional[str]:
+async def resolve_project_parameter(
+    project: Optional[str] = None, allow_discovery: bool = False
+) -> Optional[str]:
     """Resolve project parameter using three-tier hierarchy.
 
     if config.cloud_mode:
-        project is required
+        project is required (unless allow_discovery=True for tools that support discovery mode)
     else:
         Resolution order:
         1. Single Project Mode  (--project cli arg, or BASIC_MEMORY_MCP_PROJECT env var) - highest priority
@@ -32,17 +33,22 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
 
     Args:
         project: Optional explicit project parameter
+        allow_discovery: If True, allows returning None in cloud mode for discovery mode
+            (used by tools like recent_activity that can operate across all projects)
 
     Returns:
         Resolved project name or None if no resolution possible
     """
 
     config = ConfigManager().config
-    # if cloud_mode, project is required
+    # if cloud_mode, project is required (unless discovery mode is allowed)
     if config.cloud_mode:
         if project:
             logger.debug(f"project: {project}, cloud_mode: {config.cloud_mode}")
             return project
+        elif allow_discovery:
+            logger.debug("cloud_mode: discovery mode allowed, returning None")
+            return None
         else:
             raise ValueError("No project specified. Project is required for cloud mode.")
 
@@ -67,6 +73,9 @@ async def resolve_project_parameter(project: Optional[str] = None) -> Optional[s
 
 
 async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = None) -> List[str]:
+    # Deferred import to avoid circular dependency with tools
+    from basic_memory.mcp.tools.utils import call_get
+
     response = await call_get(client, "/projects/projects", headers=headers)
     project_list = ProjectList.model_validate(response.json())
     return [project.name for project in project_list.projects]
@@ -92,6 +101,9 @@ async def get_active_project(
         ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
+    # Deferred import to avoid circular dependency with tools
+    from basic_memory.mcp.tools.utils import call_get
+
     resolved_project = await resolve_project_parameter(project)
     if not resolved_project:
         project_names = await get_project_names(client, headers)

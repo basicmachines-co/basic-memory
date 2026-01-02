@@ -11,6 +11,7 @@ from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.repository import EntityRepository
 from basic_memory.services import EntityService
+from basic_memory.services.file_service import FileService
 from basic_memory.services.search_service import SearchService
 from basic_memory.schemas.search import SearchQuery
 from basic_memory.sync.sync_service import SyncService
@@ -31,12 +32,13 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     """
     base_path = project_config.home
 
-    # Create parser and processor for importer
+    # Create parser, processor, and file_service for importer
     parser = EntityParser(base_path)
     processor = MarkdownProcessor(parser)
+    file_service = FileService(base_path, processor)
 
     # Create importer
-    importer = ClaudeConversationsImporter(base_path, processor)
+    importer = ClaudeConversationsImporter(base_path, processor, file_service)
 
     # Sample conversation data
     conversations = [

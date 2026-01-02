@@ -210,6 +210,7 @@ async def engine_factory(
             CREATE_POSTGRES_SEARCH_INDEX_TABLE,
             CREATE_POSTGRES_SEARCH_INDEX_FTS,
             CREATE_POSTGRES_SEARCH_INDEX_METADATA,
+            CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
         )
 
         # Drop and recreate all tables for test isolation
@@ -223,6 +224,7 @@ async def engine_factory(
             await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
             await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
             await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
+            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
 
         yield engine, session_maker
 

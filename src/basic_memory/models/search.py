@@ -48,6 +48,15 @@ CREATE_POSTGRES_SEARCH_INDEX_METADATA = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_metadata_gin ON search_index USING gin(metadata jsonb_path_ops)
 """)
 
+# Partial unique index on (permalink, project_id) for non-null permalinks
+# This prevents duplicate permalinks per project and is used by upsert operations
+# in PostgresSearchRepository to handle race conditions during parallel indexing
+CREATE_POSTGRES_SEARCH_INDEX_PERMALINK = DDL("""
+CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_project
+ON search_index (permalink, project_id)
+WHERE permalink IS NOT NULL
+""")
+
 # Define FTS5 virtual table creation for SQLite only
 # This DDL is executed separately for SQLite databases
 CREATE_SEARCH_INDEX = DDL("""

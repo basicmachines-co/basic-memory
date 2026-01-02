@@ -24,6 +24,11 @@ class PostgresSearchRepository(SearchRepositoryBase):
     - GIN indexes for performance
     - ts_rank() function for relevance scoring
     - JSONB containment operators for metadata search
+
+    Note: This implementation uses UPSERT patterns (INSERT ... ON CONFLICT) instead of
+    delete-then-insert to handle race conditions during parallel entity indexing.
+    The partial unique index uix_search_index_permalink_project prevents duplicate
+    permalinks per project.
     """
 
     async def init_search_index(self):
@@ -40,6 +45,63 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # - CREATE INDEX USING GIN on textsearchable_index_col
         # - CREATE INDEX USING GIN on metadata jsonb_path_ops
         pass
+
+    async def index_item(self, search_index_row: SearchIndexRow) -> None:
+        """Index or update a single item using UPSERT.
+
+        Uses INSERT ... ON CONFLICT to handle race conditions during parallel
+        entity indexing. The partial unique index uix_search_index_permalink_project
+        on (permalink, project_id) WHERE permalink IS NOT NULL prevents duplicate
+        permalinks.
+
+        For rows with non-null permalinks (entities), conflicts are resolved by
+        updating the existing row. For rows with null permalinks, no conflict
+        occurs on this index.
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            # Serialize JSON for raw SQL
+            insert_data = search_index_row.to_insert(serialize_json=True)
+            insert_data["project_id"] = self.project_id
+
+            # Use upsert to handle race conditions during parallel indexing
+            # ON CONFLICT (permalink, project_id) matches the partial unique index
+            # uix_search_index_permalink_project WHERE permalink IS NOT NULL
+            # For rows with NULL permalinks, no conflict occurs (partial index doesn't apply)
+            await session.execute(
+                text("""
+                    INSERT INTO search_index (
+                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        from_id, to_id, relation_type,
+                        entity_id, category,
+                        created_at, updated_at,
+                        project_id
+                    ) VALUES (
+                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :from_id, :to_id, :relation_type,
+                        :entity_id, :category,
+                        :created_at, :updated_at,
+                        :project_id
+                    )
+                    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+                        id = EXCLUDED.id,
+                        title = EXCLUDED.title,
+                        content_stems = EXCLUDED.content_stems,
+                        content_snippet = EXCLUDED.content_snippet,
+                        file_path = EXCLUDED.file_path,
+                        type = EXCLUDED.type,
+                        metadata = EXCLUDED.metadata,
+                        from_id = EXCLUDED.from_id,
+                        to_id = EXCLUDED.to_id,
+                        relation_type = EXCLUDED.relation_type,
+                        entity_id = EXCLUDED.entity_id,
+                        category = EXCLUDED.category,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at
+                """),
+                insert_data,
+            )
+            logger.debug(f"indexed row {search_index_row}")
+            await session.commit()
 
     def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a search term for tsquery format.
@@ -316,10 +378,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
     async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
         """Index multiple items in a single batch operation using UPSERT.
 
-        Uses INSERT ... ON CONFLICT DO UPDATE to handle re-indexing of existing
-        entities (e.g., during forward reference resolution) without requiring
-        a separate delete operation. This eliminates race conditions between
-        delete and insert operations in separate transactions.
+        Uses INSERT ... ON CONFLICT to handle race conditions during parallel
+        entity indexing. The partial unique index uix_search_index_permalink_project
+        on (permalink, project_id) WHERE permalink IS NOT NULL prevents duplicate
+        permalinks.
+
+        For rows with non-null permalinks (entities), conflicts are resolved by
+        updating the existing row. For rows with null permalinks (observations,
+        relations), the partial index doesn't apply and they are inserted directly.
 
         Args:
             search_index_rows: List of SearchIndexRow objects to index
@@ -338,11 +404,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 insert_data["project_id"] = self.project_id
                 insert_data_list.append(insert_data)
 
-            # Use UPSERT (INSERT ... ON CONFLICT) to handle re-indexing
-            # Primary key is (id, type, project_id)
-            # This handles race conditions during forward reference resolution
-            # where an entity might be re-indexed before the delete commits
-            # Syntax works for both SQLite 3.24+ and PostgreSQL
+            # Use upsert to handle race conditions during parallel indexing
+            # ON CONFLICT (permalink, project_id) matches the partial unique index
+            # uix_search_index_permalink_project WHERE permalink IS NOT NULL
+            # For rows with NULL permalinks (observations, relations), no conflict occurs
             await session.execute(
                 text("""
                     INSERT INTO search_index (
@@ -358,12 +423,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         :created_at, :updated_at,
                         :project_id
                     )
-                    ON CONFLICT (id, type, project_id) DO UPDATE SET
+                    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+                        id = EXCLUDED.id,
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
-                        permalink = EXCLUDED.permalink,
                         file_path = EXCLUDED.file_path,
+                        type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,
                         from_id = EXCLUDED.from_id,
                         to_id = EXCLUDED.to_id,

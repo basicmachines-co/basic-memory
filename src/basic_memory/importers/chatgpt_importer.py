@@ -15,6 +15,19 @@ logger = logging.getLogger(__name__)
 class ChatGPTImporter(Importer[ChatImportResult]):
     """Service for importing ChatGPT conversations."""
 
+    def handle_error(
+        self, message: str, error: Optional[Exception] = None
+    ) -> ChatImportResult:
+        """Return a failed ChatImportResult with an error message."""
+        error_msg = f"{message}: {error}" if error else message
+        return ChatImportResult(
+            import_count={},
+            success=False,
+            error_message=error_msg,
+            conversations=0,
+            messages=0,
+        )
+
     async def import_data(
         self, source_data, destination_folder: str, **kwargs: Any
     ) -> ChatImportResult:
@@ -30,7 +43,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
         """
         try:  # pragma: no cover
             # Ensure the destination folder exists
-            self.ensure_folder_exists(destination_folder)
+            await self.ensure_folder_exists(destination_folder)
             conversations = source_data
 
             # Process each conversation
@@ -41,8 +54,8 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 # Convert to entity
                 entity = self._format_chat_content(destination_folder, chat)
 
-                # Write file
-                file_path = self.base_path / f"{entity.frontmatter.metadata['permalink']}.md"
+                # Write file using relative path - FileService handles base_path
+                file_path = f"{entity.frontmatter.metadata['permalink']}.md"
                 await self.write_entity(entity, file_path)
 
                 # Count messages
@@ -67,7 +80,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
         except Exception as e:  # pragma: no cover
             logger.exception("Failed to import ChatGPT conversations")
-            return self.handle_error("Failed to import ChatGPT conversations", e)  # pyright: ignore [reportReturnType]
+            return self.handle_error("Failed to import ChatGPT conversations", e)
 
     def _format_chat_content(
         self, folder: str, conversation: Dict[str, Any]

@@ -143,6 +143,50 @@ class MarkdownProcessor:
 
         return await file_utils.compute_checksum(content_for_checksum)
 
+    def to_markdown_string(self, markdown: EntityMarkdown) -> str:
+        """Convert EntityMarkdown to markdown string with frontmatter.
+
+        This method handles serialization only - it does not write to files.
+        Use FileService.write_file() to persist the output.
+
+        This enables cloud environments to override file operations via
+        dependency injection while reusing the serialization logic.
+
+        Args:
+            markdown: EntityMarkdown schema to serialize
+
+        Returns:
+            Complete markdown string with frontmatter, content, and structured sections
+        """
+        # Convert frontmatter to dict
+        frontmatter_dict = OrderedDict()
+        frontmatter_dict["title"] = markdown.frontmatter.title
+        frontmatter_dict["type"] = markdown.frontmatter.type
+        frontmatter_dict["permalink"] = markdown.frontmatter.permalink
+
+        metadata = markdown.frontmatter.metadata or {}
+        for k, v in metadata.items():
+            frontmatter_dict[k] = v
+
+        # Start with user content (or minimal title for new files)
+        content = markdown.content or f"# {markdown.frontmatter.title}\n"
+
+        # Add structured sections with proper spacing
+        content = content.rstrip()  # Remove trailing whitespace
+
+        # Add a blank line if we have semantic content
+        if markdown.observations or markdown.relations:
+            content += "\n"
+
+        if markdown.observations:
+            content += self.format_observations(markdown.observations)
+        if markdown.relations:
+            content += self.format_relations(markdown.relations)
+
+        # Create Post object for frontmatter
+        post = Post(content, **frontmatter_dict)
+        return dump_frontmatter(post)
+
     def format_observations(self, observations: list[Observation]) -> str:
         """Format observations section in standard way.
 

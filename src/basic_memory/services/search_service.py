@@ -184,13 +184,29 @@ class SearchService:
         entity: Entity,
         content: str | None = None,
     ) -> None:
-        # delete all search index data associated with entity
-        await self.repository.delete_by_entity_id(entity_id=entity.id)
+        logger.info(
+            f"[BackgroundTask] Starting search index for entity_id={entity.id} "
+            f"permalink={entity.permalink} project_id={entity.project_id}"
+        )
+        try:
+            # delete all search index data associated with entity
+            await self.repository.delete_by_entity_id(entity_id=entity.id)
 
-        # reindex
-        await self.index_entity_markdown(
-            entity, content
-        ) if entity.is_markdown else await self.index_entity_file(entity)
+            # reindex
+            await self.index_entity_markdown(
+                entity, content
+            ) if entity.is_markdown else await self.index_entity_file(entity)
+
+            logger.info(
+                f"[BackgroundTask] Completed search index for entity_id={entity.id} "
+                f"permalink={entity.permalink}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[BackgroundTask] Failed search index for entity_id={entity.id} "
+                f"permalink={entity.permalink} error={e}"
+            )
+            raise
 
     async def index_entity_file(
         self,

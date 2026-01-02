@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from basic_memory.cli.app import import_app
 from basic_memory.cli.commands import import_memory_json  # noqa
 from basic_memory.markdown import MarkdownProcessor
+from basic_memory.services.file_service import FileService
 
 # Set up CLI runner
 runner = CliRunner()
@@ -43,11 +44,12 @@ def sample_json_file(tmp_path, sample_entities):
 
 
 @pytest.mark.asyncio
-async def test_get_markdown_processor(tmp_path, monkeypatch):
-    """Test getting markdown processor."""
+async def test_get_importer_dependencies(tmp_path, monkeypatch):
+    """Test getting importer dependencies (MarkdownProcessor and FileService)."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    processor = await import_memory_json.get_markdown_processor()
+    processor, file_service = await import_memory_json.get_importer_dependencies()
     assert isinstance(processor, MarkdownProcessor)
+    assert isinstance(file_service, FileService)
 
 
 def test_import_json_command_file_not_found(tmp_path):
