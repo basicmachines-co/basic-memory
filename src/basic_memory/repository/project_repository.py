@@ -74,6 +74,18 @@ class ProjectRepository(Repository[Project]):
         async with db.scoped_session(self.session_maker) as session:
             return await self.select_by_id(session, project_id)
 
+    async def get_by_external_id(self, external_id: str) -> Optional[Project]:
+        """Get project by external UUID.
+
+        Args:
+            external_id: External UUID identifier
+
+        Returns:
+            Project if found, None otherwise
+        """
+        query = self.select().where(Project.external_id == external_id)
+        return await self.find_one(query)
+
     async def get_default_project(self) -> Optional[Project]:
         """Get the default project (the one marked as is_default=True)."""
         query = self.select().where(Project.is_default.is_not(None))

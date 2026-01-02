@@ -31,11 +31,12 @@ class EntityResolveResponse(BaseModel):
     Returns the entity ID and associated metadata for the resolved entity.
     """
 
-    entity_id: int = Field(..., description="Numeric entity ID (primary identifier)")
+    external_id: str = Field(..., description="External UUID (primary API identifier)")
+    entity_id: int = Field(..., description="Numeric entity ID (internal identifier)")
     permalink: Optional[str] = Field(None, description="Entity permalink")
     file_path: str = Field(..., description="Relative file path")
     title: str = Field(..., description="Entity title")
-    resolution_method: Literal["id", "permalink", "title", "path", "search"] = Field(
+    resolution_method: Literal["external_id", "permalink", "title", "path", "search"] = Field(
         ..., description="How the identifier was resolved"
     )
 
@@ -56,14 +57,16 @@ class MoveEntityRequestV2(BaseModel):
 
 
 class EntityResponseV2(BaseModel):
-    """V2 entity response with ID as the primary field.
+    """V2 entity response with external_id as the primary API identifier.
 
-    This response format emphasizes the entity ID as the primary identifier,
-    with all other fields (permalink, file_path) as secondary metadata.
+    This response format emphasizes the external_id (UUID) as the primary API identifier,
+    with the numeric id maintained for internal reference.
     """
 
-    # ID first - this is the primary identifier in v2
-    id: int = Field(..., description="Numeric entity ID (primary identifier)")
+    # External UUID first - this is the primary API identifier in v2
+    external_id: str = Field(..., description="External UUID (primary API identifier)")
+    # Internal numeric ID
+    id: int = Field(..., description="Numeric entity ID (internal identifier)")
 
     # Core entity fields
     title: str = Field(..., description="Entity title")
@@ -118,12 +121,13 @@ class ProjectResolveResponse(BaseModel):
     Returns the project ID and associated metadata for the resolved project.
     """
 
-    project_id: int = Field(..., description="Numeric project ID (primary identifier)")
+    external_id: str = Field(..., description="External UUID (primary API identifier)")
+    project_id: int = Field(..., description="Numeric project ID (internal identifier)")
     name: str = Field(..., description="Project name")
     permalink: str = Field(..., description="Project permalink")
     path: str = Field(..., description="Project file path")
     is_active: bool = Field(..., description="Whether the project is active")
     is_default: bool = Field(..., description="Whether the project is the default")
-    resolution_method: Literal["id", "name", "permalink"] = Field(
+    resolution_method: Literal["external_id", "name", "permalink"] = Field(
         ..., description="How the identifier was resolved"
     )

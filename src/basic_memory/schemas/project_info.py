@@ -174,6 +174,7 @@ class ProjectItem(BaseModel):
     """Simple representation of a project."""
 
     id: int
+    external_id: str  # UUID string for API references (required after migration)
     name: str
     path: str
     is_default: bool = False

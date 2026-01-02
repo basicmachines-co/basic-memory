@@ -62,7 +62,7 @@ async def test_get_resource_by_id(
     test_project: Project,
     v2_project_url: str,
 ):
-    """Test getting resource content by entity ID."""
+    """Test getting resource content by external_id."""
     # First create a resource
     test_content = "# Test Resource\n\nThis is test content."
     create_data = {
@@ -74,8 +74,8 @@ async def test_get_resource_by_id(
     assert create_response.status_code == 200
     created = ResourceResponse.model_validate(create_response.json())
 
-    # Now get it by entity ID
-    response = await client.get(f"{v2_project_url}/resource/{created.entity_id}")
+    # Now get it by external_id
+    response = await client.get(f"{v2_project_url}/resource/{created.external_id}")
 
     assert response.status_code == 200
     # Normalize line endings for cross-platform compatibility
@@ -89,7 +89,8 @@ async def test_get_resource_not_found(
     v2_project_url: str,
 ):
     """Test getting a non-existent resource returns 404."""
-    response = await client.get(f"{v2_project_url}/resource/999999")
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await client.get(f"{v2_project_url}/resource/{fake_uuid}")
 
     assert response.status_code == 404
 
@@ -100,7 +101,7 @@ async def test_update_resource(
     test_project: Project,
     v2_project_url: str,
 ):
-    """Test updating resource content by entity ID."""
+    """Test updating resource content by external_id."""
     # Create a resource
     create_data = {
         "file_path": "test-update.md",
@@ -115,17 +116,17 @@ async def test_update_resource(
         "content": "Updated content",
     }
     response = await client.put(
-        f"{v2_project_url}/resource/{created.entity_id}",
+        f"{v2_project_url}/resource/{created.external_id}",
         json=update_data,
     )
 
     assert response.status_code == 200
     result = ResourceResponse.model_validate(response.json())
-    assert result.entity_id == created.entity_id
+    assert result.external_id == created.external_id
     assert result.file_path == "test-update.md"
 
     # Verify content was updated
-    get_response = await client.get(f"{v2_project_url}/resource/{created.entity_id}")
+    get_response = await client.get(f"{v2_project_url}/resource/{created.external_id}")
     assert "Updated content" in get_response.text
 
 
@@ -151,17 +152,17 @@ async def test_update_resource_and_move(
         "file_path": "moved/new-location.md",
     }
     response = await client.put(
-        f"{v2_project_url}/resource/{created.entity_id}",
+        f"{v2_project_url}/resource/{created.external_id}",
         json=update_data,
     )
 
     assert response.status_code == 200
     result = ResourceResponse.model_validate(response.json())
-    assert result.entity_id == created.entity_id
+    assert result.external_id == created.external_id
     assert result.file_path == "moved/new-location.md"
 
     # Verify content at new location
-    get_response = await client.get(f"{v2_project_url}/resource/{created.entity_id}")
+    get_response = await client.get(f"{v2_project_url}/resource/{created.external_id}")
     assert "Updated content in new location" in get_response.text
 
 
@@ -172,11 +173,12 @@ async def test_update_resource_not_found(
     v2_project_url: str,
 ):
     """Test updating a non-existent resource returns 404."""
+    fake_uuid = "00000000-0000-0000-0000-000000000000"
     update_data = {
         "content": "New content",
     }
     response = await client.put(
-        f"{v2_project_url}/resource/999999",
+        f"{v2_project_url}/resource/{fake_uuid}",
         json=update_data,
     )
 
@@ -223,7 +225,7 @@ async def test_update_resource_invalid_path(
         "file_path": "../../../etc/passwd",
     }
     response = await client.put(
-        f"{v2_project_url}/resource/{created.entity_id}",
+        f"{v2_project_url}/resource/{created.external_id}",
         json=update_data,
     )
 
@@ -235,21 +237,24 @@ async def test_update_resource_invalid_path(
 async def test_resource_invalid_project_id(
     client: AsyncClient,
 ):
-    """Test resource endpoints with invalid project ID return 404."""
+    """Test resource endpoints with invalid project external_id return 404."""
+    fake_project_uuid = "00000000-0000-0000-0000-000000000000"
+    fake_entity_uuid = "00000000-0000-0000-0000-000000000001"
+
     # Test create
     response = await client.post(
-        "/v2/projects/999999/resource",
+        f"/v2/projects/{fake_project_uuid}/resource",
         json={"file_path": "test.md", "content": "test"},
     )
     assert response.status_code == 404
 
     # Test get
-    response = await client.get("/v2/projects/999999/resource/1")
+    response = await client.get(f"/v2/projects/{fake_project_uuid}/resource/{fake_entity_uuid}")
     assert response.status_code == 404
 
     # Test update
     response = await client.put(
-        "/v2/projects/999999/resource/1",
+        f"/v2/projects/{fake_project_uuid}/resource/{fake_entity_uuid}",
         json={"content": "test"},
     )
     assert response.status_code == 404
@@ -259,9 +264,10 @@ async def test_resource_invalid_project_id(
 async def test_v2_resource_endpoints_use_project_id_not_name(
     client: AsyncClient, test_project: Project
 ):
-    """Verify v2 resource endpoints require project ID, not name."""
-    # Try using project name instead of ID - should fail
-    response = await client.get(f"/v2/projects/{test_project.name}/resource/1")
+    """Verify v2 resource endpoints require project external_id UUID, not name."""
+    # Try using project name instead of external_id - should fail
+    fake_entity_uuid = "00000000-0000-0000-0000-000000000000"
+    response = await client.get(f"/v2/projects/{test_project.name}/resource/{fake_entity_uuid}")
 
-    # Should get validation error or 404 because name is not a valid integer
-    assert response.status_code in [404, 422]
+    # Should get 404 because name is not a valid project external_id
+    assert response.status_code == 404

@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.importers.base import Importer
@@ -14,6 +14,19 @@ logger = logging.getLogger(__name__)
 
 class ClaudeConversationsImporter(Importer[ChatImportResult]):
     """Service for importing Claude conversations."""
+
+    def handle_error(
+        self, message: str, error: Optional[Exception] = None
+    ) -> ChatImportResult:
+        """Return a failed ChatImportResult with an error message."""
+        error_msg = f"{message}: {error}" if error else message
+        return ChatImportResult(
+            import_count={},
+            success=False,
+            error_message=error_msg,
+            conversations=0,
+            messages=0,
+        )
 
     async def import_data(
         self, source_data, destination_folder: str, **kwargs: Any
@@ -67,7 +80,7 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
 
         except Exception as e:  # pragma: no cover
             logger.exception("Failed to import Claude conversations")
-            return self.handle_error("Failed to import Claude conversations", e)  # pyright: ignore [reportReturnType]
+            return self.handle_error("Failed to import Claude conversations", e)
 
     def _format_chat_content(
         self,

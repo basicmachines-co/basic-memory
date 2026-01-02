@@ -14,6 +14,19 @@ logger = logging.getLogger(__name__)
 class ClaudeProjectsImporter(Importer[ProjectImportResult]):
     """Service for importing Claude projects."""
 
+    def handle_error(
+        self, message: str, error: Optional[Exception] = None
+    ) -> ProjectImportResult:
+        """Return a failed ProjectImportResult with an error message."""
+        error_msg = f"{message}: {error}" if error else message
+        return ProjectImportResult(
+            import_count={},
+            success=False,
+            error_message=error_msg,
+            documents=0,
+            prompts=0,
+        )
+
     async def import_data(
         self, source_data, destination_folder: str, **kwargs: Any
     ) -> ProjectImportResult:
@@ -73,7 +86,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
 
         except Exception as e:  # pragma: no cover
             logger.exception("Failed to import Claude projects")
-            return self.handle_error("Failed to import Claude projects", e)  # pyright: ignore [reportReturnType]
+            return self.handle_error("Failed to import Claude projects", e)
 
     def _format_project_markdown(
         self, project: Dict[str, Any], doc: Dict[str, Any], destination_folder: str = ""

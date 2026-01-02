@@ -108,7 +108,7 @@ async def build_context(
 
         response = await call_get(
             client,
-            f"/v2/projects/{active_project.id}/memory/{memory_url_path(url)}",
+            f"/v2/projects/{active_project.external_id}/memory/{memory_url_path(url)}",
             params={
                 "depth": depth,
                 "timeframe": timeframe,

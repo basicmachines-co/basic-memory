@@ -1,14 +1,14 @@
 """V2 router for search operations.
 
-This router uses integer project IDs for stable, efficient routing.
+This router uses external_id UUIDs for stable, API-friendly routing.
 V1 uses string-based project names which are less efficient and less stable.
 """
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Path
 
 from basic_memory.api.routers.utils import to_search_results
 from basic_memory.schemas.search import SearchQuery, SearchResponse
-from basic_memory.deps import SearchServiceV2Dep, EntityServiceV2Dep, ProjectIdPathDep
+from basic_memory.deps import SearchServiceV2ExternalDep, EntityServiceV2ExternalDep
 
 # Note: No prefix here - it's added during registration as /v2/{project_id}/search
 router = APIRouter(tags=["search"])
@@ -16,19 +16,19 @@ router = APIRouter(tags=["search"])
 
 @router.post("/search/", response_model=SearchResponse)
 async def search(
-    project_id: ProjectIdPathDep,
     query: SearchQuery,
-    search_service: SearchServiceV2Dep,
-    entity_service: EntityServiceV2Dep,
+    search_service: SearchServiceV2ExternalDep,
+    entity_service: EntityServiceV2ExternalDep,
+    project_id: str = Path(..., description="Project external UUID"),
     page: int = 1,
     page_size: int = 10,
 ):
     """Search across all knowledge and documents in a project.
 
-    V2 uses integer project IDs for improved performance and stability.
+    V2 uses external_id UUIDs for stable API references.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         query: Search query parameters (text, filters, etc.)
         search_service: Search service scoped to project
         entity_service: Entity service scoped to project
@@ -51,9 +51,9 @@ async def search(
 
 @router.post("/search/reindex")
 async def reindex(
-    project_id: ProjectIdPathDep,
     background_tasks: BackgroundTasks,
-    search_service: SearchServiceV2Dep,
+    search_service: SearchServiceV2ExternalDep,
+    project_id: str = Path(..., description="Project external UUID"),
 ):
     """Recreate and populate the search index for a project.
 
@@ -62,7 +62,7 @@ async def reindex(
     corrupted.
 
     Args:
-        project_id: Validated numeric project ID from URL path
+        project_id: Project external UUID from URL path
         background_tasks: FastAPI background tasks handler
         search_service: Search service scoped to project
 

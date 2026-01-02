@@ -102,7 +102,35 @@ async def get_project_config_v2(
     )
 
 
-ProjectConfigV2Dep = Annotated[ProjectConfig, Depends(get_project_config_v2)]  # pragma: no cover
+ProjectConfigV2Dep = Annotated[ProjectConfig, Depends(get_project_config_v2)]
+
+
+async def get_project_config_v2_external(
+    project_id: "ProjectExternalIdPathDep", project_repository: "ProjectRepositoryDep"
+) -> ProjectConfig:  # pragma: no cover
+    """Get the project config for v2 API (uses external_id UUID from path).
+
+    Args:
+        project_id: The internal project ID resolved from external_id
+        project_repository: Repository for project operations
+
+    Returns:
+        The resolved project config
+
+    Raises:
+        HTTPException: If project is not found
+    """
+    project_obj = await project_repository.get_by_id(project_id)
+    if project_obj:
+        return ProjectConfig(name=project_obj.name, home=pathlib.Path(project_obj.path))
+
+    # Not found (this should not happen since ProjectExternalIdPathDep already validates)
+    raise HTTPException(  # pragma: no cover
+        status_code=status.HTTP_404_NOT_FOUND, detail=f"Project with ID {project_id} not found."
+    )
+
+
+ProjectConfigV2ExternalDep = Annotated[ProjectConfig, Depends(get_project_config_v2_external)]  # pragma: no cover
 
 ## sqlalchemy
 
@@ -190,6 +218,38 @@ async def validate_project_id(
 ProjectIdPathDep = Annotated[int, Depends(validate_project_id)]
 
 
+async def validate_project_external_id(
+    project_id: str,
+    project_repository: ProjectRepositoryDep,
+) -> int:
+    """Validate that a project external_id (UUID) exists in the database.
+
+    This is used for v2 API endpoints that take project external_ids as strings in the path.
+    The project_id parameter will be automatically extracted from the URL path by FastAPI.
+
+    Args:
+        project_id: The external UUID from the URL path (named project_id for URL consistency)
+        project_repository: Repository for project operations
+
+    Returns:
+        The internal numeric project ID (for use by repositories)
+
+    Raises:
+        HTTPException: If project with that external_id is not found
+    """
+    project_obj = await project_repository.get_by_external_id(project_id)
+    if not project_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project with external_id '{project_id}' not found.",
+        )
+    return project_obj.id
+
+
+# V2 API: Validated external UUID project ID from path (returns internal int ID)
+ProjectExternalIdPathDep = Annotated[int, Depends(validate_project_external_id)]
+
+
 async def get_project_id(
     project_repository: ProjectRepositoryDep,
     project: ProjectPathDep,
@@ -259,6 +319,17 @@ async def get_entity_repository_v2(
 EntityRepositoryV2Dep = Annotated[EntityRepository, Depends(get_entity_repository_v2)]
 
 
+async def get_entity_repository_v2_external(
+    session_maker: SessionMakerDep,
+    project_id: ProjectExternalIdPathDep,
+) -> EntityRepository:
+    """Create an EntityRepository instance for v2 API (uses external_id from path)."""
+    return EntityRepository(session_maker, project_id=project_id)
+
+
+EntityRepositoryV2ExternalDep = Annotated[EntityRepository, Depends(get_entity_repository_v2_external)]
+
+
 async def get_observation_repository(
     session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
@@ -283,6 +354,19 @@ ObservationRepositoryV2Dep = Annotated[
 ]
 
 
+async def get_observation_repository_v2_external(
+    session_maker: SessionMakerDep,
+    project_id: ProjectExternalIdPathDep,
+) -> ObservationRepository:
+    """Create an ObservationRepository instance for v2 API (uses external_id)."""
+    return ObservationRepository(session_maker, project_id=project_id)
+
+
+ObservationRepositoryV2ExternalDep = Annotated[
+    ObservationRepository, Depends(get_observation_repository_v2_external)
+]
+
+
 async def get_relation_repository(
     session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
@@ -303,6 +387,17 @@ async def get_relation_repository_v2(
 
 
 RelationRepositoryV2Dep = Annotated[RelationRepository, Depends(get_relation_repository_v2)]
+
+
+async def get_relation_repository_v2_external(
+    session_maker: SessionMakerDep,
+    project_id: ProjectExternalIdPathDep,
+) -> RelationRepository:
+    """Create a RelationRepository instance for v2 API (uses external_id)."""
+    return RelationRepository(session_maker, project_id=project_id)
+
+
+RelationRepositoryV2ExternalDep = Annotated[RelationRepository, Depends(get_relation_repository_v2_external)]
 
 
 async def get_search_repository(
@@ -331,6 +426,17 @@ async def get_search_repository_v2(
 SearchRepositoryV2Dep = Annotated[SearchRepository, Depends(get_search_repository_v2)]
 
 
+async def get_search_repository_v2_external(
+    session_maker: SessionMakerDep,
+    project_id: ProjectExternalIdPathDep,
+) -> SearchRepository:
+    """Create a SearchRepository instance for v2 API (uses external_id)."""
+    return create_search_repository(session_maker, project_id=project_id)
+
+
+SearchRepositoryV2ExternalDep = Annotated[SearchRepository, Depends(get_search_repository_v2_external)]
+
+
 # ProjectInfoRepository is deprecated and will be removed in a future version.
 # Use ProjectRepository instead, which has the same functionality plus more project-specific operations.
 
@@ -351,6 +457,13 @@ async def get_entity_parser_v2(project_config: ProjectConfigV2Dep) -> EntityPars
 EntityParserV2Dep = Annotated["EntityParser", Depends(get_entity_parser_v2)]
 
 
+async def get_entity_parser_v2_external(project_config: ProjectConfigV2ExternalDep) -> EntityParser:
+    return EntityParser(project_config.home)
+
+
+EntityParserV2ExternalDep = Annotated["EntityParser", Depends(get_entity_parser_v2_external)]
+
+
 async def get_markdown_processor(
     entity_parser: EntityParserDep, app_config: AppConfigDep
 ) -> MarkdownProcessor:
@@ -367,6 +480,15 @@ async def get_markdown_processor_v2(
 
 
 MarkdownProcessorV2Dep = Annotated[MarkdownProcessor, Depends(get_markdown_processor_v2)]
+
+
+async def get_markdown_processor_v2_external(
+    entity_parser: EntityParserV2ExternalDep, app_config: AppConfigDep
+) -> MarkdownProcessor:
+    return MarkdownProcessor(entity_parser, app_config=app_config)
+
+
+MarkdownProcessorV2ExternalDep = Annotated[MarkdownProcessor, Depends(get_markdown_processor_v2_external)]
 
 
 async def get_file_service(
@@ -397,6 +519,21 @@ async def get_file_service_v2(
 
 
 FileServiceV2Dep = Annotated[FileService, Depends(get_file_service_v2)]
+
+
+async def get_file_service_v2_external(
+    project_config: ProjectConfigV2ExternalDep,
+    markdown_processor: MarkdownProcessorV2ExternalDep,
+    app_config: AppConfigDep,
+) -> FileService:
+    file_service = FileService(project_config.home, markdown_processor, app_config=app_config)
+    logger.debug(
+        f"Created FileService for project: {project_config.name}, base_path: {project_config.home}"
+    )
+    return file_service
+
+
+FileServiceV2ExternalDep = Annotated[FileService, Depends(get_file_service_v2_external)]
 
 
 async def get_entity_service(
@@ -451,6 +588,32 @@ async def get_entity_service_v2(
 EntityServiceV2Dep = Annotated[EntityService, Depends(get_entity_service_v2)]
 
 
+async def get_entity_service_v2_external(
+    entity_repository: EntityRepositoryV2ExternalDep,
+    observation_repository: ObservationRepositoryV2ExternalDep,
+    relation_repository: RelationRepositoryV2ExternalDep,
+    entity_parser: EntityParserV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+    link_resolver: "LinkResolverV2ExternalDep",
+    search_service: "SearchServiceV2ExternalDep",
+    app_config: AppConfigDep,
+) -> EntityService:
+    """Create EntityService for v2 API (uses external_id)."""
+    return EntityService(
+        entity_repository=entity_repository,
+        observation_repository=observation_repository,
+        relation_repository=relation_repository,
+        entity_parser=entity_parser,
+        file_service=file_service,
+        link_resolver=link_resolver,
+        search_service=search_service,
+        app_config=app_config,
+    )
+
+
+EntityServiceV2ExternalDep = Annotated[EntityService, Depends(get_entity_service_v2_external)]
+
+
 async def get_search_service(
     search_repository: SearchRepositoryDep,
     entity_repository: EntityRepositoryDep,
@@ -475,6 +638,18 @@ async def get_search_service_v2(
 SearchServiceV2Dep = Annotated[SearchService, Depends(get_search_service_v2)]
 
 
+async def get_search_service_v2_external(
+    search_repository: SearchRepositoryV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> SearchService:
+    """Create SearchService for v2 API (uses external_id)."""
+    return SearchService(search_repository, entity_repository, file_service)
+
+
+SearchServiceV2ExternalDep = Annotated[SearchService, Depends(get_search_service_v2_external)]
+
+
 async def get_link_resolver(
     entity_repository: EntityRepositoryDep, search_service: SearchServiceDep
 ) -> LinkResolver:
@@ -491,6 +666,15 @@ async def get_link_resolver_v2(
 
 
 LinkResolverV2Dep = Annotated[LinkResolver, Depends(get_link_resolver_v2)]
+
+
+async def get_link_resolver_v2_external(
+    entity_repository: EntityRepositoryV2ExternalDep, search_service: SearchServiceV2ExternalDep
+) -> LinkResolver:
+    return LinkResolver(entity_repository=entity_repository, search_service=search_service)
+
+
+LinkResolverV2ExternalDep = Annotated[LinkResolver, Depends(get_link_resolver_v2_external)]
 
 
 async def get_context_service(
@@ -522,6 +706,22 @@ async def get_context_service_v2(
 
 
 ContextServiceV2Dep = Annotated[ContextService, Depends(get_context_service_v2)]
+
+
+async def get_context_service_v2_external(
+    search_repository: SearchRepositoryV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    observation_repository: ObservationRepositoryV2ExternalDep,
+) -> ContextService:
+    """Create ContextService for v2 API (uses external_id)."""
+    return ContextService(
+        search_repository=search_repository,
+        entity_repository=entity_repository,
+        observation_repository=observation_repository,
+    )
+
+
+ContextServiceV2ExternalDep = Annotated[ContextService, Depends(get_context_service_v2_external)]
 
 
 async def get_sync_service(
@@ -579,6 +779,32 @@ async def get_sync_service_v2(
 SyncServiceV2Dep = Annotated[SyncService, Depends(get_sync_service_v2)]
 
 
+async def get_sync_service_v2_external(
+    app_config: AppConfigDep,
+    entity_service: EntityServiceV2ExternalDep,
+    entity_parser: EntityParserV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    relation_repository: RelationRepositoryV2ExternalDep,
+    project_repository: ProjectRepositoryDep,
+    search_service: SearchServiceV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> SyncService:  # pragma: no cover
+    """Create SyncService for v2 API (uses external_id)."""
+    return SyncService(
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_parser=entity_parser,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        project_repository=project_repository,
+        search_service=search_service,
+        file_service=file_service,
+    )
+
+
+SyncServiceV2ExternalDep = Annotated[SyncService, Depends(get_sync_service_v2_external)]
+
+
 async def get_project_service(
     project_repository: ProjectRepositoryDep,
 ) -> ProjectService:
@@ -611,6 +837,18 @@ async def get_directory_service_v2(
 
 
 DirectoryServiceV2Dep = Annotated[DirectoryService, Depends(get_directory_service_v2)]
+
+
+async def get_directory_service_v2_external(
+    entity_repository: EntityRepositoryV2ExternalDep,
+) -> DirectoryService:
+    """Create DirectoryService for v2 API (uses external_id from path)."""
+    return DirectoryService(
+        entity_repository=entity_repository,
+    )
+
+
+DirectoryServiceV2ExternalDep = Annotated[DirectoryService, Depends(get_directory_service_v2_external)]
 
 
 # Import
@@ -719,3 +957,58 @@ async def get_memory_json_importer_v2(
 
 
 MemoryJsonImporterV2Dep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer_v2)]
+
+
+# V2 External Import dependencies (using external_id)
+
+
+async def get_chatgpt_importer_v2_external(
+    project_config: ProjectConfigV2ExternalDep,
+    markdown_processor: MarkdownProcessorV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> ChatGPTImporter:
+    """Create ChatGPTImporter with v2 external_id dependencies."""
+    return ChatGPTImporter(project_config.home, markdown_processor, file_service)
+
+
+ChatGPTImporterV2ExternalDep = Annotated[ChatGPTImporter, Depends(get_chatgpt_importer_v2_external)]
+
+
+async def get_claude_conversations_importer_v2_external(
+    project_config: ProjectConfigV2ExternalDep,
+    markdown_processor: MarkdownProcessorV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> ClaudeConversationsImporter:
+    """Create ClaudeConversationsImporter with v2 external_id dependencies."""
+    return ClaudeConversationsImporter(project_config.home, markdown_processor, file_service)
+
+
+ClaudeConversationsImporterV2ExternalDep = Annotated[
+    ClaudeConversationsImporter, Depends(get_claude_conversations_importer_v2_external)
+]
+
+
+async def get_claude_projects_importer_v2_external(
+    project_config: ProjectConfigV2ExternalDep,
+    markdown_processor: MarkdownProcessorV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> ClaudeProjectsImporter:
+    """Create ClaudeProjectsImporter with v2 external_id dependencies."""
+    return ClaudeProjectsImporter(project_config.home, markdown_processor, file_service)
+
+
+ClaudeProjectsImporterV2ExternalDep = Annotated[
+    ClaudeProjectsImporter, Depends(get_claude_projects_importer_v2_external)
+]
+
+
+async def get_memory_json_importer_v2_external(
+    project_config: ProjectConfigV2ExternalDep,
+    markdown_processor: MarkdownProcessorV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> MemoryJsonImporter:
+    """Create MemoryJsonImporter with v2 external_id dependencies."""
+    return MemoryJsonImporter(project_config.home, markdown_processor, file_service)
+
+
+MemoryJsonImporterV2ExternalDep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer_v2_external)]

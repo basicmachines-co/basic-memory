@@ -45,6 +45,22 @@ class EntityRepository(Repository[Entity]):
         async with db.scoped_session(self.session_maker) as session:
             return await self.select_by_id(session, entity_id)
 
+    async def get_by_external_id(self, external_id: str) -> Optional[Entity]:
+        """Get entity by external UUID.
+
+        Args:
+            external_id: External UUID identifier
+
+        Returns:
+            Entity if found, None otherwise
+        """
+        query = (
+            self.select()
+            .where(Entity.external_id == external_id)
+            .options(*self.get_load_options())
+        )
+        return await self.find_one(query)
+
     async def get_by_permalink(self, permalink: str) -> Optional[Entity]:
         """Get entity by permalink.
 

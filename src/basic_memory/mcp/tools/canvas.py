@@ -114,7 +114,7 @@ async def canvas(
         try:
             response = await call_post(
                 client,
-                f"/v2/projects/{active_project.id}/resource",
+                f"/v2/projects/{active_project.external_id}/resource",
                 json={"file_path": file_path, "content": canvas_json},
             )
             action = "Created"
@@ -127,11 +127,11 @@ async def canvas(
             ):
                 logger.info(f"Canvas file exists, updating instead: {file_path}")
                 try:
-                    entity_id = await resolve_entity_id(client, active_project.id, file_path)
+                    entity_id = await resolve_entity_id(client, active_project.external_id, file_path)
                     # For update, send content in JSON body
                     response = await call_put(
                         client,
-                        f"/v2/projects/{active_project.id}/resource/{entity_id}",
+                        f"/v2/projects/{active_project.external_id}/resource/{entity_id}",
                         json={"content": canvas_json},
                     )
                     action = "Updated"

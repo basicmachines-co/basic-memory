@@ -1,7 +1,7 @@
 """Memory JSON import service for Basic Memory."""
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown, Observation, Relation
 from basic_memory.importers.base import Importer
@@ -12,6 +12,20 @@ logger = logging.getLogger(__name__)
 
 class MemoryJsonImporter(Importer[EntityImportResult]):
     """Service for importing memory.json format data."""
+
+    def handle_error(
+        self, message: str, error: Optional[Exception] = None
+    ) -> EntityImportResult:
+        """Return a failed EntityImportResult with an error message."""
+        error_msg = f"{message}: {error}" if error else message
+        return EntityImportResult(
+            import_count={},
+            success=False,
+            error_message=error_msg,
+            entities=0,
+            relations=0,
+            skipped_entities=0,
+        )
 
     async def import_data(
         self, source_data, destination_folder: str = "", **kwargs: Any
@@ -111,4 +125,4 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
 
         except Exception as e:  # pragma: no cover
             logger.exception("Failed to import memory.json")
-            return self.handle_error("Failed to import memory.json", e)  # pyright: ignore [reportReturnType]
+            return self.handle_error("Failed to import memory.json", e)

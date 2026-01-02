@@ -107,12 +107,12 @@ async def read_note(
 
         try:
             # Try to resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.id, entity_path)
+            entity_id = await resolve_entity_id(client, active_project.external_id, entity_path)
 
             # Fetch content using entity ID
             response = await call_get(
                 client,
-                f"/v2/projects/{active_project.id}/resource/{entity_id}",
+                f"/v2/projects/{active_project.external_id}/resource/{entity_id}",
                 params={"page": page, "page_size": page_size},
             )
 
@@ -136,12 +136,12 @@ async def read_note(
             if result.permalink:
                 try:
                     # Resolve the permalink to entity ID
-                    entity_id = await resolve_entity_id(client, active_project.id, result.permalink)
+                    entity_id = await resolve_entity_id(client, active_project.external_id, result.permalink)
 
                     # Fetch content using the entity ID
                     response = await call_get(
                         client,
-                        f"/v2/projects/{active_project.id}/resource/{entity_id}",
+                        f"/v2/projects/{active_project.external_id}/resource/{entity_id}",
                         params={"page": page, "page_size": page_size},
                     )
 
