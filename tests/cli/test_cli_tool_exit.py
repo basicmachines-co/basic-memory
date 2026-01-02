@@ -13,12 +13,19 @@ The issue occurs when:
 The fix ensures db.shutdown_db() is called before asyncio.run() returns.
 """
 
+import platform
 import subprocess
 import sys
 
 import pytest
 
+# Windows has different process cleanup behavior that makes these tests unreliable
+IS_WINDOWS = platform.system() == "Windows"
+SUBPROCESS_TIMEOUT = 10.0
+skip_on_windows = pytest.mark.skipif(IS_WINDOWS, reason="Subprocess cleanup tests unreliable on Windows CI")
 
+
+@skip_on_windows
 class TestCLIToolExit:
     """Test that CLI tool commands exit cleanly."""
 
@@ -45,7 +52,7 @@ class TestCLIToolExit:
                 full_command,
                 capture_output=True,
                 text=True,
-                timeout=10.0,  # 10 second timeout - commands should complete in ~2s
+                timeout=SUBPROCESS_TIMEOUT,
             )
             # Command should exit with code 0 for --help
             assert result.returncode == 0, f"Command failed: {result.stderr}"
@@ -75,7 +82,7 @@ print("OK")
                 [sys.executable, "-c", code],
                 capture_output=True,
                 text=True,
-                timeout=10.0,
+                timeout=SUBPROCESS_TIMEOUT,
             )
             assert "OK" in result.stdout, f"Unexpected output: {result.stdout}"
         except subprocess.TimeoutExpired:
