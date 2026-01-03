@@ -2,7 +2,6 @@
 Basic Memory FastMCP server.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
@@ -10,7 +9,7 @@ from loguru import logger
 
 from basic_memory import db
 from basic_memory.mcp.container import McpContainer, set_container
-from basic_memory.services.initialization import initialize_app, initialize_file_sync
+from basic_memory.services.initialization import initialize_app
 from basic_memory.telemetry import show_notice_if_needed, track_app_started
 
 
@@ -21,7 +20,7 @@ async def lifespan(app: FastMCP):
     Handles:
     - Database initialization and migrations
     - Telemetry notice and tracking
-    - File sync in background (if enabled and not in cloud mode)
+    - File sync via SyncCoordinator (if enabled and not in cloud mode)
     - Proper cleanup on shutdown
     """
     # --- Composition Root ---
@@ -43,32 +42,16 @@ async def lifespan(app: FastMCP):
     # Initialize app (runs migrations, reconciles projects)
     await initialize_app(container.config)
 
-    # Start file sync as background task (decision made by container)
-    sync_task = None
-    if container.should_sync_files:  # pragma: no cover
-        logger.info("Starting file sync in background")
-
-        async def _file_sync_runner() -> None:
-            await initialize_file_sync(container.config)
-
-        sync_task = asyncio.create_task(_file_sync_runner())
-    else:
-        # Log why sync was skipped
-        skip_reason = container.sync_skip_reason
-        if skip_reason:
-            logger.info(f"{skip_reason} - skipping local file sync")
+    # Create and start sync coordinator (lifecycle centralized in coordinator)
+    sync_coordinator = container.create_sync_coordinator()
+    await sync_coordinator.start()
 
     try:
         yield
     finally:
-        # Shutdown
+        # Shutdown - coordinator handles clean task cancellation
         logger.info("Shutting down Basic Memory MCP server")
-        if sync_task:  # pragma: no cover
-            sync_task.cancel()
-            try:
-                await sync_task
-            except asyncio.CancelledError:
-                logger.info("File sync task cancelled")
+        await sync_coordinator.stop()
 
         # Only shutdown DB if we created it (not if test fixture provided it)
         if engine_was_none:

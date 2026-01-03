@@ -11,9 +11,13 @@ Design principles:
 """
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
+
+if TYPE_CHECKING:
+    from basic_memory.sync import SyncCoordinator
 
 
 @dataclass
@@ -68,6 +72,21 @@ class McpContainer:
         if not self.config.sync_changes:
             return "Sync changes disabled"
         return None
+
+    def create_sync_coordinator(self) -> "SyncCoordinator":
+        """Create a SyncCoordinator with this container's settings.
+
+        Returns:
+            SyncCoordinator configured for this runtime environment
+        """
+        # Deferred import to avoid circular dependency
+        from basic_memory.sync import SyncCoordinator
+
+        return SyncCoordinator(
+            config=self.config,
+            should_sync=self.should_sync_files,
+            skip_reason=self.sync_skip_reason,
+        )
 
 
 # Module-level container instance (set by lifespan)

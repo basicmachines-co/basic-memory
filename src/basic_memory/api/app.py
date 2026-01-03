@@ -1,6 +1,5 @@
 """FastAPI application for basic-memory knowledge graph API."""
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -31,7 +30,7 @@ from basic_memory.api.v2.routers import (
     importer_router as v2_importer,
 )
 from basic_memory.config import init_api_logging
-from basic_memory.services.initialization import initialize_file_sync, initialize_app
+from basic_memory.services.initialization import initialize_app
 
 
 @asynccontextmanager
@@ -58,34 +57,17 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     app.state.session_maker = session_maker
     logger.info("Database connections cached in app state")
 
-    # Start file sync if enabled (decision made by container)
-    if container.should_sync_files:
-        logger.info(f"Sync changes enabled: {container.config.sync_changes}")
-
-        # Start file sync task in background
-        async def _file_sync_runner() -> None:
-            await initialize_file_sync(container.config)
-
-        app.state.sync_task = asyncio.create_task(_file_sync_runner())
-    else:
-        # Log why sync was skipped
-        if container.mode.is_test:
-            logger.info("Test environment detected. Skipping file sync service.")
-        else:
-            logger.info("Sync changes disabled. Skipping file sync service.")
-        app.state.sync_task = None
+    # Create and start sync coordinator (lifecycle centralized in coordinator)
+    sync_coordinator = container.create_sync_coordinator()
+    await sync_coordinator.start()
+    app.state.sync_coordinator = sync_coordinator
 
     # Proceed with startup
     yield
 
+    # Shutdown - coordinator handles clean task cancellation
     logger.info("Shutting down Basic Memory API")
-    if app.state.sync_task:
-        logger.info("Stopping sync...")
-        app.state.sync_task.cancel()  # pyright: ignore
-        try:
-            await app.state.sync_task
-        except asyncio.CancelledError:
-            logger.info("Sync task cancelled successfully")
+    await sync_coordinator.stop()
 
     await container.shutdown_database()
 
