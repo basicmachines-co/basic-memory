@@ -92,17 +92,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Include v1 routers
-app.include_router(knowledge.router, prefix="/{project}")
-app.include_router(memory.router, prefix="/{project}")
-app.include_router(resource.router, prefix="/{project}")
-app.include_router(search.router, prefix="/{project}")
-app.include_router(project.project_router, prefix="/{project}")
-app.include_router(directory_router.router, prefix="/{project}")
-app.include_router(prompt_router.router, prefix="/{project}")
-app.include_router(importer_router.router, prefix="/{project}")
-
-# Include v2 routers (ID-based paths)
+# Include v2 routers FIRST (more specific paths must match before /{project} catch-all)
 app.include_router(v2_knowledge, prefix="/v2/projects/{project_id}")
 app.include_router(v2_memory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_search, prefix="/v2/projects/{project_id}")
@@ -111,6 +101,16 @@ app.include_router(v2_directory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
+
+# Include v1 routers (/{project} is a catch-all, must come after specific prefixes)
+app.include_router(knowledge.router, prefix="/{project}")
+app.include_router(memory.router, prefix="/{project}")
+app.include_router(resource.router, prefix="/{project}")
+app.include_router(search.router, prefix="/{project}")
+app.include_router(project.project_router, prefix="/{project}")
+app.include_router(directory_router.router, prefix="/{project}")
+app.include_router(prompt_router.router, prefix="/{project}")
+app.include_router(importer_router.router, prefix="/{project}")
 
 # Project resource router works across projects
 app.include_router(project.project_resource_router)
