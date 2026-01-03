@@ -8,7 +8,6 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get
 from basic_memory.telemetry import track_mcp_tool
 
 
@@ -68,26 +67,16 @@ async def list_directory(
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
 
-        # Prepare query parameters
-        params = {
-            "dir_name": dir_name,
-            "depth": str(depth),
-        }
-        if file_name_glob:
-            params["file_name_glob"] = file_name_glob
-
         logger.debug(
             f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
         )
 
-        # Call the API endpoint
-        response = await call_get(
-            client,
-            f"/v2/projects/{active_project.external_id}/directory/list",
-            params=params,
-        )
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import DirectoryClient
 
-        nodes = response.json()
+        # Use typed DirectoryClient for API calls
+        directory_client = DirectoryClient(client, active_project.external_id)
+        nodes = await directory_client.list(dir_name, depth=depth, file_name_glob=file_name_glob)
 
         if not nodes:
             filter_desc = ""

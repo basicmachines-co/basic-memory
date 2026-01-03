@@ -133,12 +133,12 @@ class KnowledgeClient:
         )
         return DeleteEntitiesResponse.model_validate(response.json())
 
-    async def move_entity(self, entity_id: str, destination: str) -> EntityResponse:
+    async def move_entity(self, entity_id: str, destination_path: str) -> EntityResponse:
         """Move an entity to a new location.
 
         Args:
             entity_id: Entity external_id (UUID)
-            destination: New file path for the entity
+            destination_path: New file path for the entity
 
         Returns:
             EntityResponse with updated entity details
@@ -149,7 +149,7 @@ class KnowledgeClient:
         response = await call_put(
             self.http_client,
             f"{self._base_path}/entities/{entity_id}/move",
-            json={"destination": destination},
+            json={"destination_path": destination_path},
         )
         return EntityResponse.model_validate(response.json())
 

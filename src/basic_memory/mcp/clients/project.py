@@ -3,10 +3,12 @@
 Encapsulates project-level endpoints.
 """
 
+from typing import Any
+
 from httpx import AsyncClient
 
-from basic_memory.mcp.tools.utils import call_get
-from basic_memory.schemas.project_info import ProjectList
+from basic_memory.mcp.tools.utils import call_get, call_post, call_delete
+from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 
 
 class ProjectClient:
@@ -48,3 +50,40 @@ class ProjectClient:
             "/projects/projects",
         )
         return ProjectList.model_validate(response.json())
+
+    async def create_project(self, project_data: dict[str, Any]) -> ProjectStatusResponse:
+        """Create a new project.
+
+        Args:
+            project_data: Project creation data (name, path, set_default)
+
+        Returns:
+            ProjectStatusResponse with creation result
+
+        Raises:
+            ToolError: If the request fails
+        """
+        response = await call_post(
+            self.http_client,
+            "/projects/projects",
+            json=project_data,
+        )
+        return ProjectStatusResponse.model_validate(response.json())
+
+    async def delete_project(self, project_external_id: str) -> ProjectStatusResponse:
+        """Delete a project by its external ID.
+
+        Args:
+            project_external_id: Project external ID (UUID)
+
+        Returns:
+            ProjectStatusResponse with deletion result
+
+        Raises:
+            ToolError: If the request fails
+        """
+        response = await call_delete(
+            self.http_client,
+            f"/v2/projects/{project_external_id}",
+        )
+        return ProjectStatusResponse.model_validate(response.json())

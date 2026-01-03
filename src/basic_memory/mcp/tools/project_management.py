@@ -9,12 +9,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, call_post, call_delete
-from basic_memory.schemas.project_info import (
-    ProjectList,
-    ProjectStatusResponse,
-    ProjectInfoRequest,
-)
+from basic_memory.schemas.project_info import ProjectInfoRequest
 from basic_memory.telemetry import track_mcp_tool
 from basic_memory.utils import generate_permalink
 
@@ -49,9 +44,12 @@ async def list_memory_projects(context: Context | None = None) -> str:
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
 
-        # Get projects from API
-        response = await call_get(client, "/projects/projects")
-        project_list = ProjectList.model_validate(response.json())
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import ProjectClient
+
+        # Use typed ProjectClient for API calls
+        project_client = ProjectClient(client)
+        project_list = await project_client.list_projects()
 
         if constrained_project:
             result = f"Project: {constrained_project}\n\n"
@@ -109,9 +107,12 @@ async def create_memory_project(
             name=project_name, path=project_path, set_default=set_default
         )
 
-        # Call API to create project
-        response = await call_post(client, "/projects/projects", json=project_request.model_dump())
-        status_response = ProjectStatusResponse.model_validate(response.json())
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import ProjectClient
+
+        # Use typed ProjectClient for API calls
+        project_client = ProjectClient(client)
+        status_response = await project_client.create_project(project_request.model_dump())
 
         result = f"✓ {status_response.message}\n\n"
 
@@ -160,9 +161,14 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
         if context:  # pragma: no cover
             await context.info(f"Deleting project: {project_name}")
 
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import ProjectClient
+
+        # Use typed ProjectClient for API calls
+        project_client = ProjectClient(client)
+
         # Get project info before deletion to validate it exists
-        response = await call_get(client, "/projects/projects")
-        project_list = ProjectList.model_validate(response.json())
+        project_list = await project_client.list_projects()
 
         # Find the project by permalink (derived from name).
         # Note: The API response uses `ProjectItem` which derives `permalink` from `name`,
@@ -181,9 +187,8 @@ async def delete_project(project_name: str, context: Context | None = None) -> s
                 f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
             )
 
-        # Call v2 API to delete project using project external_id
-        response = await call_delete(client, f"/v2/projects/{target_project.external_id}")
-        status_response = ProjectStatusResponse.model_validate(response.json())
+        # Delete project using project external_id
+        status_response = await project_client.delete_project(target_project.external_id)
 
         result = f"✓ {status_response.message}\n\n"
 

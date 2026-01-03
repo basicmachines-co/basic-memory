@@ -33,19 +33,20 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
     )
 
     import importlib
-
-    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
-    from basic_memory.mcp.tools.utils import resolve_entity_id as real_resolve_entity_id
     from basic_memory.schemas.memory import memory_url_path
 
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
     direct_identifier = memory_url_path("Fallback Title Note")
 
-    async def selective_resolve(client, project_id, identifier: str) -> int:
-        if identifier == direct_identifier:
-            raise RuntimeError("force direct lookup failure")
-        return await real_resolve_entity_id(client, project_id, identifier)
+    class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str) -> int:
+            # Fail on the direct identifier to force fallback to title search
+            if identifier == direct_identifier:
+                raise RuntimeError("force direct lookup failure")
+            return await super().resolve_entity(identifier)
 
-    monkeypatch.setattr(read_note_module, "resolve_entity_id", selective_resolve)
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
 
     content = await read_note.fn("Fallback Title Note", project=test_project.name)
     assert "fallback content" in content
@@ -59,6 +60,8 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
     import importlib
 
     read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
 
     async def fake_search_notes_fn(*, query, search_type, **kwargs):
         if search_type == "title":
@@ -88,10 +91,11 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
         )
 
     # Ensure direct resolution doesn't short-circuit the fallback logic.
-    async def boom(*args, **kwargs):
-        raise RuntimeError("force fallback")
+    class FailingKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str) -> int:
+            raise RuntimeError("force fallback")
 
-    monkeypatch.setattr(read_note_module, "resolve_entity_id", boom)
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
     monkeypatch.setattr(read_note_module.search_notes, "fn", fake_search_notes_fn)
 
     result = await read_note.fn("missing-note", project=test_project.name)
