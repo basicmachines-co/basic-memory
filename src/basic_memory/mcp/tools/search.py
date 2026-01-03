@@ -9,7 +9,6 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_post
 from basic_memory.telemetry import track_mcp_tool
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
@@ -365,13 +364,16 @@ async def search_notes(
         logger.info(f"Searching for {search_query} in project {active_project.name}")
 
         try:
-            response = await call_post(
-                client,
-                f"/v2/projects/{active_project.external_id}/search/",
-                json=search_query.model_dump(),
-                params={"page": page, "page_size": page_size},
+            # Import here to avoid circular import (tools → clients → utils → tools)
+            from basic_memory.mcp.clients import SearchClient
+
+            # Use typed SearchClient for API calls
+            search_client = SearchClient(client, active_project.external_id)
+            result = await search_client.search(
+                search_query.model_dump(),
+                page=page,
+                page_size=page_size,
             )
-            result = SearchResponse.model_validate(response.json())
 
             # Check if we got no results and provide helpful guidance
             if not result.results:
