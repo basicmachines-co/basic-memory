@@ -1,6 +1,5 @@
 """Tests for runtime mode resolution."""
 
-import pytest
 
 from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
 

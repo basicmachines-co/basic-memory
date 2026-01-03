@@ -6,7 +6,6 @@ from basic_memory.api.container import (
     ApiContainer,
     get_container,
     set_container,
-    _container,
 )
 from basic_memory.runtime import RuntimeMode
 
