@@ -34,16 +34,21 @@ def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
     import importlib
 
     api_app_module = importlib.import_module("basic_memory.api.app")
+    container_module = importlib.import_module("basic_memory.api.container")
 
     # Keep startup cheap: we don't need real DB init for this ordering test.
     async def _noop_initialize_app(_app_config):
         return None
 
-    async def _fake_get_or_create_db(*_args, **_kwargs):
-        return object(), object()
-
     monkeypatch.setattr(api_app_module, "initialize_app", _noop_initialize_app)
-    monkeypatch.setattr(api_app_module.db, "get_or_create_db", _fake_get_or_create_db)
+
+    # Patch the container's init_database to return fake objects
+    async def _fake_init_database(self):
+        self.engine = object()
+        self.session_maker = object()
+        return self.engine, self.session_maker
+
+    monkeypatch.setattr(container_module.ApiContainer, "init_database", _fake_init_database)
 
     # Make the sync task long-lived so it must be cancelled on shutdown.
     async def _fake_initialize_file_sync(_app_config):
@@ -52,11 +57,13 @@ def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
     monkeypatch.setattr(api_app_module, "initialize_file_sync", _fake_initialize_file_sync)
 
     # Assert ordering: shutdown_db must be called only after the sync_task is done.
-    async def _assert_sync_task_done_before_db_shutdown():
+    async def _assert_sync_task_done_before_db_shutdown(self):
         assert api_app_module.app.state.sync_task is not None
         assert api_app_module.app.state.sync_task.done()
 
-    monkeypatch.setattr(api_app_module.db, "shutdown_db", _assert_sync_task_done_before_db_shutdown)
+    monkeypatch.setattr(
+        container_module.ApiContainer, "shutdown_database", _assert_sync_task_done_before_db_shutdown
+    )
 
     async def _run_client_once():
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:

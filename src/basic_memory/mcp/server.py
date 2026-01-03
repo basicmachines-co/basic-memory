@@ -9,7 +9,7 @@ from fastmcp import FastMCP
 from loguru import logger
 
 from basic_memory import db
-from basic_memory.config import ConfigManager
+from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app, initialize_file_sync
 from basic_memory.telemetry import show_notice_if_needed, track_app_started
 
@@ -24,8 +24,12 @@ async def lifespan(app: FastMCP):
     - File sync in background (if enabled and not in cloud mode)
     - Proper cleanup on shutdown
     """
-    app_config = ConfigManager().config
-    logger.info("Starting Basic Memory MCP server")
+    # --- Composition Root ---
+    # Create container and read config (single point of config access)
+    container = McpContainer.create()
+    set_container(container)
+
+    logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
 
     # Show telemetry notice (first run only) and track startup
     show_notice_if_needed()
@@ -37,23 +41,22 @@ async def lifespan(app: FastMCP):
     engine_was_none = db._engine is None
 
     # Initialize app (runs migrations, reconciles projects)
-    await initialize_app(app_config)
+    await initialize_app(container.config)
 
-    # Start file sync as background task (if enabled and not in cloud mode)
+    # Start file sync as background task (decision made by container)
     sync_task = None
-    if app_config.is_test_env:
-        logger.info("Test environment detected - skipping local file sync")
-    elif app_config.sync_changes and not app_config.cloud_mode_enabled:  # pragma: no cover
+    if container.should_sync_files:  # pragma: no cover
         logger.info("Starting file sync in background")
 
         async def _file_sync_runner() -> None:
-            await initialize_file_sync(app_config)
+            await initialize_file_sync(container.config)
 
         sync_task = asyncio.create_task(_file_sync_runner())
-    elif app_config.cloud_mode_enabled:  # pragma: no cover
-        logger.info("Cloud mode enabled - skipping local file sync")
-    else:  # pragma: no cover
-        logger.info("Sync changes disabled - skipping file sync")
+    else:
+        # Log why sync was skipped
+        skip_reason = container.sync_skip_reason
+        if skip_reason:
+            logger.info(f"{skip_reason} - skipping local file sync")
 
     try:
         yield
