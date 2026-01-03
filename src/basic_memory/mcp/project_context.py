@@ -19,11 +19,15 @@ from basic_memory.utils import generate_permalink
 
 
 async def resolve_project_parameter(
-    project: Optional[str] = None, allow_discovery: bool = False
+    project: Optional[str] = None,
+    allow_discovery: bool = False,
+    cloud_mode: Optional[bool] = None,
+    default_project_mode: Optional[bool] = None,
+    default_project: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve project parameter using three-tier hierarchy.
 
-    if config.cloud_mode:
+    if cloud_mode:
         project is required (unless allow_discovery=True for tools that support discovery mode)
     else:
         Resolution order:
@@ -35,16 +39,27 @@ async def resolve_project_parameter(
         project: Optional explicit project parameter
         allow_discovery: If True, allows returning None in cloud mode for discovery mode
             (used by tools like recent_activity that can operate across all projects)
+        cloud_mode: Optional explicit cloud mode. If not provided, reads from ConfigManager.
+        default_project_mode: Optional explicit default project mode. If not provided, reads from ConfigManager.
+        default_project: Optional explicit default project. If not provided, reads from ConfigManager.
 
     Returns:
         Resolved project name or None if no resolution possible
     """
+    # Prefer explicit parameters; fall back to ConfigManager for backwards compatibility
+    if cloud_mode is None or default_project_mode is None or default_project is None:
+        config = ConfigManager().config
+        if cloud_mode is None:
+            cloud_mode = config.cloud_mode
+        if default_project_mode is None:
+            default_project_mode = config.default_project_mode
+        if default_project is None:
+            default_project = config.default_project
 
-    config = ConfigManager().config
     # if cloud_mode, project is required (unless discovery mode is allowed)
-    if config.cloud_mode:
+    if cloud_mode:
         if project:
-            logger.debug(f"project: {project}, cloud_mode: {config.cloud_mode}")
+            logger.debug(f"project: {project}, cloud_mode: {cloud_mode}")
             return project
         elif allow_discovery:
             logger.debug("cloud_mode: discovery mode allowed, returning None")
@@ -64,9 +79,9 @@ async def resolve_project_parameter(
         return project
 
     # Priority 3: Default project mode
-    if config.default_project_mode:
-        logger.debug(f"Using default project from config: {config.default_project}")
-        return config.default_project
+    if default_project_mode:
+        logger.debug(f"Using default project from config: {default_project}")
+        return default_project
 
     # No resolution possible
     return None

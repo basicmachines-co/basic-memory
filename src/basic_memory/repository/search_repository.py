@@ -68,20 +68,27 @@ class SearchRepository(Protocol):
 
 
 def create_search_repository(
-    session_maker: async_sessionmaker[AsyncSession], project_id: int
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: int,
+    database_backend: Optional[DatabaseBackend] = None,
 ) -> SearchRepository:
     """Factory function to create the appropriate search repository based on database backend.
 
     Args:
         session_maker: SQLAlchemy async session maker
         project_id: Project ID for the repository
+        database_backend: Optional explicit backend. If not provided, reads from ConfigManager.
+            Prefer passing explicitly from composition roots.
 
     Returns:
         SearchRepository: Backend-appropriate search repository instance
     """
-    config = ConfigManager().config
+    # Prefer explicit parameter; fall back to ConfigManager for backwards compatibility
+    if database_backend is None:
+        config = ConfigManager().config
+        database_backend = config.database_backend
 
-    if config.database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
+    if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
         return PostgresSearchRepository(session_maker, project_id=project_id)  # pragma: no cover
     else:
         return SQLiteSearchRepository(session_maker, project_id=project_id)
