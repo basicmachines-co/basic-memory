@@ -167,6 +167,7 @@ Flow: MCP Tool → Typed Client → HTTP API → Router → Service → Reposito
 - CI runs SQLite and Postgres tests in parallel for faster feedback
 - Performance benchmarks are in `test-int/test_sync_performance_benchmark.py`
 - Use pytest markers: `@pytest.mark.benchmark` for benchmarks, `@pytest.mark.slow` for slow tests
+- **Coverage must stay at 100%**: Write tests for new code. Only use `# pragma: no cover` when tests would require excessive mocking (e.g., TYPE_CHECKING blocks, error handlers that need failure injection, runtime-mode-dependent code paths)
 
 ### Async Client Pattern (Important!)
 

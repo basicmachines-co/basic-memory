@@ -54,6 +54,7 @@ jobs:
             - [ ] Unit tests for new functions/methods
             - [ ] Integration tests for new MCP tools
             - [ ] Test coverage for edge cases
+            - [ ] **100% test coverage maintained** (use `# pragma: no cover` only for truly hard-to-test code)
             - [ ] Documentation updated (README, docstrings)
             - [ ] CLAUDE.md updated if conventions change
 
