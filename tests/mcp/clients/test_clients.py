@@ -148,6 +148,65 @@ class TestMemoryClient:
         assert result.results == []
 
 
+    @pytest.mark.asyncio
+    async def test_recent(self, monkeypatch):
+        """Test recent calls correct endpoint."""
+        from basic_memory.mcp.clients import memory as memory_mod
+        from datetime import datetime
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [],
+            "metadata": {
+                "depth": 2,
+                "generated_at": datetime.now().isoformat(),
+            },
+        }
+
+        async def mock_call_get(client, url, **kwargs):
+            assert "/v2/projects/proj-123/memory/recent" in url
+            params = kwargs.get("params", {})
+            assert params.get("timeframe") == "7d"
+            assert params.get("depth") == 2
+            return mock_response
+
+        monkeypatch.setattr(memory_mod, "call_get", mock_call_get)
+
+        mock_http = MagicMock()
+        client = MemoryClient(mock_http, "proj-123")
+        result = await client.recent(timeframe="7d", depth=2)
+        assert result.results == []
+        assert result.metadata.depth == 2
+
+    @pytest.mark.asyncio
+    async def test_recent_with_types(self, monkeypatch):
+        """Test recent with types filter."""
+        from basic_memory.mcp.clients import memory as memory_mod
+        from datetime import datetime
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "results": [],
+            "metadata": {
+                "depth": 1,
+                "generated_at": datetime.now().isoformat(),
+            },
+        }
+
+        async def mock_call_get(client, url, **kwargs):
+            assert "/v2/projects/proj-123/memory/recent" in url
+            params = kwargs.get("params", {})
+            assert params.get("type") == "note,spec"
+            return mock_response
+
+        monkeypatch.setattr(memory_mod, "call_get", mock_call_get)
+
+        mock_http = MagicMock()
+        client = MemoryClient(mock_http, "proj-123")
+        result = await client.recent(types=["note", "spec"])
+        assert result.results == []
+
+
 class TestDirectoryClient:
     """Tests for DirectoryClient."""
 

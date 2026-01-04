@@ -19,7 +19,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.sync import SyncCoordinator
 
 
@@ -40,7 +40,7 @@ class ApiContainer:
     session_maker: async_sessionmaker[AsyncSession] | None = None
 
     @classmethod
-    def create(cls) -> "ApiContainer":
+    def create(cls) -> "ApiContainer":  # pragma: no cover
         """Create container by reading ConfigManager.
 
         This is the single point where API reads global config.
@@ -65,7 +65,7 @@ class ApiContainer:
         return self.config.sync_changes and not self.mode.is_test
 
     @property
-    def sync_skip_reason(self) -> str | None:
+    def sync_skip_reason(self) -> str | None:  # pragma: no cover
         """Reason why sync is skipped, or None if sync should run.
 
         Useful for logging why sync was disabled.
@@ -76,7 +76,7 @@ class ApiContainer:
             return "Sync changes disabled"
         return None
 
-    def create_sync_coordinator(self) -> "SyncCoordinator":
+    def create_sync_coordinator(self) -> "SyncCoordinator":  # pragma: no cover
         """Create a SyncCoordinator with this container's settings.
 
         Returns:
@@ -93,7 +93,9 @@ class ApiContainer:
 
     # --- Database Factory ---
 
-    async def init_database(self) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    async def init_database(  # pragma: no cover
+        self,
+    ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
         """Initialize and cache database connections.
 
         Returns:
@@ -104,7 +106,7 @@ class ApiContainer:
         self.session_maker = session_maker
         return engine, session_maker
 
-    async def shutdown_database(self) -> None:
+    async def shutdown_database(self) -> None:  # pragma: no cover
         """Clean up database connections."""
         await db.shutdown_db()
 

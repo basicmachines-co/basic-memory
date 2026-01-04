@@ -8,6 +8,7 @@ import pytest_asyncio
 from fastapi import HTTPException
 
 from basic_memory.deps import get_project_config, get_project_id
+from basic_memory.deps.projects import validate_project_id
 from basic_memory.models.project import Project
 from basic_memory.repository.project_repository import ProjectRepository
 
@@ -204,3 +205,28 @@ async def test_get_project_config_case_sensitivity(
     # All should resolve to the same project
     assert config1.name == config2.name == config3.name == "My Test Project"
     assert config1.home == config2.home == config3.home == Path("/my/test/project")
+
+
+# --- Tests for validate_project_id (v2 API) ---
+
+
+@pytest.mark.asyncio
+async def test_validate_project_id_success(
+    project_repository: ProjectRepository, test_project: Project
+):
+    """Test that validate_project_id returns project_id when project exists."""
+    project_id = await validate_project_id(
+        project_id=test_project.id, project_repository=project_repository
+    )
+
+    assert project_id == test_project.id
+
+
+@pytest.mark.asyncio
+async def test_validate_project_id_not_found(project_repository: ProjectRepository):
+    """Test that validate_project_id raises HTTPException when project not found."""
+    with pytest.raises(HTTPException) as exc_info:
+        await validate_project_id(project_id=99999, project_repository=project_repository)
+
+    assert exc_info.value.status_code == 404
+    assert "Project with ID 99999 not found" in exc_info.value.detail

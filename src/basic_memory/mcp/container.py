@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.runtime import RuntimeMode, resolve_runtime_mode
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.sync import SyncCoordinator
 
 

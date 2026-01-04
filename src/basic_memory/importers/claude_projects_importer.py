@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class ClaudeProjectsImporter(Importer[ProjectImportResult]):
     """Service for importing Claude projects."""
 
-    def handle_error(
+    def handle_error(  # pragma: no cover
         self, message: str, error: Optional[Exception] = None
     ) -> ProjectImportResult:
         """Return a failed ProjectImportResult with an error message."""

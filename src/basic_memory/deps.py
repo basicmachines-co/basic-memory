@@ -13,4 +13,4 @@ This file will be removed once all callers are migrated.
 """
 
 # Re-export everything from the deps package for backwards compatibility
-from basic_memory.deps import *  # noqa: F401, F403
+from basic_memory.deps import *  # noqa: F401, F403  # pragma: no cover

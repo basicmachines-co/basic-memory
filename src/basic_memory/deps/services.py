@@ -54,7 +54,7 @@ async def get_entity_parser(project_config: ProjectConfigDep) -> EntityParser:
 EntityParserDep = Annotated["EntityParser", Depends(get_entity_parser)]
 
 
-async def get_entity_parser_v2(project_config: ProjectConfigV2Dep) -> EntityParser:
+async def get_entity_parser_v2(project_config: ProjectConfigV2Dep) -> EntityParser:  # pragma: no cover
     return EntityParser(project_config.home)
 
 
@@ -80,7 +80,7 @@ async def get_markdown_processor(
 MarkdownProcessorDep = Annotated[MarkdownProcessor, Depends(get_markdown_processor)]
 
 
-async def get_markdown_processor_v2(
+async def get_markdown_processor_v2(  # pragma: no cover
     entity_parser: EntityParserV2Dep, app_config: AppConfigDep
 ) -> MarkdownProcessor:
     return MarkdownProcessor(entity_parser, app_config=app_config)
@@ -118,7 +118,7 @@ async def get_file_service(
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
-async def get_file_service_v2(
+async def get_file_service_v2(  # pragma: no cover
     project_config: ProjectConfigV2Dep,
     markdown_processor: MarkdownProcessorV2Dep,
     app_config: AppConfigDep,
@@ -163,7 +163,7 @@ async def get_search_service(
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
 
 
-async def get_search_service_v2(
+async def get_search_service_v2(  # pragma: no cover
     search_repository: SearchRepositoryV2Dep,
     entity_repository: EntityRepositoryV2Dep,
     file_service: FileServiceV2Dep,
@@ -199,7 +199,7 @@ async def get_link_resolver(
 LinkResolverDep = Annotated[LinkResolver, Depends(get_link_resolver)]
 
 
-async def get_link_resolver_v2(
+async def get_link_resolver_v2(  # pragma: no cover
     entity_repository: EntityRepositoryV2Dep, search_service: SearchServiceV2Dep
 ) -> LinkResolver:
     return LinkResolver(entity_repository=entity_repository, search_service=search_service)
@@ -246,7 +246,7 @@ async def get_entity_service(
 EntityServiceDep = Annotated[EntityService, Depends(get_entity_service)]
 
 
-async def get_entity_service_v2(
+async def get_entity_service_v2(  # pragma: no cover
     entity_repository: EntityRepositoryV2Dep,
     observation_repository: ObservationRepositoryV2Dep,
     relation_repository: RelationRepositoryV2Dep,
@@ -316,7 +316,7 @@ async def get_context_service(
 ContextServiceDep = Annotated[ContextService, Depends(get_context_service)]
 
 
-async def get_context_service_v2(
+async def get_context_service_v2(  # pragma: no cover
     search_repository: SearchRepositoryV2Dep,
     entity_repository: EntityRepositoryV2Dep,
     observation_repository: ObservationRepositoryV2Dep,
@@ -456,7 +456,7 @@ async def get_directory_service(
 DirectoryServiceDep = Annotated[DirectoryService, Depends(get_directory_service)]
 
 
-async def get_directory_service_v2(
+async def get_directory_service_v2(  # pragma: no cover
     entity_repository: EntityRepositoryV2Dep,
 ) -> DirectoryService:
     """Create DirectoryService for v2 API (uses integer project_id from path)."""

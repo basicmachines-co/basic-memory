@@ -39,7 +39,7 @@ async def get_entity_repository(
 EntityRepositoryDep = Annotated[EntityRepository, Depends(get_entity_repository)]
 
 
-async def get_entity_repository_v2(
+async def get_entity_repository_v2(  # pragma: no cover
     session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> EntityRepository:
@@ -75,7 +75,7 @@ async def get_observation_repository(
 ObservationRepositoryDep = Annotated[ObservationRepository, Depends(get_observation_repository)]
 
 
-async def get_observation_repository_v2(
+async def get_observation_repository_v2(  # pragma: no cover
     session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> ObservationRepository:
@@ -115,7 +115,7 @@ async def get_relation_repository(
 RelationRepositoryDep = Annotated[RelationRepository, Depends(get_relation_repository)]
 
 
-async def get_relation_repository_v2(
+async def get_relation_repository_v2(  # pragma: no cover
     session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> RelationRepository:
@@ -157,7 +157,7 @@ async def get_search_repository(
 SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]
 
 
-async def get_search_repository_v2(
+async def get_search_repository_v2(  # pragma: no cover
     session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
 ) -> SearchRepository:

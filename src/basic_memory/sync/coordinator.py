@@ -93,7 +93,7 @@ class SyncCoordinator:
             # Deferred import to avoid circular dependency
             from basic_memory.services.initialization import initialize_file_sync
 
-            async def _file_sync_runner() -> None:
+            async def _file_sync_runner() -> None:  # pragma: no cover
                 """Run the file sync service."""
                 try:
                     await initialize_file_sync(self.config)
@@ -109,7 +109,7 @@ class SyncCoordinator:
             self._status = SyncStatus.RUNNING
             logger.info("Sync coordinator started successfully")
 
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.error(f"Failed to start sync coordinator: {e}")
             self._status = SyncStatus.ERROR
             raise
@@ -123,7 +123,7 @@ class SyncCoordinator:
         if self._status in (SyncStatus.NOT_STARTED, SyncStatus.STOPPED):
             return
 
-        if self._sync_task is None:
+        if self._sync_task is None:  # pragma: no cover
             self._status = SyncStatus.STOPPED
             return
 

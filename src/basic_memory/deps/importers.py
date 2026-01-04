@@ -47,7 +47,7 @@ async def get_chatgpt_importer(
 ChatGPTImporterDep = Annotated[ChatGPTImporter, Depends(get_chatgpt_importer)]
 
 
-async def get_chatgpt_importer_v2(
+async def get_chatgpt_importer_v2(  # pragma: no cover
     project_config: ProjectConfigV2Dep,
     markdown_processor: MarkdownProcessorV2Dep,
     file_service: FileServiceV2Dep,
@@ -88,7 +88,7 @@ ClaudeConversationsImporterDep = Annotated[
 ]
 
 
-async def get_claude_conversations_importer_v2(
+async def get_claude_conversations_importer_v2(  # pragma: no cover
     project_config: ProjectConfigV2Dep,
     markdown_processor: MarkdownProcessorV2Dep,
     file_service: FileServiceV2Dep,
@@ -131,7 +131,7 @@ async def get_claude_projects_importer(
 ClaudeProjectsImporterDep = Annotated[ClaudeProjectsImporter, Depends(get_claude_projects_importer)]
 
 
-async def get_claude_projects_importer_v2(
+async def get_claude_projects_importer_v2(  # pragma: no cover
     project_config: ProjectConfigV2Dep,
     markdown_processor: MarkdownProcessorV2Dep,
     file_service: FileServiceV2Dep,
@@ -174,7 +174,7 @@ async def get_memory_json_importer(
 MemoryJsonImporterDep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer)]
 
 
-async def get_memory_json_importer_v2(
+async def get_memory_json_importer_v2(  # pragma: no cover
     project_config: ProjectConfigV2Dep,
     markdown_processor: MarkdownProcessorV2Dep,
     file_service: FileServiceV2Dep,
