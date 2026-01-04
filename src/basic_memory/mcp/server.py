@@ -2,15 +2,14 @@
 Basic Memory FastMCP server.
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 from loguru import logger
 
 from basic_memory import db
-from basic_memory.config import ConfigManager
-from basic_memory.services.initialization import initialize_app, initialize_file_sync
+from basic_memory.mcp.container import McpContainer, set_container
+from basic_memory.services.initialization import initialize_app
 from basic_memory.telemetry import show_notice_if_needed, track_app_started
 
 
@@ -21,11 +20,15 @@ async def lifespan(app: FastMCP):
     Handles:
     - Database initialization and migrations
     - Telemetry notice and tracking
-    - File sync in background (if enabled and not in cloud mode)
+    - File sync via SyncCoordinator (if enabled and not in cloud mode)
     - Proper cleanup on shutdown
     """
-    app_config = ConfigManager().config
-    logger.info("Starting Basic Memory MCP server")
+    # --- Composition Root ---
+    # Create container and read config (single point of config access)
+    container = McpContainer.create()
+    set_container(container)
+
+    logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
 
     # Show telemetry notice (first run only) and track startup
     show_notice_if_needed()
@@ -37,35 +40,18 @@ async def lifespan(app: FastMCP):
     engine_was_none = db._engine is None
 
     # Initialize app (runs migrations, reconciles projects)
-    await initialize_app(app_config)
+    await initialize_app(container.config)
 
-    # Start file sync as background task (if enabled and not in cloud mode)
-    sync_task = None
-    if app_config.is_test_env:
-        logger.info("Test environment detected - skipping local file sync")
-    elif app_config.sync_changes and not app_config.cloud_mode_enabled:  # pragma: no cover
-        logger.info("Starting file sync in background")
-
-        async def _file_sync_runner() -> None:
-            await initialize_file_sync(app_config)
-
-        sync_task = asyncio.create_task(_file_sync_runner())
-    elif app_config.cloud_mode_enabled:  # pragma: no cover
-        logger.info("Cloud mode enabled - skipping local file sync")
-    else:  # pragma: no cover
-        logger.info("Sync changes disabled - skipping file sync")
+    # Create and start sync coordinator (lifecycle centralized in coordinator)
+    sync_coordinator = container.create_sync_coordinator()
+    await sync_coordinator.start()
 
     try:
         yield
     finally:
-        # Shutdown
+        # Shutdown - coordinator handles clean task cancellation
         logger.info("Shutting down Basic Memory MCP server")
-        if sync_task:  # pragma: no cover
-            sync_task.cancel()
-            try:
-                await sync_task
-            except asyncio.CancelledError:
-                logger.info("File sync task cancelled")
+        await sync_coordinator.stop()
 
         # Only shutdown DB if we created it (not if test fixture provided it)
         if engine_was_none:

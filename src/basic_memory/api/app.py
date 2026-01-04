@@ -1,6 +1,5 @@
 """FastAPI application for basic-memory knowledge graph API."""
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -8,7 +7,7 @@ from fastapi.exception_handlers import http_exception_handler
 from loguru import logger
 
 from basic_memory import __version__ as version
-from basic_memory import db
+from basic_memory.api.container import ApiContainer, set_container
 from basic_memory.api.routers import (
     directory_router,
     importer_router,
@@ -30,8 +29,8 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
 )
-from basic_memory.config import ConfigManager, init_api_logging
-from basic_memory.services.initialization import initialize_file_sync, initialize_app
+from basic_memory.config import init_api_logging
+from basic_memory.services.initialization import initialize_app
 
 
 @asynccontextmanager
@@ -41,47 +40,36 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     # Initialize logging for API (stdout in cloud mode, file otherwise)
     init_api_logging()
 
-    app_config = ConfigManager().config
-    logger.info("Starting Basic Memory API")
+    # --- Composition Root ---
+    # Create container and read config (single point of config access)
+    container = ApiContainer.create()
+    set_container(container)
+    app.state.container = container
 
-    await initialize_app(app_config)
+    logger.info(f"Starting Basic Memory API (mode={container.mode.name})")
+
+    await initialize_app(container.config)
 
     # Cache database connections in app state for performance
     logger.info("Initializing database and caching connections...")
-    engine, session_maker = await db.get_or_create_db(app_config.database_path)
+    engine, session_maker = await container.init_database()
     app.state.engine = engine
     app.state.session_maker = session_maker
     logger.info("Database connections cached in app state")
 
-    # Start file sync if enabled
-    if app_config.sync_changes and not app_config.is_test_env:
-        logger.info(f"Sync changes enabled: {app_config.sync_changes}")
+    # Create and start sync coordinator (lifecycle centralized in coordinator)
+    sync_coordinator = container.create_sync_coordinator()
+    await sync_coordinator.start()
+    app.state.sync_coordinator = sync_coordinator
 
-        # start file sync task in background
-        async def _file_sync_runner() -> None:
-            await initialize_file_sync(app_config)
-
-        app.state.sync_task = asyncio.create_task(_file_sync_runner())
-    else:
-        if app_config.is_test_env:
-            logger.info("Test environment detected. Skipping file sync service.")
-        else:
-            logger.info("Sync changes disabled. Skipping file sync service.")
-        app.state.sync_task = None
-
-    # proceed with startup
+    # Proceed with startup
     yield
 
+    # Shutdown - coordinator handles clean task cancellation
     logger.info("Shutting down Basic Memory API")
-    if app.state.sync_task:
-        logger.info("Stopping sync...")
-        app.state.sync_task.cancel()  # pyright: ignore
-        try:
-            await app.state.sync_task
-        except asyncio.CancelledError:
-            logger.info("Sync task cancelled successfully")
+    await sync_coordinator.stop()
 
-    await db.shutdown_db()
+    await container.shutdown_database()
 
 
 # Initialize FastAPI app

@@ -12,12 +12,19 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
     """Cross-project detection should fail open (return None) if the projects API errors."""
     import importlib
 
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    # Mock ProjectClient to raise an exception on list_projects
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
-
-    async def boom(*args, **kwargs):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(move_note_module, "call_get", boom)
 
     result = await move_note_module._detect_cross_project_move_attempt(
         client=None,

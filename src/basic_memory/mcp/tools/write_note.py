@@ -7,9 +7,7 @@ from loguru import logger
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 from basic_memory.telemetry import track_mcp_tool
-from basic_memory.schemas import EntityResponse
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
 from basic_memory.utils import parse_tags, validate_project_path
@@ -153,13 +151,17 @@ async def write_note(
             entity_metadata=metadata,
         )
 
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import KnowledgeClient
+
+        # Use typed KnowledgeClient for API calls
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
         # Try to create the entity first (optimistic create)
         logger.debug(f"Attempting to create entity permalink={entity.permalink}")
         action = "Created"  # Default to created
         try:
-            url = f"/v2/projects/{active_project.external_id}/knowledge/entities"
-            response = await call_post(client, url, json=entity.model_dump())
-            result = EntityResponse.model_validate(response.json())
+            result = await knowledge_client.create_entity(entity.model_dump())
             action = "Created"
         except Exception as e:
             # If creation failed due to conflict (already exists), try to update
@@ -172,10 +174,8 @@ async def write_note(
                 try:
                     if not entity.permalink:
                         raise ValueError("Entity permalink is required for updates")  # pragma: no cover
-                    entity_id = await resolve_entity_id(client, active_project.external_id, entity.permalink)
-                    url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
-                    response = await call_put(client, url, json=entity.model_dump())
-                    result = EntityResponse.model_validate(response.json())
+                    entity_id = await knowledge_client.resolve_entity(entity.permalink)
+                    result = await knowledge_client.update_entity(entity_id, entity.model_dump())
                     action = "Updated"
                 except Exception as update_error:  # pragma: no cover
                     # Re-raise the original error if update also fails
@@ -224,7 +224,7 @@ async def write_note(
 
         # Log the response with structured data
         logger.info(
-            f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} status_code={response.status_code}"
+            f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
         )
-        result = "\n".join(summary)
-        return add_project_metadata(result, active_project.name)
+        summary_result = "\n".join(summary)
+        return add_project_metadata(summary_result, active_project.name)

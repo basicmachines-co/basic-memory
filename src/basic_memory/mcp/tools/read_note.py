@@ -10,7 +10,6 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
-from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.telemetry import track_mcp_tool
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
@@ -105,16 +104,19 @@ async def read_note(
             f"Attempting to read note from Project: {active_project.name} identifier: {entity_path}"
         )
 
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import KnowledgeClient, ResourceClient
+
+        # Use typed clients for API calls
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+        resource_client = ResourceClient(client, active_project.external_id)
+
         try:
             # Try to resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.external_id, entity_path)
+            entity_id = await knowledge_client.resolve_entity(entity_path)
 
             # Fetch content using entity ID
-            response = await call_get(
-                client,
-                f"/v2/projects/{active_project.external_id}/resource/{entity_id}",
-                params={"page": page, "page_size": page_size},
-            )
+            response = await resource_client.read(entity_id, page=page, page_size=page_size)
 
             # If successful, return the content
             if response.status_code == 200:
@@ -136,14 +138,10 @@ async def read_note(
             if result.permalink:
                 try:
                     # Resolve the permalink to entity ID
-                    entity_id = await resolve_entity_id(client, active_project.external_id, result.permalink)
+                    entity_id = await knowledge_client.resolve_entity(result.permalink)
 
                     # Fetch content using the entity ID
-                    response = await call_get(
-                        client,
-                        f"/v2/projects/{active_project.external_id}/resource/{entity_id}",
-                        params={"page": page, "page_size": page_size},
-                    )
+                    response = await resource_client.read(entity_id, page=page, page_size=page_size)
 
                     if response.status_code == 200:
                         logger.info(f"Found note by title search: {result.permalink}")

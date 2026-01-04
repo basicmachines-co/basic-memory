@@ -6,11 +6,9 @@ from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_active_project
-from basic_memory.mcp.tools.utils import call_delete, resolve_entity_id
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import get_client
 from basic_memory.telemetry import track_mcp_tool
-from basic_memory.schemas import DeleteEntitiesResponse
 
 
 def _format_delete_error_response(project: str, error_message: str, identifier: str) -> str:
@@ -208,9 +206,15 @@ async def delete_note(
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
 
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import KnowledgeClient
+
+        # Use typed KnowledgeClient for API calls
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
         try:
             # Resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
+            entity_id = await knowledge_client.resolve_entity(identifier)
         except ToolError as e:
             # If entity not found, return False (note doesn't exist)
             if "Entity not found" in str(e) or "not found" in str(e).lower():
@@ -226,10 +230,7 @@ async def delete_note(
 
         try:
             # Call the DELETE endpoint
-            response = await call_delete(
-                client, f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
-            )
-            result = DeleteEntitiesResponse.model_validate(response.json())
+            result = await knowledge_client.delete_entity(entity_id)
 
             if result.deleted:
                 logger.info(

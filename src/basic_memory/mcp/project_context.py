@@ -2,9 +2,12 @@
 
 Provides project lookup utilities for MCP tools.
 Handles project validation and context management in one place.
+
+Note: This module uses ProjectResolver for unified project resolution.
+The resolve_project_parameter function is a thin wrapper for backwards
+compatibility with existing MCP tools.
 """
 
-import os
 from typing import Optional, List
 from httpx import AsyncClient
 from httpx._types import (
@@ -14,16 +17,25 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.config import ConfigManager
+from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
 
 
 async def resolve_project_parameter(
-    project: Optional[str] = None, allow_discovery: bool = False
+    project: Optional[str] = None,
+    allow_discovery: bool = False,
+    cloud_mode: Optional[bool] = None,
+    default_project_mode: Optional[bool] = None,
+    default_project: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve project parameter using three-tier hierarchy.
 
-    if config.cloud_mode:
+    This is a thin wrapper around ProjectResolver for backwards compatibility.
+    New code should consider using ProjectResolver directly for more detailed
+    resolution information.
+
+    if cloud_mode:
         project is required (unless allow_discovery=True for tools that support discovery mode)
     else:
         Resolution order:
@@ -35,41 +47,31 @@ async def resolve_project_parameter(
         project: Optional explicit project parameter
         allow_discovery: If True, allows returning None in cloud mode for discovery mode
             (used by tools like recent_activity that can operate across all projects)
+        cloud_mode: Optional explicit cloud mode. If not provided, reads from ConfigManager.
+        default_project_mode: Optional explicit default project mode. If not provided, reads from ConfigManager.
+        default_project: Optional explicit default project. If not provided, reads from ConfigManager.
 
     Returns:
         Resolved project name or None if no resolution possible
     """
+    # Load config for any values not explicitly provided
+    if cloud_mode is None or default_project_mode is None or default_project is None:
+        config = ConfigManager().config
+        if cloud_mode is None:
+            cloud_mode = config.cloud_mode
+        if default_project_mode is None:
+            default_project_mode = config.default_project_mode
+        if default_project is None:
+            default_project = config.default_project
 
-    config = ConfigManager().config
-    # if cloud_mode, project is required (unless discovery mode is allowed)
-    if config.cloud_mode:
-        if project:
-            logger.debug(f"project: {project}, cloud_mode: {config.cloud_mode}")
-            return project
-        elif allow_discovery:
-            logger.debug("cloud_mode: discovery mode allowed, returning None")
-            return None
-        else:
-            raise ValueError("No project specified. Project is required for cloud mode.")
-
-    # Priority 1: CLI constraint overrides everything (--project arg sets env var)
-    constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
-    if constrained_project:
-        logger.debug(f"Using CLI constrained project: {constrained_project}")
-        return constrained_project
-
-    # Priority 2: Explicit project parameter
-    if project:
-        logger.debug(f"Using explicit project parameter: {project}")
-        return project
-
-    # Priority 3: Default project mode
-    if config.default_project_mode:
-        logger.debug(f"Using default project from config: {config.default_project}")
-        return config.default_project
-
-    # No resolution possible
-    return None
+    # Create resolver with configuration and resolve
+    resolver = ProjectResolver.from_env(
+        cloud_mode=cloud_mode,
+        default_project_mode=default_project_mode,
+        default_project=default_project,
+    )
+    result = resolver.resolve(project=project, allow_discovery=allow_discovery)
+    return result.project
 
 
 async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = None) -> List[str]:

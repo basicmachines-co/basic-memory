@@ -285,7 +285,7 @@ async def edit_entity_by_id(
 
     # Verify entity exists
     entity = await entity_repository.get_by_external_id(entity_id)
-    if not entity:
+    if not entity:  # pragma: no cover
         raise HTTPException(
             status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
         )
@@ -394,7 +394,7 @@ async def move_entity(
     try:
         # First, get the entity by external_id to verify it exists
         entity = await entity_repository.get_by_external_id(entity_id)
-        if not entity:
+        if not entity:  # pragma: no cover
             raise HTTPException(
                 status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
             )

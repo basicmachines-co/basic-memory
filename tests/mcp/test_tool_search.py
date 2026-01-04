@@ -292,6 +292,7 @@ class TestSearchToolErrorHandling:
         import importlib
 
         search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+        clients_mod = importlib.import_module("basic_memory.mcp.clients")
 
         class StubProject:
             project_url = "http://test"
@@ -302,11 +303,17 @@ class TestSearchToolErrorHandling:
         async def fake_get_active_project(*args, **kwargs):
             return StubProject()
 
-        async def fake_call_post(*args, **kwargs):
-            raise Exception("syntax error")
+        # Mock SearchClient to raise an exception
+        class MockSearchClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def search(self, *args, **kwargs):
+                raise Exception("syntax error")
 
         monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
-        monkeypatch.setattr(search_mod, "call_post", fake_call_post)
+        # Patch at the clients module level where the import happens
+        monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
         result = await search_mod.search_notes.fn(project="test-project", query="test query")
         assert isinstance(result, str)
@@ -318,6 +325,7 @@ class TestSearchToolErrorHandling:
         import importlib
 
         search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+        clients_mod = importlib.import_module("basic_memory.mcp.clients")
 
         class StubProject:
             project_url = "http://test"
@@ -328,11 +336,17 @@ class TestSearchToolErrorHandling:
         async def fake_get_active_project(*args, **kwargs):
             return StubProject()
 
-        async def fake_call_post(*args, **kwargs):
-            raise Exception("permission denied")
+        # Mock SearchClient to raise a permission error
+        class MockSearchClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def search(self, *args, **kwargs):
+                raise Exception("permission denied")
 
         monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
-        monkeypatch.setattr(search_mod, "call_post", fake_call_post)
+        # Patch at the clients module level where the import happens
+        monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
         result = await search_mod.search_notes.fn(project="test-project", query="test query")
         assert isinstance(result, str)

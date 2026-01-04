@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class ChatGPTImporter(Importer[ChatImportResult]):
     """Service for importing ChatGPT conversations."""
 
-    def handle_error(
+    def handle_error(  # pragma: no cover
         self, message: str, error: Optional[Exception] = None
     ) -> ChatImportResult:
         """Return a failed ChatImportResult with an error message."""

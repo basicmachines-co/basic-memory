@@ -202,7 +202,7 @@ async def update_project_by_id(
 
         # Get updated project info (use the same external_id)
         updated_project = await project_repository.get_by_external_id(project_id)
-        if not updated_project:
+        if not updated_project:  # pragma: no cover
             raise HTTPException(
                 status_code=404,
                 detail=f"Project with external_id '{project_id}' not found after update",

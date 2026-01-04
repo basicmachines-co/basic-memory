@@ -14,7 +14,8 @@ from typing import Optional  # noqa: E402
 
 import typer  # noqa: E402
 
-from basic_memory.config import ConfigManager, init_cli_logging  # noqa: E402
+from basic_memory.cli.container import CliContainer, set_container  # noqa: E402
+from basic_memory.config import init_cli_logging  # noqa: E402
 from basic_memory.telemetry import show_notice_if_needed, track_app_started  # noqa: E402
 
 
@@ -47,6 +48,11 @@ def app_callback(
     # Initialize logging for CLI (file only, no stdout)
     init_cli_logging()
 
+    # --- Composition Root ---
+    # Create container and read config (single point of config access)
+    container = CliContainer.create()
+    set_container(container)
+
     # Show telemetry notice and track CLI startup
     # Skip for 'mcp' command - it handles its own telemetry in lifespan
     # Skip for 'telemetry' command - avoid issues when user is managing telemetry
@@ -65,8 +71,7 @@ def app_callback(
     ):
         from basic_memory.services.initialization import ensure_initialization
 
-        app_config = ConfigManager().config
-        ensure_initialization(app_config)
+        ensure_initialization(container.config)
 
 
 ## import

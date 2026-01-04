@@ -242,18 +242,24 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
 
 
 def _create_engine_and_session(
-    db_path: Path, db_type: DatabaseType = DatabaseType.FILESYSTEM
+    db_path: Path,
+    db_type: DatabaseType = DatabaseType.FILESYSTEM,
+    config: Optional[BasicMemoryConfig] = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Internal helper to create engine and session maker.
 
     Args:
         db_path: Path to database file (used for SQLite, ignored for Postgres)
         db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
+        config: Optional explicit config. If not provided, reads from ConfigManager.
+            Prefer passing explicitly from composition roots.
 
     Returns:
         Tuple of (engine, session_maker)
     """
-    config = ConfigManager().config
+    # Prefer explicit parameter; fall back to ConfigManager for backwards compatibility
+    if config is None:
+        config = ConfigManager().config
     db_url = DatabaseType.get_db_url(db_path, db_type, config)
     logger.debug(f"Creating engine for db_url: {db_url}")
 
@@ -272,17 +278,29 @@ async def get_or_create_db(
     db_path: Path,
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     ensure_migrations: bool = True,
+    config: Optional[BasicMemoryConfig] = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:  # pragma: no cover
-    """Get or create database engine and session maker."""
+    """Get or create database engine and session maker.
+
+    Args:
+        db_path: Path to database file
+        db_type: Type of database
+        ensure_migrations: Whether to run migrations
+        config: Optional explicit config. If not provided, reads from ConfigManager.
+            Prefer passing explicitly from composition roots.
+    """
     global _engine, _session_maker
 
+    # Prefer explicit parameter; fall back to ConfigManager for backwards compatibility
+    if config is None:
+        config = ConfigManager().config
+
     if _engine is None:
-        _engine, _session_maker = _create_engine_and_session(db_path, db_type)
+        _engine, _session_maker = _create_engine_and_session(db_path, db_type, config)
 
         # Run migrations automatically unless explicitly disabled
         if ensure_migrations:
-            app_config = ConfigManager().config
-            await run_migrations(app_config, db_type)
+            await run_migrations(config, db_type)
 
     # These checks should never fail since we just created the engine and session maker
     # if they were None, but we'll check anyway for the type checker
@@ -311,17 +329,23 @@ async def shutdown_db() -> None:  # pragma: no cover
 async def engine_session_factory(
     db_path: Path,
     db_type: DatabaseType = DatabaseType.MEMORY,
+    config: Optional[BasicMemoryConfig] = None,
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
     """Create engine and session factory.
 
     Note: This is primarily used for testing where we want a fresh database
     for each test. For production use, use get_or_create_db() instead.
+
+    Args:
+        db_path: Path to database file
+        db_type: Type of database
+        config: Optional explicit config. If not provided, reads from ConfigManager.
     """
 
     global _engine, _session_maker
 
     # Use the same helper function as production code
-    _engine, _session_maker = _create_engine_and_session(db_path, db_type)
+    _engine, _session_maker = _create_engine_and_session(db_path, db_type, config)
 
     try:
         # Verify that engine and session maker are initialized

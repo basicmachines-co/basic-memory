@@ -117,17 +117,38 @@ counter += 1  # track retries for backoff calculation
 
 ### Codebase Architecture
 
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+
+**Directory Structure:**
 - `/alembic` - Alembic db migrations
-- `/api` - FastAPI implementation of REST endpoints
-- `/cli` - Typer command-line interface
+- `/api` - FastAPI REST endpoints + `container.py` composition root
+- `/cli` - Typer CLI + `container.py` composition root
+- `/deps` - Feature-scoped FastAPI dependencies (config, db, projects, repositories, services, importers)
 - `/importers` - Import functionality for Claude, ChatGPT, and other sources
 - `/markdown` - Markdown parsing and processing
-- `/mcp` - Model Context Protocol server implementation
+- `/mcp` - MCP server + `container.py` composition root + `clients/` typed API clients
 - `/models` - SQLAlchemy ORM models
 - `/repository` - Data access layer
 - `/schemas` - Pydantic models for validation
 - `/services` - Business logic layer
-- `/sync` - File synchronization services
+- `/sync` - File synchronization services + `coordinator.py` for lifecycle management
+
+**Composition Roots:**
+Each entrypoint (API, MCP, CLI) has a composition root that:
+- Reads `ConfigManager` (the only place that reads global config)
+- Resolves runtime mode via `RuntimeMode` enum (TEST > CLOUD > LOCAL)
+- Provides dependencies to downstream code explicitly
+
+**Typed API Clients (MCP):**
+MCP tools use typed clients in `mcp/clients/` to communicate with the API:
+- `KnowledgeClient` - Entity CRUD operations
+- `SearchClient` - Search operations
+- `MemoryClient` - Context building
+- `DirectoryClient` - Directory listing
+- `ResourceClient` - Resource reading
+- `ProjectClient` - Project management
+
+Flow: MCP Tool → Typed Client → HTTP API → Router → Service → Repository
 
 ### Development Notes
 
@@ -146,6 +167,7 @@ counter += 1  # track retries for backoff calculation
 - CI runs SQLite and Postgres tests in parallel for faster feedback
 - Performance benchmarks are in `test-int/test_sync_performance_benchmark.py`
 - Use pytest markers: `@pytest.mark.benchmark` for benchmarks, `@pytest.mark.slow` for slow tests
+- **Coverage must stay at 100%**: Write tests for new code. Only use `# pragma: no cover` when tests would require excessive mocking (e.g., TYPE_CHECKING blocks, error handlers that need failure injection, runtime-mode-dependent code paths)
 
 ### Async Client Pattern (Important!)
 

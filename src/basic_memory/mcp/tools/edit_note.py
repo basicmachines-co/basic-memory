@@ -8,9 +8,7 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_patch, resolve_entity_id
 from basic_memory.telemetry import track_mcp_tool
-from basic_memory.schemas import EntityResponse
 
 
 def _format_error_response(
@@ -236,8 +234,14 @@ async def edit_note(
 
         # Use the PATCH endpoint to edit the entity
         try:
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import KnowledgeClient
+
+            # Use typed KnowledgeClient for API calls
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
+
             # Resolve identifier to entity ID
-            entity_id = await resolve_entity_id(client, active_project.external_id, identifier)
+            entity_id = await knowledge_client.resolve_entity(identifier)
 
             # Prepare the edit request data
             edit_data = {
@@ -254,9 +258,7 @@ async def edit_note(
                 edit_data["expected_replacements"] = str(expected_replacements)
 
             # Call the PATCH endpoint
-            url = f"/v2/projects/{active_project.external_id}/knowledge/entities/{entity_id}"
-            response = await call_patch(client, url, json=edit_data)
-            result = EntityResponse.model_validate(response.json())
+            result = await knowledge_client.patch_entity(entity_id, edit_data)
 
             # Format summary
             summary = [
@@ -311,11 +313,10 @@ async def edit_note(
                 permalink=result.permalink,
                 observations_count=len(result.observations),
                 relations_count=len(result.relations),
-                status_code=response.status_code,
             )
 
-            result = "\n".join(summary)
-            return add_project_metadata(result, active_project.name)
+            summary_result = "\n".join(summary)
+            return add_project_metadata(summary_result, active_project.name)
 
         except Exception as e:
             logger.error(f"Error editing note: {e}")
