@@ -42,23 +42,45 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     return asyncio.run(_with_cleanup())
 
 
-async def run_sync(project: Optional[str] = None, force_full: bool = False):
+async def run_sync(
+    project: Optional[str] = None,
+    force_full: bool = False,
+    run_in_background: bool = True,
+):
     """Run sync operation via API endpoint.
 
     Args:
         project: Optional project name
         force_full: If True, force a full scan bypassing watermark optimization
+        run_in_background: If True, return immediately; if False, wait for completion
     """
 
     try:
         async with get_client() as client:
             project_item = await get_active_project(client, project, None)
             url = f"{project_item.project_url}/project/sync"
+            params = []
             if force_full:
-                url += "?force_full=true"
+                params.append("force_full=true")
+            if not run_in_background:
+                params.append("run_in_background=false")
+            if params:
+                url += "?" + "&".join(params)
             response = await call_post(client, url)
             data = response.json()
-            console.print(f"[green]{data['message']}[/green]")
+            # Background mode returns {"message": "..."}, foreground returns SyncReportResponse
+            if "message" in data:
+                console.print(f"[green]{data['message']}[/green]")
+            else:
+                # Foreground mode - show summary of sync results
+                total = data.get("total", 0)
+                new_count = len(data.get("new", []))
+                modified_count = len(data.get("modified", []))
+                deleted_count = len(data.get("deleted", []))
+                console.print(
+                    f"[green]Synced {total} files[/green] "
+                    f"(new: {new_count}, modified: {modified_count}, deleted: {deleted_count})"
+                )
     except (ToolError, ValueError) as e:
         console.print(f"[red]Sync failed: {e}[/red]")
         raise typer.Exit(1)

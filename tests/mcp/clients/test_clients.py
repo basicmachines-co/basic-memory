@@ -1,7 +1,7 @@
 """Tests for typed API clients."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 from basic_memory.mcp.clients import (
     KnowledgeClient,

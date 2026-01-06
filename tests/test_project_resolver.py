@@ -1,6 +1,5 @@
 """Tests for ProjectResolver - unified project resolution logic."""
 
-import os
 import pytest
 from basic_memory.project_resolver import (
     ProjectResolver,
