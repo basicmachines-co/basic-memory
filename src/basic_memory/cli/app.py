@@ -63,11 +63,12 @@ def app_callback(
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization
     # Skip for API-using commands (status, sync, etc.) - they handle initialization via deps.py
-    api_commands = {"mcp", "status", "sync", "project", "tool"}
+    # Skip for 'reset' command - it manages its own database lifecycle
+    skip_init_commands = {"mcp", "status", "sync", "project", "tool", "reset"}
     if (
         not version
         and ctx.invoked_subcommand is not None
-        and ctx.invoked_subcommand not in api_commands
+        and ctx.invoked_subcommand not in skip_init_commands
     ):
         from basic_memory.services.initialization import ensure_initialization
 
