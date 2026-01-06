@@ -108,6 +108,48 @@ async def test_init_search_index(search_repository, app_config):
 
 
 @pytest.mark.asyncio
+async def test_init_search_index_preserves_data(search_repository, search_entity):
+    """Regression test: calling init_search_index() twice should preserve indexed data.
+
+    This test prevents regression of the bug fixed in PR #503 where
+    init_search_index() was dropping existing data on every call due to
+    an unconditional DROP TABLE statement.
+
+    The bug caused search to work immediately after creating notes, but
+    return empty results after MCP server restarts (~30 minutes in Claude Desktop).
+    """
+    # Create and index a search item
+    search_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title=search_entity.title,
+        content_stems="regression test content for server restart",
+        content_snippet="This content should persist across init_search_index calls",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"entity_type": search_entity.entity_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(search_row)
+
+    # Verify it's searchable
+    results = await search_repository.search(search_text="regression test")
+    assert len(results) == 1
+    assert results[0].title == search_entity.title
+
+    # Re-initialize the search index (simulates MCP server restart)
+    await search_repository.init_search_index()
+
+    # Verify data is still there after re-initialization
+    results_after = await search_repository.search(search_text="regression test")
+    assert len(results_after) == 1, "Search index data was lost after init_search_index()"
+    assert results_after[0].id == search_entity.id
+
+
+@pytest.mark.asyncio
 async def test_index_item(search_repository, search_entity):
     """Test indexing an item with project_id."""
     # Create search index row for the entity
