@@ -27,17 +27,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     """
 
     async def init_search_index(self):
-        """Create FTS5 virtual table for search.
+        """Create FTS5 virtual table for search if it doesn't exist.
 
-        Note: Drops any existing search_index table first to ensure FTS5 virtual table creation.
-        This is necessary because Base.metadata.create_all() might create a regular table.
+        Uses CREATE VIRTUAL TABLE IF NOT EXISTS to preserve existing indexed data
+        across server restarts.
         """
         logger.info("Initializing SQLite FTS5 search index")
         try:
             async with db.scoped_session(self.session_maker) as session:
-                # Drop any existing regular or virtual table first
-                await session.execute(text("DROP TABLE IF EXISTS search_index"))
-                # Create FTS5 virtual table
+                # Create FTS5 virtual table if it doesn't exist
                 await session.execute(CREATE_SEARCH_INDEX)
                 await session.commit()
         except Exception as e:  # pragma: no cover
