@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from typing import AsyncIterator, Callable, Optional
 
@@ -95,12 +96,19 @@ async def get_client() -> AsyncIterator[AsyncClient]:
                 yield client
         else:
             # Local mode: ASGI transport for in-process calls
-            # Note: ASGI transport does NOT trigger FastAPI lifespan, so no special handling needed
-            logger.info("Creating ASGI client for local Basic Memory API")
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-            ) as client:
-                yield client
+            # Set environment variable to disable file sync for short-lived CLI commands
+            # File sync is designed for long-running processes (MCP server, API server)
+            # not for quick CLI queries that trigger lifespan via ASGITransport
+            os.environ["BASIC_MEMORY_DISABLE_FILE_SYNC"] = "1"
+            try:
+                logger.info("Creating ASGI client for local Basic Memory API")
+                async with AsyncClient(
+                    transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
+                ) as client:
+                    yield client
+            finally:
+                # Clean up environment variable
+                os.environ.pop("BASIC_MEMORY_DISABLE_FILE_SYNC", None)
 
 
 def create_client() -> AsyncClient:

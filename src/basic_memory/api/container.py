@@ -10,6 +10,7 @@ Design principles:
 - Factories for services are provided, not singletons
 """
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -61,7 +62,11 @@ class ApiContainer:
         Sync is enabled when:
         - sync_changes is True in config
         - Not in test mode (tests manage their own sync)
+        - Not disabled via BASIC_MEMORY_DISABLE_FILE_SYNC env var (CLI ASGI context)
         """
+        # Check if file sync is explicitly disabled (e.g., for short-lived CLI commands)
+        if os.environ.get("BASIC_MEMORY_DISABLE_FILE_SYNC") == "1":
+            return False
         return self.config.sync_changes and not self.mode.is_test
 
     @property
@@ -70,6 +75,8 @@ class ApiContainer:
 
         Useful for logging why sync was disabled.
         """
+        if os.environ.get("BASIC_MEMORY_DISABLE_FILE_SYNC") == "1":
+            return "File sync disabled for short-lived CLI command"
         if self.mode.is_test:
             return "Test environment detected"
         if not self.config.sync_changes:
