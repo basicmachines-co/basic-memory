@@ -1,6 +1,5 @@
 """Format command for basic-memory CLI."""
 
-import asyncio
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -10,6 +9,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.file_utils import format_file
 
@@ -189,7 +189,7 @@ def format(
         basic-memory format notes/             # Format all files in directory
     """
     try:
-        asyncio.run(run_format(path, project))
+        run_with_cleanup(run_format(path, project))
     except Exception as e:
         if not isinstance(e, typer.Exit):
             logger.error(f"Error formatting files: {e}")

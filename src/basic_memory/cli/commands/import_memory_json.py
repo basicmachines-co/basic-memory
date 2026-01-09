@@ -1,12 +1,12 @@
 """Import command for basic-memory CLI to import from JSON memory format."""
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Tuple
 
 import typer
 from basic_memory.cli.app import import_app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.importers.memory_json_importer import MemoryJsonImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
@@ -52,7 +52,7 @@ def memory_json(
     config = get_project_config()
     try:
         # Get importer dependencies
-        markdown_processor, file_service = asyncio.run(get_importer_dependencies())
+        markdown_processor, file_service = run_with_cleanup(get_importer_dependencies())
 
         # Create the importer
         importer = MemoryJsonImporter(config.home, markdown_processor, file_service)
@@ -67,7 +67,7 @@ def memory_json(
             for line in file:
                 json_data = json.loads(line)
                 file_data.append(json_data)
-        result = asyncio.run(importer.import_data(file_data, destination_folder))
+        result = run_with_cleanup(importer.import_data(file_data, destination_folder))
 
         if not result.success:  # pragma: no cover
             typer.echo(f"Error during import: {result.error_message}", err=True)
