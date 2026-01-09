@@ -14,7 +14,7 @@ from basic_memory.repository.postgres_search_repository import PostgresSearchRep
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.memory import MemoryUrl, memory_url_path
 from basic_memory.schemas.search import SearchItemType
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import generate_permalink, parse_datetime
 
 
 @dataclass
@@ -200,7 +200,7 @@ class ContextService:
                             entity_id=primary_item.id,
                             depth=0,
                             root_id=primary_item.id,
-                            created_at=primary_item.created_at,  # created_at time from entity
+                            created_at=parse_datetime(primary_item.created_at),
                         )
                     )
 
@@ -335,7 +335,7 @@ class ContextService:
                 entity_id=row.entity_id,
                 depth=row.depth,
                 root_id=row.root_id,
-                created_at=row.created_at,
+                created_at=parse_datetime(row.created_at),
             )
             for row in rows
         ]
