@@ -74,10 +74,12 @@ async def test_update_project_invalid_path(
 
 
 @pytest.mark.asyncio
-async def test_update_project_not_found(client: AsyncClient, v2_projects_url):
+async def test_update_project_not_found(client: AsyncClient, v2_projects_url, tmp_path):
     """Test updating a non-existent project returns 404."""
     fake_uuid = "00000000-0000-0000-0000-000000000000"
-    update_data = {"path": "/tmp/new-path"}
+    # Use tmp_path for cross-platform absolute path compatibility
+    new_path = str(tmp_path / "new-path")
+    update_data = {"path": new_path}
     response = await client.patch(
         f"{v2_projects_url}/{fake_uuid}",
         json=update_data,
@@ -167,7 +169,9 @@ async def test_delete_project_with_delete_notes_param(
         assert created_project is not None
 
         # Delete with delete_notes=true
-        response = await client.delete(f"{v2_projects_url}/{created_project.external_id}?delete_notes=true")
+        response = await client.delete(
+            f"{v2_projects_url}/{created_project.external_id}?delete_notes=true"
+        )
 
         assert response.status_code == 200
 

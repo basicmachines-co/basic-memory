@@ -17,7 +17,9 @@ from basic_memory.cli.commands.cloud.cloud_utils import (
 
 
 @pytest.mark.asyncio
-async def test_make_api_request_success_injects_auth_and_accept_encoding(config_home, config_manager):
+async def test_make_api_request_success_injects_auth_and_accept_encoding(
+    config_home, config_manager
+):
     # Arrange: create a token on disk so CLIAuth can authenticate without any network.
     auth = CLIAuth(client_id="cid", authkit_domain="https://auth.example.test")
     auth.token_file.parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +92,9 @@ async def test_make_api_request_raises_subscription_required(config_home, config
 
 
 @pytest.mark.asyncio
-async def test_cloud_utils_fetch_and_exists_and_create_project(config_home, config_manager, monkeypatch):
+async def test_cloud_utils_fetch_and_exists_and_create_project(
+    config_home, config_manager, monkeypatch
+):
     # Point config.cloud_host at our mocked base URL
     config = config_manager.load_config()
     config.cloud_host = "https://cloud.example.test"
@@ -140,7 +144,9 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(config_home, conf
 
     @asynccontextmanager
     async def http_client_factory():
-        async with httpx.AsyncClient(transport=transport, base_url="https://cloud.example.test") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="https://cloud.example.test"
+        ) as client:
             yield client
 
     async def api_request(**kwargs):
@@ -157,5 +163,3 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(config_home, conf
     assert created.new_project["name"] == "My Project"
     # Path should be permalink-like (kebab)
     assert seen["create_payload"]["path"] == "my-project"
-
-

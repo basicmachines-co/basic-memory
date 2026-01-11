@@ -76,5 +76,3 @@ def test_configure_rclone_remote_writes_config_and_backs_up_existing(config_home
     # Backup exists
     backups = list(cfg_path.parent.glob("rclone.conf.backup-*"))
     assert backups, "expected a backup of rclone.conf to be created"
-
-

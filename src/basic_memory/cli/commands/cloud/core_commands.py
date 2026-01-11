@@ -1,11 +1,10 @@
 """Core cloud commands for Basic Memory CLI."""
 
-import asyncio
-
 import typer
 from rich.console import Console
 
 from basic_memory.cli.app import cloud_app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.config import ConfigManager
 from basic_memory.cli.commands.cloud.api_client import (
@@ -64,7 +63,7 @@ def login():
             )
             raise typer.Exit(1)
 
-    asyncio.run(_login())
+    run_with_cleanup(_login())
 
 
 @cloud_app.command()
@@ -110,7 +109,7 @@ def status() -> None:
         console.print("\n[blue]Checking cloud instance health...[/blue]")
 
         # Make API request to check health
-        response = asyncio.run(
+        response = run_with_cleanup(
             make_api_request(method="GET", url=f"{host_url}/proxy/health", headers=headers)
         )
 
@@ -156,12 +155,12 @@ def setup() -> None:
 
         # Step 2: Get tenant info
         console.print("\n[blue]Step 2: Getting tenant information...[/blue]")
-        tenant_info = asyncio.run(get_mount_info())
+        tenant_info = run_with_cleanup(get_mount_info())
         console.print(f"[green]Found tenant: {tenant_info.tenant_id}[/green]")
 
         # Step 3: Generate credentials
         console.print("\n[blue]Step 3: Generating sync credentials...[/blue]")
-        creds = asyncio.run(generate_mount_credentials(tenant_info.tenant_id))
+        creds = run_with_cleanup(generate_mount_credentials(tenant_info.tenant_id))
         console.print("[green]Generated secure credentials[/green]")
 
         # Step 4: Configure rclone remote

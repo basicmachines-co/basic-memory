@@ -342,11 +342,13 @@ async def test_update_project_both_params_endpoint(
 
 
 @pytest.mark.asyncio
-async def test_update_project_nonexistent_endpoint(client, project_url):
+async def test_update_project_nonexistent_endpoint(client, project_url, tmp_path):
     """Test the update project endpoint with a nonexistent project."""
     # Try to update a project that doesn't exist
+    # Use tmp_path for cross-platform absolute path compatibility
+    new_path = str(tmp_path / "new-path")
     response = await client.patch(
-        f"{project_url}/project/nonexistent-project", json={"path": "/tmp/new-path"}
+        f"{project_url}/project/nonexistent-project", json={"path": new_path}
     )
 
     # Should return 400 error

@@ -1,12 +1,12 @@
 """Import command for ChatGPT conversations."""
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Tuple
 
 import typer
 from basic_memory.cli.app import import_app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.importers import ChatGPTImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
@@ -53,7 +53,7 @@ def import_chatgpt(
             raise typer.Exit(1)
 
         # Get importer dependencies
-        markdown_processor, file_service = asyncio.run(get_importer_dependencies())
+        markdown_processor, file_service = run_with_cleanup(get_importer_dependencies())
         config = get_project_config()
         # Process the file
         base_path = config.home / folder
@@ -63,7 +63,7 @@ def import_chatgpt(
         importer = ChatGPTImporter(config.home, markdown_processor, file_service)
         with conversations_json.open("r", encoding="utf-8") as file:
             json_data = json.load(file)
-            result = asyncio.run(importer.import_data(json_data, folder))
+            result = run_with_cleanup(importer.import_data(json_data, folder))
 
         if not result.success:  # pragma: no cover
             typer.echo(f"Error during import: {result.error_message}", err=True)

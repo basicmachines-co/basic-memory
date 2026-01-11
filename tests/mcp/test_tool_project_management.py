@@ -47,5 +47,3 @@ async def test_create_and_delete_project_and_name_match_branch(
 
     delete_result = await delete_project.fn("My Project")
     assert delete_result.startswith("✓")
-
-

@@ -15,7 +15,9 @@ def _make_mock_transport(handler):
 
 
 @pytest.mark.asyncio
-async def test_cli_auth_request_device_authorization_uses_injected_http_client(tmp_path, monkeypatch):
+async def test_cli_auth_request_device_authorization_uses_injected_http_client(
+    tmp_path, monkeypatch
+):
     """Integration-style test: exercise the request flow with real httpx plumbing (MockTransport)."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("BASIC_MEMORY_ENV", "test")
@@ -76,7 +78,12 @@ async def test_cli_auth_save_load_and_get_valid_token_roundtrip(tmp_path, monkey
 
     auth = CLIAuth(client_id="cid", authkit_domain="https://example.test")
 
-    tokens = {"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "token_type": "Bearer"}
+    tokens = {
+        "access_token": "at",
+        "refresh_token": "rt",
+        "expires_in": 3600,
+        "token_type": "Bearer",
+    }
     auth.save_tokens(tokens)
 
     loaded = auth.load_tokens()
@@ -143,5 +150,3 @@ async def test_cli_auth_refresh_flow_uses_injected_http_client(tmp_path, monkeyp
 
     token = await auth.get_valid_token()
     assert token == "new-at"
-
-

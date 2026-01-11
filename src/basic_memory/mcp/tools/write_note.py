@@ -173,7 +173,9 @@ async def write_note(
                 logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
                 try:
                     if not entity.permalink:
-                        raise ValueError("Entity permalink is required for updates")  # pragma: no cover
+                        raise ValueError(
+                            "Entity permalink is required for updates"
+                        )  # pragma: no cover
                     entity_id = await knowledge_client.resolve_entity(entity.permalink)
                     result = await knowledge_client.update_entity(entity_id, entity.model_dump())
                     action = "Updated"

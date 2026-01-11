@@ -1,12 +1,12 @@
 """Import command for basic-memory CLI to import project data from Claude.ai."""
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Annotated, Tuple
 
 import typer
 from basic_memory.cli.app import claude_app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.importers.claude_projects_importer import ClaudeProjectsImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
@@ -53,7 +53,7 @@ def import_projects(
             raise typer.Exit(1)
 
         # Get importer dependencies
-        markdown_processor, file_service = asyncio.run(get_importer_dependencies())
+        markdown_processor, file_service = run_with_cleanup(get_importer_dependencies())
 
         # Create the importer
         importer = ClaudeProjectsImporter(config.home, markdown_processor, file_service)
@@ -65,7 +65,7 @@ def import_projects(
         # Run the import
         with projects_json.open("r", encoding="utf-8") as file:
             json_data = json.load(file)
-            result = asyncio.run(importer.import_data(json_data, base_folder))
+            result = run_with_cleanup(importer.import_data(json_data, base_folder))
 
         if not result.success:  # pragma: no cover
             typer.echo(f"Error during import: {result.error_message}", err=True)

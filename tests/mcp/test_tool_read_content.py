@@ -166,5 +166,3 @@ async def test_read_content_empty_path_does_not_trigger_security_error(client, t
     except ToolError:
         # Acceptable: resource resolution may treat empty path as not-found.
         pass
-
-

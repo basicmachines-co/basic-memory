@@ -62,9 +62,7 @@ class Entity(Base):
     # Core identity
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # External UUID for API references - stable identifier that won't change
-    external_id: Mapped[str] = mapped_column(
-        String, unique=True, default=lambda: str(uuid.uuid4())
-    )
+    external_id: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String)
     entity_type: Mapped[str] = mapped_column(String)
     entity_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

@@ -1,12 +1,12 @@
 """Upload CLI commands for basic-memory projects."""
 
-import asyncio
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from basic_memory.cli.app import cloud_app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.cloud.cloud_utils import (
     create_cloud_project,
     project_exists,
@@ -121,4 +121,4 @@ def upload(
                 console.print(f"[yellow]Warning: Sync failed: {e}[/yellow]")
                 console.print("[dim]Files uploaded but may not be indexed yet[/dim]")
 
-    asyncio.run(_upload())
+    run_with_cleanup(_upload())

@@ -55,9 +55,7 @@ class EntityRepository(Repository[Entity]):
             Entity if found, None otherwise
         """
         query = (
-            self.select()
-            .where(Entity.external_id == external_id)
-            .options(*self.get_load_options())
+            self.select().where(Entity.external_id == external_id).options(*self.get_load_options())
         )
         return await self.find_one(query)
 

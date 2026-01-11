@@ -3,7 +3,6 @@
 import pytest
 
 
-
 @pytest.mark.asyncio
 async def test_get_directory_tree_endpoint(test_graph, client, project_url):
     """Test the get_directory_tree endpoint returns correctly structured data."""

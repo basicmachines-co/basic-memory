@@ -54,7 +54,9 @@ async def get_entity_parser(project_config: ProjectConfigDep) -> EntityParser:
 EntityParserDep = Annotated["EntityParser", Depends(get_entity_parser)]
 
 
-async def get_entity_parser_v2(project_config: ProjectConfigV2Dep) -> EntityParser:  # pragma: no cover
+async def get_entity_parser_v2(
+    project_config: ProjectConfigV2Dep,
+) -> EntityParser:  # pragma: no cover
     return EntityParser(project_config.home)
 
 
@@ -477,4 +479,6 @@ async def get_directory_service_v2_external(
     )
 
 
-DirectoryServiceV2ExternalDep = Annotated[DirectoryService, Depends(get_directory_service_v2_external)]
+DirectoryServiceV2ExternalDep = Annotated[
+    DirectoryService, Depends(get_directory_service_v2_external)
+]

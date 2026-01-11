@@ -1,9 +1,9 @@
 """Repository for managing Relation objects."""
 
-from typing import Sequence, List, Optional
-
+from typing import Sequence, List, Optional, Any, cast
 
 from sqlalchemy import and_, delete, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -139,7 +139,7 @@ class RelationRepository(Repository[Relation]):
                 # SQLite: rowcount works correctly
                 stmt = sqlite_insert(Relation).values(values)
                 stmt = stmt.on_conflict_do_nothing()
-                result = await session.execute(stmt)
+                result = cast(CursorResult[Any], await session.execute(stmt))
                 return result.rowcount if result.rowcount > 0 else 0
 
     def get_load_options(self) -> List[LoaderOption]:

@@ -231,7 +231,9 @@ async def read_content(
             raise ToolError(f"Resource not found: {url}")
 
         # Call the v2 resource endpoint
-        response = await call_get(client, f"/v2/projects/{active_project.external_id}/resource/{entity_id}")
+        response = await call_get(
+            client, f"/v2/projects/{active_project.external_id}/resource/{entity_id}"
+        )
         content_type = response.headers.get("content-type", "application/octet-stream")
         content_length = int(response.headers.get("content-length", 0))
 

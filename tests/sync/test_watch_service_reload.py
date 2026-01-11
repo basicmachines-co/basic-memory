@@ -255,5 +255,3 @@ async def test_new_project_addition_scenario(monkeypatch, tmp_path):
     assert cycle_count == 3
     assert any(len(p) == 1 for p in project_lists_used)
     assert any(len(p) == 2 for p in project_lists_used)
-
-

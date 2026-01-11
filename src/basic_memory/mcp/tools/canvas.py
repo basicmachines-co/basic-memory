@@ -127,7 +127,9 @@ async def canvas(
             ):
                 logger.info(f"Canvas file exists, updating instead: {file_path}")
                 try:
-                    entity_id = await resolve_entity_id(client, active_project.external_id, file_path)
+                    entity_id = await resolve_entity_id(
+                        client, active_project.external_id, file_path
+                    )
                     # For update, send content in JSON body
                     response = await call_put(
                         client,

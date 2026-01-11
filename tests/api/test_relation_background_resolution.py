@@ -8,6 +8,7 @@ from basic_memory.api.routers.knowledge_router import resolve_relations_backgrou
 @pytest.mark.asyncio
 async def test_resolve_relations_background_success():
     """Test that background relation resolution calls sync service correctly."""
+
     class StubSyncService:
         def __init__(self) -> None:
             self.calls: list[int] = []
@@ -30,6 +31,7 @@ async def test_resolve_relations_background_success():
 @pytest.mark.asyncio
 async def test_resolve_relations_background_handles_errors():
     """Test that background relation resolution handles errors gracefully."""
+
     class StubSyncService:
         def __init__(self) -> None:
             self.calls: list[int] = []

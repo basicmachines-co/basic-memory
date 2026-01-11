@@ -27,6 +27,7 @@ console = Console()
 # Minimum rclone version for --create-empty-src-dirs support
 MIN_RCLONE_VERSION_EMPTY_DIRS = (1, 64, 0)
 
+
 class RunResult(Protocol):
     returncode: int
     stdout: str

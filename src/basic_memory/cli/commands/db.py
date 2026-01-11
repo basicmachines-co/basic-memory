@@ -1,6 +1,5 @@
 """Database management commands."""
 
-import asyncio
 from pathlib import Path
 
 import typer
@@ -10,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 
 from basic_memory import db
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager
 from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import reconcile_projects_with_config
@@ -81,7 +81,7 @@ def reset(
 
         # Create a new empty database (preserves project configuration)
         try:
-            asyncio.run(db.run_migrations(app_config))
+            run_with_cleanup(db.run_migrations(app_config))
         except OperationalError as e:
             if "disk I/O error" in str(e) or "database is locked" in str(e):
                 console.print(
@@ -99,5 +99,7 @@ def reset(
                 console.print("[yellow]No projects configured. Skipping reindex.[/yellow]")
             else:
                 console.print(f"Rebuilding search index for {len(projects)} project(s)...")
-                asyncio.run(_reindex_projects(app_config))
+                # Note: _reindex_projects has its own cleanup, but run_with_cleanup
+                # ensures db.shutdown_db() is called even if _reindex_projects changes
+                run_with_cleanup(_reindex_projects(app_config))
                 console.print("[green]Reindex complete[/green]")

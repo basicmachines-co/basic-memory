@@ -1,6 +1,5 @@
 """CLI tool commands for Basic Memory."""
 
-import asyncio
 import sys
 from typing import Annotated, List, Optional
 
@@ -9,6 +8,7 @@ from loguru import logger
 from rich import print as rprint
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager
 
 # Import prompts
@@ -109,7 +109,7 @@ def write_note(
         # use the project name, or the default from the config
         project_name = project_name or config_manager.default_project
 
-        note = asyncio.run(mcp_write_note.fn(title, content, folder, project_name, tags))
+        note = run_with_cleanup(mcp_write_note.fn(title, content, folder, project_name, tags))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -145,7 +145,7 @@ def read_note(
     project_name = project_name or config_manager.default_project
 
     try:
-        note = asyncio.run(mcp_read_note.fn(identifier, project_name, page, page_size))
+        note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -182,7 +182,7 @@ def build_context(
     project_name = project_name or config_manager.default_project
 
     try:
-        context = asyncio.run(
+        context = run_with_cleanup(
             mcp_build_context.fn(
                 project=project_name,
                 url=url,
@@ -213,7 +213,7 @@ def recent_activity(
 ):
     """Get recent activity across the knowledge base."""
     try:
-        result = asyncio.run(
+        result = run_with_cleanup(
             mcp_recent_activity.fn(
                 type=type,  # pyright: ignore [reportArgumentType]
                 depth=depth,
@@ -279,7 +279,7 @@ def search_notes(
         search_type = ("title" if title else None,)
         search_type = "text" if search_type is None else search_type
 
-        results = asyncio.run(
+        results = run_with_cleanup(
             mcp_search.fn(
                 query,
                 project_name,
@@ -312,7 +312,7 @@ def continue_conversation(
     """Prompt to continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
-        session = asyncio.run(mcp_continue_conversation.fn(topic=topic, timeframe=timeframe))  # type: ignore
+        session = run_with_cleanup(mcp_continue_conversation.fn(topic=topic, timeframe=timeframe))  # type: ignore
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):

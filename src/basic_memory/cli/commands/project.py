@@ -1,6 +1,5 @@
 """Command module for basic-memory project management."""
 
-import asyncio
 import os
 from pathlib import Path
 
@@ -9,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import get_project_info
+from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
 from basic_memory.config import ConfigManager
 import json
 from datetime import datetime
@@ -56,7 +55,7 @@ def list_projects() -> None:
             return ProjectList.model_validate(response.json())
 
     try:
-        result = asyncio.run(_list_projects())
+        result = run_with_cleanup(_list_projects())
         config = ConfigManager().config
 
         table = Table(title="Basic Memory Projects")
@@ -155,7 +154,7 @@ def add_project(
                 return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = asyncio.run(_add_project())
+        result = run_with_cleanup(_add_project())
         console.print(f"[green]{result.message}[/green]")
 
         # Save local sync path to config if in cloud mode
@@ -212,7 +211,7 @@ def setup_project_sync(
 
     try:
         # Verify project exists on cloud
-        asyncio.run(_verify_project_exists())
+        run_with_cleanup(_verify_project_exists())
 
         # Resolve and create local path
         resolved_path = Path(os.path.abspath(os.path.expanduser(local_path)))
@@ -279,7 +278,7 @@ def remove_project(
             has_bisync_state = bisync_state_path.exists()
 
         # Remove project from cloud/API
-        result = asyncio.run(_remove_project())
+        result = run_with_cleanup(_remove_project())
         console.print(f"[green]{result.message}[/green]")
 
         # Clean up local sync directory if it exists and delete_notes is True
@@ -347,7 +346,7 @@ def set_default_project(
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = asyncio.run(_set_default())
+        result = run_with_cleanup(_set_default())
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
@@ -372,7 +371,7 @@ def synchronize_projects() -> None:
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = asyncio.run(_sync_config())
+        result = run_with_cleanup(_sync_config())
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:  # pragma: no cover
         console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
@@ -407,7 +406,7 @@ def move_project(
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = asyncio.run(_move_project())
+        result = run_with_cleanup(_move_project())
         console.print(f"[green]{result.message}[/green]")
 
         # Show important file movement reminder
@@ -448,7 +447,7 @@ def sync_project_command(
 
     try:
         # Get tenant info for bucket name
-        tenant_info = asyncio.run(get_mount_info())
+        tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
         # Get project info
@@ -461,7 +460,7 @@ def sync_project_command(
                         return proj
                 return None
 
-        project_data = asyncio.run(_get_project())
+        project_data = run_with_cleanup(_get_project())
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
@@ -502,7 +501,7 @@ def sync_project_command(
                         return response.json()
 
                 try:
-                    result = asyncio.run(_trigger_db_sync())
+                    result = run_with_cleanup(_trigger_db_sync())
                     console.print(f"[dim]Database sync initiated: {result.get('message')}[/dim]")
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
@@ -539,7 +538,7 @@ def bisync_project_command(
 
     try:
         # Get tenant info for bucket name
-        tenant_info = asyncio.run(get_mount_info())
+        tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
         # Get project info
@@ -552,7 +551,7 @@ def bisync_project_command(
                         return proj
                 return None
 
-        project_data = asyncio.run(_get_project())
+        project_data = run_with_cleanup(_get_project())
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
@@ -600,7 +599,7 @@ def bisync_project_command(
                         return response.json()
 
                 try:
-                    result = asyncio.run(_trigger_db_sync())
+                    result = run_with_cleanup(_trigger_db_sync())
                     console.print(f"[dim]Database sync initiated: {result.get('message')}[/dim]")
                 except Exception as e:
                     console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
@@ -633,7 +632,7 @@ def check_project_command(
 
     try:
         # Get tenant info for bucket name
-        tenant_info = asyncio.run(get_mount_info())
+        tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
         # Get project info
@@ -646,7 +645,7 @@ def check_project_command(
                         return proj
                 return None
 
-        project_data = asyncio.run(_get_project())
+        project_data = run_with_cleanup(_get_project())
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
@@ -734,7 +733,7 @@ def ls_project_command(
 
     try:
         # Get tenant info for bucket name
-        tenant_info = asyncio.run(get_mount_info())
+        tenant_info = run_with_cleanup(get_mount_info())
         bucket_name = tenant_info.bucket_name
 
         # Get project info
@@ -747,7 +746,7 @@ def ls_project_command(
                         return proj
                 return None
 
-        project_data = asyncio.run(_get_project())
+        project_data = run_with_cleanup(_get_project())
         if not project_data:
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
@@ -784,7 +783,7 @@ def display_project_info(
     """Display detailed information and statistics about the current project."""
     try:
         # Get project info
-        info = asyncio.run(get_project_info(name))
+        info = run_with_cleanup(get_project_info(name))
 
         if json_output:
             # Convert to JSON and print

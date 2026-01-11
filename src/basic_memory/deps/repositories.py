@@ -58,7 +58,9 @@ async def get_entity_repository_v2_external(
     return EntityRepository(session_maker, project_id=project_id)
 
 
-EntityRepositoryV2ExternalDep = Annotated[EntityRepository, Depends(get_entity_repository_v2_external)]
+EntityRepositoryV2ExternalDep = Annotated[
+    EntityRepository, Depends(get_entity_repository_v2_external)
+]
 
 
 # --- Observation Repository ---
@@ -176,4 +178,6 @@ async def get_search_repository_v2_external(
     return create_search_repository(session_maker, project_id=project_id)
 
 
-SearchRepositoryV2ExternalDep = Annotated[SearchRepository, Depends(get_search_repository_v2_external)]
+SearchRepositoryV2ExternalDep = Annotated[
+    SearchRepository, Depends(get_search_repository_v2_external)
+]

@@ -69,5 +69,3 @@ async def test_add_project_to_config(project_service: ProjectService, config_man
             # Clean up
             if test_project_name in project_service.projects:
                 config_manager.remove_project(test_project_name)
-
-

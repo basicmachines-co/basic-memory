@@ -208,16 +208,26 @@ async def recent_activity(
             else:
                 # At least one project has activity: suggest the most active project.
                 suggested_project = most_active_project or next(
-                    (name for name, activity in projects_activity.items() if activity.item_count > 0),
+                    (
+                        name
+                        for name, activity in projects_activity.items()
+                        if activity.item_count > 0
+                    ),
                     None,
                 )
                 if suggested_project:
                     suffix = (
-                        f"(most active with {most_active_count} items)" if most_active_count > 0 else ""
+                        f"(most active with {most_active_count} items)"
+                        if most_active_count > 0
+                        else ""
                     )
-                    guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
+                    guidance_lines.append(
+                        f"Suggested project: '{suggested_project}' {suffix}".strip()
+                    )
                     if active_projects == 1:
-                        guidance_lines.append(f"Ask user: 'Should I use {suggested_project} for this task?'")
+                        guidance_lines.append(
+                            f"Ask user: 'Should I use {suggested_project} for this task?'"
+                        )
                     else:
                         guidance_lines.append(
                             f"Ask user: 'Should I use {suggested_project} for this task, or would you prefer a different project?'"

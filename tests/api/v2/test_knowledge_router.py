@@ -374,7 +374,9 @@ async def test_v2_endpoints_use_project_id_not_name(client: AsyncClient, test_pr
     """Verify v2 endpoints require project external_id UUID, not name."""
     # Try using project name instead of external_id - should fail
     fake_entity_uuid = "00000000-0000-0000-0000-000000000000"
-    response = await client.get(f"/v2/projects/{test_project.name}/knowledge/entities/{fake_entity_uuid}")
+    response = await client.get(
+        f"/v2/projects/{test_project.name}/knowledge/entities/{fake_entity_uuid}"
+    )
 
     # Should get 404 because name is not a valid project external_id
     assert response.status_code == 404

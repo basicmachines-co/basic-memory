@@ -623,7 +623,9 @@ class SyncService:
         except Exception as e:
             # Check if this is a fatal error (or caused by one)
             # Fatal errors like project deletion should terminate sync immediately
-            if isinstance(e, SyncFatalError) or isinstance(e.__cause__, SyncFatalError):  # pragma: no cover
+            if isinstance(e, SyncFatalError) or isinstance(
+                e.__cause__, SyncFatalError
+            ):  # pragma: no cover
                 logger.error(f"Fatal sync error encountered, terminating sync: path={path}")
                 raise
 

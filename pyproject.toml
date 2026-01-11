@@ -14,7 +14,7 @@ dependencies = [
     "typer>=0.9.0",
     "aiosqlite>=0.20.0",
     "greenlet>=3.1.1",
-    "pydantic[email,timezone]>=2.10.3",
+    "pydantic[email,timezone]>=2.12.0",
     "mcp>=1.23.1",
     "pydantic-settings>=2.6.1",
     "loguru>=0.7.3",
@@ -29,7 +29,7 @@ dependencies = [
     "alembic>=1.14.1",
     "pillow>=11.1.0",
     "pybars3>=0.9.7",
-    "fastmcp==2.12.3",  # Pinned - 2.14.x breaks MCP tools visibility (issue #463)
+    "fastmcp==2.12.3", # Pinned - 2.14.x breaks MCP tools visibility (issue #463)
     "pyjwt>=2.10.1",
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
@@ -41,7 +41,10 @@ dependencies = [
     "mdformat>=0.7.22",
     "mdformat-gfm>=0.3.7",
     "mdformat-frontmatter>=2.0.8",
-    "openpanel>=0.0.1",  # Anonymous usage telemetry (Homebrew-style opt-out)
+    "openpanel>=0.0.1", # Anonymous usage telemetry (Homebrew-style opt-out)
+    "sniffio>=1.3.1",
+    "anyio>=4.10.0",
+    "httpx>=0.28.0",
 ]
 
 
@@ -88,6 +91,7 @@ dev = [
     "freezegun>=1.5.5",
     "testcontainers[postgres]>=4.0.0",
     "psycopg>=3.2.0",
+    "pyright>=1.1.408",
 ]
 
 [tool.hatch.version]
