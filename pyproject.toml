@@ -88,6 +88,7 @@ dev = [
     "freezegun>=1.5.5",
     "testcontainers[postgres]>=4.0.0",
     "psycopg>=3.2.0",
+    "pyright>=1.1.408",
 ]
 
 [tool.hatch.version]
