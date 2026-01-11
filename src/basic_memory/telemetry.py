@@ -128,6 +128,9 @@ def _get_client() -> OpenPanel | None:
         )
 
         if not _initialized:
+            install_id = get_install_id()
+            # Set profile ID for OpenPanel (required for API to accept events)
+            _client.identify(install_id)
             # Set global properties that go with every event
             _client.set_global_properties(
                 {
@@ -135,7 +138,7 @@ def _get_client() -> OpenPanel | None:
                     "python_version": platform.python_version(),
                     "os": platform.system().lower(),
                     "arch": platform.machine(),
-                    "install_id": get_install_id(),
+                    "install_id": install_id,
                     "source": "foss",
                 }
             )
@@ -159,12 +162,30 @@ def shutdown_telemetry() -> None:
     The OpenPanel client creates a background thread with an event loop
     that needs to be stopped to avoid hangs on Python 3.14+.
     """
+    import gc
+    import io
+    import sys
+
     global _client
 
     if _client is not None:
         try:
-            # OpenPanel._cleanup stops the event loop and joins the thread
-            _client._cleanup()
+            # Suppress "Task was destroyed but it is pending!" warnings
+            # These occur when we stop the event loop with pending HTTP requests,
+            # which is expected during shutdown. The message is printed directly
+            # to stderr by asyncio.Task.__del__(), so we redirect stderr temporarily.
+            # We also force garbage collection to ensure the warning happens
+            # while stderr is still redirected.
+            stderr_backup = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                # OpenPanel._cleanup stops the event loop and joins the thread
+                _client._cleanup()
+                _client = None
+                # Force garbage collection to trigger Task.__del__ while stderr is redirected
+                gc.collect()
+            finally:
+                sys.stderr = stderr_backup
         except Exception as e:
             logger.opt(exception=False).debug(f"Telemetry shutdown failed: {e}")
         finally:

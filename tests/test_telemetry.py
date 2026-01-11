@@ -18,6 +18,10 @@ class _StubOpenPanel:
         self.global_properties: dict | None = None
         self.events: list[tuple[str, dict]] = []
         self.raise_on_track: Exception | None = None
+        self.profile_id: str | None = None
+
+    def identify(self, profile_id: str) -> None:
+        self.profile_id = profile_id
 
     def set_global_properties(self, props: dict) -> None:
         self.global_properties = props
