@@ -243,8 +243,7 @@ async def test_recent_activity_get_project_activity_timezone_normalization(monke
                         },
                         "observations": [],
                         "related_results": [],
-                    }
-                    ,
+                    },
                     {
                         "primary_result": {
                             "type": "entity",

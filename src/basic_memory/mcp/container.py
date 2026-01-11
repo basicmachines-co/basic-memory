@@ -55,9 +55,7 @@ class McpContainer:
         - Not in test mode (tests manage their own sync)
         - Not in cloud mode (cloud handles sync differently)
         """
-        return (
-            self.config.sync_changes and not self.mode.is_test and not self.mode.is_cloud
-        )
+        return self.config.sync_changes and not self.mode.is_test and not self.mode.is_cloud
 
     @property
     def sync_skip_reason(self) -> str | None:

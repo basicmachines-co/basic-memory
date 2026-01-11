@@ -5,14 +5,18 @@ import os
 from logging.config import fileConfig
 
 # Allow nested event loops (needed for pytest-asyncio and other async contexts)
-# Note: nest_asyncio doesn't work with uvloop, so we handle that case separately
-try:
-    import nest_asyncio
+# Note: nest_asyncio doesn't work with uvloop or Python 3.14+, so we handle those cases separately
+import sys
 
-    nest_asyncio.apply()
-except (ImportError, ValueError):
-    # nest_asyncio not available or can't patch this loop type (e.g., uvloop)
-    pass
+if sys.version_info < (3, 14):
+    try:
+        import nest_asyncio
+
+        nest_asyncio.apply()
+    except (ImportError, ValueError):
+        # nest_asyncio not available or can't patch this loop type (e.g., uvloop)
+        pass
+# For Python 3.14+, we rely on the thread-based fallback in run_migrations_online()
 
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine

@@ -221,5 +221,3 @@ class TestLoginCommand:
         result = runner.invoke(app, ["cloud", "login"])
         assert result.exit_code == 1
         assert "Login failed" in result.stdout
-
-

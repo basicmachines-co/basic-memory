@@ -1,6 +1,5 @@
 """Database management commands."""
 
-import asyncio
 from pathlib import Path
 
 import typer

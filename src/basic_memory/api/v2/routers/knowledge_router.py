@@ -414,9 +414,7 @@ async def move_entity(
 
         result = EntityResponseV2.model_validate(moved_entity)
 
-        logger.info(
-            f"API v2 response: moved external_id={entity_id} to '{data.destination_path}'"
-        )
+        logger.info(f"API v2 response: moved external_id={entity_id} to '{data.destination_path}'")
 
         return result
 

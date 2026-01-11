@@ -78,5 +78,3 @@ async def test_get_client_local_mode_uses_asgi_transport(config_manager):
     async with get_client() as client:
         # httpx stores ASGITransport privately, but we can still sanity-check type
         assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
-
-

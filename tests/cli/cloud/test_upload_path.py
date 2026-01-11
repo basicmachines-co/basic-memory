@@ -53,7 +53,9 @@ async def test_upload_path_non_dry_puts_files_and_skips_archives(config_home, tm
 
     @asynccontextmanager
     async def client_cm_factory():
-        async with httpx.AsyncClient(transport=transport, base_url="https://cloud.example.test") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="https://cloud.example.test"
+        ) as client:
             yield client
 
     ok = await upload_path(
@@ -69,5 +71,3 @@ async def test_upload_path_non_dry_puts_files_and_skips_archives(config_home, tm
     # Only keep.md uploaded; archive skipped
     assert "/webdav/proj/keep.md" in seen["puts"]
     assert all("archive.zip" not in p for p in seen["puts"])
-
-

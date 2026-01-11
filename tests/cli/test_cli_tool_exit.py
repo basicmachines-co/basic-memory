@@ -23,7 +23,9 @@ import pytest
 # Windows has different process cleanup behavior that makes these tests unreliable
 IS_WINDOWS = platform.system() == "Windows"
 SUBPROCESS_TIMEOUT = 10.0
-skip_on_windows = pytest.mark.skipif(IS_WINDOWS, reason="Subprocess cleanup tests unreliable on Windows CI")
+skip_on_windows = pytest.mark.skipif(
+    IS_WINDOWS, reason="Subprocess cleanup tests unreliable on Windows CI"
+)
 
 
 @skip_on_windows

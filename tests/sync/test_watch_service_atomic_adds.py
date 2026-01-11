@@ -49,5 +49,3 @@ async def test_handle_changes_reclassifies_added_existing_files_as_modified(
     actions = [e.action for e in watch_service.state.recent_events]
     assert "new" not in actions
     assert actions.count("modified") >= 2
-
-

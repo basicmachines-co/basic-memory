@@ -82,7 +82,9 @@ async def test_postgres_search_repository_index_and_search(session_maker, test_p
 
 
 @pytest.mark.asyncio
-async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(session_maker, test_project):
+async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
+    session_maker, test_project
+):
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
 
     # Empty batch is a no-op
@@ -167,7 +169,9 @@ async def test_postgres_search_repository_wildcard_text_and_permalink_match_exac
 
 
 @pytest.mark.asyncio
-async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(session_maker, test_project):
+async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(
+    session_maker, test_project
+):
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
 
     # Trailing boolean operator creates an invalid tsquery; repository should return []
@@ -176,7 +180,9 @@ async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(ses
 
 
 @pytest.mark.asyncio
-async def test_postgres_search_repository_reraises_non_tsquery_db_errors(session_maker, test_project):
+async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
+    session_maker, test_project
+):
     """Dropping the search_index table triggers a non-tsquery DB error which should be re-raised."""
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
 
@@ -191,5 +197,3 @@ async def test_postgres_search_repository_reraises_non_tsquery_db_errors(session
         # Use a non-text query so the generated SQL doesn't include to_tsquery(),
         # ensuring we hit the generic "re-raise other db errors" branch.
         await repo.search(permalink="docs/anything")
-
-

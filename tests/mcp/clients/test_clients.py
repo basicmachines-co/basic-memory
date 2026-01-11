@@ -147,7 +147,6 @@ class TestMemoryClient:
         result = await client.build_context("specs/search")
         assert result.results == []
 
-
     @pytest.mark.asyncio
     async def test_recent(self, monkeypatch):
         """Test recent calls correct endpoint."""

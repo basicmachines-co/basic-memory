@@ -101,5 +101,3 @@ async def test_local_mode_returns_none_when_no_resolution(config_manager, monkey
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
     assert await resolve_project_parameter(project=None) is None
-
-

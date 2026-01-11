@@ -267,7 +267,9 @@ class ContextService:
             if isinstance(self.search_repository, PostgresSearchRepository):  # pragma: no cover
                 # asyncpg expects timezone-NAIVE datetime in UTC for DateTime(timezone=True) columns
                 # even though the column stores timezone-aware values
-                since_utc = since.astimezone(timezone.utc) if since.tzinfo else since  # pragma: no cover
+                since_utc = (
+                    since.astimezone(timezone.utc) if since.tzinfo else since
+                )  # pragma: no cover
                 params["since_date"] = since_utc.replace(tzinfo=None)  # pyright: ignore  # pragma: no cover
             else:
                 params["since_date"] = since.isoformat()  # pyright: ignore

@@ -167,7 +167,9 @@ async def test_delete_project_with_delete_notes_param(
         assert created_project is not None
 
         # Delete with delete_notes=true
-        response = await client.delete(f"{v2_projects_url}/{created_project.external_id}?delete_notes=true")
+        response = await client.delete(
+            f"{v2_projects_url}/{created_project.external_id}?delete_notes=true"
+        )
 
         assert response.status_code == 200
 

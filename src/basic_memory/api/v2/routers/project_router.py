@@ -264,9 +264,7 @@ async def delete_project_by_id(
         # Use is_default from database, not ConfigManager (which doesn't work in cloud mode)
         if old_project.is_default:
             available_projects = await project_service.list_projects()
-            other_projects = [
-                p.name for p in available_projects if p.external_id != project_id
-            ]
+            other_projects = [p.name for p in available_projects if p.external_id != project_id]
             detail = f"Cannot delete default project '{old_project.name}'. "
             if other_projects:
                 detail += (  # pragma: no cover

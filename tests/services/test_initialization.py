@@ -37,11 +37,15 @@ async def test_initialize_database_creates_engine_and_allows_queries(app_config:
 
 
 @pytest.mark.asyncio
-async def test_initialize_database_raises_on_invalid_postgres_config(app_config: BasicMemoryConfig, config_manager):
+async def test_initialize_database_raises_on_invalid_postgres_config(
+    app_config: BasicMemoryConfig, config_manager
+):
     """If config selects Postgres but has no DATABASE_URL, initialization should fail."""
     await db.shutdown_db()
     try:
-        bad_config = app_config.model_copy(update={"database_backend": DatabaseBackend.POSTGRES, "database_url": None})
+        bad_config = app_config.model_copy(
+            update={"database_backend": DatabaseBackend.POSTGRES, "database_url": None}
+        )
         config_manager.save_config(bad_config)
 
         with pytest.raises(ValueError):
@@ -74,7 +78,9 @@ async def test_reconcile_projects_with_config_creates_projects_and_default(
         await initialize_database(updated)
         await reconcile_projects_with_config(updated)
 
-        _, session_maker = await db.get_or_create_db(updated.database_path, db_type=db.DatabaseType.FILESYSTEM)
+        _, session_maker = await db.get_or_create_db(
+            updated.database_path, db_type=db.DatabaseType.FILESYSTEM
+        )
         repo = ProjectRepository(session_maker)
 
         active = await repo.get_active_projects()
@@ -89,7 +95,9 @@ async def test_reconcile_projects_with_config_creates_projects_and_default(
 
 
 @pytest.mark.asyncio
-async def test_reconcile_projects_with_config_swallow_errors(monkeypatch, app_config: BasicMemoryConfig):
+async def test_reconcile_projects_with_config_swallow_errors(
+    monkeypatch, app_config: BasicMemoryConfig
+):
     """reconcile_projects_with_config should not raise if ProjectService sync fails."""
     await db.shutdown_db()
     try:
@@ -116,5 +124,3 @@ def test_ensure_initialization_runs_and_cleans_up(app_config: BasicMemoryConfig,
     # Must be cleaned up to avoid hanging processes.
     assert db._engine is None  # pyright: ignore [reportPrivateUsage]
     assert db._session_maker is None  # pyright: ignore [reportPrivateUsage]
-
-

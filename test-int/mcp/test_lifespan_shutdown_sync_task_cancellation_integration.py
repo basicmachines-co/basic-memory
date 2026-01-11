@@ -66,7 +66,9 @@ def test_lifespan_shutdown_awaits_sync_task_cancellation(app, monkeypatch):
         assert sync_coordinator._sync_task.done()
 
     monkeypatch.setattr(
-        container_module.ApiContainer, "shutdown_database", _assert_sync_task_done_before_db_shutdown
+        container_module.ApiContainer,
+        "shutdown_database",
+        _assert_sync_task_done_before_db_shutdown,
     )
 
     async def _run_client_once():

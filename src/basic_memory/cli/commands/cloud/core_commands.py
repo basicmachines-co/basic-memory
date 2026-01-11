@@ -1,7 +1,5 @@
 """Core cloud commands for Basic Memory CLI."""
 
-import asyncio
-
 import typer
 from rich.console import Console
 

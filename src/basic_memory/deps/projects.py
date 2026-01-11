@@ -233,6 +233,4 @@ async def get_project_config_v2_external(
     )
 
 
-ProjectConfigV2ExternalDep = Annotated[
-    ProjectConfig, Depends(get_project_config_v2_external)
-]
+ProjectConfigV2ExternalDep = Annotated[ProjectConfig, Depends(get_project_config_v2_external)]

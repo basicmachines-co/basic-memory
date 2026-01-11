@@ -119,5 +119,3 @@ async def test_stop_watch_service_already_done(app_with_state: FastAPI):
     app_with_state.state.watch_task = _Task(done=True)
     resp = await stop_watch_service(_Request(app_with_state))
     assert resp.running is False
-
-

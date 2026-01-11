@@ -1,4 +1,3 @@
-
 from basic_memory.schemas.response import RelationResponse
 
 
@@ -38,5 +37,3 @@ def test_relation_response_resolves_from_to_from_orm_like_object_fallbacks():
     assert rel.from_id == "From2.md"
     assert rel.to_id == "To2.md"
     assert rel.to_name == "To2 Title"
-
-

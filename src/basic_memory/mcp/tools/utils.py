@@ -451,7 +451,9 @@ async def resolve_entity_id(client: AsyncClient, project_external_id: str, ident
     """
     try:
         response = await call_post(
-            client, f"/v2/projects/{project_external_id}/knowledge/resolve", json={"identifier": identifier}
+            client,
+            f"/v2/projects/{project_external_id}/knowledge/resolve",
+            json={"identifier": identifier},
         )
         data = response.json()
         return data["external_id"]
@@ -460,7 +462,9 @@ async def resolve_entity_id(client: AsyncClient, project_external_id: str, ident
             raise ToolError(f"Entity not found: '{identifier}'")  # pragma: no cover
         raise ToolError(f"Error resolving identifier '{identifier}': {e}")  # pragma: no cover
     except Exception as e:
-        raise ToolError(f"Unexpected error resolving identifier '{identifier}': {e}")  # pragma: no cover
+        raise ToolError(
+            f"Unexpected error resolving identifier '{identifier}': {e}"
+        )  # pragma: no cover
 
 
 async def call_delete(

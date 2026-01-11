@@ -34,7 +34,11 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
                 project_name="p1",
                 project_path="/tmp/p1",
                 activity=GraphContext(
-                    results=[ContextResult(primary_result=_entity("A"), observations=[], related_results=[])],
+                    results=[
+                        ContextResult(
+                            primary_result=_entity("A"), observations=[], related_results=[]
+                        )
+                    ],
                     metadata=MemoryMetadata(
                         uri=None,
                         types=[SearchItemType.ENTITY],
@@ -49,7 +53,11 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
                 project_name="p2",
                 project_path="/tmp/p2",
                 activity=GraphContext(
-                    results=[ContextResult(primary_result=_entity("B", 2), observations=[], related_results=[])],
+                    results=[
+                        ContextResult(
+                            primary_result=_entity("B", 2), observations=[], related_results=[]
+                        )
+                    ],
                     metadata=MemoryMetadata(
                         uri=None,
                         types=[SearchItemType.ENTITY],
@@ -61,7 +69,9 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
                 item_count=1,
             ),
         },
-        summary=ActivityStats(total_projects=2, active_projects=2, most_active_project="p1", total_items=2),
+        summary=ActivityStats(
+            total_projects=2, active_projects=2, most_active_project="p1", total_items=2
+        ),
         timeframe="7d",
         generated_at=datetime.now(UTC),
     )
@@ -79,7 +89,9 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
 @pytest.mark.asyncio
 async def test_recent_activity_prompt_project_mode(monkeypatch):
     recent = GraphContext(
-        results=[ContextResult(primary_result=_entity("Only"), observations=[], related_results=[])],
+        results=[
+            ContextResult(primary_result=_entity("Only"), observations=[], related_results=[])
+        ],
         metadata=MemoryMetadata(
             uri=None,
             types=[SearchItemType.ENTITY],
@@ -97,5 +109,3 @@ async def test_recent_activity_prompt_project_mode(monkeypatch):
     out = await recent_activity_prompt.fn(timeframe="1d", project="proj")  # pyright: ignore[reportGeneralTypeIssues]
     assert "Recent Activity in proj" in out
     assert "Opportunity to Capture Activity Summary" in out
-
-
