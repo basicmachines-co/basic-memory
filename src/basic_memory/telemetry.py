@@ -19,16 +19,20 @@ What we NEVER collect:
 Documentation: https://basicmemory.com/telemetry
 """
 
+from __future__ import annotations
+
 import platform
 import re
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from openpanel import OpenPanel
 
 from basic_memory import __version__
+
+if TYPE_CHECKING:
+    from openpanel import OpenPanel
 
 # --- Configuration ---
 
@@ -51,6 +55,29 @@ Details: {TELEMETRY_DOCS_URL}
 
 _client: OpenPanel | None = None
 _initialized: bool = False
+_telemetry_enabled: bool | None = None  # Cached to avoid repeated config reads
+
+
+# --- Telemetry State ---
+
+
+def _is_telemetry_enabled() -> bool:
+    """Check if telemetry is enabled (cached).
+
+    Returns False if:
+    - User disabled via `bm telemetry disable`
+    - DO_NOT_TRACK environment variable is set
+    - Running in test environment
+    """
+    global _telemetry_enabled
+
+    if _telemetry_enabled is None:
+        from basic_memory.config import ConfigManager
+
+        config = ConfigManager().config
+        _telemetry_enabled = config.telemetry_enabled and not config.is_test_env
+
+    return _telemetry_enabled
 
 
 # --- Installation ID ---
@@ -76,30 +103,31 @@ def get_install_id() -> str:
 # --- Client Management ---
 
 
-def _get_client() -> OpenPanel:
+def _get_client() -> OpenPanel | None:
     """Get or create the OpenPanel client (singleton).
 
     Lazily initializes the client with global properties.
+    Returns None if telemetry is disabled (avoids creating background thread).
     """
     global _client, _initialized
 
+    # Trigger: telemetry disabled via config, env var, or test mode
+    # Why: OpenPanel creates a background thread even when disabled=True,
+    #      which can cause hangs on Python 3.14 during thread shutdown
+    # Outcome: return None early, no OpenPanel client or thread created
+    if not _is_telemetry_enabled():
+        return None
+
     if _client is None:
-        from basic_memory.config import ConfigManager
+        # Defer import to avoid creating background thread when telemetry disabled
+        from openpanel import OpenPanel
 
-        config = ConfigManager().config
-
-        # Trigger: first call to track an event
-        # Why: lazy init avoids work if telemetry never used; disabled flag
-        #      tells OpenPanel to skip network calls when user opts out or during tests
-        # Outcome: client ready to queue events (or silently discard if disabled)
-        is_disabled = not config.telemetry_enabled or config.is_test_env
         _client = OpenPanel(
             client_id=OPENPANEL_CLIENT_ID,
             client_secret=OPENPANEL_CLIENT_SECRET,
-            disabled=is_disabled,
         )
 
-        if config.telemetry_enabled and not config.is_test_env and not _initialized:
+        if not _initialized:
             # Set global properties that go with every event
             _client.set_global_properties(
                 {
@@ -118,9 +146,29 @@ def _get_client() -> OpenPanel:
 
 def reset_client() -> None:
     """Reset the telemetry client (for testing or after config changes)."""
-    global _client, _initialized
+    global _client, _initialized, _telemetry_enabled
     _client = None
     _initialized = False
+    _telemetry_enabled = None
+
+
+def shutdown_telemetry() -> None:
+    """Shutdown the telemetry client, stopping its background thread.
+
+    Call this on application exit to ensure clean shutdown.
+    The OpenPanel client creates a background thread with an event loop
+    that needs to be stopped to avoid hangs on Python 3.14+.
+    """
+    global _client
+
+    if _client is not None:
+        try:
+            # OpenPanel._cleanup stops the event loop and joins the thread
+            _client._cleanup()
+        except Exception as e:
+            logger.opt(exception=False).debug(f"Telemetry shutdown failed: {e}")
+        finally:
+            _client = None
 
 
 # --- Event Tracking ---
@@ -136,7 +184,9 @@ def track(event: str, properties: dict[str, Any] | None = None) -> None:
     # Constraint: telemetry must never break the application
     # Even if OpenPanel API is down or config is corrupt, user's command must succeed
     try:
-        _get_client().track(event, properties or {})
+        client = _get_client()
+        if client is not None:
+            client.track(event, properties or {})
     except Exception as e:
         logger.opt(exception=False).debug(f"Telemetry failed: {e}")
 

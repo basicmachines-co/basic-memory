@@ -88,18 +88,20 @@ class TestTrack:
 
         basic_memory.config._CONFIG_CACHE = None
         telemetry.reset_client()
+        # Force telemetry to be enabled for this test
+        monkeypatch.setattr(telemetry, "_is_telemetry_enabled", lambda: True)
 
         # Replace OpenPanel with a stub that raises on track
         stub_client = _StubOpenPanel(client_id="id", client_secret="sec", disabled=False)
         stub_client.raise_on_track = Exception("Network error")
 
-        def openpanel_factory(*, client_id, client_secret, disabled=False):
+        def openpanel_factory(*, client_id, client_secret):
             stub_client.client_id = client_id
             stub_client.client_secret = client_secret
-            stub_client.disabled = disabled
             return stub_client
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        # Mock the import inside _get_client()
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
 
         # Should not raise
         telemetry.track("test_event", {"key": "value"})
@@ -115,16 +117,16 @@ class TestTrack:
 
         created: list[_StubOpenPanel] = []
 
-        def openpanel_factory(*, client_id, client_secret, disabled=False):
-            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+        def openpanel_factory(*, client_id, client_secret):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=False)
             created.append(client)
             return client
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
 
         telemetry.track("test_event")
-        assert len(created) == 1
-        assert created[0].disabled is True
+        # With disabled config, OpenPanel client is never created (early return)
+        assert len(created) == 0
 
 
 class TestShowNoticeIfNeeded:
@@ -181,15 +183,17 @@ class TestConvenienceFunctions:
 
         basic_memory.config._CONFIG_CACHE = None
         telemetry.reset_client()
+        # Force telemetry to be enabled for this test (pytest sets PYTEST_CURRENT_TEST)
+        monkeypatch.setattr(telemetry, "_is_telemetry_enabled", lambda: True)
 
         created: list[_StubOpenPanel] = []
 
-        def openpanel_factory(*, client_id, client_secret, disabled=False):
-            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+        def openpanel_factory(*, client_id, client_secret):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=False)
             created.append(client)
             return client
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
 
         telemetry.track_app_started("cli")
         assert created
@@ -201,15 +205,17 @@ class TestConvenienceFunctions:
 
         basic_memory.config._CONFIG_CACHE = None
         telemetry.reset_client()
+        # Force telemetry to be enabled for this test
+        monkeypatch.setattr(telemetry, "_is_telemetry_enabled", lambda: True)
 
         created: list[_StubOpenPanel] = []
 
-        def openpanel_factory(*, client_id, client_secret, disabled=False):
-            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+        def openpanel_factory(*, client_id, client_secret):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=False)
             created.append(client)
             return client
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
 
         telemetry.track_mcp_tool("write_note")
         assert created
@@ -221,15 +227,17 @@ class TestConvenienceFunctions:
 
         basic_memory.config._CONFIG_CACHE = None
         telemetry.reset_client()
+        # Force telemetry to be enabled for this test
+        monkeypatch.setattr(telemetry, "_is_telemetry_enabled", lambda: True)
 
         created: list[_StubOpenPanel] = []
 
-        def openpanel_factory(*, client_id, client_secret, disabled=False):
-            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+        def openpanel_factory(*, client_id, client_secret):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=False)
             created.append(client)
             return client
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
 
         telemetry.track_error("ValueError", "x" * 500)
         _, props = created[0].events[-1]
@@ -241,15 +249,17 @@ class TestConvenienceFunctions:
 
         basic_memory.config._CONFIG_CACHE = None
         telemetry.reset_client()
+        # Force telemetry to be enabled for this test
+        monkeypatch.setattr(telemetry, "_is_telemetry_enabled", lambda: True)
 
         created: list[_StubOpenPanel] = []
 
-        def openpanel_factory(*, client_id, client_secret, disabled=False):
-            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=disabled)
+        def openpanel_factory(*, client_id, client_secret):
+            client = _StubOpenPanel(client_id=client_id, client_secret=client_secret, disabled=False)
             created.append(client)
             return client
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
 
         telemetry.track_error("FileNotFoundError", "No such file: /Users/john/notes/secret.md")
         _, props = created[0].events[-1]
@@ -259,7 +269,7 @@ class TestConvenienceFunctions:
         telemetry.reset_client()
         created.clear()
 
-        monkeypatch.setattr(telemetry, "OpenPanel", openpanel_factory)
+        monkeypatch.setattr("openpanel.OpenPanel", openpanel_factory)
         telemetry.track_error("FileNotFoundError", "Cannot open C:\\Users\\john\\docs\\private.txt")
         _, props = created[0].events[-1]
         assert "C:\\Users\\john" not in props["message"]

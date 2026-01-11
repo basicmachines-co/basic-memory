@@ -14,6 +14,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_post, call_get
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.schemas import ProjectInfoResponse
+from basic_memory.telemetry import shutdown_telemetry
 
 console = Console()
 
@@ -23,8 +24,8 @@ T = TypeVar("T")
 def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
     """Run an async coroutine with proper database cleanup.
 
-    This helper ensures database connections are cleaned up before the event
-    loop closes, preventing process hangs in CLI commands.
+    This helper ensures database connections and telemetry threads are cleaned up
+    before the event loop closes, preventing process hangs in CLI commands.
 
     Args:
         coro: The coroutine to run
@@ -38,6 +39,9 @@ def run_with_cleanup(coro: Coroutine[Any, Any, T]) -> T:
             return await coro
         finally:
             await db.shutdown_db()
+            # Shutdown telemetry to stop the OpenPanel background thread
+            # This prevents hangs on Python 3.14+ during thread shutdown
+            shutdown_telemetry()
 
     return asyncio.run(_with_cleanup())
 
