@@ -74,10 +74,12 @@ async def test_update_project_invalid_path(
 
 
 @pytest.mark.asyncio
-async def test_update_project_not_found(client: AsyncClient, v2_projects_url):
+async def test_update_project_not_found(client: AsyncClient, v2_projects_url, tmp_path):
     """Test updating a non-existent project returns 404."""
     fake_uuid = "00000000-0000-0000-0000-000000000000"
-    update_data = {"path": "/tmp/new-path"}
+    # Use tmp_path for cross-platform absolute path compatibility
+    new_path = str(tmp_path / "new-path")
+    update_data = {"path": new_path}
     response = await client.patch(
         f"{v2_projects_url}/{fake_uuid}",
         json=update_data,
