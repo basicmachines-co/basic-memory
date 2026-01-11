@@ -1,6 +1,6 @@
 """Base repository implementation."""
 
-from typing import Type, Optional, Any, Sequence, TypeVar, List, Dict
+from typing import Type, Optional, Any, Sequence, TypeVar, List, Dict, cast
 
 
 from loguru import logger
@@ -14,6 +14,7 @@ from sqlalchemy import (
     and_,
     delete,
 )
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlalchemy.orm.interfaces import LoaderOption
@@ -324,7 +325,7 @@ class Repository[T: Base]:
                 conditions.append(getattr(self.Model, "project_id") == self.project_id)
 
             query = delete(self.Model).where(and_(*conditions))
-            result = await session.execute(query)
+            result = cast(CursorResult[Any], await session.execute(query))
             logger.debug(f"Deleted {result.rowcount} records")
             return result.rowcount
 
@@ -339,7 +340,7 @@ class Repository[T: Base]:
                 conditions.append(getattr(self.Model, "project_id") == self.project_id)
 
             query = delete(self.Model).where(and_(*conditions))
-            result = await session.execute(query)
+            result = cast(CursorResult[Any], await session.execute(query))
             deleted = result.rowcount > 0
             logger.debug(f"Deleted {result.rowcount} records")
             return deleted
