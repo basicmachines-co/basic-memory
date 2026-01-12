@@ -1,6 +1,6 @@
 """Build context tool for Basic Memory MCP server."""
 
-from typing import Optional
+from typing import Optional, cast
 
 from loguru import logger
 from fastmcp import Context
@@ -10,10 +10,13 @@ from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
+    EntitySummary,
     GraphContext,
     MemoryUrl,
+    ObservationSummary,
     memory_url_path,
 )
+from basic_memory.dataview.integration import create_dataview_integration
 
 
 @mcp.tool(
@@ -41,6 +44,7 @@ async def build_context(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
+    enable_dataview: bool = True,
     context: Context | None = None,
 ) -> GraphContext:
     """Get context needed to continue a discussion within a specific project.
@@ -62,6 +66,7 @@ async def build_context(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
+        enable_dataview: Execute Dataview queries in context notes (default: True)
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -108,7 +113,7 @@ async def build_context(
 
         # Use typed MemoryClient for API calls
         memory_client = MemoryClient(client, active_project.external_id)
-        return await memory_client.build_context(
+        graph_context = await memory_client.build_context(
             memory_url_path(url),
             depth=depth or 1,
             timeframe=timeframe,
@@ -116,3 +121,46 @@ async def build_context(
             page_size=page_size,
             max_related=max_related,
         )
+        
+        # Enrich with Dataview if enabled
+        if enable_dataview:
+            logger.info("Enriching graph context with Dataview queries")
+            integration = create_dataview_integration()
+            
+            for context_result in graph_context.results:
+                # Process primary result if it's an entity with content
+                primary = context_result.primary_result
+                if primary.type == "entity" and primary.content:
+                    try:
+                        dataview_results = integration.process_note(primary.content)
+                        if dataview_results:
+                            # Append Dataview summary to content
+                            summary = f"\n\n---\n**Dataview:** {len(dataview_results)} quer{'y' if len(dataview_results) == 1 else 'ies'} executed"
+                            primary.content += summary
+                    except Exception as e:
+                        logger.warning(f"Failed to process Dataview for primary result: {e}")
+                
+                # Process related results (only entities and observations have content)
+                for related in context_result.related_results:
+                    if related.type == "entity":
+                        entity = cast(EntitySummary, related)
+                        if entity.content:
+                            try:
+                                dataview_results = integration.process_note(entity.content)
+                                if dataview_results:
+                                    summary = f"\n\n---\n**Dataview:** {len(dataview_results)} quer{'y' if len(dataview_results) == 1 else 'ies'}"
+                                    entity.content += summary
+                            except Exception as e:
+                                logger.warning(f"Failed to process Dataview for related entity: {e}")
+                    elif related.type == "observation":
+                        obs = cast(ObservationSummary, related)
+                        if obs.content:
+                            try:
+                                dataview_results = integration.process_note(obs.content)
+                                if dataview_results:
+                                    summary = f"\n\n---\n**Dataview:** {len(dataview_results)} quer{'y' if len(dataview_results) == 1 else 'ies'}"
+                                    obs.content += summary
+                            except Exception as e:
+                                logger.warning(f"Failed to process Dataview for related observation: {e}")
+        
+        return graph_context

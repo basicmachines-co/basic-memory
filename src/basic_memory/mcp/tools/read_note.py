@@ -12,6 +12,58 @@ from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
+from basic_memory.dataview.integration import create_dataview_integration
+
+
+async def _enrich_with_dataview(content: str, project_name: str) -> str:
+    """
+    Enrich note content with executed Dataview queries.
+    
+    Args:
+        content: The markdown content
+        project_name: Name of the project (for logging)
+        
+    Returns:
+        Content with Dataview results appended
+    """
+    try:
+        # Create integration (without notes provider for now)
+        integration = create_dataview_integration()
+        
+        # Process the note
+        dataview_results = integration.process_note(content)
+        
+        if not dataview_results:
+            return content
+        
+        # Append Dataview results as a special section
+        enriched = content + "\n\n---\n\n## Dataview Query Results\n\n"
+        enriched += f"*Found {len(dataview_results)} Dataview quer{'y' if len(dataview_results) == 1 else 'ies'}*\n\n"
+        
+        for result in dataview_results:
+            enriched += f"### Query {result['query_id']} (Line {result['line_number']})\n\n"
+            enriched += f"**Type:** {result['query_type']}  \n"
+            enriched += f"**Status:** {result['status']}  \n"
+            enriched += f"**Execution time:** {result['execution_time_ms']}ms  \n\n"
+            
+            if result['status'] == 'success':
+                enriched += f"**Results:** {result['result_count']} item(s)\n\n"
+                if result.get('result_markdown'):
+                    enriched += result['result_markdown'] + "\n\n"
+                
+                if result.get('discovered_links'):
+                    enriched += f"**Discovered links:** {len(result['discovered_links'])}\n\n"
+            else:
+                enriched += f"**Error:** {result.get('error', 'Unknown error')}\n\n"
+            
+            enriched += "---\n\n"
+        
+        return enriched
+        
+    except Exception as e:
+        logger.warning(f"Failed to enrich note with Dataview results: {e}")
+        # Return original content on error
+        return content
 
 
 @mcp.tool(
@@ -22,6 +74,7 @@ async def read_note(
     project: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
+    enable_dataview: bool = True,
     context: Context | None = None,
 ) -> str:
     """Return the raw markdown for a note, or guidance text if no match is found.
@@ -46,6 +99,7 @@ async def read_note(
                    Can be a full memory:// URL, a permalink, a title, or search text
         page: Page number for paginated results (default: 1)
         page_size: Number of items per page (default: 10)
+        enable_dataview: Execute Dataview queries found in the note (default: True)
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -119,7 +173,13 @@ async def read_note(
             # If successful, return the content
             if response.status_code == 200:
                 logger.info("Returning read_note result from resource: {path}", path=entity_path)
-                return response.text
+                content = response.text
+                
+                # Execute Dataview queries if enabled
+                if enable_dataview:
+                    content = await _enrich_with_dataview(content, active_project.name)
+                
+                return content
         except Exception as e:  # pragma: no cover
             logger.info(f"Direct lookup failed for '{entity_path}': {e}")
             # Continue to fallback methods
@@ -143,7 +203,13 @@ async def read_note(
 
                     if response.status_code == 200:
                         logger.info(f"Found note by title search: {result.permalink}")
-                        return response.text
+                        content = response.text
+                        
+                        # Execute Dataview queries if enabled
+                        if enable_dataview:
+                            content = await _enrich_with_dataview(content, active_project.name)
+                        
+                        return content
                 except Exception as e:  # pragma: no cover
                     logger.info(
                         f"Failed to fetch content for found title match {result.permalink}: {e}"
