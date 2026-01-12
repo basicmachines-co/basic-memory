@@ -365,6 +365,12 @@ def setup_basic_memory_logging():  # pragma: no cover
     if not log_level:
         config_manager = ConfigManager()
         log_level = config_manager.config.log_level
+    
+    # Normalize log level to uppercase to handle case sensitivity
+    if log_level:
+        log_level = log_level.upper()
+    else:
+        log_level = "INFO"
 
     config_manager = ConfigManager()
     config = get_project_config()

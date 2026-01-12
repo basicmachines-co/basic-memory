@@ -161,6 +161,9 @@ def setup_logging(
         log_level: The logging level to use
         console: Whether to log to the console
     """
+    # Normalize log level to uppercase to handle case sensitivity
+    log_level = log_level.upper()
+    
     # Remove default handler and any existing handlers
     logger.remove()
 
