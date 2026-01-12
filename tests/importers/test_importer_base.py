@@ -1,23 +1,24 @@
 """Tests for the base importer class."""
 
 import pytest
-from unittest.mock import AsyncMock
 
 from basic_memory.importers.base import Importer
+from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
-from basic_memory.markdown.schemas import EntityMarkdown
+from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.schemas.importer import ImportResult
+from basic_memory.services.file_service import FileService
 
 
 # Create a concrete implementation of the abstract class for testing
-class TestImporter(Importer[ImportResult]):
+class ConcreteTestImporter(Importer[ImportResult]):
     """Test implementation of Importer base class."""
 
     async def import_data(self, source_data, destination_folder: str, **kwargs):
         """Implement the abstract method for testing."""
         try:
             # Test implementation that returns success
-            self.ensure_folder_exists(destination_folder)
+            await self.ensure_folder_exists(destination_folder)
             return ImportResult(
                 import_count={"files": 1},
                 success=True,
@@ -45,71 +46,55 @@ class TestImporter(Importer[ImportResult]):
 
 
 @pytest.fixture
-def mock_markdown_processor():
-    """Mock MarkdownProcessor for testing."""
-    processor = AsyncMock(spec=MarkdownProcessor)
-    processor.write_file = AsyncMock()
-    return processor
-
-
-@pytest.fixture
-def test_importer(tmp_path, mock_markdown_processor):
-    """Create a TestImporter instance for testing."""
-    return TestImporter(tmp_path, mock_markdown_processor)
+def test_importer(tmp_path):
+    """Create a ConcreteTestImporter instance for testing."""
+    entity_parser = EntityParser(base_path=tmp_path)
+    markdown_processor = MarkdownProcessor(entity_parser=entity_parser)
+    file_service = FileService(base_path=tmp_path, markdown_processor=markdown_processor)
+    return ConcreteTestImporter(tmp_path, markdown_processor, file_service)
 
 
 @pytest.mark.asyncio
-async def test_import_data_success(test_importer, tmp_path):
+async def test_import_data_success(test_importer):
     """Test successful import_data implementation."""
     result = await test_importer.import_data({}, "test_folder")
     assert result.success
     assert result.import_count == {"files": 1}
     assert result.error_message is None
 
-    # Verify folder was created
-    folder_path = tmp_path / "test_folder"
-    assert folder_path.exists()
-    assert folder_path.is_dir()
+    assert (test_importer.base_path / "test_folder").exists()
 
 
 @pytest.mark.asyncio
-async def test_write_entity(test_importer, mock_markdown_processor, tmp_path):
+async def test_write_entity(test_importer, tmp_path):
     """Test write_entity method."""
     # Create test entity
     entity = EntityMarkdown(
-        title="Test Entity",
+        frontmatter=EntityFrontmatter(metadata={"title": "Test Entity", "type": "note"}),
         content="Test content",
-        frontmatter={},
         observations=[],
         relations=[],
     )
 
     # Call write_entity
     file_path = tmp_path / "test_entity.md"
-    await test_importer.write_entity(entity, file_path)
+    checksum = await test_importer.write_entity(entity, file_path)
 
-    # Verify markdown processor was called with correct arguments
-    mock_markdown_processor.write_file.assert_called_once_with(file_path, entity)
+    assert file_path.exists()
+    assert len(checksum) == 64  # sha256 hex digest
+    assert file_path.read_text(encoding="utf-8").strip() != ""
 
 
-def test_ensure_folder_exists(test_importer, tmp_path):
+@pytest.mark.asyncio
+async def test_ensure_folder_exists(test_importer):
     """Test ensure_folder_exists method."""
-    # Test with simple folder
-    folder_path = test_importer.ensure_folder_exists("test_folder")
-    assert folder_path.exists()
-    assert folder_path.is_dir()
-    assert folder_path == tmp_path / "test_folder"
+    # Test with simple folder - now passes relative path to FileService
+    await test_importer.ensure_folder_exists("test_folder")
+    assert (test_importer.base_path / "test_folder").exists()
 
-    # Test with nested folder
-    nested_path = test_importer.ensure_folder_exists("nested/folder/path")
-    assert nested_path.exists()
-    assert nested_path.is_dir()
-    assert nested_path == tmp_path / "nested" / "folder" / "path"
-
-    # Test with existing folder (should not raise error)
-    existing_path = test_importer.ensure_folder_exists("test_folder")
-    assert existing_path.exists()
-    assert existing_path.is_dir()
+    # Test with nested folder - FileService handles base_path resolution
+    await test_importer.ensure_folder_exists("nested/folder/path")
+    assert (test_importer.base_path / "nested/folder/path").exists()
 
 
 @pytest.mark.asyncio

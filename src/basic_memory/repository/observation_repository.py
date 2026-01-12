@@ -2,6 +2,7 @@
 
 from typing import Dict, List, Sequence
 
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 

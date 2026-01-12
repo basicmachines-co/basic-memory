@@ -2,7 +2,6 @@
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import patch
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import search_notes, _format_search_error_response
@@ -10,10 +9,11 @@ from basic_memory.schemas.search import SearchResponse
 
 
 @pytest.mark.asyncio
-async def test_search_text(client):
+async def test_search_text(client, test_project):
     """Test basic search functionality."""
     # Create a test note
     result = await write_note.fn(
+        project=test_project.name,
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -22,7 +22,7 @@ async def test_search_text(client):
     assert result
 
     # Search for it
-    response = await search_notes.fn(query="searchable")
+    response = await search_notes.fn(project=test_project.name, query="searchable")
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -35,10 +35,11 @@ async def test_search_text(client):
 
 
 @pytest.mark.asyncio
-async def test_search_title(client):
+async def test_search_title(client, test_project):
     """Test basic search functionality."""
     # Create a test note
     result = await write_note.fn(
+        project=test_project.name,
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -47,7 +48,9 @@ async def test_search_title(client):
     assert result
 
     # Search for it
-    response = await search_notes.fn(query="Search Note", search_type="title")
+    response = await search_notes.fn(
+        project=test_project.name, query="Search Note", search_type="title"
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, str):
@@ -60,10 +63,11 @@ async def test_search_title(client):
 
 
 @pytest.mark.asyncio
-async def test_search_permalink(client):
+async def test_search_permalink(client, test_project):
     """Test basic search functionality."""
     # Create a test note
     result = await write_note.fn(
+        project=test_project.name,
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -72,7 +76,9 @@ async def test_search_permalink(client):
     assert result
 
     # Search for it
-    response = await search_notes.fn(query="test/test-search-note", search_type="permalink")
+    response = await search_notes.fn(
+        project=test_project.name, query="test/test-search-note", search_type="permalink"
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -85,10 +91,11 @@ async def test_search_permalink(client):
 
 
 @pytest.mark.asyncio
-async def test_search_permalink_match(client):
+async def test_search_permalink_match(client, test_project):
     """Test basic search functionality."""
     # Create a test note
     result = await write_note.fn(
+        project=test_project.name,
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -97,7 +104,9 @@ async def test_search_permalink_match(client):
     assert result
 
     # Search for it
-    response = await search_notes.fn(query="test/test-search-*", search_type="permalink")
+    response = await search_notes.fn(
+        project=test_project.name, query="test/test-search-*", search_type="permalink"
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -110,10 +119,11 @@ async def test_search_permalink_match(client):
 
 
 @pytest.mark.asyncio
-async def test_search_pagination(client):
+async def test_search_pagination(client, test_project):
     """Test basic search functionality."""
     # Create a test note
     result = await write_note.fn(
+        project=test_project.name,
         title="Test Search Note",
         folder="test",
         content="# Test\nThis is a searchable test note",
@@ -122,7 +132,9 @@ async def test_search_pagination(client):
     assert result
 
     # Search for it
-    response = await search_notes.fn(query="searchable", page=1, page_size=1)
+    response = await search_notes.fn(
+        project=test_project.name, query="searchable", page=1, page_size=1
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -135,17 +147,18 @@ async def test_search_pagination(client):
 
 
 @pytest.mark.asyncio
-async def test_search_with_type_filter(client):
+async def test_search_with_type_filter(client, test_project):
     """Test search with entity type filter."""
     # Create test content
     await write_note.fn(
+        project=test_project.name,
         title="Entity Type Test",
         folder="test",
         content="# Test\nFiltered by type",
     )
 
     # Search with type filter
-    response = await search_notes.fn(query="type", types=["note"])
+    response = await search_notes.fn(project=test_project.name, query="type", types=["note"])
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -157,17 +170,20 @@ async def test_search_with_type_filter(client):
 
 
 @pytest.mark.asyncio
-async def test_search_with_entity_type_filter(client):
+async def test_search_with_entity_type_filter(client, test_project):
     """Test search with entity type filter."""
     # Create test content
     await write_note.fn(
+        project=test_project.name,
         title="Entity Type Test",
         folder="test",
         content="# Test\nFiltered by type",
     )
 
     # Search with entity type filter
-    response = await search_notes.fn(query="type", entity_types=["entity"])
+    response = await search_notes.fn(
+        project=test_project.name, query="type", entity_types=["entity"]
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -179,10 +195,11 @@ async def test_search_with_entity_type_filter(client):
 
 
 @pytest.mark.asyncio
-async def test_search_with_date_filter(client):
+async def test_search_with_date_filter(client, test_project):
     """Test search with date filter."""
     # Create test content
     await write_note.fn(
+        project=test_project.name,
         title="Recent Note",
         folder="test",
         content="# Test\nRecent content",
@@ -190,7 +207,9 @@ async def test_search_with_date_filter(client):
 
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
-    response = await search_notes.fn(query="recent", after_date=one_hour_ago.isoformat())
+    response = await search_notes.fn(
+        project=test_project.name, query="recent", after_date=one_hour_ago.isoformat()
+    )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -206,7 +225,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_fts5_syntax(self):
         """Test formatting for FTS5 syntax errors."""
-        result = _format_search_error_response("syntax error in FTS5", "test query(")
+        result = _format_search_error_response(
+            "test-project", "syntax error in FTS5", "test query("
+        )
 
         assert "# Search Failed - Invalid Syntax" in result
         assert "The search query 'test query(' contains invalid syntax" in result
@@ -215,7 +236,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_no_results(self):
         """Test formatting for no results found."""
-        result = _format_search_error_response("no results found", "very specific query")
+        result = _format_search_error_response(
+            "test-project", "no results found", "very specific query"
+        )
 
         assert "# Search Complete - No Results Found" in result
         assert "No content found matching 'very specific query'" in result
@@ -224,7 +247,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_server_error(self):
         """Test formatting for server errors."""
-        result = _format_search_error_response("internal server error", "test query")
+        result = _format_search_error_response(
+            "test-project", "internal server error", "test query"
+        )
 
         assert "# Search Failed - Server Error" in result
         assert "The search service encountered an error while processing 'test query'" in result
@@ -233,7 +258,7 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_permission_denied(self):
         """Test formatting for permission errors."""
-        result = _format_search_error_response("permission denied", "test query")
+        result = _format_search_error_response("test-project", "permission denied", "test query")
 
         assert "# Search Failed - Access Error" in result
         assert "You don't have permission to search" in result
@@ -241,7 +266,9 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_project_not_found(self):
         """Test formatting for project not found errors."""
-        result = _format_search_error_response("current project not found", "test query")
+        result = _format_search_error_response(
+            "test-project", "current project not found", "test query"
+        )
 
         assert "# Search Failed - Project Not Found" in result
         assert "The current project is not accessible" in result
@@ -249,7 +276,7 @@ class TestSearchErrorFormatting:
 
     def test_format_search_error_generic(self):
         """Test formatting for generic errors."""
-        result = _format_search_error_response("unknown error", "test query")
+        result = _format_search_error_response("test-project", "unknown error", "test query")
 
         assert "# Search Failed" in result
         assert "Error searching for 'test query': unknown error" in result
@@ -260,30 +287,67 @@ class TestSearchToolErrorHandling:
     """Test search tool exception handling."""
 
     @pytest.mark.asyncio
-    async def test_search_notes_exception_handling(self):
+    async def test_search_notes_exception_handling(self, monkeypatch):
         """Test exception handling in search_notes."""
-        with patch("basic_memory.mcp.tools.search.get_active_project") as mock_get_project:
-            mock_get_project.return_value.project_url = "http://test"
+        import importlib
 
-            with patch(
-                "basic_memory.mcp.tools.search.call_post", side_effect=Exception("syntax error")
-            ):
-                result = await search_notes.fn("test query")
+        search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+        clients_mod = importlib.import_module("basic_memory.mcp.clients")
 
-                assert isinstance(result, str)
-                assert "# Search Failed - Invalid Syntax" in result
+        class StubProject:
+            project_url = "http://test"
+            name = "test-project"
+            id = 1
+            external_id = "test-external-id"
+
+        async def fake_get_active_project(*args, **kwargs):
+            return StubProject()
+
+        # Mock SearchClient to raise an exception
+        class MockSearchClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def search(self, *args, **kwargs):
+                raise Exception("syntax error")
+
+        monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+        # Patch at the clients module level where the import happens
+        monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+        result = await search_mod.search_notes.fn(project="test-project", query="test query")
+        assert isinstance(result, str)
+        assert "# Search Failed - Invalid Syntax" in result
 
     @pytest.mark.asyncio
-    async def test_search_notes_permission_error(self):
+    async def test_search_notes_permission_error(self, monkeypatch):
         """Test search_notes with permission error."""
-        with patch("basic_memory.mcp.tools.search.get_active_project") as mock_get_project:
-            mock_get_project.return_value.project_url = "http://test"
+        import importlib
 
-            with patch(
-                "basic_memory.mcp.tools.search.call_post",
-                side_effect=Exception("permission denied"),
-            ):
-                result = await search_notes.fn("test query")
+        search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+        clients_mod = importlib.import_module("basic_memory.mcp.clients")
 
-                assert isinstance(result, str)
-                assert "# Search Failed - Access Error" in result
+        class StubProject:
+            project_url = "http://test"
+            name = "test-project"
+            id = 1
+            external_id = "test-external-id"
+
+        async def fake_get_active_project(*args, **kwargs):
+            return StubProject()
+
+        # Mock SearchClient to raise a permission error
+        class MockSearchClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def search(self, *args, **kwargs):
+                raise Exception("permission denied")
+
+        monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+        # Patch at the clients module level where the import happens
+        monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+        result = await search_mod.search_notes.fn(project="test-project", query="test query")
+        assert isinstance(result, str)
+        assert "# Search Failed - Access Error" in result

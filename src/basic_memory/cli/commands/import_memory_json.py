@@ -1,15 +1,16 @@
 """Import command for basic-memory CLI to import from JSON memory format."""
 
-import asyncio
 import json
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Tuple
 
 import typer
 from basic_memory.cli.app import import_app
-from basic_memory.config import get_project_config
+from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.config import ConfigManager, get_project_config
 from basic_memory.importers.memory_json_importer import MemoryJsonImporter
 from basic_memory.markdown import EntityParser, MarkdownProcessor
+from basic_memory.services.file_service import FileService
 from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
@@ -17,11 +18,14 @@ from rich.panel import Panel
 console = Console()
 
 
-async def get_markdown_processor() -> MarkdownProcessor:
-    """Get MarkdownProcessor instance."""
+async def get_importer_dependencies() -> Tuple[MarkdownProcessor, FileService]:
+    """Get MarkdownProcessor and FileService instances for importers."""
     config = get_project_config()
+    app_config = ConfigManager().config
     entity_parser = EntityParser(config.home)
-    return MarkdownProcessor(entity_parser)
+    markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
+    file_service = FileService(config.home, markdown_processor, app_config=app_config)
+    return markdown_processor, file_service
 
 
 @import_app.command()
@@ -39,8 +43,6 @@ def memory_json(
     1. Read entities and relations from the JSON file
     2. Create markdown files for each entity
     3. Include outgoing relations in each entity's markdown
-
-    After importing, run 'basic-memory sync' to index the new files.
     """
 
     if not json_path.exists():
@@ -49,11 +51,11 @@ def memory_json(
 
     config = get_project_config()
     try:
-        # Get markdown processor
-        markdown_processor = asyncio.run(get_markdown_processor())
+        # Get importer dependencies
+        markdown_processor, file_service = run_with_cleanup(get_importer_dependencies())
 
         # Create the importer
-        importer = MemoryJsonImporter(config.home, markdown_processor)
+        importer = MemoryJsonImporter(config.home, markdown_processor, file_service)
 
         # Process the file
         base_path = config.home if not destination_folder else config.home / destination_folder
@@ -65,7 +67,7 @@ def memory_json(
             for line in file:
                 json_data = json.loads(line)
                 file_data.append(json_data)
-        result = asyncio.run(importer.import_data(file_data, destination_folder))
+        result = run_with_cleanup(importer.import_data(file_data, destination_folder))
 
         if not result.success:  # pragma: no cover
             typer.echo(f"Error during import: {result.error_message}", err=True)
@@ -81,8 +83,6 @@ def memory_json(
                 expand=False,
             )
         )
-
-        console.print("\nRun 'basic-memory sync' to index the new files.")
 
     except Exception as e:
         logger.error("Import failed")

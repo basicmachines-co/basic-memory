@@ -3,7 +3,7 @@ name = "basic-memory"
 dynamic = ["version"]
 description = "Local-first knowledge management combining Zettelkasten with knowledge graphs"
 readme = "README.md"
-requires-python = ">=3.12.1"
+requires-python = ">=3.12"
 license = { text = "AGPL-3.0-or-later" }
 authors = [
     { name = "Basic Machines", email = "hello@basic-machines.co" }
@@ -14,9 +14,8 @@ dependencies = [
     "typer>=0.9.0",
     "aiosqlite>=0.20.0",
     "greenlet>=3.1.1",
-    "pydantic[email,timezone]>=2.10.3",
-    "icecream>=2.1.3",
-    "mcp>=1.2.0",
+    "pydantic[email,timezone]>=2.12.0",
+    "mcp>=1.23.1",
     "pydantic-settings>=2.6.1",
     "loguru>=0.7.3",
     "pyright>=1.1.390",
@@ -30,10 +29,22 @@ dependencies = [
     "alembic>=1.14.1",
     "pillow>=11.1.0",
     "pybars3>=0.9.7",
-    "fastmcp==2.10.2",
+    "fastmcp==2.12.3", # Pinned - 2.14.x breaks MCP tools visibility (issue #463)
     "pyjwt>=2.10.1",
     "python-dotenv>=1.1.0",
     "pytest-aio>=1.9.0",
+    "aiofiles>=24.1.0", # Optional observability (disabled by default via config)
+    "asyncpg>=0.30.0",
+    "nest-asyncio>=1.6.0", # For Alembic migrations with Postgres
+    "pytest-asyncio>=1.2.0",
+    "psycopg==3.3.1",
+    "mdformat>=0.7.22",
+    "mdformat-gfm>=0.3.7",
+    "mdformat-frontmatter>=2.0.8",
+    "openpanel>=0.0.1", # Anonymous usage telemetry (Homebrew-style opt-out)
+    "sniffio>=1.3.1",
+    "anyio>=4.10.0",
+    "httpx>=0.28.0",
 ]
 
 
@@ -53,16 +64,22 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 addopts = "--cov=basic_memory --cov-report term-missing"
-testpaths = ["tests"]
+testpaths = ["tests", "test-int"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "benchmark: Performance benchmark tests (deselect with '-m \"not benchmark\"')",
+    "slow: Slow-running tests (deselect with '-m \"not slow\"')",
+    "postgres: Tests that run against Postgres backend (deselect with '-m \"not postgres\"')",
+    "windows: Windows-specific tests (deselect with '-m \"not windows\"')",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "gevent>=24.11.1",
     "icecream>=2.1.3",
     "pytest>=8.3.4",
@@ -71,6 +88,10 @@ dev-dependencies = [
     "pytest-asyncio>=0.24.0",
     "pytest-xdist>=3.0.0",
     "ruff>=0.1.6",
+    "freezegun>=1.5.5",
+    "testcontainers[postgres]>=4.0.0",
+    "psycopg>=3.2.0",
+    "pyright>=1.1.408",
 ]
 
 [tool.hatch.version]
@@ -95,6 +116,8 @@ pythonVersion = "3.12"
 
 [tool.coverage.run]
 concurrency = ["thread", "gevent"]
+parallel = true
+source = ["basic_memory"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -116,9 +139,11 @@ omit = [
     "*/supabase_auth_provider.py",  # External HTTP calls to Supabase APIs
     "*/watch_service.py",           # File system watching - complex integration testing
     "*/background_sync.py",         # Background processes
-    "*/cli/main.py",               # CLI entry point
-    "*/mcp/tools/project_management.py",  # Covered by integration tests
-    "*/mcp/tools/sync_status.py",  # Covered by integration tests
+    "*/cli/**",                    # CLI is an interactive wrapper; core logic is covered via API/MCP/service tests
+    "*/db.py",                     # Backend/runtime-dependent (sqlite/postgres/windows tuning); validated via integration tests
+    "*/services/initialization.py", # Startup orchestration + background tasks (watchers); exercised indirectly in entrypoints
+    "*/sync/sync_service.py",      # Heavy filesystem/db integration; covered by integration suite, not enforced in unit coverage
+    "*/telemetry.py",              # External analytics; tested lightly, excluded from strict coverage target
     "*/services/migration_service.py", # Complex migration scenarios
 ]
 

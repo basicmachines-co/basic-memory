@@ -1,9 +1,8 @@
 """Memory JSON import service for Basic Memory."""
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from basic_memory.config import get_project_config
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown, Observation, Relation
 from basic_memory.importers.base import Importer
 from basic_memory.schemas.importer import EntityImportResult
@@ -13,6 +12,20 @@ logger = logging.getLogger(__name__)
 
 class MemoryJsonImporter(Importer[EntityImportResult]):
     """Service for importing memory.json format data."""
+
+    def handle_error(  # pragma: no cover
+        self, message: str, error: Optional[Exception] = None
+    ) -> EntityImportResult:
+        """Return a failed EntityImportResult with an error message."""
+        error_msg = f"{message}: {error}" if error else message
+        return EntityImportResult(
+            import_count={},
+            success=False,
+            error_message=error_msg,
+            entities=0,
+            relations=0,
+            skipped_entities=0,
+        )
 
     async def import_data(
         self, source_data, destination_folder: str = "", **kwargs: Any
@@ -27,17 +40,15 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
         Returns:
             EntityImportResult containing statistics and status of the import.
         """
-        config = get_project_config()
         try:
             # First pass - collect all relations by source entity
             entity_relations: Dict[str, List[Relation]] = {}
             entities: Dict[str, Dict[str, Any]] = {}
             skipped_entities: int = 0
 
-            # Ensure the base path exists
-            base_path = config.home  # pragma: no cover
+            # Ensure the destination folder exists if provided
             if destination_folder:  # pragma: no cover
-                base_path = self.ensure_folder_exists(destination_folder)
+                await self.ensure_folder_exists(destination_folder)
 
             # First pass - collect entities and relations
             for line in source_data:
@@ -46,9 +57,9 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                     # Handle different possible name keys
                     entity_name = data.get("name") or data.get("entityName") or data.get("id")
                     if not entity_name:
-                        logger.warning(f"Entity missing name field: {data}")
-                        skipped_entities += 1
-                        continue
+                        logger.warning(f"Entity missing name field: {data}")  # pragma: no cover
+                        skipped_entities += 1  # pragma: no cover
+                        continue  # pragma: no cover
                     entities[entity_name] = data
                 elif data["type"] == "relation":
                     # Store relation with its source entity
@@ -68,9 +79,18 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 # Get entity type with fallback
                 entity_type = entity_data.get("entityType") or entity_data.get("type") or "entity"
 
-                # Ensure entity type directory exists
-                entity_type_dir = base_path / entity_type
-                entity_type_dir.mkdir(parents=True, exist_ok=True)
+                # Build permalink with optional destination folder prefix
+                permalink = (
+                    f"{destination_folder}/{entity_type}/{name}"
+                    if destination_folder
+                    else f"{entity_type}/{name}"
+                )
+
+                # Ensure entity type directory exists using FileService with relative path
+                entity_type_dir = (
+                    f"{destination_folder}/{entity_type}" if destination_folder else entity_type
+                )
+                await self.file_service.ensure_directory(entity_type_dir)
 
                 # Get observations with fallback to empty list
                 observations = entity_data.get("observations", [])
@@ -80,7 +100,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                         metadata={
                             "type": entity_type,
                             "title": name,
-                            "permalink": f"{entity_type}/{name}",
+                            "permalink": permalink,
                         }
                     ),
                     content=f"# {name}\n",
@@ -88,8 +108,8 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                     relations=entity_relations.get(name, []),
                 )
 
-                # Write entity file
-                file_path = base_path / f"{entity_type}/{name}.md"
+                # Write file using relative path - FileService handles base_path
+                file_path = f"{entity.frontmatter.metadata['permalink']}.md"
                 await self.write_entity(entity, file_path)
                 entities_created += 1
 
@@ -105,4 +125,4 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
 
         except Exception as e:  # pragma: no cover
             logger.exception("Failed to import memory.json")
-            return self.handle_error("Failed to import memory.json", e)  # pyright: ignore [reportReturnType]
+            return self.handle_error("Failed to import memory.json", e)

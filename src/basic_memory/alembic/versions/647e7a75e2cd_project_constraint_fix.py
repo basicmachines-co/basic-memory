@@ -25,43 +25,51 @@ def upgrade() -> None:
     The UNIQUE constraint prevents multiple projects from having is_default=FALSE,
     which breaks project creation when the service sets is_default=False.
 
-    Since SQLite doesn't support dropping specific constraints easily, we'll
-    recreate the table without the problematic constraint.
+    SQLite: Recreate the table without the constraint (no ALTER TABLE support)
+    Postgres: Use ALTER TABLE to drop the constraint directly
     """
-    # For SQLite, we need to recreate the table without the UNIQUE constraint
-    # Create a new table without the UNIQUE constraint on is_default
-    op.create_table(
-        "project_new",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("name", sa.String(), nullable=False),
-        sa.Column("description", sa.Text(), nullable=True),
-        sa.Column("permalink", sa.String(), nullable=False),
-        sa.Column("path", sa.String(), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column("is_default", sa.Boolean(), nullable=True),  # No UNIQUE constraint!
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("name"),
-        sa.UniqueConstraint("permalink"),
-    )
+    connection = op.get_bind()
+    is_sqlite = connection.dialect.name == "sqlite"
 
-    # Copy data from old table to new table
-    op.execute("INSERT INTO project_new SELECT * FROM project")
+    if is_sqlite:
+        # For SQLite, we need to recreate the table without the UNIQUE constraint
+        # Create a new table without the UNIQUE constraint on is_default
+        op.create_table(
+            "project_new",
+            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("name", sa.String(), nullable=False),
+            sa.Column("description", sa.Text(), nullable=True),
+            sa.Column("permalink", sa.String(), nullable=False),
+            sa.Column("path", sa.String(), nullable=False),
+            sa.Column("is_active", sa.Boolean(), nullable=False),
+            sa.Column("is_default", sa.Boolean(), nullable=True),  # No UNIQUE constraint!
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.Column("updated_at", sa.DateTime(), nullable=False),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("name"),
+            sa.UniqueConstraint("permalink"),
+        )
 
-    # Drop the old table
-    op.drop_table("project")
+        # Copy data from old table to new table
+        op.execute("INSERT INTO project_new SELECT * FROM project")
 
-    # Rename the new table
-    op.rename_table("project_new", "project")
+        # Drop the old table
+        op.drop_table("project")
 
-    # Recreate the indexes
-    with op.batch_alter_table("project", schema=None) as batch_op:
-        batch_op.create_index("ix_project_created_at", ["created_at"], unique=False)
-        batch_op.create_index("ix_project_name", ["name"], unique=True)
-        batch_op.create_index("ix_project_path", ["path"], unique=False)
-        batch_op.create_index("ix_project_permalink", ["permalink"], unique=True)
-        batch_op.create_index("ix_project_updated_at", ["updated_at"], unique=False)
+        # Rename the new table
+        op.rename_table("project_new", "project")
+
+        # Recreate the indexes
+        with op.batch_alter_table("project", schema=None) as batch_op:
+            batch_op.create_index("ix_project_created_at", ["created_at"], unique=False)
+            batch_op.create_index("ix_project_name", ["name"], unique=True)
+            batch_op.create_index("ix_project_path", ["path"], unique=False)
+            batch_op.create_index("ix_project_permalink", ["permalink"], unique=True)
+            batch_op.create_index("ix_project_updated_at", ["updated_at"], unique=False)
+    else:
+        # For Postgres, we can simply drop the constraint
+        with op.batch_alter_table("project", schema=None) as batch_op:
+            batch_op.drop_constraint("project_is_default_key", type_="unique")
 
 
 def downgrade() -> None:

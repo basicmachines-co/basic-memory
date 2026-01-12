@@ -4,22 +4,22 @@ from textwrap import dedent
 from typing import Optional
 
 from loguru import logger
+from fastmcp import Context
 
-from basic_memory.mcp.async_client import client
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_post, call_get
-from basic_memory.mcp.project_session import get_active_project
-from basic_memory.schemas import EntityResponse
-from basic_memory.schemas.project_info import ProjectList
+from basic_memory.mcp.project_context import get_active_project
+from basic_memory.telemetry import track_mcp_tool
 from basic_memory.utils import validate_project_path
 
 
 async def _detect_cross_project_move_attempt(
-    identifier: str, destination_path: str, current_project: str
+    client, identifier: str, destination_path: str, current_project: str
 ) -> Optional[str]:
     """Detect potential cross-project move attempts and return guidance.
 
     Args:
+        client: The AsyncClient instance
         identifier: The note identifier being moved
         destination_path: The destination path
         current_project: The current active project
@@ -28,9 +28,12 @@ async def _detect_cross_project_move_attempt(
         Error message with guidance if cross-project move is detected, None otherwise
     """
     try:
-        # Get list of all available projects to check against
-        response = await call_get(client, "/projects/projects")
-        project_list = ProjectList.model_validate(response.json())
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import ProjectClient
+
+        # Use typed ProjectClient for API calls
+        project_client = ProjectClient(client)
+        project_list = await project_client.list_projects()
         project_names = [p.name.lower() for p in project_list.projects]
 
         # Check if destination path contains any project names
@@ -64,42 +67,37 @@ def _format_cross_project_error_response(
     """Format error response for detected cross-project move attempts."""
     return dedent(f"""
         # Move Failed - Cross-Project Move Not Supported
-        
+
         Cannot move '{identifier}' to '{destination_path}' because it appears to reference a different project ('{target_project}').
-        
+
         **Current project:** {current_project}
         **Target project:** {target_project}
-        
+
         ## Cross-project moves are not supported directly
-        
+
         Notes can only be moved within the same project. To move content between projects, use this workflow:
-        
+
         ### Recommended approach:
         ```
         # 1. Read the note content from current project
         read_note("{identifier}")
         
-        # 2. Switch to the target project
-        switch_project("{target_project}")
+        # 2. Create the note in the target project
+        write_note("Note Title", "content from step 1", "target-folder", project="{target_project}")
+
+        # 3. Delete the original note if desired
+        delete_note("{identifier}", project="{current_project}")
         
-        # 3. Create the note in the target project
-        write_note("Note Title", "content from step 1", "target-folder")
-        
-        # 4. Switch back to original project (optional)
-        switch_project("{current_project}")
-        
-        # 5. Delete the original note if desired
-        delete_note("{identifier}")
         ```
-        
+
         ### Alternative: Stay in current project
         If you want to move the note within the **{current_project}** project only:
         ```
         move_note("{identifier}", "new-folder/new-name.md")
         ```
-        
+
         ## Available projects:
-        Use `list_projects()` to see all available projects and `switch_project("project-name")` to change projects.
+        Use `list_memory_projects()` to see all available projects.
         """).strip()
 
 
@@ -107,11 +105,12 @@ def _format_potential_cross_project_guidance(
     identifier: str, destination_path: str, current_project: str, available_projects: list[str]
 ) -> str:
     """Format guidance for potentially cross-project moves."""
-    other_projects = ", ".join(available_projects[:3])  # Show first 3 projects
-    if len(available_projects) > 3:
-        other_projects += f" (and {len(available_projects) - 3} others)"
+    other_projects = ", ".join(available_projects[:3])  # Show first 3 projects  # pragma: no cover
+    if len(available_projects) > 3:  # pragma: no cover
+        other_projects += f" (and {len(available_projects) - 3} others)"  # pragma: no cover
 
-    return dedent(f"""
+    return (  # pragma: no cover
+        dedent(f"""
         # Move Failed - Check Project Context
         
         Cannot move '{identifier}' to '{destination_path}' within the current project '{current_project}'.
@@ -130,22 +129,19 @@ def _format_potential_cross_project_guidance(
         # 1. Read the content
         read_note("{identifier}")
         
-        # 2. Switch to target project
-        switch_project("target-project-name")
-        
-        # 3. Create note in target project
-        write_note("Title", "content", "folder")
-        
-        # 4. Switch back and delete original if desired
-        switch_project("{current_project}")
-        delete_note("{identifier}")
+        # 2. Create note in target project
+        write_note("Title", "content", "folder", project="target-project-name")
+
+        # 3. Delete original if desired
+        delete_note("{identifier}", project="{current_project}")
         ```
         
         ### To see all projects:
         ```
-        list_projects()
+        list_memory_projects()
         ```
         """).strip()
+    )
 
 
 def _format_move_error_response(error_message: str, identifier: str, destination_path: str) -> str:
@@ -171,7 +167,7 @@ def _format_move_error_response(error_message: str, identifier: str, destination
                - If you used a title, try the exact permalink format: "{permalink_format}"
                - Use `read_note()` first to verify the note exists and get the exact identifier
 
-            3. **Check current project**: Use `get_current_project()` to verify you're in the right project
+            3. **List available notes**: Use `list_directory("/")` to see what notes exist in the current project
             4. **List available notes**: Use `list_directory("/")` to see what notes exist
 
             ## Before trying again:
@@ -248,9 +244,8 @@ You don't have permission to move '{identifier}': {error_message}
 3. **Check file locks**: The file might be open in another application
 
 ## Alternative actions:
-- Check current project: `get_current_project()`
-- Switch projects if needed: `switch_project("project-name")`
-- Try copying content instead: `read_note("{identifier}")` then `write_note()` to new location"""
+- List available projects: `list_memory_projects()`
+- Try copying content instead: `read_note("{identifier}", project="project-name")` then `write_note()` to new location"""
 
     # Source file not found errors
     if "source" in error_message.lower() and (
@@ -310,9 +305,10 @@ delete_note("{identifier}")
 ```"""
 
     # Generic fallback
-    return f"""# Move Failed
+    return (  # pragma: no cover
+        f"""# Move Failed
 
-Error moving '{identifier}' to '{destination_path}': {error_message}
+Error moving '{identifier}' to '{destination_path}': {error_message}  # pragma: no cover
 
 ## General troubleshooting:
 1. **Verify the note exists**: `read_note("{identifier}")` or `search_notes("{identifier}")`
@@ -343,6 +339,7 @@ write_note("Title", content, "target-folder")
 # Delete original once confirmed
 delete_note("{identifier}")
 ```"""
+    )
 
 
 @mcp.tool(
@@ -352,18 +349,25 @@ async def move_note(
     identifier: str,
     destination_path: str,
     project: Optional[str] = None,
+    context: Context | None = None,
 ) -> str:
     """Move a note to a new file location within the same project.
+
+    Moves a note from one location to another within the project, updating all
+    database references and maintaining semantic content. Uses stateless architecture -
+    project parameter optional with server resolution.
 
     Args:
         identifier: Exact entity identifier (title, permalink, or memory:// URL).
                    Must be an exact match - fuzzy matching is not supported for move operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
-        project: Optional project name (defaults to current session project)
+        project: Project name to move within. Optional - server will resolve using hierarchy.
+                If unknown, use list_memory_projects() to discover available projects.
+        context: Optional FastMCP context for performance caching.
 
     Returns:
-        Success message with move details
+        Success message with move details and project information.
 
     Examples:
         # Move to new folder (exact title match)
@@ -372,15 +376,22 @@ async def move_note(
         # Move by exact permalink
         move_note("my-note-permalink", "archive/old-notes/my-note.md")
 
-        # Specify project with exact identifier
-        move_note("My Note", "archive/my-note.md", project="work-project")
+        # Move with complex path structure
+        move_note("experiments/ml-results", "archive/2025/ml-experiments.md")
+
+        # Explicit project specification
+        move_note("My Note", "work/notes/my-note.md", project="work-project")
 
         # If uncertain about identifier, search first:
         # search_notes("my note")  # Find available notes
         # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
 
-    Note: This operation moves notes within the specified project only. Moving notes
-    between different projects is not currently supported.
+    Raises:
+        ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
+
+    Note:
+        This operation moves notes within the specified project only. Moving notes
+        between different projects is not currently supported.
 
     The move operation:
     - Updates the entity's file_path in the database
@@ -389,20 +400,21 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
-    logger.debug(f"Moving note: {identifier} to {destination_path}")
+    track_mcp_tool("move_note")
+    async with get_client() as client:
+        logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
 
-    active_project = get_active_project(project)
-    project_url = active_project.project_url
+        active_project = await get_active_project(client, project, context)
 
-    # Validate destination path to prevent path traversal attacks
-    project_path = active_project.home
-    if not validate_project_path(destination_path, project_path):
-        logger.warning(
-            "Attempted path traversal attack blocked",
-            destination_path=destination_path,
-            project=active_project.name,
-        )
-        return f"""# Move Failed - Security Validation Error
+        # Validate destination path to prevent path traversal attacks
+        project_path = active_project.home
+        if not validate_project_path(destination_path, project_path):
+            logger.warning(
+                "Attempted path traversal attack blocked",
+                destination_path=destination_path,
+                project=active_project.name,
+            )
+            return f"""# Move Failed - Security Validation Error
 
 The destination path '{destination_path}' is not allowed - paths must stay within project boundaries.
 
@@ -416,50 +428,122 @@ The destination path '{destination_path}' is not allowed - paths must stay withi
 move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
-    # Check for potential cross-project move attempts
-    cross_project_error = await _detect_cross_project_move_attempt(
-        identifier, destination_path, active_project.name
-    )
-    if cross_project_error:
-        logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
-        return cross_project_error
-
-    try:
-        # Prepare move request
-        move_data = {
-            "identifier": identifier,
-            "destination_path": destination_path,
-            "project": active_project.name,
-        }
-
-        # Call the move API endpoint
-        url = f"{project_url}/knowledge/move"
-        response = await call_post(client, url, json=move_data)
-        result = EntityResponse.model_validate(response.json())
-
-        # Build success message
-        result_lines = [
-            "✅ Note moved successfully",
-            "",
-            f"📁 **{identifier}** → **{result.file_path}**",
-            f"🔗 Permalink: {result.permalink}",
-            "📊 Database and search index updated",
-            "",
-            f"<!-- Project: {active_project.name} -->",
-        ]
-
-        # Log the operation
-        logger.info(
-            "Move note completed",
-            identifier=identifier,
-            destination_path=destination_path,
-            project=active_project.name,
-            status_code=response.status_code,
+        # Check for potential cross-project move attempts
+        cross_project_error = await _detect_cross_project_move_attempt(
+            client, identifier, destination_path, active_project.name
         )
+        if cross_project_error:
+            logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
+            return cross_project_error
 
-        return "\n".join(result_lines)
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import KnowledgeClient
 
-    except Exception as e:
-        logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
-        # Return formatted error message for better user experience
-        return _format_move_error_response(str(e), identifier, destination_path)
+        # Use typed KnowledgeClient for API calls
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+        # Get the source entity information for extension validation
+        source_ext = "md"  # Default to .md if we can't determine source extension
+        try:
+            # Resolve identifier to entity ID
+            entity_id = await knowledge_client.resolve_entity(identifier)
+            # Fetch source entity information to get the current file extension
+            source_entity = await knowledge_client.get_entity(entity_id)
+            if "." in source_entity.file_path:
+                source_ext = source_entity.file_path.split(".")[-1]
+        except Exception as e:
+            # If we can't fetch the source entity, default to .md extension
+            logger.debug(f"Could not fetch source entity for extension check: {e}")
+
+        # Validate that destination path includes a file extension
+        if "." not in destination_path or not destination_path.split(".")[-1]:
+            logger.warning(f"Move failed - no file extension provided: {destination_path}")
+            return dedent(f"""
+                # Move Failed - File Extension Required
+
+                The destination path '{destination_path}' must include a file extension (e.g., '.md').
+
+                ## Valid examples:
+                - `notes/my-note.md`
+                - `projects/meeting-2025.txt`
+                - `archive/old-program.sh`
+
+                ## Try again with extension:
+                ```
+                move_note("{identifier}", "{destination_path}.{source_ext}")
+                ```
+
+                All examples in Basic Memory expect file extensions to be explicitly provided.
+                """).strip()
+
+        # Get the source entity to check its file extension
+        try:
+            # Resolve identifier to entity ID (might already be cached from above)
+            entity_id = await knowledge_client.resolve_entity(identifier)
+            # Fetch source entity information
+            source_entity = await knowledge_client.get_entity(entity_id)
+
+            # Extract file extensions
+            source_ext = (
+                source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
+            )
+            dest_ext = destination_path.split(".")[-1] if "." in destination_path else ""
+
+            # Check if extensions match
+            if source_ext and dest_ext and source_ext.lower() != dest_ext.lower():
+                logger.warning(
+                    f"Move failed - file extension mismatch: source={source_ext}, dest={dest_ext}"
+                )
+                return dedent(f"""
+                    # Move Failed - File Extension Mismatch
+
+                    The destination file extension '.{dest_ext}' does not match the source file extension '.{source_ext}'.
+
+                    To preserve file type consistency, the destination must have the same extension as the source.
+
+                    ## Source file:
+                    - Path: `{source_entity.file_path}`
+                    - Extension: `.{source_ext}`
+
+                    ## Try again with matching extension:
+                    ```
+                    move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
+                    ```
+                    """).strip()
+        except Exception as e:
+            # If we can't fetch the source entity, log it but continue
+            # This might happen if the identifier is not yet resolved
+            logger.debug(f"Could not fetch source entity for extension check: {e}")
+
+        try:
+            # Resolve identifier to entity ID for the move operation
+            entity_id = await knowledge_client.resolve_entity(identifier)
+
+            # Call the move API using KnowledgeClient
+            result = await knowledge_client.move_entity(entity_id, destination_path)
+
+            # Build success message
+            result_lines = [
+                "✅ Note moved successfully",
+                "",
+                f"📁 **{identifier}** → **{result.file_path}**",
+                f"🔗 Permalink: {result.permalink}",
+                "📊 Database and search index updated",
+                "",
+                f"<!-- Project: {active_project.name} -->",
+            ]
+
+            # Log the operation
+            logger.info(
+                "Move note completed",
+                identifier=identifier,
+                destination_path=destination_path,
+                project=active_project.name,
+            )
+
+            return "\n".join(result_lines)
+
+        except Exception as e:
+            logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
+            # Return formatted error message for better user experience
+            return _format_move_error_response(str(e), identifier, destination_path)

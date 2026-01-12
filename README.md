@@ -7,6 +7,16 @@
 ![](https://badge.mcpx.dev?type=dev 'MCP Dev')
 [![smithery badge](https://smithery.ai/badge/@basicmachines-co/basic-memory)](https://smithery.ai/server/@basicmachines-co/basic-memory)
 
+## 🚀 Basic Memory Cloud is Live!
+
+- **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile - seamlessly synced across all your AI tools (Claude, ChatGPT, Gemini, Claude Code, and Codex) 
+- **Early Supporter Pricing:** Early users get 25% off forever. 
+The open source project continues as always. Cloud just makes it work everywhere.
+
+[Sign up now →](https://basicmemory.com/beta)
+
+with a 7 day free trial
+
 # Basic Memory
 
 Basic Memory lets you build persistent knowledge through natural conversations with Large Language Models (LLMs) like
@@ -100,6 +110,9 @@ With Basic Memory, you can:
 - Keep everything local and under your control
 - Use familiar tools like Obsidian to view and edit notes
 - Build a personal knowledge base that grows over time
+- Sync your knowledge to the cloud with bidirectional synchronization
+- Authenticate and manage cloud projects with subscription validation
+- Mount cloud storage for direct file access
 
 ## How It Works in Practice
 
@@ -346,14 +359,57 @@ basic-memory sync
 basic-memory sync --watch
 ```
 
-3. In Claude Desktop, the LLM can now use these tools:
+3. Cloud features (optional, requires subscription):
 
+```bash
+# Authenticate with cloud
+basic-memory cloud login
+
+# Bidirectional sync with cloud
+basic-memory cloud sync
+
+# Verify cloud integrity
+basic-memory cloud check
+
+# Mount cloud storage
+basic-memory cloud mount
+```
+
+4. In Claude Desktop, the LLM can now use these tools:
+
+**Content Management:**
 ```
 write_note(title, content, folder, tags) - Create or update notes
 read_note(identifier, page, page_size) - Read notes by title or permalink
+read_content(path) - Read raw file content (text, images, binaries)
+view_note(identifier) - View notes as formatted artifacts
+edit_note(identifier, operation, content) - Edit notes incrementally
+move_note(identifier, destination_path) - Move notes with database consistency
+delete_note(identifier) - Delete notes from knowledge base
+```
+
+**Knowledge Graph Navigation:**
+```
 build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
-search(query, page, page_size) - Search across your knowledge base
 recent_activity(type, depth, timeframe) - Find recently updated information
+list_directory(dir_name, depth) - Browse directory contents with filtering
+```
+
+**Search & Discovery:**
+```
+search(query, page, page_size) - Search across your knowledge base
+```
+
+**Project Management:**
+```
+list_memory_projects() - List all available projects
+create_memory_project(project_name, project_path) - Create new projects
+get_current_project() - Show current project stats
+sync_status() - Check synchronization status
+```
+
+**Visualization:**
+```
 canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 ```
 
@@ -371,10 +427,129 @@ canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 
 See the [Documentation](https://memory.basicmachines.co/) for more info, including:
 
-- [Complete User Guide](https://memory.basicmachines.co/docs/user-guide)
-- [CLI tools](https://memory.basicmachines.co/docs/cli-reference)
-- [Managing multiple Projects](https://memory.basicmachines.co/docs/cli-reference#project)
-- [Importing data from OpenAI/Claude Projects](https://memory.basicmachines.co/docs/cli-reference#import)
+- [Complete User Guide](https://docs.basicmemory.com/user-guide/)
+- [CLI tools](https://docs.basicmemory.com/guides/cli-reference/)
+- [Cloud CLI and Sync](https://docs.basicmemory.com/guides/cloud-cli/)
+- [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/#project)
+- [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/#import)
+
+## Logging
+
+Basic Memory uses [Loguru](https://github.com/Delgan/loguru) for logging. The logging behavior varies by entry point:
+
+| Entry Point | Default Behavior | Use Case |
+|-------------|------------------|----------|
+| CLI commands | File only | Prevents log output from interfering with command output |
+| MCP server | File only | Stdout would corrupt the JSON-RPC protocol |
+| API server | File (local) or stdout (cloud) | Docker/cloud deployments use stdout |
+
+**Log file location:** `~/.basic-memory/basic-memory.log` (10MB rotation, 10 days retention)
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BASIC_MEMORY_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
+| `BASIC_MEMORY_CLOUD_MODE` | `false` | When `true`, API logs to stdout with structured context |
+| `BASIC_MEMORY_ENV` | `dev` | Set to `test` for test mode (stderr only) |
+
+### Examples
+
+```bash
+# Enable debug logging
+BASIC_MEMORY_LOG_LEVEL=DEBUG basic-memory sync
+
+# View logs
+tail -f ~/.basic-memory/basic-memory.log
+
+# Cloud/Docker mode (stdout logging with structured context)
+BASIC_MEMORY_CLOUD_MODE=true uvicorn basic_memory.api.app:app
+```
+
+## Telemetry
+
+Basic Memory collects anonymous usage statistics to help improve the software. This follows the [Homebrew model](https://docs.brew.sh/Analytics) - telemetry is on by default with easy opt-out.
+
+**What we collect:**
+- App version, Python version, OS, architecture
+- Feature usage (which MCP tools and CLI commands are used)
+- Error types (sanitized - no file paths or personal data)
+
+**What we NEVER collect:**
+- Note content, file names, or paths
+- Personal information
+- IP addresses
+
+**Opting out:**
+```bash
+# Disable telemetry
+basic-memory telemetry disable
+
+# Check status
+basic-memory telemetry status
+
+# Re-enable
+basic-memory telemetry enable
+```
+
+Or set the environment variable:
+```bash
+export BASIC_MEMORY_TELEMETRY_ENABLED=false
+```
+
+For more details, see the [Telemetry documentation](https://basicmemory.com/telemetry).
+
+## Development
+
+### Running Tests
+
+Basic Memory supports dual database backends (SQLite and Postgres). By default, tests run against SQLite. Set `BASIC_MEMORY_TEST_POSTGRES=1` to run against Postgres (uses testcontainers - Docker required).
+
+**Quick Start:**
+```bash
+# Run all tests against SQLite (default, fast)
+just test-sqlite
+
+# Run all tests against Postgres (uses testcontainers)
+just test-postgres
+
+# Run both SQLite and Postgres tests
+just test
+```
+
+**Available Test Commands:**
+
+- `just test` - Run all tests against both SQLite and Postgres
+- `just test-sqlite` - Run all tests against SQLite (fast, no Docker needed)
+- `just test-postgres` - Run all tests against Postgres (uses testcontainers)
+- `just test-unit-sqlite` - Run unit tests against SQLite
+- `just test-unit-postgres` - Run unit tests against Postgres
+- `just test-int-sqlite` - Run integration tests against SQLite
+- `just test-int-postgres` - Run integration tests against Postgres
+- `just test-windows` - Run Windows-specific tests (auto-skips on other platforms)
+- `just test-benchmark` - Run performance benchmark tests
+
+**Postgres Testing:**
+
+Postgres tests use [testcontainers](https://testcontainers-python.readthedocs.io/) which automatically spins up a Postgres instance in Docker. No manual database setup required - just have Docker running.
+
+**Test Markers:**
+
+Tests use pytest markers for selective execution:
+- `windows` - Windows-specific database optimizations
+- `benchmark` - Performance tests (excluded from default runs)
+
+**Other Development Commands:**
+```bash
+just install          # Install with dev dependencies
+just lint             # Run linting checks
+just typecheck        # Run type checking
+just format           # Format code with ruff
+just check            # Run all quality checks
+just migration "msg"  # Create database migration
+```
+
+See the [justfile](justfile) for the complete list of development commands.
 
 ## License
 

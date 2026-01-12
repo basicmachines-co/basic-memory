@@ -4,12 +4,14 @@ Uses markdown-it with plugins to parse structured data from markdown content.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import dateparser
 import frontmatter
+import yaml
+from loguru import logger
 from markdown_it import MarkdownIt
 
 from basic_memory.markdown.plugins import observation_plugin, relation_plugin
@@ -21,7 +23,84 @@ from basic_memory.markdown.schemas import (
 )
 from basic_memory.utils import parse_tags
 
+
 md = MarkdownIt().use(observation_plugin).use(relation_plugin)
+
+
+def normalize_frontmatter_value(value: Any) -> Any:
+    """Normalize frontmatter values to safe types for processing.
+
+    PyYAML automatically converts various string-like values into native Python types:
+    - Date strings ("2025-10-24") → datetime.date objects
+    - Numbers ("1.0") → int or float
+    - Booleans ("true") → bool
+    - Lists → list objects
+
+    This can cause AttributeError when code expects strings and calls string methods
+    like .strip() on these values (see GitHub issue #236).
+
+    This function normalizes all frontmatter values to safe types:
+    - Dates/datetimes → ISO format strings
+    - Numbers (int/float) → strings
+    - Booleans → strings ("True"/"False")
+    - Lists → preserved as lists, but items are recursively normalized
+    - Dicts → preserved as dicts, but values are recursively normalized
+    - Strings → kept as-is
+    - None → kept as None
+
+    Args:
+        value: The frontmatter value to normalize
+
+    Returns:
+        The normalized value safe for string operations
+
+    Example:
+        >>> normalize_frontmatter_value(datetime.date(2025, 10, 24))
+        '2025-10-24'
+        >>> normalize_frontmatter_value([datetime.date(2025, 10, 24), "tag", 123])
+        ['2025-10-24', 'tag', '123']
+        >>> normalize_frontmatter_value(True)
+        'True'
+    """
+    # Convert date/datetime objects to ISO format strings
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+
+    # Convert boolean to string (must come before int check since bool is subclass of int)
+    if isinstance(value, bool):
+        return str(value)
+
+    # Convert numbers to strings
+    if isinstance(value, (int, float)):
+        return str(value)
+
+    # Recursively process lists (preserve as list, normalize items)
+    if isinstance(value, list):
+        return [normalize_frontmatter_value(item) for item in value]
+
+    # Recursively process dicts (preserve as dict, normalize values)
+    if isinstance(value, dict):
+        return {key: normalize_frontmatter_value(val) for key, val in value.items()}
+
+    # Keep strings and None as-is
+    return value
+
+
+def normalize_frontmatter_metadata(metadata: dict) -> dict:
+    """Normalize all values in frontmatter metadata dict.
+
+    Converts date/datetime objects to ISO format strings to prevent
+    AttributeError when code expects strings (GitHub issue #236).
+
+    Args:
+        metadata: The frontmatter metadata dictionary
+
+    Returns:
+        A new dictionary with all values normalized
+    """
+    return {key: normalize_frontmatter_value(value) for key, value in metadata.items()}
 
 
 @dataclass
@@ -111,25 +190,90 @@ class EntityParser:
         return self.base_path / path
 
     async def parse_file_content(self, absolute_path, file_content):
-        post = frontmatter.loads(file_content)
-        # Extract file stat info
+        """Parse markdown content from file stats.
+
+        Delegates to parse_markdown_content() for actual parsing logic.
+        Exists for backwards compatibility with code that passes file paths.
+        """
+        # Extract file stat info for timestamps
         file_stats = absolute_path.stat()
-        metadata = post.metadata
-        metadata["title"] = post.metadata.get("title", absolute_path.stem)
-        metadata["type"] = post.metadata.get("type", "note")
-        tags = parse_tags(post.metadata.get("tags", []))  # pyright: ignore
+
+        # Delegate to parse_markdown_content with timestamps from file stats
+        return await self.parse_markdown_content(
+            file_path=absolute_path,
+            content=file_content,
+            mtime=file_stats.st_mtime,
+            ctime=file_stats.st_ctime,
+        )
+
+    async def parse_markdown_content(
+        self,
+        file_path: Path,
+        content: str,
+        mtime: Optional[float] = None,
+        ctime: Optional[float] = None,
+    ) -> EntityMarkdown:
+        """Parse markdown content without requiring file to exist on disk.
+
+        Useful for parsing content from S3 or other remote sources where the file
+        is not available locally.
+
+        Args:
+            file_path: Path for metadata (doesn't need to exist on disk)
+            content: Markdown content as string
+            mtime: Optional modification time (Unix timestamp)
+            ctime: Optional creation time (Unix timestamp)
+
+        Returns:
+            EntityMarkdown with parsed content
+        """
+        # Strip BOM before parsing (can be present in files from Windows or certain sources)
+        # See issue #452
+        from basic_memory.file_utils import strip_bom
+
+        content = strip_bom(content)
+
+        # Parse frontmatter with proper error handling for malformed YAML
+        try:
+            post = frontmatter.loads(content)
+        except yaml.YAMLError as e:
+            logger.warning(
+                f"Failed to parse YAML frontmatter in {file_path}: {e}. "
+                f"Treating file as plain markdown without frontmatter."
+            )
+            post = frontmatter.Post(content, metadata={})
+
+        # Normalize frontmatter values
+        metadata = normalize_frontmatter_metadata(post.metadata)
+
+        # Ensure required fields have defaults
+        title = metadata.get("title")
+        if not title or title == "None":
+            metadata["title"] = file_path.stem
+        else:
+            metadata["title"] = title
+
+        entity_type = metadata.get("type")
+        metadata["type"] = entity_type if entity_type is not None else "note"
+
+        tags = parse_tags(metadata.get("tags", []))  # pyright: ignore
         if tags:
             metadata["tags"] = tags
-        # frontmatter
-        entity_frontmatter = EntityFrontmatter(
-            metadata=post.metadata,
-        )
+
+        # Parse content for observations and relations
+        entity_frontmatter = EntityFrontmatter(metadata=metadata)
         entity_content = parse(post.content)
+
+        # Use provided timestamps or current time as fallback
+        now = datetime.now().astimezone()
+        created = datetime.fromtimestamp(ctime).astimezone() if ctime else now
+        modified = datetime.fromtimestamp(mtime).astimezone() if mtime else now
+
         return EntityMarkdown(
             frontmatter=entity_frontmatter,
             content=post.content,
             observations=entity_content.observations,
             relations=entity_content.relations,
-            created=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
-            modified=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+            created=created,
+            modified=modified,
         )

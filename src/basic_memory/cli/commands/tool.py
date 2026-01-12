@@ -1,6 +1,5 @@
 """CLI tool commands for Basic Memory."""
 
-import asyncio
 import sys
 from typing import Annotated, List, Optional
 
@@ -9,6 +8,8 @@ from loguru import logger
 from rich import print as rprint
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.config import ConfigManager
 
 # Import prompts
 from basic_memory.mcp.prompts.continue_conversation import (
@@ -34,6 +35,12 @@ app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 def write_note(
     title: Annotated[str, typer.Option(help="The title of the note")],
     folder: Annotated[str, typer.Option(help="The folder to create the note in")],
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The project to write to. If not provided, the default project will be used."
+        ),
+    ] = None,
     content: Annotated[
         Optional[str],
         typer.Option(
@@ -90,7 +97,19 @@ def write_note(
             typer.echo("Empty content provided. Please provide non-empty content.", err=True)
             raise typer.Exit(1)
 
-        note = asyncio.run(mcp_write_note.fn(title, content, folder, tags))
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
+        note = run_with_cleanup(mcp_write_note.fn(title, content, folder, project_name, tags))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -100,10 +119,33 @@ def write_note(
 
 
 @tool_app.command()
-def read_note(identifier: str, page: int = 1, page_size: int = 10):
+def read_note(
+    identifier: str,
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The project to use for the note. If not provided, the default project will be used."
+        ),
+    ] = None,
+    page: int = 1,
+    page_size: int = 10,
+):
     """Read a markdown note from the knowledge base."""
+
+    # look for the project in the config
+    config_manager = ConfigManager()
+    project_name = None
+    if project is not None:
+        project_name, _ = config_manager.get_project(project)
+        if not project_name:
+            typer.echo(f"No project found named: {project}", err=True)
+            raise typer.Exit(1)
+
+    # use the project name, or the default from the config
+    project_name = project_name or config_manager.default_project
+
     try:
-        note = asyncio.run(mcp_read_note.fn(identifier, page, page_size))
+        note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
         rprint(note)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
@@ -115,6 +157,10 @@ def read_note(identifier: str, page: int = 1, page_size: int = 10):
 @tool_app.command()
 def build_context(
     url: MemoryUrl,
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
@@ -122,9 +168,23 @@ def build_context(
     max_related: int = 10,
 ):
     """Get context needed to continue a discussion."""
+
+    # look for the project in the config
+    config_manager = ConfigManager()
+    project_name = None
+    if project is not None:
+        project_name, _ = config_manager.get_project(project)
+        if not project_name:
+            typer.echo(f"No project found named: {project}", err=True)
+            raise typer.Exit(1)
+
+    # use the project name, or the default from the config
+    project_name = project_name or config_manager.default_project
+
     try:
-        context = asyncio.run(
+        context = run_with_cleanup(
             mcp_build_context.fn(
+                project=project_name,
                 url=url,
                 depth=depth,
                 timeframe=timeframe,
@@ -150,30 +210,21 @@ def recent_activity(
     type: Annotated[Optional[List[SearchItemType]], typer.Option()] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
-    page: int = 1,
-    page_size: int = 10,
-    max_related: int = 10,
 ):
     """Get recent activity across the knowledge base."""
     try:
-        context = asyncio.run(
+        result = run_with_cleanup(
             mcp_recent_activity.fn(
                 type=type,  # pyright: ignore [reportArgumentType]
                 depth=depth,
                 timeframe=timeframe,
-                page=page,
-                page_size=page_size,
-                max_related=max_related,
             )
         )
-        # Use json module for more controlled serialization
-        import json
-
-        context_dict = context.model_dump(exclude_none=True)
-        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
+        # The tool now returns a formatted string directly
+        print(result)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
-            typer.echo(f"Error during build_context: {e}", err=True)
+            typer.echo(f"Error during recent_activity: {e}", err=True)
             raise typer.Exit(1)
         raise
 
@@ -183,6 +234,12 @@ def search_notes(
     query: str,
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The project to use for the note. If not provided, the default project will be used."
+        ),
+    ] = None,
     after_date: Annotated[
         Optional[str],
         typer.Option("--after_date", help="Search results after date, eg. '2d', '1 week'"),
@@ -191,6 +248,19 @@ def search_notes(
     page_size: int = 10,
 ):
     """Search across all content in the knowledge base."""
+
+    # look for the project in the config
+    config_manager = ConfigManager()
+    project_name = None
+    if project is not None:
+        project_name, _ = config_manager.get_project(project)
+        if not project_name:
+            typer.echo(f"No project found named: {project}", err=True)
+            raise typer.Exit(1)
+
+    # use the project name, or the default from the config
+    project_name = project_name or config_manager.default_project
+
     if permalink and title:  # pragma: no cover
         print("Cannot search both permalink and title")
         raise typer.Abort()
@@ -209,9 +279,10 @@ def search_notes(
         search_type = ("title" if title else None,)
         search_type = "text" if search_type is None else search_type
 
-        results = asyncio.run(
+        results = run_with_cleanup(
             mcp_search.fn(
                 query,
+                project_name,
                 search_type=search_type,
                 page=page,
                 after_date=after_date,
@@ -241,7 +312,7 @@ def continue_conversation(
     """Prompt to continue a previous conversation or work session."""
     try:
         # Prompt functions return formatted strings directly
-        session = asyncio.run(mcp_continue_conversation.fn(topic=topic, timeframe=timeframe))  # type: ignore
+        session = run_with_cleanup(mcp_continue_conversation.fn(topic=topic, timeframe=timeframe))  # type: ignore
         rprint(session)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):

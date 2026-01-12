@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any, Optional
 
+
 from frontmatter import Post
 
 from basic_memory.file_utils import has_frontmatter, remove_frontmatter, parse_frontmatter
@@ -12,7 +13,10 @@ from basic_memory.models import Observation as ObservationModel
 
 
 def entity_model_from_markdown(
-    file_path: Path, markdown: EntityMarkdown, entity: Optional[Entity] = None
+    file_path: Path,
+    markdown: EntityMarkdown,
+    entity: Optional[Entity] = None,
+    project_id: Optional[int] = None,
 ) -> Entity:
     """
     Convert markdown entity to model. Does not include relations.
@@ -21,6 +25,7 @@ def entity_model_from_markdown(
         file_path: Path to the markdown file
         markdown: Parsed markdown entity
         entity: Optional existing entity to update
+        project_id: Project ID for new observations (uses entity.project_id if not provided)
 
     Returns:
         Entity model populated from markdown
@@ -50,9 +55,13 @@ def entity_model_from_markdown(
     metadata = markdown.frontmatter.metadata or {}
     model.entity_metadata = {k: str(v) for k, v in metadata.items() if v is not None}
 
+    # Get project_id from entity if not provided
+    obs_project_id = project_id or (model.project_id if hasattr(model, "project_id") else None)
+
     # Convert observations
     model.observations = [
         ObservationModel(
+            project_id=obs_project_id,
             content=obs.content,
             category=obs.category,
             context=obs.context,

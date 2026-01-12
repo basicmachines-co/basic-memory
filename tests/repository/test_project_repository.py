@@ -116,7 +116,7 @@ async def test_get_by_path(project_repository: ProjectRepository, sample_project
 
 
 @pytest.mark.asyncio
-async def test_get_default_project(project_repository: ProjectRepository):
+async def test_get_default_project(project_repository: ProjectRepository, test_project: Project):
     """Test getting the default project."""
     # We already have a default project from the test_project fixture
     # So just create a non-default project

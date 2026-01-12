@@ -88,7 +88,7 @@ async def test_missing_sections(tmp_path):
     entity = await parser.parse_file(test_file)
     assert len(entity.relations) == 1
     assert entity.relations[0].target == "links"
-    assert entity.relations[0].type == "links to"
+    assert entity.relations[0].type == "links_to"
 
 
 @pytest.mark.asyncio

@@ -1,10 +1,10 @@
 """Schemas for memory context."""
 
 from datetime import datetime
-from typing import List, Optional, Annotated, Sequence, Literal, Union
+from typing import List, Optional, Annotated, Sequence, Literal, Union, Dict
 
 from annotated_types import MinLen, MaxLen
-from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, ConfigDict
+from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, field_serializer
 
 from basic_memory.schemas.search import SearchItemType
 
@@ -26,6 +26,7 @@ def validate_memory_url_path(path: str) -> bool:
         >>> validate_memory_url_path("invalid://test")  # Contains protocol
         False
     """
+    # Empty paths are not valid
     if not path or not path.strip():
         return False
 
@@ -68,7 +69,13 @@ def normalize_memory_url(url: str | None) -> str:
         ValueError: Invalid memory URL path: 'memory//test' contains double slashes
     """
     if not url:
-        return ""
+        raise ValueError("Memory URL cannot be empty")
+
+    # Strip whitespace for consistency
+    url = url.strip()
+
+    if not url:
+        raise ValueError("Memory URL cannot be empty or whitespace")
 
     clean_path = url.removeprefix("memory://")
 
@@ -79,8 +86,6 @@ def normalize_memory_url(url: str | None) -> str:
             raise ValueError(f"Invalid memory URL path: '{clean_path}' contains protocol scheme")
         elif "//" in clean_path:
             raise ValueError(f"Invalid memory URL path: '{clean_path}' contains double slashes")
-        elif not clean_path.strip():
-            raise ValueError("Memory URL path cannot be empty or whitespace")
         else:
             raise ValueError(f"Invalid memory URL path: '{clean_path}' contains invalid characters")
 
@@ -117,69 +122,92 @@ def memory_url_path(url: memory_url) -> str:  # pyright: ignore
 
 class EntitySummary(BaseModel):
     """Simplified entity representation."""
-    
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["entity"] = "entity"
+    entity_id: int  # Database ID for v2 API consistency
     permalink: Optional[str]
     title: str
     content: Optional[str] = None
     file_path: str
-    created_at: datetime
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
 
 
 class RelationSummary(BaseModel):
     """Simplified relation representation."""
-    
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["relation"] = "relation"
+    relation_id: int  # Database ID for v2 API consistency
+    entity_id: Optional[int] = None  # ID of the entity this relation belongs to
     title: str
     file_path: str
     permalink: str
     relation_type: str
     from_entity: Optional[str] = None
+    from_entity_id: Optional[int] = None  # ID of source entity
     to_entity: Optional[str] = None
-    created_at: datetime
+    to_entity_id: Optional[int] = None  # ID of target entity
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
 
 
 class ObservationSummary(BaseModel):
     """Simplified observation representation."""
-    
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     type: Literal["observation"] = "observation"
+    observation_id: int  # Database ID for v2 API consistency
+    entity_id: Optional[int] = None  # ID of the entity this observation belongs to
     title: str
     file_path: str
     permalink: str
     category: str
     content: str
-    created_at: datetime
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
 
 
 class MemoryMetadata(BaseModel):
     """Simplified response metadata."""
-    
-    model_config = ConfigDict(json_encoders={datetime: lambda dt: dt.isoformat()})
 
     uri: Optional[str] = None
     types: Optional[List[SearchItemType]] = None
     depth: int
     timeframe: Optional[str] = None
-    generated_at: datetime
+    generated_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
     primary_count: Optional[int] = None  # Changed field name
     related_count: Optional[int] = None  # Changed field name
     total_results: Optional[int] = None  # For backward compatibility
     total_relations: Optional[int] = None
     total_observations: Optional[int] = None
 
+    @field_serializer("generated_at")
+    def serialize_generated_at(self, dt: datetime) -> str:
+        return dt.isoformat()
+
 
 class ContextResult(BaseModel):
     """Context result containing a primary item with its observations and related items."""
 
     primary_result: Annotated[
-        Union[EntitySummary, RelationSummary, ObservationSummary], 
-        Field(discriminator="type", description="Primary item")
+        Union[EntitySummary, RelationSummary, ObservationSummary],
+        Field(discriminator="type", description="Primary item"),
     ]
 
     observations: Sequence[ObservationSummary] = Field(
@@ -188,8 +216,7 @@ class ContextResult(BaseModel):
 
     related_results: Sequence[
         Annotated[
-            Union[EntitySummary, RelationSummary, ObservationSummary], 
-            Field(discriminator="type")
+            Union[EntitySummary, RelationSummary, ObservationSummary], Field(discriminator="type")
         ]
     ] = Field(description="Related items", default_factory=list)
 
@@ -207,3 +234,52 @@ class GraphContext(BaseModel):
 
     page: Optional[int] = None
     page_size: Optional[int] = None
+
+
+class ActivityStats(BaseModel):
+    """Statistics about activity across all projects."""
+
+    total_projects: int
+    active_projects: int = Field(description="Projects with activity in timeframe")
+    most_active_project: Optional[str] = None
+    total_items: int = Field(description="Total items across all projects")
+    total_entities: int = 0
+    total_relations: int = 0
+    total_observations: int = 0
+
+
+class ProjectActivity(BaseModel):
+    """Activity summary for a single project."""
+
+    project_name: str
+    project_path: str
+    activity: GraphContext = Field(description="The actual activity data for this project")
+    item_count: int = Field(description="Total items in this project's activity")
+    last_activity: Optional[
+        Annotated[datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})]
+    ] = Field(default=None, description="Most recent activity timestamp")
+    active_folders: List[str] = Field(default_factory=list, description="Most active folders")
+
+    @field_serializer("last_activity")
+    def serialize_last_activity(self, dt: Optional[datetime]) -> Optional[str]:
+        return dt.isoformat() if dt else None  # pragma: no cover
+
+
+class ProjectActivitySummary(BaseModel):
+    """Summary of activity across all projects."""
+
+    projects: Dict[str, ProjectActivity] = Field(
+        description="Activity per project, keyed by project name"
+    )
+    summary: ActivityStats
+    timeframe: str = Field(description="The timeframe used for the query")
+    generated_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
+    guidance: Optional[str] = Field(
+        default=None, description="Assistant guidance for project selection and session management"
+    )
+
+    @field_serializer("generated_at")
+    def serialize_generated_at(self, dt: datetime) -> str:
+        return dt.isoformat()  # pragma: no cover

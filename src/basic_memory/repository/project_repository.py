@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -23,12 +24,24 @@ class ProjectRepository(Repository[Project]):
         super().__init__(session_maker, Project)
 
     async def get_by_name(self, name: str) -> Optional[Project]:
-        """Get project by name.
+        """Get project by name (exact match).
 
         Args:
             name: Unique name of the project
         """
         query = self.select().where(Project.name == name)
+        return await self.find_one(query)
+
+    async def get_by_name_case_insensitive(self, name: str) -> Optional[Project]:
+        """Get project by name (case-insensitive match).
+
+        Args:
+            name: Project name (case-insensitive)
+
+        Returns:
+            Project if found, None otherwise
+        """
+        query = self.select().where(Project.name.ilike(name))
         return await self.find_one(query)
 
     async def get_by_permalink(self, permalink: str) -> Optional[Project]:
@@ -47,6 +60,30 @@ class ProjectRepository(Repository[Project]):
             path: Path to the project directory (will be converted to string internally)
         """
         query = self.select().where(Project.path == Path(path).as_posix())
+        return await self.find_one(query)
+
+    async def get_by_id(self, project_id: int) -> Optional[Project]:
+        """Get project by numeric ID.
+
+        Args:
+            project_id: Numeric project ID
+
+        Returns:
+            Project if found, None otherwise
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            return await self.select_by_id(session, project_id)
+
+    async def get_by_external_id(self, external_id: str) -> Optional[Project]:
+        """Get project by external UUID.
+
+        Args:
+            external_id: External UUID identifier
+
+        Returns:
+            Project if found, None otherwise
+        """
+        query = self.select().where(Project.external_id == external_id)
         return await self.find_one(query)
 
     async def get_default_project(self) -> Optional[Project]:

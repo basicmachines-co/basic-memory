@@ -10,7 +10,7 @@ from basic_memory.schemas.directory import DirectoryNode
 router = APIRouter(prefix="/directory", tags=["directory"])
 
 
-@router.get("/tree", response_model=DirectoryNode)
+@router.get("/tree", response_model=DirectoryNode, response_model_exclude_none=True)
 async def get_directory_tree(
     directory_service: DirectoryServiceDep,
     project_id: ProjectIdDep,
@@ -31,7 +31,28 @@ async def get_directory_tree(
     return tree
 
 
-@router.get("/list", response_model=List[DirectoryNode])
+@router.get("/structure", response_model=DirectoryNode, response_model_exclude_none=True)
+async def get_directory_structure(
+    directory_service: DirectoryServiceDep,
+    project_id: ProjectIdDep,
+):
+    """Get folder structure for navigation (no files).
+
+    Optimized endpoint for folder tree navigation. Returns only directory nodes
+    without file metadata. For full tree with files, use /directory/tree.
+
+    Args:
+        directory_service: Service for directory operations
+        project_id: ID of the current project
+
+    Returns:
+        DirectoryNode tree containing only folders (type="directory")
+    """
+    structure = await directory_service.get_directory_structure()
+    return structure
+
+
+@router.get("/list", response_model=List[DirectoryNode], response_model_exclude_none=True)
 async def list_directory(
     directory_service: DirectoryServiceDep,
     project_id: ProjectIdDep,

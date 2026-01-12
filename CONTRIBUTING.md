@@ -34,11 +34,18 @@ project and how to get started as a developer.
 
 4. **Run the Tests**:
    ```bash
-   # Run all tests
+   # Run all tests with unified coverage (unit + integration)
    just test
-   # or
-   uv run pytest -p pytest_mock -v
-   
+
+   # Run unit tests only (fast, no coverage)
+   just test-unit
+
+   # Run integration tests only (fast, no coverage)
+   just test-int
+
+   # Generate HTML coverage report
+   just coverage
+
    # Run a specific test
    pytest tests/path/to/test_file.py::test_function_name
    ```
@@ -134,7 +141,7 @@ agreement to the DCO.
 
 ## Code Style Guidelines
 
-- **Python Version**: Python 3.12+ with full type annotations
+- **Python Version**: Python 3.12+ with full type annotations (3.12+ required for type parameter syntax)
 - **Line Length**: 100 characters maximum
 - **Formatting**: Use ruff for consistent styling
 - **Import Order**: Standard lib, third-party, local imports
@@ -144,12 +151,78 @@ agreement to the DCO.
 
 ## Testing Guidelines
 
-- **Coverage Target**: We aim for 100% test coverage for all code
+### Test Structure
+
+Basic Memory uses two test directories with unified coverage reporting:
+
+- **`tests/`**: Unit tests that test individual components in isolation
+  - Fast execution with extensive mocking
+  - Test individual functions, classes, and modules
+  - Run with: `just test-unit` (no coverage, fast)
+
+- **`test-int/`**: Integration tests that test real-world scenarios
+  - Test full workflows with real database and file operations
+  - Include performance benchmarks
+  - More realistic but slower than unit tests
+  - Run with: `just test-int` (no coverage, fast)
+
+### Running Tests
+
+```bash
+# Run all tests with unified coverage report
+just test
+
+# Run only unit tests (fast iteration)
+just test-unit
+
+# Run only integration tests
+just test-int
+
+# Generate HTML coverage report
+just coverage
+
+# Run specific test
+pytest tests/path/to/test_file.py::test_function_name
+
+# Run tests excluding benchmarks
+pytest -m "not benchmark"
+
+# Run only benchmark tests
+pytest -m benchmark test-int/test_sync_performance_benchmark.py
+```
+
+### Performance Benchmarks
+
+The `test-int/test_sync_performance_benchmark.py` file contains performance benchmarks that measure sync and indexing speed:
+
+- `test_benchmark_sync_100_files` - Small repository performance
+- `test_benchmark_sync_500_files` - Medium repository performance
+- `test_benchmark_sync_1000_files` - Large repository performance (marked slow)
+- `test_benchmark_resync_no_changes` - Re-sync performance baseline
+
+Run benchmarks with:
+```bash
+# Run all benchmarks (excluding slow ones)
+pytest test-int/test_sync_performance_benchmark.py -v -m "benchmark and not slow"
+
+# Run all benchmarks including slow ones
+pytest test-int/test_sync_performance_benchmark.py -v -m benchmark
+
+# Run specific benchmark
+pytest test-int/test_sync_performance_benchmark.py::test_benchmark_sync_100_files -v
+```
+
+See `test-int/BENCHMARKS.md` for detailed benchmark documentation.
+
+### Testing Best Practices
+
+- **Coverage Target**: We aim for high test coverage for all code
 - **Test Framework**: Use pytest for unit and integration tests
-- **Mocking**: Use pytest-mock for mocking dependencies only when necessary
+- **Mocking**: Avoid mocking in integration tests; use sparingly in unit tests
 - **Edge Cases**: Test both normal operation and edge cases
 - **Database Testing**: Use in-memory SQLite for testing database operations
 - **Fixtures**: Use async pytest fixtures for setup and teardown
+- **Markers**: Use `@pytest.mark.benchmark` for benchmarks, `@pytest.mark.slow` for slow tests
 
 ## Release Process
 

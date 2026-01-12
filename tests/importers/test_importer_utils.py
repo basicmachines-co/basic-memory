@@ -23,6 +23,9 @@ def test_clean_filename():
     # Test with empty string
     assert clean_filename("") == "untitled"
 
+    # Test with None (fixes #451 - ChatGPT null titles)
+    assert clean_filename(None) == "untitled"
+
     # Test with only special characters
     # Some implementations may return empty string or underscore
     result = clean_filename("!@#$%^&*()")

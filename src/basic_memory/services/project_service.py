@@ -1,10 +1,13 @@
 """Project management service for Basic Memory."""
 
+import asyncio
 import json
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Sequence
+
 
 from loguru import logger
 from sqlalchemy import text
@@ -41,7 +44,7 @@ class ProjectService:
         return ConfigManager()
 
     @property
-    def config(self) -> ProjectConfig:
+    def config(self) -> ProjectConfig:  # pragma: no cover
         """Get the current project configuration.
 
         Returns:
@@ -77,13 +80,53 @@ class ProjectService:
         return os.environ.get("BASIC_MEMORY_PROJECT", self.config_manager.default_project)
 
     async def list_projects(self) -> Sequence[Project]:
-        return await self.repository.find_all()
+        """List all projects without loading entity relationships.
+
+        Returns only basic project fields (name, path, etc.) without
+        eager loading the entities relationship which could load thousands
+        of entities for large knowledge bases.
+        """
+        return await self.repository.find_all(use_load_options=False)
 
     async def get_project(self, name: str) -> Optional[Project]:
         """Get the file path for a project by name or permalink."""
         return await self.repository.get_by_name(name) or await self.repository.get_by_permalink(
             name
         )
+
+    def _check_nested_paths(self, path1: str, path2: str) -> bool:
+        """Check if two paths are nested (one is a prefix of the other).
+
+        Args:
+            path1: First path to compare
+            path2: Second path to compare
+
+        Returns:
+            True if one path is nested within the other, False otherwise
+
+        Examples:
+            _check_nested_paths("/foo", "/foo/bar")     # True (child under parent)
+            _check_nested_paths("/foo/bar", "/foo")     # True (parent over child)
+            _check_nested_paths("/foo", "/bar")         # False (siblings)
+        """
+        # Normalize paths to ensure proper comparison
+        p1 = Path(path1).resolve()
+        p2 = Path(path2).resolve()
+
+        # Check if either path is a parent of the other
+        try:
+            # Check if p2 is under p1
+            p2.relative_to(p1)
+            return True
+        except ValueError:
+            # Not nested in this direction, check the other
+            try:
+                # Check if p1 is under p2
+                p1.relative_to(p2)
+                return True
+            except ValueError:
+                # Not nested in either direction
+                return False
 
     async def add_project(self, name: str, path: str, set_default: bool = False) -> None:
         """Add a new project to the configuration and database.
@@ -94,22 +137,76 @@ class ProjectService:
             set_default: Whether to set this project as the default
 
         Raises:
-            ValueError: If the project already exists
+            ValueError: If the project already exists or path collides with existing project
         """
-        if not self.repository:  # pragma: no cover
-            raise ValueError("Repository is required for add_project")
+        # If project_root is set, constrain all projects to that directory
+        project_root = self.config_manager.config.project_root
+        sanitized_name = None
+        if project_root:
+            base_path = Path(project_root)
 
-        # Resolve to absolute path
-        resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
+            # In cloud mode (when project_root is set), ignore user's path completely
+            # and use sanitized project name as the directory name
+            # This ensures flat structure: /app/data/test-bisync instead of /app/data/documents/test bisync
+            sanitized_name = generate_permalink(name)
 
-        # First add to config file (this will validate the project doesn't exist)
-        project_config = self.config_manager.add_project(name, resolved_path)
+            # Construct path using sanitized project name only
+            resolved_path = (base_path / sanitized_name).resolve().as_posix()
+
+            # Verify the resolved path is actually under project_root
+            if not resolved_path.startswith(base_path.resolve().as_posix()):  # pragma: no cover
+                raise ValueError(
+                    f"BASIC_MEMORY_PROJECT_ROOT is set to {project_root}. "
+                    f"All projects must be created under this directory. Invalid path: {path}"
+                )  # pragma: no cover
+
+            # Check for case-insensitive path collisions with existing projects
+            existing_projects = await self.list_projects()
+            for existing in existing_projects:
+                if (
+                    existing.path.lower() == resolved_path.lower()
+                    and existing.path != resolved_path
+                ):
+                    raise ValueError(  # pragma: no cover
+                        f"Path collision detected: '{resolved_path}' conflicts with existing project "
+                        f"'{existing.name}' at '{existing.path}'. "
+                        f"In cloud mode, paths are normalized to lowercase to prevent case-sensitivity issues."
+                    )  # pragma: no cover
+        else:
+            resolved_path = Path(os.path.abspath(os.path.expanduser(path))).as_posix()
+
+        # Check for nested paths with existing projects
+        existing_projects = await self.list_projects()
+        for existing in existing_projects:
+            if self._check_nested_paths(resolved_path, existing.path):
+                # Determine which path is nested within which for appropriate error message
+                p_new = Path(resolved_path).resolve()
+                p_existing = Path(existing.path).resolve()
+
+                # Check if new path is nested under existing project
+                if p_new.is_relative_to(p_existing):
+                    raise ValueError(
+                        f"Cannot create project at '{resolved_path}': "
+                        f"path is nested within existing project '{existing.name}' at '{existing.path}'. "
+                        f"Projects cannot share directory trees."
+                    )
+                else:
+                    # Existing project is nested under new path
+                    raise ValueError(
+                        f"Cannot create project at '{resolved_path}': "
+                        f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
+                        f"Projects cannot share directory trees."
+                    )
+
+        if not self.config_manager.config.cloud_mode:
+            # First add to config file (this will validate the project doesn't exist)
+            self.config_manager.add_project(name, resolved_path)
 
         # Then add to database
         project_data = {
             "name": name,
             "path": resolved_path,
-            "permalink": generate_permalink(project_config.name),
+            "permalink": sanitized_name,
             "is_active": True,
             # Don't set is_default=False to avoid UNIQUE constraint issues
             # Let it default to NULL, only set to True when explicitly making default
@@ -124,11 +221,12 @@ class ProjectService:
 
         logger.info(f"Project '{name}' added at {resolved_path}")
 
-    async def remove_project(self, name: str) -> None:
+    async def remove_project(self, name: str, delete_notes: bool = False) -> None:
         """Remove a project from configuration and database.
 
         Args:
             name: The name of the project to remove
+            delete_notes: If True, delete the project directory from filesystem
 
         Raises:
             ValueError: If the project doesn't exist or is the default project
@@ -136,15 +234,46 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for remove_project")
 
-        # First remove from config (this will validate the project exists and is not default)
-        self.config_manager.remove_project(name)
-
-        # Then remove from database using robust lookup
+        # Get project from database first
         project = await self.get_project(name)
-        if project:
-            await self.repository.delete(project.id)
+        if not project:
+            raise ValueError(f"Project '{name}' not found")  # pragma: no cover
+
+        project_path = project.path
+
+        # Check if project is default (in cloud mode, check database; in local mode, check config)
+        if project.is_default or name == self.config_manager.config.default_project:
+            raise ValueError(f"Cannot remove the default project '{name}'")  # pragma: no cover
+
+        # Remove from config if it exists there (may not exist in cloud mode)
+        try:
+            self.config_manager.remove_project(name)
+        except ValueError:  # pragma: no cover
+            # Project not in config - that's OK in cloud mode, continue with database deletion
+            logger.debug(  # pragma: no cover
+                f"Project '{name}' not found in config, removing from database only"
+            )
+
+        # Remove from database
+        await self.repository.delete(project.id)
 
         logger.info(f"Project '{name}' removed from configuration and database")
+
+        # Optionally delete the project directory
+        if delete_notes and project_path:
+            try:
+                path_obj = Path(project_path)
+                if path_obj.exists() and path_obj.is_dir():
+                    await asyncio.to_thread(shutil.rmtree, project_path)
+                    logger.info(f"Deleted project directory: {project_path}")
+                else:
+                    logger.warning(  # pragma: no cover
+                        f"Project directory not found or not a directory: {project_path}"
+                    )  # pragma: no cover
+            except Exception as e:  # pragma: no cover
+                logger.warning(  # pragma: no cover
+                    f"Failed to delete project directory {project_path}: {e}"
+                )
 
     async def set_default_project(self, name: str) -> None:
         """Set the default project in configuration and database.
@@ -158,26 +287,19 @@ class ProjectService:
         if not self.repository:  # pragma: no cover
             raise ValueError("Repository is required for set_default_project")
 
-        # First update config file (this will validate the project exists)
-        self.config_manager.set_default_project(name)
-
-        # Then update database using the same lookup logic as get_project
+        # Look up project in database first to validate it exists
         project = await self.get_project(name)
-        if project:
-            await self.repository.set_as_default(project.id)
-        else:
-            logger.error(f"Project '{name}' exists in config but not in database")
+        if not project:
+            raise ValueError(f"Project '{name}' not found")
+
+        # Update database
+        await self.repository.set_as_default(project.id)
+
+        # Update config file only in local mode (cloud mode uses database only)
+        if not self.config_manager.config.cloud_mode:
+            self.config_manager.set_default_project(name)
 
         logger.info(f"Project '{name}' set as default in configuration and database")
-
-        # Refresh MCP session to pick up the new default project
-        try:
-            from basic_memory.mcp.project_session import session
-
-            session.refresh_from_config()
-        except ImportError:  # pragma: no cover
-            # MCP components might not be available in all contexts (e.g., CLI-only usage)
-            logger.debug("MCP session not available, skipping session refresh")
 
     async def _ensure_single_default_project(self) -> None:
         """Ensure only one project has is_default=True.
@@ -274,11 +396,15 @@ class ProjectService:
                 }
                 await self.repository.create(project_data)
 
-        # Add projects that exist in DB but not in config to config
+        # Remove projects that exist in DB but not in config
+        # Config is the source of truth - if a project was deleted from config,
+        # it should be deleted from DB too (fixes issue #193)
         for name, project in db_projects_by_permalink.items():
             if name not in config_projects:
-                logger.info(f"Adding project '{name}' to configuration")
-                self.config_manager.add_project(name, project.path)
+                logger.info(
+                    f"Removing project '{name}' from database (deleted from config, source of truth)"
+                )
+                await self.repository.delete(project.id)
 
         # Ensure database default project state is consistent
         await self._ensure_single_default_project()
@@ -300,15 +426,6 @@ class ProjectService:
 
         logger.info("Project synchronization complete")
 
-        # Refresh MCP session to ensure it's in sync with current config
-        try:
-            from basic_memory.mcp.project_session import session
-
-            session.refresh_from_config()
-        except ImportError:
-            # MCP components might not be available in all contexts
-            logger.debug("MCP session not available, skipping session refresh")
-
     async def move_project(self, name: str, new_path: str) -> None:
         """Move a project to a new location.
 
@@ -319,8 +436,8 @@ class ProjectService:
         Raises:
             ValueError: If the project doesn't exist or repository isn't initialized
         """
-        if not self.repository:
-            raise ValueError("Repository is required for move_project")
+        if not self.repository:  # pragma: no cover
+            raise ValueError("Repository is required for move_project")  # pragma: no cover
 
         # Resolve to absolute path
         resolved_path = Path(os.path.abspath(os.path.expanduser(new_path))).as_posix()
@@ -655,25 +772,42 @@ class ProjectService:
         )
 
         # Query for monthly entity creation (project filtered)
+        # Use different date formatting for SQLite vs Postgres
+        from basic_memory.config import DatabaseBackend
+
+        is_postgres = self.config_manager.config.database_backend == DatabaseBackend.POSTGRES
+        date_format = (
+            "to_char(created_at, 'YYYY-MM')" if is_postgres else "strftime('%Y-%m', created_at)"
+        )
+
+        # Postgres needs datetime objects, SQLite needs ISO strings
+        six_months_param = six_months_ago if is_postgres else six_months_ago.isoformat()
+
         entity_growth_result = await self.repository.execute_query(
-            text("""
-            SELECT 
-                strftime('%Y-%m', created_at) AS month,
+            text(f"""
+            SELECT
+                {date_format} AS month,
                 COUNT(*) AS count
             FROM entity
             WHERE created_at >= :six_months_ago AND project_id = :project_id
             GROUP BY month
             ORDER BY month
         """),
-            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
+            {"six_months_ago": six_months_param, "project_id": project_id},
         )
         entity_growth = {row[0]: row[1] for row in entity_growth_result.fetchall()}
 
         # Query for monthly observation creation (project filtered)
+        date_format_entity = (
+            "to_char(entity.created_at, 'YYYY-MM')"
+            if is_postgres
+            else "strftime('%Y-%m', entity.created_at)"
+        )
+
         observation_growth_result = await self.repository.execute_query(
-            text("""
-            SELECT 
-                strftime('%Y-%m', entity.created_at) AS month,
+            text(f"""
+            SELECT
+                {date_format_entity} AS month,
                 COUNT(*) AS count
             FROM observation
             INNER JOIN entity ON observation.entity_id = entity.id
@@ -681,15 +815,15 @@ class ProjectService:
             GROUP BY month
             ORDER BY month
         """),
-            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
+            {"six_months_ago": six_months_param, "project_id": project_id},
         )
         observation_growth = {row[0]: row[1] for row in observation_growth_result.fetchall()}
 
         # Query for monthly relation creation (project filtered)
         relation_growth_result = await self.repository.execute_query(
-            text("""
-            SELECT 
-                strftime('%Y-%m', entity.created_at) AS month,
+            text(f"""
+            SELECT
+                {date_format_entity} AS month,
                 COUNT(*) AS count
             FROM relation
             INNER JOIN entity ON relation.from_id = entity.id
@@ -697,7 +831,7 @@ class ProjectService:
             GROUP BY month
             ORDER BY month
         """),
-            {"six_months_ago": six_months_ago.isoformat(), "project_id": project_id},
+            {"six_months_ago": six_months_param, "project_id": project_id},
         )
         relation_growth = {row[0]: row[1] for row in relation_growth_result.fetchall()}
 
@@ -738,8 +872,10 @@ class ProjectService:
         watch_status = None
         watch_status_path = Path.home() / ".basic-memory" / WATCH_STATUS_JSON
         if watch_status_path.exists():
-            try:
-                watch_status = json.loads(watch_status_path.read_text(encoding="utf-8"))
+            try:  # pragma: no cover
+                watch_status = json.loads(  # pragma: no cover
+                    watch_status_path.read_text(encoding="utf-8")
+                )
             except Exception:  # pragma: no cover
                 pass
 

@@ -1,5 +1,6 @@
 """Knowledge graph models."""
 
+import uuid
 from datetime import datetime
 from basic_memory.utils import ensure_timezone_aware
 from typing import Optional
@@ -13,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     JSON,
+    Float,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -37,6 +39,7 @@ class Entity(Base):
         # Regular indexes
         Index("ix_entity_type", "entity_type"),
         Index("ix_entity_title", "title"),
+        Index("ix_entity_external_id", "external_id", unique=True),
         Index("ix_entity_created_at", "created_at"),  # For timeline queries
         Index("ix_entity_updated_at", "updated_at"),  # For timeline queries
         Index("ix_entity_project_id", "project_id"),  # For project filtering
@@ -58,6 +61,8 @@ class Entity(Base):
 
     # Core identity
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # External UUID for API references - stable identifier that won't change
+    external_id: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String)
     entity_type: Mapped[str] = mapped_column(String)
     entity_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -73,9 +78,21 @@ class Entity(Base):
     # checksum of file
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
+    # File metadata for sync
+    # mtime: file modification timestamp (Unix epoch float) for change detection
+    mtime: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # size: file size in bytes for quick change detection
+    size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # Metadata and tracking
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now().astimezone()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now().astimezone(),
+        onupdate=lambda: datetime.now().astimezone(),
+    )
 
     # Relationships
     project = relationship("Project", back_populates="entities")
@@ -104,19 +121,19 @@ class Entity(Base):
     def is_markdown(self):
         """Check if the entity is a markdown file."""
         return self.content_type == "text/markdown"
-    
+
     def __getattribute__(self, name):
         """Override attribute access to ensure datetime fields are timezone-aware."""
         value = super().__getattribute__(name)
-        
+
         # Ensure datetime fields are timezone-aware
-        if name in ('created_at', 'updated_at') and isinstance(value, datetime):
+        if name in ("created_at", "updated_at") and isinstance(value, datetime):
             return ensure_timezone_aware(value)
-        
+
         return value
 
     def __repr__(self) -> str:
-        return f"Entity(id={self.id}, name='{self.title}', type='{self.entity_type}'"
+        return f"Entity(id={self.id}, external_id='{self.external_id}', name='{self.title}', type='{self.entity_type}', checksum='{self.checksum}')"
 
 
 class Observation(Base):
@@ -132,6 +149,7 @@ class Observation(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(Text)
     category: Mapped[str] = mapped_column(String, nullable=False, default="note")
@@ -149,9 +167,14 @@ class Observation(Base):
 
         We can construct these because observations are always defined in
         and owned by a single entity.
+
+        Content is truncated to 200 chars to stay under PostgreSQL's
+        btree index limit of 2704 bytes.
         """
+        # Truncate content to avoid exceeding PostgreSQL's btree index limit
+        content_for_permalink = self.content[:200] if len(self.content) > 200 else self.content
         return generate_permalink(
-            f"{self.entity.permalink}/observations/{self.category}/{self.content}"
+            f"{self.entity.permalink}/observations/{self.category}/{content_for_permalink}"
         )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -173,6 +196,7 @@ class Relation(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     from_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     to_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True

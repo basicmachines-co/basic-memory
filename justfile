@@ -2,28 +2,136 @@
 
 # Install dependencies
 install:
-    pip install -e ".[dev]"
+    uv pip install -e ".[dev]"
     uv sync
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
 
-# Run unit tests in parallel
-test-unit:
-    uv run pytest -p pytest_mock -v -n auto
+# ==============================================================================
+# DATABASE BACKEND TESTING
+# ==============================================================================
+# Basic Memory supports dual database backends (SQLite and Postgres).
+# By default, tests run against SQLite (fast, no dependencies).
+# Set BASIC_MEMORY_TEST_POSTGRES=1 to run against Postgres (uses testcontainers).
+#
+# Quick Start:
+#   just test              # Run all tests against SQLite (default)
+#   just test-sqlite       # Run all tests against SQLite
+#   just test-postgres     # Run all tests against Postgres (testcontainers)
+#   just test-unit-sqlite  # Run unit tests against SQLite
+#   just test-unit-postgres # Run unit tests against Postgres
+#   just test-int-sqlite   # Run integration tests against SQLite
+#   just test-int-postgres # Run integration tests against Postgres
+#
+# CI runs both in parallel for faster feedback.
+# ==============================================================================
 
-# Run integration tests in parallel
-test-int:
-    uv run pytest -p pytest_mock -v --no-cov -n auto test-int
+# Run all tests against SQLite and Postgres
+test: test-sqlite test-postgres
 
-# Run all tests
-test: test-unit test-int
+# Run all tests against SQLite
+test-sqlite: test-unit-sqlite test-int-sqlite
+
+# Run all tests against Postgres (uses testcontainers)
+test-postgres: test-unit-postgres test-int-postgres
+
+# Run unit tests against SQLite
+test-unit-sqlite:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov tests
+
+# Run unit tests against Postgres
+test-unit-postgres:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov tests
+
+# Run integration tests against SQLite
+test-int-sqlite:
+    uv run pytest -p pytest_mock -v --no-cov test-int
+
+# Run integration tests against Postgres
+# Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
+# See: https://github.com/jlowin/fastmcp/issues/1311
+test-int-postgres:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Use gtimeout (macOS/Homebrew) or timeout (Linux)
+    TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
+    if [[ -n "$TIMEOUT_CMD" ]]; then
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int' || test $? -eq 137
+    else
+        echo "⚠️  No timeout command found, running without timeout..."
+        BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int
+    fi
+
+# Reset Postgres test database (drops and recreates schema)
+# Useful when Alembic migration state gets out of sync during development
+# Uses credentials from docker-compose-postgres.yml
+postgres-reset:
+    docker exec basic-memory-postgres psql -U ${POSTGRES_USER:-basic_memory_user} -d ${POSTGRES_TEST_DB:-basic_memory_test} -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+    @echo "✅ Postgres test database reset"
+
+# Run Alembic migrations manually against Postgres test database
+# Useful for debugging migration issues
+# Uses credentials from docker-compose-postgres.yml (can override with env vars)
+postgres-migrate:
+    @cd src/basic_memory/alembic && \
+    BASIC_MEMORY_DATABASE_BACKEND=postgres \
+    BASIC_MEMORY_DATABASE_URL=${POSTGRES_TEST_URL:-postgresql+asyncpg://basic_memory_user:dev_password@localhost:5433/basic_memory_test} \
+    uv run alembic upgrade head
+    @echo "✅ Migrations applied to Postgres test database"
+
+# Run Windows-specific tests only (only works on Windows platform)
+# These tests verify Windows-specific database optimizations (locking mode, NullPool)
+# Will be skipped automatically on non-Windows platforms
+test-windows:
+    uv run pytest -p pytest_mock -v --no-cov -m windows tests test-int
+
+# Run benchmark tests only (performance testing)
+# These are slow tests that measure sync performance with various file counts
+# Excluded from default test runs to keep CI fast
+test-benchmark:
+    uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
+
+# Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
+# Use this before releasing to ensure everything works across all backends and platforms
+test-all:
+    uv run pytest -p pytest_mock -v --no-cov tests test-int
+
+# Generate HTML coverage report
+coverage:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    uv run coverage erase
+    
+    echo "🔎 Coverage (SQLite)..."
+    BASIC_MEMORY_ENV=test uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests test-int
+    
+    echo "🔎 Coverage (Postgres via testcontainers)..."
+    # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
+    # See: https://github.com/jlowin/fastmcp/issues/1311
+    TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
+    if [[ -n "$TIMEOUT_CMD" ]]; then
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests test-int' || test $? -eq 137
+    else
+        echo "⚠️  No timeout command found, running without timeout..."
+        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests test-int
+    fi
+    
+    echo "🧩 Combining coverage data..."
+    uv run coverage combine
+    uv run coverage report -m
+    uv run coverage html
+    echo "Coverage report generated in htmlcov/index.html"
+
+# Lint and fix code (calls fix)
+lint: fix
 
 # Lint and fix code
-lint:
-    uv run ruff check . --fix
+fix:
+    uv run ruff check --fix --unsafe-fixes src tests test-int
 
 # Type check code
-type-check:
+typecheck:
     uv run pyright
 
 # Clean build artifacts and cache files
@@ -41,21 +149,13 @@ format:
 run-inspector:
     npx @modelcontextprotocol/inspector
 
-# Build macOS installer
-installer-mac:
-    cd installer && chmod +x make_icons.sh && ./make_icons.sh
-    cd installer && uv run python setup.py bdist_mac
-
-# Build Windows installer
-installer-win:
-    cd installer && uv run python setup.py bdist_win32
 
 # Update all dependencies to latest versions
 update-deps:
     uv sync --upgrade
 
 # Run all code quality checks and tests
-check: lint format type-check test
+check: lint format typecheck test
 
 # Generate Alembic migration with descriptive message
 migration message:
@@ -96,8 +196,9 @@ release version:
     fi
     
     # Run quality checks
-    echo "🔍 Running quality checks..."
-    just check
+    echo "🔍 Running lint  checks..."
+    just lint
+    just typecheck
     
     # Update version in __init__.py
     echo "📝 Updating version in __init__.py..."
@@ -155,8 +256,9 @@ beta version:
     fi
     
     # Run quality checks
-    echo "🔍 Running quality checks..."
-    just check
+    echo "🔍 Running lint  checks..."
+    just lint
+    just typecheck
     
     # Update version in __init__.py
     echo "📝 Updating version in __init__.py..."

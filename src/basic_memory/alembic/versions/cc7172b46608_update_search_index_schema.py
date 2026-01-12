@@ -21,6 +21,12 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade database schema to use new search index with content_stems and content_snippet."""
 
+    # This migration is SQLite-specific (FTS5 virtual tables)
+    # For Postgres, the search_index table is created via ORM models
+    connection = op.get_bind()
+    if connection.dialect.name != "sqlite":
+        return
+
     # First, drop the existing search_index table
     op.execute("DROP TABLE IF EXISTS search_index")
 
@@ -59,6 +65,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade database schema to use old search index."""
+
+    # This migration is SQLite-specific (FTS5 virtual tables)
+    # For Postgres, the search_index table is managed via ORM models
+    connection = op.get_bind()
+    if connection.dialect.name != "sqlite":
+        return
+
     # Drop the updated search_index table
     op.execute("DROP TABLE IF EXISTS search_index")
 

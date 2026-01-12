@@ -1,14 +1,18 @@
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from collections import OrderedDict
 
-import frontmatter
 from frontmatter import Post
 from loguru import logger
 
+
 from basic_memory import file_utils
+from basic_memory.file_utils import dump_frontmatter
 from basic_memory.markdown.entity_parser import EntityParser
 from basic_memory.markdown.schemas import EntityMarkdown, Observation, Relation
+
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.config import BasicMemoryConfig
 
 
 class DirtyFileError(Exception):
@@ -35,9 +39,14 @@ class MarkdownProcessor:
     3. Track schema changes (that's done by the database)
     """
 
-    def __init__(self, entity_parser: EntityParser):
-        """Initialize processor with base path and parser."""
+    def __init__(
+        self,
+        entity_parser: EntityParser,
+        app_config: Optional["BasicMemoryConfig"] = None,
+    ):
+        """Initialize processor with parser and optional config."""
         self.entity_parser = entity_parser
+        self.app_config = app_config
 
     async def read_file(self, path: Path) -> EntityMarkdown:
         """Read and parse file into EntityMarkdown schema.
@@ -115,14 +124,68 @@ class MarkdownProcessor:
 
         # Create Post object for frontmatter
         post = Post(content, **frontmatter_dict)
-        final_content = frontmatter.dumps(post, sort_keys=False)
+        final_content = dump_frontmatter(post)
 
         logger.debug(f"writing file {path} with content:\n{final_content}")
 
         # Write atomically and return checksum of updated file
         path.parent.mkdir(parents=True, exist_ok=True)
         await file_utils.write_file_atomic(path, final_content)
-        return await file_utils.compute_checksum(final_content)
+
+        # Format file if configured (MarkdownProcessor always handles markdown files)
+        content_for_checksum = final_content
+        if self.app_config:
+            formatted_content = await file_utils.format_file(  # pragma: no cover
+                path, self.app_config, is_markdown=True
+            )
+            if formatted_content is not None:  # pragma: no cover
+                content_for_checksum = formatted_content  # pragma: no cover
+
+        return await file_utils.compute_checksum(content_for_checksum)
+
+    def to_markdown_string(self, markdown: EntityMarkdown) -> str:
+        """Convert EntityMarkdown to markdown string with frontmatter.
+
+        This method handles serialization only - it does not write to files.
+        Use FileService.write_file() to persist the output.
+
+        This enables cloud environments to override file operations via
+        dependency injection while reusing the serialization logic.
+
+        Args:
+            markdown: EntityMarkdown schema to serialize
+
+        Returns:
+            Complete markdown string with frontmatter, content, and structured sections
+        """
+        # Convert frontmatter to dict
+        frontmatter_dict = OrderedDict()
+        frontmatter_dict["title"] = markdown.frontmatter.title
+        frontmatter_dict["type"] = markdown.frontmatter.type
+        frontmatter_dict["permalink"] = markdown.frontmatter.permalink
+
+        metadata = markdown.frontmatter.metadata or {}
+        for k, v in metadata.items():
+            frontmatter_dict[k] = v
+
+        # Start with user content (or minimal title for new files)
+        content = markdown.content or f"# {markdown.frontmatter.title}\n"
+
+        # Add structured sections with proper spacing
+        content = content.rstrip()  # Remove trailing whitespace
+
+        # Add a blank line if we have semantic content
+        if markdown.observations or markdown.relations:
+            content += "\n"
+
+        if markdown.observations:
+            content += self.format_observations(markdown.observations)
+        if markdown.relations:
+            content += self.format_relations(markdown.relations)
+
+        # Create Post object for frontmatter
+        post = Post(content, **frontmatter_dict)
+        return dump_frontmatter(post)
 
     def format_observations(self, observations: list[Observation]) -> str:
         """Format observations section in standard way.

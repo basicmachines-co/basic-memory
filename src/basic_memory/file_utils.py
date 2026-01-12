@@ -1,14 +1,37 @@
 """Utilities for file operations."""
 
+import asyncio
 import hashlib
+import shlex
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 import re
-from typing import Any, Dict, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
+import aiofiles
 import yaml
+import frontmatter
 from loguru import logger
 
 from basic_memory.utils import FilePath
+
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.config import BasicMemoryConfig
+
+
+@dataclass
+class FileMetadata:
+    """File metadata for cloud-compatible file operations.
+
+    This dataclass provides a cloud-agnostic way to represent file metadata,
+    enabling S3FileService to return metadata from head_object responses
+    instead of mock stat_result with zeros.
+    """
+
+    size: int
+    created_at: datetime
+    modified_at: datetime
 
 
 class FileError(Exception):
@@ -51,28 +74,33 @@ async def compute_checksum(content: Union[str, bytes]) -> str:
         raise FileError(f"Failed to compute checksum: {e}")
 
 
-async def ensure_directory(path: FilePath) -> None:
-    """
-    Ensure directory exists, creating if necessary.
+# UTF-8 BOM character that can appear at the start of files
+UTF8_BOM = "\ufeff"
+
+
+def strip_bom(content: str) -> str:
+    """Strip UTF-8 BOM from the start of content if present.
+
+    BOM (Byte Order Mark) characters can be present in files created on Windows
+    or copied from certain sources. They should be stripped before processing
+    frontmatter. See issue #452.
 
     Args:
-        path: Directory path to ensure (Path or string)
+        content: Content that may start with BOM
 
-    Raises:
-        FileWriteError: If directory creation fails
+    Returns:
+        Content with BOM removed if present
     """
-    try:
-        # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
-        path_obj.mkdir(parents=True, exist_ok=True)
-    except Exception as e:  # pragma: no cover
-        logger.error("Failed to create directory", path=str(path), error=str(e))
-        raise FileWriteError(f"Failed to create directory {path}: {e}")
+    if content and content.startswith(UTF8_BOM):
+        return content[1:]
+    return content
 
 
 async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     Write file with atomic operation using temporary file.
+
+    Uses aiofiles for true async I/O (non-blocking).
 
     Args:
         path: Target file path (Path or string)
@@ -86,13 +114,179 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     temp_path = path_obj.with_suffix(".tmp")
 
     try:
-        temp_path.write_text(content, encoding="utf-8")
+        # Use aiofiles for non-blocking write
+        async with aiofiles.open(temp_path, mode="w", encoding="utf-8") as f:
+            await f.write(content)
+
+        # Atomic rename (this is fast, doesn't need async)
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
         temp_path.unlink(missing_ok=True)
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
+
+
+async def format_markdown_builtin(path: Path) -> Optional[str]:
+    """
+    Format a markdown file using the built-in mdformat formatter.
+
+    Uses mdformat with GFM (GitHub Flavored Markdown) support for consistent
+    formatting without requiring Node.js or external tools.
+
+    Args:
+        path: Path to the markdown file to format
+
+    Returns:
+        Formatted content if successful, None if formatting failed.
+    """
+    try:
+        import mdformat
+    except ImportError:  # pragma: no cover
+        logger.warning(
+            "mdformat not installed, skipping built-in formatting",
+            path=str(path),
+        )
+        return None
+
+    try:
+        # Read original content
+        async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
+            content = await f.read()
+
+        # Format using mdformat with GFM and frontmatter extensions
+        # mdformat is synchronous, so we run it in a thread executor
+        loop = asyncio.get_event_loop()
+        formatted_content = await loop.run_in_executor(
+            None,
+            lambda: mdformat.text(
+                content,
+                extensions={"gfm", "frontmatter"},  # GFM + YAML frontmatter support
+                options={"wrap": "no"},  # Don't wrap lines
+            ),
+        )
+
+        # Only write if content changed
+        if formatted_content != content:
+            async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
+                await f.write(formatted_content)
+
+        logger.debug(
+            "Formatted file with mdformat",
+            path=str(path),
+            changed=formatted_content != content,
+        )
+        return formatted_content
+
+    except Exception as e:  # pragma: no cover
+        logger.warning(
+            "mdformat formatting failed",
+            path=str(path),
+            error=str(e),
+        )
+        return None
+
+
+async def format_file(
+    path: Path,
+    config: "BasicMemoryConfig",
+    is_markdown: bool = False,
+) -> Optional[str]:
+    """
+    Format a file using configured formatter.
+
+    By default, uses the built-in mdformat formatter for markdown files (pure Python,
+    no Node.js required). External formatters like Prettier can be configured via
+    formatter_command or per-extension formatters.
+
+    Args:
+        path: File to format
+        config: Configuration with formatter settings
+        is_markdown: Whether this is a markdown file (caller should use FileService.is_markdown)
+
+    Returns:
+        Formatted content if successful, None if formatting was skipped or failed.
+        Failures are logged as warnings but don't raise exceptions.
+    """
+    if not config.format_on_save:
+        return None
+
+    extension = path.suffix.lstrip(".")
+    formatter = config.formatters.get(extension) or config.formatter_command
+
+    # Use built-in mdformat for markdown files when no external formatter configured
+    if not formatter:
+        if is_markdown:
+            return await format_markdown_builtin(path)
+        else:
+            logger.debug("No formatter configured for extension", extension=extension)
+            return None
+
+    # Use external formatter
+    # Replace {file} placeholder with the actual path
+    cmd = formatter.replace("{file}", str(path))
+
+    try:
+        # Parse command into args list for safer execution (no shell=True)
+        args = shlex.split(cmd)
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=config.formatter_timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning(
+                "Formatter timed out",
+                path=str(path),
+                timeout=config.formatter_timeout,
+            )
+            return None
+
+        if proc.returncode != 0:
+            logger.warning(
+                "Formatter exited with non-zero status",
+                path=str(path),
+                returncode=proc.returncode,
+                stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+            )
+            # Still try to read the file - formatter may have partially worked
+            # or the file may be unchanged
+
+        # Read formatted content
+        async with aiofiles.open(path, mode="r", encoding="utf-8") as f:
+            formatted_content = await f.read()
+
+        logger.debug(
+            "Formatted file successfully",
+            path=str(path),
+            formatter=args[0] if args else formatter,
+        )
+        return formatted_content
+
+    except FileNotFoundError:
+        # Formatter executable not found
+        logger.warning(
+            "Formatter executable not found",
+            command=cmd.split()[0] if cmd else "",
+            path=str(path),
+        )
+        return None
+    except Exception as e:  # pragma: no cover
+        logger.warning(
+            "Formatter failed",
+            path=str(path),
+            error=str(e),
+        )
+        return None
 
 
 def has_frontmatter(content: str) -> bool:
@@ -108,7 +302,8 @@ def has_frontmatter(content: str) -> bool:
     if not content:
         return False
 
-    content = content.strip()
+    # Strip BOM before checking for frontmatter markers
+    content = strip_bom(content).strip()
     if not content.startswith("---"):
         return False
 
@@ -129,6 +324,8 @@ def parse_frontmatter(content: str) -> Dict[str, Any]:
         ParseError: If frontmatter is invalid or parsing fails
     """
     try:
+        # Strip BOM before parsing frontmatter
+        content = strip_bom(content)
         if not content.strip().startswith("---"):
             raise ParseError("Content has no frontmatter")
 
@@ -170,7 +367,8 @@ def remove_frontmatter(content: str) -> str:
     Raises:
         ParseError: If content starts with frontmatter marker but is malformed
     """
-    content = content.strip()
+    # Strip BOM before processing
+    content = strip_bom(content).strip()
 
     # Return as-is if no frontmatter marker
     if not content.startswith("---"):
@@ -184,56 +382,54 @@ def remove_frontmatter(content: str) -> str:
     return parts[2].strip()
 
 
-async def update_frontmatter(path: FilePath, updates: Dict[str, Any]) -> str:
-    """Update frontmatter fields in a file while preserving all content.
+def dump_frontmatter(post: frontmatter.Post) -> str:
+    """
+    Serialize frontmatter.Post to markdown with Obsidian-compatible YAML format.
 
-    Only modifies the frontmatter section, leaving all content untouched.
-    Creates frontmatter section if none exists.
-    Returns checksum of updated file.
+    This function ensures that:
+    1. Tags are formatted as YAML lists instead of JSON arrays
+    2. String values are properly quoted to handle special characters (colons, etc.)
+
+    Good (Obsidian compatible):
+    ---
+    title: "L2 Governance Core (Split: Core)"
+    tags:
+    - system
+    - overview
+    - reference
+    ---
+
+    Bad (causes parsing errors):
+    ---
+    title: L2 Governance Core (Split: Core)  # Unquoted colon breaks YAML
+    tags: ["system", "overview", "reference"]
+    ---
 
     Args:
-        path: Path to markdown file (Path or string)
-        updates: Dict of frontmatter fields to update
+        post: frontmatter.Post object to serialize
 
     Returns:
-        Checksum of updated file
-
-    Raises:
-        FileError: If file operations fail
-        ParseError: If frontmatter parsing fails
+        String containing markdown with properly formatted YAML frontmatter
     """
-    try:
-        # Convert string to Path if needed
-        path_obj = Path(path) if isinstance(path, str) else path
+    if not post.metadata:
+        # No frontmatter, just return content
+        return post.content
 
-        # Read current content
-        content = path_obj.read_text(encoding="utf-8")
+    # Serialize YAML with block style for lists
+    # SafeDumper automatically quotes values with special characters (colons, etc.)
+    yaml_str = yaml.dump(
+        post.metadata,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        Dumper=yaml.SafeDumper,
+    )
 
-        # Parse current frontmatter
-        current_fm = {}
-        if has_frontmatter(content):
-            current_fm = parse_frontmatter(content)
-            content = remove_frontmatter(content)
-
-        # Update frontmatter
-        new_fm = {**current_fm, **updates}
-
-        # Write new file with updated frontmatter
-        yaml_fm = yaml.dump(new_fm, sort_keys=False, allow_unicode=True)
-        final_content = f"---\n{yaml_fm}---\n\n{content.strip()}"
-
-        logger.debug("Updating frontmatter", path=str(path_obj), update_keys=list(updates.keys()))
-
-        await write_file_atomic(path_obj, final_content)
-        return await compute_checksum(final_content)
-
-    except Exception as e:  # pragma: no cover
-        logger.error(
-            "Failed to update frontmatter",
-            path=str(path) if isinstance(path, (str, Path)) else "<unknown>",
-            error=str(e),
-        )
-        raise FileError(f"Failed to update frontmatter: {e}")
+    # Construct the final markdown with frontmatter
+    if post.content:
+        return f"---\n{yaml_str}---\n\n{post.content}"
+    else:
+        return f"---\n{yaml_str}---\n"
 
 
 def sanitize_for_filename(text: str, replacement: str = "-") -> str:
@@ -252,3 +448,31 @@ def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     text = re.sub(f"{re.escape(replacement)}+", replacement, text)
 
     return text.strip(replacement)
+
+
+def sanitize_for_folder(folder: str) -> str:
+    """
+    Sanitize folder path to be safe for use in file system paths.
+    Removes leading/trailing whitespace, compresses multiple slashes,
+    and removes special characters except for /, -, and _.
+    """
+    if not folder:
+        return ""
+
+    sanitized = folder.strip()
+
+    if sanitized.startswith("./"):
+        sanitized = sanitized[2:]
+
+    # ensure no special characters (except for a few that are allowed)
+    sanitized = "".join(
+        c for c in sanitized if c.isalnum() or c in (".", " ", "-", "_", "\\", "/")
+    ).rstrip()
+
+    # compress multiple, repeated instances of path separators
+    sanitized = re.sub(r"[\\/]+", "/", sanitized)
+
+    # trim any leading/trailing path separators
+    sanitized = sanitized.strip("\\/")
+
+    return sanitized

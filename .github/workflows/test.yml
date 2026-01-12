@@ -13,12 +13,13 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test:
+  test-sqlite:
+    name: Test SQLite (${{ matrix.os }}, Python ${{ matrix.python-version }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: [ "3.12" ]
+        python-version: [ "3.12", "3.13", "3.14" ]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -58,9 +59,109 @@ jobs:
 
       - name: Run type checks
         run: |
-          just type-check
+          just typecheck
 
-      - name: Run tests
+      - name: Run linting
+        run: |
+          just lint
+
+      - name: Run tests (SQLite)
         run: |
           uv pip install pytest pytest-cov
-          just test
+          just test-sqlite
+
+  test-postgres:
+    name: Test Postgres (Python ${{ matrix.python-version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.12", "3.13", "3.14" ]
+    runs-on: ubuntu-latest
+
+    # Note: No services section needed - testcontainers handles Postgres in Docker
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e .[dev]
+
+      - name: Run tests (Postgres via testcontainers)
+        run: |
+          uv pip install pytest pytest-cov
+          just test-postgres
+
+  coverage:
+    name: Coverage Summary (combined, Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e .[dev]
+
+      - name: Run combined coverage (SQLite + Postgres)
+        run: |
+          uv pip install pytest pytest-cov
+          just coverage
+
+      - name: Add coverage report to job summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage"
+            echo ""
+            echo '```'
+            uv run coverage report -m
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: htmlcov
+          path: htmlcov/

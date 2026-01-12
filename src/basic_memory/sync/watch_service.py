@@ -5,16 +5,21 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Sequence, Callable, Awaitable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from basic_memory.sync.sync_service import SyncService
 
 from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
+from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rich.console import Console
 from watchfiles import awatch
 from watchfiles.main import FileChange, Change
+import time
 
 
 class WatchEvent(BaseModel):
@@ -29,8 +34,8 @@ class WatchEvent(BaseModel):
 class WatchServiceState(BaseModel):
     # Service status
     running: bool = False
-    start_time: datetime = datetime.now()  # Use directly with Pydantic model
-    pid: int = os.getpid()  # Use directly with Pydantic model
+    start_time: datetime = Field(default_factory=datetime.now)
+    pid: int = Field(default_factory=os.getpid)
 
     # Stats
     error_count: int = 0
@@ -41,7 +46,7 @@ class WatchServiceState(BaseModel):
     synced_files: int = 0
 
     # Recent activity
-    recent_events: List[WatchEvent] = []  # Use directly with Pydantic model
+    recent_events: List[WatchEvent] = Field(default_factory=list)
 
     def add_event(
         self,
@@ -69,66 +74,137 @@ class WatchServiceState(BaseModel):
         self.last_error = datetime.now()
 
 
+# Type alias for sync service factory function
+SyncServiceFactory = Callable[[Project], Awaitable["SyncService"]]
+
+
 class WatchService:
     def __init__(
         self,
         app_config: BasicMemoryConfig,
         project_repository: ProjectRepository,
         quiet: bool = False,
+        sync_service_factory: Optional[SyncServiceFactory] = None,
     ):
         self.app_config = app_config
         self.project_repository = project_repository
         self.state = WatchServiceState()
         self.status_path = Path.home() / ".basic-memory" / WATCH_STATUS_JSON
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ignore_patterns_cache: dict[Path, Set[str]] = {}
+        self._sync_service_factory = sync_service_factory
 
         # quiet mode for mcp so it doesn't mess up stdout
         self.console = Console(quiet=quiet)
 
-    async def run(self):  # pragma: no cover
-        """Watch for file changes and sync them"""
+    async def _get_sync_service(self, project: Project) -> "SyncService":
+        """Get sync service for a project, using factory if provided."""
+        if self._sync_service_factory:
+            return await self._sync_service_factory(project)
+        # Fall back to default factory
+        from basic_memory.sync.sync_service import get_sync_service
 
-        projects = await self.project_repository.get_active_projects()
+        return await get_sync_service(project)
+
+    async def _schedule_restart(self, stop_event: asyncio.Event):
+        """Schedule a restart of the watch service after the configured interval."""
+        await asyncio.sleep(self.app_config.watch_project_reload_interval)
+        stop_event.set()
+
+    def _get_ignore_patterns(self, project_path: Path) -> Set[str]:
+        """Get or load ignore patterns for a project path."""
+        if project_path not in self._ignore_patterns_cache:
+            self._ignore_patterns_cache[project_path] = load_gitignore_patterns(project_path)
+        return self._ignore_patterns_cache[project_path]
+
+    async def _watch_projects_cycle(self, projects: Sequence[Project], stop_event: asyncio.Event):
+        """Run one cycle of watching the given projects until stop_event is set."""
         project_paths = [project.path for project in projects]
 
-        logger.info(
-            "Watch service started",
-            f"directories={project_paths}",
-            f"debounce_ms={self.app_config.sync_delay}",
-            f"pid={os.getpid()}",
-        )
+        async for changes in awatch(
+            *project_paths,
+            debounce=self.app_config.sync_delay,
+            watch_filter=self.filter_changes,
+            recursive=True,
+            stop_event=stop_event,
+        ):
+            # group changes by project and filter using ignore patterns
+            project_changes = defaultdict(list)
+            for change, path in changes:
+                for project in projects:
+                    if self.is_project_path(project, path):
+                        # Check if the file should be ignored based on gitignore patterns
+                        project_path = Path(project.path)
+                        file_path = Path(path)
+                        ignore_patterns = self._get_ignore_patterns(project_path)
+
+                        if should_ignore_path(file_path, project_path, ignore_patterns):
+                            logger.trace(
+                                f"Ignoring watched file change: {file_path.relative_to(project_path)}"
+                            )
+                            continue
+
+                        project_changes[project].append((change, path))
+                        break
+
+            # create coroutines to handle changes
+            change_handlers = [
+                self.handle_changes(project, changes)  # pyright: ignore
+                for project, changes in project_changes.items()
+            ]
+
+            # process changes
+            await asyncio.gather(*change_handlers)
+
+    async def run(self):  # pragma: no cover
+        """Watch for file changes and sync them"""
 
         self.state.running = True
         self.state.start_time = datetime.now()
         await self.write_status()
 
+        logger.info(
+            "Watch service started",
+            f"debounce_ms={self.app_config.sync_delay}",
+            f"pid={os.getpid()}",
+        )
+
         try:
-            async for changes in awatch(
-                *project_paths,
-                debounce=self.app_config.sync_delay,
-                watch_filter=self.filter_changes,
-                recursive=True,
-            ):
-                # group changes by project
-                project_changes = defaultdict(list)
-                for change, path in changes:
-                    for project in projects:
-                        if self.is_project_path(project, path):
-                            project_changes[project].append((change, path))
-                            break
+            while self.state.running:
+                # Clear ignore patterns cache to pick up any .gitignore changes
+                self._ignore_patterns_cache.clear()
 
-                # create coroutines to handle changes
-                change_handlers = [
-                    self.handle_changes(project, changes)  # pyright: ignore
-                    for project, changes in project_changes.items()
-                ]
+                # Reload projects to catch any new/removed projects
+                projects = await self.project_repository.get_active_projects()
 
-                # process changes
-                await asyncio.gather(*change_handlers)
+                project_paths = [project.path for project in projects]
+                logger.debug(f"Starting watch cycle for directories: {project_paths}")
+
+                # Create stop event for this watch cycle
+                stop_event = asyncio.Event()
+
+                # Schedule restart after configured interval to reload projects
+                timer_task = asyncio.create_task(self._schedule_restart(stop_event))
+
+                try:
+                    await self._watch_projects_cycle(projects, stop_event)
+                except Exception as e:
+                    logger.exception("Watch service error during cycle", error=str(e))
+                    self.state.record_error(str(e))
+                    await self.write_status()
+                    # Continue to next cycle instead of exiting
+                    await asyncio.sleep(5)  # Brief pause before retry
+                finally:
+                    # Cancel timer task if it's still running
+                    if not timer_task.done():
+                        timer_task.cancel()
+                        try:
+                            await timer_task
+                        except asyncio.CancelledError:
+                            pass
 
         except Exception as e:
             logger.exception("Watch service error", error=str(e))
-
             self.state.record_error(str(e))
             await self.write_status()
             raise
@@ -175,13 +251,21 @@ class WatchService:
 
     async def handle_changes(self, project: Project, changes: Set[FileChange]) -> None:
         """Process a batch of file changes"""
-        import time
-        from typing import List, Set
+        # Check if project still exists in configuration before processing
+        # This prevents deleted projects from being recreated by background sync
+        from basic_memory.config import ConfigManager
 
-        # Lazily initialize sync service for project changes
-        from basic_memory.cli.commands.sync import get_sync_service
+        config_manager = ConfigManager()
+        if (
+            project.name not in config_manager.projects
+            and project.permalink not in config_manager.projects
+        ):
+            logger.info(
+                f"Skipping sync for deleted project: {project.name}, change_count={len(changes)}"
+            )
+            return
 
-        sync_service = await get_sync_service(project)
+        sync_service = await self._get_sync_service(project)
         file_service = sync_service.file_service
 
         start_time = time.time()
@@ -215,12 +299,17 @@ class WatchService:
         )
 
         # because of our atomic writes on updates, an add may be an existing file
-        for added_path in adds:  # pragma: no cover TODO add test
+        # Avoid mutating `adds` while iterating (can skip items).
+        reclassified_as_modified: List[str] = []
+        for added_path in list(adds):  # pragma: no cover TODO add test
             entity = await sync_service.entity_repository.get_by_file_path(added_path)
             if entity is not None:
                 logger.debug(f"Existing file will be processed as modified, path={added_path}")
-                adds.remove(added_path)
-                modifies.append(added_path)
+                reclassified_as_modified.append(added_path)
+
+        if reclassified_as_modified:
+            adds = [p for p in adds if p not in reclassified_as_modified]
+            modifies.extend(reclassified_as_modified)
 
         # Track processed files to avoid duplicates
         processed: Set[str] = set()
@@ -288,9 +377,13 @@ class WatchService:
                 full_path = directory / path
                 if full_path.exists() and full_path.is_file():
                     # File still exists despite DELETE event - treat as modification
-                    logger.debug("File exists despite DELETE event, treating as modification", path=path)
+                    logger.debug(
+                        "File exists despite DELETE event, treating as modification", path=path
+                    )
                     entity, checksum = await sync_service.sync_file(path, new=False)
-                    self.state.add_event(path=path, action="modified", status="success", checksum=checksum)
+                    self.state.add_event(
+                        path=path, action="modified", status="success", checksum=checksum
+                    )
                     self.console.print(f"[yellow]✎[/yellow] {path} (atomic write)")
                     logger.info(f"atomic write detected: {path}")
                     processed.add(path)
@@ -302,10 +395,12 @@ class WatchService:
                     entity = await sync_service.entity_repository.get_by_file_path(path)
                     if entity is None:
                         # No entity means this was likely a directory - skip it
-                        logger.debug(f"Skipping deleted path with no entity (likely directory), path={path}")
+                        logger.debug(
+                            f"Skipping deleted path with no entity (likely directory), path={path}"
+                        )
                         processed.add(path)
                         continue
-                    
+
                     # File truly deleted
                     logger.debug("Processing deleted file", path=path)
                     await sync_service.handle_delete(path)

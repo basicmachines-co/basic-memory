@@ -2,6 +2,7 @@
 
 from typing import Optional, Tuple
 
+
 from loguru import logger
 
 from basic_memory.models import Entity

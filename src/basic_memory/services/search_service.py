@@ -4,6 +4,7 @@ import ast
 from datetime import datetime
 from typing import List, Optional, Set
 
+
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
@@ -14,6 +15,21 @@ from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services import FileService
+
+# Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
+# We use 6000 characters to leave headroom for other indexed columns and overhead.
+MAX_CONTENT_STEMS_SIZE = 6000
+
+
+def _mtime_to_datetime(entity: Entity) -> datetime:
+    """Convert entity mtime (file modification time) to datetime.
+
+    Returns the file's actual modification time, falling back to updated_at
+    if mtime is not available.
+    """
+    if entity.mtime:
+        return datetime.fromtimestamp(entity.mtime).astimezone()
+    return entity.updated_at
 
 
 class SearchService:
@@ -113,8 +129,10 @@ class SearchService:
         # Add word boundaries
         variants.update(w.strip() for w in text.lower().split() if w.strip())
 
-        # Add trigrams for fuzzy matching
-        variants.update(text[i : i + 3].lower() for i in range(len(text) - 2))
+        # Trigrams disabled: They create massive search index bloat, increasing DB size significantly
+        # and slowing down indexing performance. FTS5 search works well without them.
+        # See: https://github.com/basicmachines-co/basic-memory/issues/351
+        # variants.update(text[i : i + 3].lower() for i in range(len(text) - 2))
 
         return variants
 
@@ -154,23 +172,43 @@ class SearchService:
         self,
         entity: Entity,
         background_tasks: Optional[BackgroundTasks] = None,
+        content: str | None = None,
     ) -> None:
         if background_tasks:
-            background_tasks.add_task(self.index_entity_data, entity)
+            background_tasks.add_task(self.index_entity_data, entity, content)
         else:
-            await self.index_entity_data(entity)
+            await self.index_entity_data(entity, content)
 
     async def index_entity_data(
         self,
         entity: Entity,
+        content: str | None = None,
     ) -> None:
-        # delete all search index data associated with entity
-        await self.repository.delete_by_entity_id(entity_id=entity.id)
+        logger.info(
+            f"[BackgroundTask] Starting search index for entity_id={entity.id} "
+            f"permalink={entity.permalink} project_id={entity.project_id}"
+        )
+        try:
+            # delete all search index data associated with entity
+            await self.repository.delete_by_entity_id(entity_id=entity.id)
 
-        # reindex
-        await self.index_entity_markdown(
-            entity
-        ) if entity.is_markdown else await self.index_entity_file(entity)
+            # reindex
+            await self.index_entity_markdown(
+                entity, content
+            ) if entity.is_markdown else await self.index_entity_file(entity)
+
+            logger.info(
+                f"[BackgroundTask] Completed search index for entity_id={entity.id} "
+                f"permalink={entity.permalink}"
+            )
+        except Exception as e:  # pragma: no cover
+            # Background task failure logging; exceptions are re-raised.
+            # Avoid forcing synthetic failures just for line coverage.
+            logger.error(  # pragma: no cover
+                f"[BackgroundTask] Failed search index for entity_id={entity.id} "
+                f"permalink={entity.permalink} error={e}"
+            )
+            raise  # pragma: no cover
 
     async def index_entity_file(
         self,
@@ -183,12 +221,13 @@ class SearchService:
                 entity_id=entity.id,
                 type=SearchItemType.ENTITY.value,
                 title=entity.title,
+                permalink=entity.permalink,  # Required for Postgres NOT NULL constraint
                 file_path=entity.file_path,
                 metadata={
                     "entity_type": entity.entity_type,
                 },
                 created_at=entity.created_at,
-                updated_at=entity.updated_at,
+                updated_at=_mtime_to_datetime(entity),
                 project_id=entity.project_id,
             )
         )
@@ -196,8 +235,13 @@ class SearchService:
     async def index_entity_markdown(
         self,
         entity: Entity,
+        content: str | None = None,
     ) -> None:
         """Index an entity and all its observations and relations.
+
+        Args:
+            entity: The entity to index
+            content: Optional pre-loaded content (avoids file read). If None, will read from file.
 
         Indexing structure:
         1. Entities
@@ -219,12 +263,17 @@ class SearchService:
         The project_id is automatically added by the repository when indexing.
         """
 
+        # Collect all search index rows to batch insert at the end
+        rows_to_index = []
+
         content_stems = []
         content_snippet = ""
         title_variants = self._generate_variants(entity.title)
         content_stems.extend(title_variants)
 
-        content = await self.file_service.read_entity_content(entity)
+        # Use provided content or read from file
+        if content is None:
+            content = await self.file_service.read_entity_content(entity)
         if content:
             content_stems.append(content)
             content_snippet = f"{content[:250]}"
@@ -241,8 +290,12 @@ class SearchService:
 
         entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
 
-        # Index entity
-        await self.repository.index_item(
+        # Truncate to stay under Postgres's 8KB index row limit
+        if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
+            entity_content_stems = entity_content_stems[:MAX_CONTENT_STEMS_SIZE]  # pragma: no cover
+
+        # Add entity row
+        rows_to_index.append(
             SearchIndexRow(
                 id=entity.id,
                 type=SearchItemType.ENTITY.value,
@@ -256,25 +309,36 @@ class SearchService:
                     "entity_type": entity.entity_type,
                 },
                 created_at=entity.created_at,
-                updated_at=entity.updated_at,
+                updated_at=_mtime_to_datetime(entity),
                 project_id=entity.project_id,
             )
         )
 
-        # Index each observation with permalink
+        # Add observation rows - dedupe by permalink to avoid unique constraint violations
+        # Two observations with same entity/category/content generate identical permalinks
+        seen_permalinks: set[str] = {entity.permalink} if entity.permalink else set()
         for obs in entity.observations:
+            obs_permalink = obs.permalink
+            if obs_permalink in seen_permalinks:
+                logger.debug(f"Skipping duplicate observation permalink: {obs_permalink}")
+                continue
+            seen_permalinks.add(obs_permalink)
+
             # Index with parent entity's file path since that's where it's defined
             obs_content_stems = "\n".join(
                 p for p in self._generate_variants(obs.content) if p and p.strip()
             )
-            await self.repository.index_item(
+            # Truncate to stay under Postgres's 8KB index row limit
+            if len(obs_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
+                obs_content_stems = obs_content_stems[:MAX_CONTENT_STEMS_SIZE]  # pragma: no cover
+            rows_to_index.append(
                 SearchIndexRow(
                     id=obs.id,
                     type=SearchItemType.OBSERVATION.value,
                     title=f"{obs.category}: {obs.content[:100]}...",
                     content_stems=obs_content_stems,
                     content_snippet=obs.content,
-                    permalink=obs.permalink,
+                    permalink=obs_permalink,
                     file_path=entity.file_path,
                     category=obs.category,
                     entity_id=entity.id,
@@ -282,12 +346,12 @@ class SearchService:
                         "tags": obs.tags,
                     },
                     created_at=entity.created_at,
-                    updated_at=entity.updated_at,
+                    updated_at=_mtime_to_datetime(entity),
                     project_id=entity.project_id,
                 )
             )
 
-        # Only index outgoing relations (ones defined in this file)
+        # Add relation rows (only outgoing relations defined in this file)
         for rel in entity.outgoing_relations:
             # Create descriptive title showing the relationship
             relation_title = (
@@ -299,7 +363,7 @@ class SearchService:
             rel_content_stems = "\n".join(
                 p for p in self._generate_variants(relation_title) if p and p.strip()
             )
-            await self.repository.index_item(
+            rows_to_index.append(
                 SearchIndexRow(
                     id=rel.id,
                     title=relation_title,
@@ -312,10 +376,13 @@ class SearchService:
                     to_id=rel.to_id,
                     relation_type=rel.relation_type,
                     created_at=entity.created_at,
-                    updated_at=entity.updated_at,
+                    updated_at=_mtime_to_datetime(entity),
                     project_id=entity.project_id,
                 )
             )
+
+        # Batch insert all rows at once
+        await self.repository.bulk_index_items(rows_to_index)
 
     async def delete_by_permalink(self, permalink: str):
         """Delete an item from the search index."""

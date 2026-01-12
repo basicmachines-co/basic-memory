@@ -107,6 +107,7 @@ async def call_get(
     """
     logger.debug(f"Calling GET '{url}' params: '{params}'")
     error_message = None
+
     try:
         response = await client.get(
             url,
@@ -280,6 +281,7 @@ async def call_patch(
         ToolError: If the request fails with an appropriate error message
     """
     logger.debug(f"Calling PATCH '{url}'")
+
     try:
         response = await client.patch(
             url,
@@ -384,6 +386,7 @@ async def call_post(
     """
     logger.debug(f"Calling POST '{url}'")
     error_message = None
+
     try:
         response = await client.post(
             url=url,
@@ -432,6 +435,38 @@ async def call_post(
         raise ToolError(error_message) from e
 
 
+async def resolve_entity_id(client: AsyncClient, project_external_id: str, identifier: str) -> str:
+    """Resolve a string identifier to an entity external_id using the v2 API.
+
+    Args:
+        client: HTTP client for API calls
+        project_external_id: Project external ID (UUID)
+        identifier: The identifier to resolve (permalink, title, or path)
+
+    Returns:
+        The resolved entity external_id (UUID)
+
+    Raises:
+        ToolError: If the identifier cannot be resolved
+    """
+    try:
+        response = await call_post(
+            client,
+            f"/v2/projects/{project_external_id}/knowledge/resolve",
+            json={"identifier": identifier},
+        )
+        data = response.json()
+        return data["external_id"]
+    except HTTPStatusError as e:
+        if e.response.status_code == 404:  # pragma: no cover
+            raise ToolError(f"Entity not found: '{identifier}'")  # pragma: no cover
+        raise ToolError(f"Error resolving identifier '{identifier}': {e}")  # pragma: no cover
+    except Exception as e:
+        raise ToolError(
+            f"Unexpected error resolving identifier '{identifier}': {e}"
+        )  # pragma: no cover
+
+
 async def call_delete(
     client: AsyncClient,
     url: URL | str,
@@ -465,6 +500,7 @@ async def call_delete(
     """
     logger.debug(f"Calling DELETE '{url}'")
     error_message = None
+
     try:
         response = await client.delete(
             url=url,
@@ -506,73 +542,3 @@ async def call_delete(
 
     except HTTPStatusError as e:
         raise ToolError(error_message) from e
-
-
-def check_migration_status() -> Optional[str]:
-    """Check if sync/migration is in progress and return status message if so.
-
-    Returns:
-        Status message if sync is in progress, None if system is ready
-    """
-    try:
-        from basic_memory.services.sync_status_service import sync_status_tracker
-
-        if not sync_status_tracker.is_ready:
-            return sync_status_tracker.get_summary()
-        return None
-    except Exception:
-        # If there's any error checking sync status, assume ready
-        return None
-
-
-async def wait_for_migration_or_return_status(
-    timeout: float = 5.0, project_name: Optional[str] = None
-) -> Optional[str]:
-    """Wait briefly for sync/migration to complete, or return status message.
-
-    Args:
-        timeout: Maximum time to wait for sync completion
-        project_name: Optional project name to check specific project status.
-                     If provided, only checks that project's readiness.
-                     If None, uses global status check (legacy behavior).
-
-    Returns:
-        Status message if sync is still in progress, None if ready
-    """
-    try:
-        from basic_memory.services.sync_status_service import sync_status_tracker
-        import asyncio
-
-        # Check if we should use project-specific or global status
-        def is_ready() -> bool:
-            if project_name:
-                return sync_status_tracker.is_project_ready(project_name)
-            return sync_status_tracker.is_ready
-
-        if is_ready():
-            return None
-
-        # Wait briefly for sync to complete
-        start_time = asyncio.get_event_loop().time()
-        while (asyncio.get_event_loop().time() - start_time) < timeout:
-            if is_ready():
-                return None
-            await asyncio.sleep(0.1)  # Check every 100ms
-
-        # Still not ready after timeout
-        if project_name:
-            # For project-specific checks, get project status details
-            project_status = sync_status_tracker.get_project_status(project_name)
-            if project_status and project_status.status.value == "failed":
-                error_msg = project_status.error or "Unknown sync error"
-                return f"❌ Sync failed for project '{project_name}': {error_msg}"
-            elif project_status:
-                return f"🔄 Project '{project_name}' is still syncing: {project_status.message}"
-            else:
-                return f"⚠️ Project '{project_name}' status unknown"
-        else:
-            # Fall back to global summary for legacy calls
-            return sync_status_tracker.get_summary()
-    except Exception:  # pragma: no cover
-        # If there's any error, assume ready
-        return None

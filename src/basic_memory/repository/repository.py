@@ -1,6 +1,7 @@
 """Base repository implementation."""
 
-from typing import Type, Optional, Any, Sequence, TypeVar, List, Dict
+from typing import Type, Optional, Any, Sequence, TypeVar, List, Dict, cast
+
 
 from loguru import logger
 from sqlalchemy import (
@@ -10,13 +11,14 @@ from sqlalchemy import (
     Executable,
     inspect,
     Result,
-    Column,
     and_,
     delete,
 )
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import NoResultFound
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.sql.elements import ColumnElement
 
 from basic_memory import db
 from basic_memory.models import Base
@@ -38,7 +40,7 @@ class Repository[T: Base]:
         if Model:
             self.Model = Model
             self.mapper = inspect(self.Model).mapper
-            self.primary_key: Column[Any] = self.mapper.primary_key[0]
+            self.primary_key: ColumnElement[Any] = self.mapper.primary_key[0]
             self.valid_columns = [column.key for column in self.mapper.columns]
             # Check if this model has a project_id column
             self.has_project_id = "project_id" in self.valid_columns
@@ -152,12 +154,25 @@ class Repository[T: Base]:
         # Add project filter if applicable
         return self._add_project_filter(query)
 
-    async def find_all(self, skip: int = 0, limit: Optional[int] = None) -> Sequence[T]:
-        """Fetch records from the database with pagination."""
+    async def find_all(
+        self, skip: int = 0, limit: Optional[int] = None, use_load_options: bool = True
+    ) -> Sequence[T]:
+        """Fetch records from the database with pagination.
+
+        Args:
+            skip: Number of records to skip
+            limit: Maximum number of records to return
+            use_load_options: Whether to apply eager loading options (default: True)
+        """
         logger.debug(f"Finding all {self.Model.__name__} (skip={skip}, limit={limit})")
 
         async with db.scoped_session(self.session_maker) as session:
-            query = select(self.Model).offset(skip).options(*self.get_load_options())
+            query = select(self.Model).offset(skip)
+
+            # Only apply load options if requested
+            if use_load_options:
+                query = query.options(*self.get_load_options())
+
             # Add project filter if applicable
             query = self._add_project_filter(query)
 
@@ -310,7 +325,7 @@ class Repository[T: Base]:
                 conditions.append(getattr(self.Model, "project_id") == self.project_id)
 
             query = delete(self.Model).where(and_(*conditions))
-            result = await session.execute(query)
+            result = cast(CursorResult[Any], await session.execute(query))
             logger.debug(f"Deleted {result.rowcount} records")
             return result.rowcount
 
@@ -325,7 +340,7 @@ class Repository[T: Base]:
                 conditions.append(getattr(self.Model, "project_id") == self.project_id)
 
             query = delete(self.Model).where(and_(*conditions))
-            result = await session.execute(query)
+            result = cast(CursorResult[Any], await session.execute(query))
             deleted = result.rowcount > 0
             logger.debug(f"Deleted {result.rowcount} records")
             return deleted

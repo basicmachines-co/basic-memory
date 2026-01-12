@@ -1,7 +1,8 @@
 """Tests for Pydantic schema validation and conversion."""
 
+import os
 import pytest
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from pydantic import ValidationError, BaseModel
 
 from basic_memory.schemas import (
@@ -20,7 +21,7 @@ def test_entity_project_name():
     """Test creating EntityIn with minimal required fields."""
     data = {"title": "Test Entity", "folder": "test", "entity_type": "knowledge"}
     entity = Entity.model_validate(data)
-    assert entity.file_path == "test/Test Entity.md"
+    assert entity.file_path == os.path.join("test", "Test Entity.md")
     assert entity.permalink == "test/test-entity"
     assert entity.entity_type == "knowledge"
 
@@ -29,7 +30,7 @@ def test_entity_project_id():
     """Test creating EntityIn with minimal required fields."""
     data = {"project": 2, "title": "Test Entity", "folder": "test", "entity_type": "knowledge"}
     entity = Entity.model_validate(data)
-    assert entity.file_path == "test/Test Entity.md"
+    assert entity.file_path == os.path.join("test", "Test Entity.md")
     assert entity.permalink == "test/test-entity"
     assert entity.entity_type == "knowledge"
 
@@ -43,7 +44,7 @@ def test_entity_non_markdown():
         "content_type": "text/plain",
     }
     entity = Entity.model_validate(data)
-    assert entity.file_path == "test/Test Entity.txt"
+    assert entity.file_path == os.path.join("test", "Test Entity.txt")
     assert entity.permalink == "test/test-entity"
     assert entity.entity_type == "file"
 
@@ -88,6 +89,49 @@ def test_relation_response():
     assert relation.to_id == "test/456"
     assert relation.relation_type == "relates_to"
     assert relation.context is None
+
+
+def test_relation_response_with_null_permalink():
+    """Test RelationResponse handles null permalinks by falling back to file_path (fixes issue #483).
+
+    When entities are imported from environments without permalinks enabled,
+    the from_entity.permalink and to_entity.permalink can be None.
+    In this case, we fall back to file_path to ensure the API always returns
+    a usable identifier for the related entities.
+
+    We use file_path directly (not converted to permalink format) because if the
+    entity doesn't have a permalink, the system won't find it by a generated one.
+    """
+    data = {
+        "permalink": "test/relation/123",
+        "relation_type": "relates_to",
+        "from_entity": {"permalink": None, "file_path": "notes/source-note.md"},
+        "to_entity": {
+            "permalink": None,
+            "file_path": "notes/target-note.md",
+            "title": "Target Note",
+        },
+    }
+    relation = RelationResponse.model_validate(data)
+    # Falls back to file_path directly (not converted to permalink)
+    assert relation.from_id == "notes/source-note.md"
+    assert relation.to_id == "notes/target-note.md"
+    assert relation.to_name == "Target Note"
+    assert relation.relation_type == "relates_to"
+
+
+def test_relation_response_with_permalink_preferred_over_file_path():
+    """Test that permalink is preferred over file_path when both are available."""
+    data = {
+        "permalink": "test/relation/123",
+        "relation_type": "links_to",
+        "from_entity": {"permalink": "from-permalink", "file_path": "notes/from-file.md"},
+        "to_entity": {"permalink": "to-permalink", "file_path": "notes/to-file.md"},
+    }
+    relation = RelationResponse.model_validate(data)
+    # Prefers permalink over file_path
+    assert relation.from_id == "from-permalink"
+    assert relation.to_id == "to-permalink"
 
 
 def test_entity_out_from_attributes():
@@ -220,8 +264,10 @@ def test_permalink_generation():
         ("last week", True),
         ("3 weeks ago", True),
         ("invalid", False),
-        ("tomorrow", False),
-        ("next week", False),
+        # NOTE: "tomorrow" and "next week" now return 1 day ago due to timezone safety
+        # They no longer raise errors - this is intentional for remote MCP
+        ("tomorrow", True),  # Now valid - returns 1 day ago
+        ("next week", True),  # Now valid - returns 1 day ago
         ("", False),
         ("0d", True),
         ("366d", False),
@@ -315,25 +361,27 @@ class TestTimeframeParsing:
     """Test cases for parse_timeframe() and validate_timeframe() functions."""
 
     def test_parse_timeframe_today(self):
-        """Test that parse_timeframe('today') returns start of current day with timezone."""
+        """Test that parse_timeframe('today') returns 1 day ago for remote MCP timezone safety."""
         result = parse_timeframe("today")
-        expected = datetime.combine(datetime.now().date(), time.min).astimezone()
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
 
-        assert result == expected
-        assert result.hour == 0
-        assert result.minute == 0
-        assert result.second == 0
-        assert result.microsecond == 0
+        # Should be approximately 1 day ago (within a second for test tolerance)
+        diff = abs((result.replace(tzinfo=None) - one_day_ago).total_seconds())
+        assert diff < 2, f"Expected ~1 day ago for 'today', got {result}"
         assert result.tzinfo is not None
 
     def test_parse_timeframe_today_case_insensitive(self):
         """Test that parse_timeframe handles 'today' case-insensitively."""
         test_cases = ["today", "TODAY", "Today", "ToDay"]
-        expected = datetime.combine(datetime.now().date(), time.min).astimezone()
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
 
         for case in test_cases:
             result = parse_timeframe(case)
-            assert result == expected
+            # Should be approximately 1 day ago (within a second for test tolerance)
+            diff = abs((result.replace(tzinfo=None) - one_day_ago).total_seconds())
+            assert diff < 2, f"Expected ~1 day ago for '{case}', got {result}"
 
     def test_parse_timeframe_other_formats(self):
         """Test that parse_timeframe works with other dateparser formats."""
@@ -343,7 +391,7 @@ class TestTimeframeParsing:
         result_1d = parse_timeframe("1d")
         expected_1d = now - timedelta(days=1)
         diff = abs((result_1d - expected_1d).total_seconds())
-        assert diff < 60  # Within 1 minute tolerance
+        assert diff < 3600  # Within 1 hour tolerance (accounts for DST transitions)
         assert result_1d.tzinfo is not None
 
         # Test yesterday - should be yesterday at same time
@@ -400,9 +448,9 @@ class TestTimeframeParsing:
         with pytest.raises(ValueError, match="Timeframe must be a string"):
             validate_timeframe(123)  # type: ignore
 
-        # Future timeframe
-        with pytest.raises(ValueError, match="Timeframe cannot be in the future"):
-            validate_timeframe("tomorrow")
+        # NOTE: Future timeframes no longer raise errors due to 1-day minimum enforcement
+        # "tomorrow" and "next week" now return 1 day ago for timezone safety
+        # This is intentional for remote MCP deployments
 
         # Too far in past (>365 days)
         with pytest.raises(ValueError, match="Timeframe should be <= 1 year"):
@@ -430,12 +478,12 @@ class TestTimeframeParsing:
         assert model.timeframe == "1d"
 
     def test_timeframe_integration_today_vs_1d(self):
-        """Test the specific bug fix: 'today' vs '1d' behavior."""
+        """Test that 'today' and '1d' both return 1 day ago due to timezone safety minimum."""
 
         class TestModel(BaseModel):
             timeframe: TimeFrame
 
-        # 'today' should be preserved
+        # 'today' should be preserved as special case in validation
         today_model = TestModel(timeframe="today")
         assert today_model.timeframe == "today"
 
@@ -443,19 +491,63 @@ class TestTimeframeParsing:
         oneday_model = TestModel(timeframe="1d")
         assert oneday_model.timeframe == "1d"
 
-        # When parsed by parse_timeframe, they should be different
+        # When parsed by parse_timeframe, both should return approximately 1 day ago
+        # due to the 1-day minimum enforcement for remote MCP timezone safety
         today_parsed = parse_timeframe("today")
         oneday_parsed = parse_timeframe("1d")
 
-        # 'today' should be start of today (00:00:00)
-        assert today_parsed.hour == 0
-        assert today_parsed.minute == 0
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
 
-        # '1d' should be 24 hours ago (same time yesterday)
-        now = datetime.now().astimezone()
-        expected_1d = now - timedelta(days=1)
-        diff = abs((oneday_parsed - expected_1d).total_seconds())
-        assert diff < 60  # Within 1 minute
+        # Both should be approximately 1 day ago
+        today_diff = abs((today_parsed.replace(tzinfo=None) - one_day_ago).total_seconds())
+        assert today_diff < 60, f"'today' should be ~1 day ago, got {today_parsed}"
 
-        # They should be different times
-        assert today_parsed != oneday_parsed
+        oneday_diff = abs((oneday_parsed.replace(tzinfo=None) - one_day_ago).total_seconds())
+        assert oneday_diff < 60, f"'1d' should be ~1 day ago, got {oneday_parsed}"
+
+        # They should be approximately the same time (within an hour due to parsing differences)
+        time_diff = abs((today_parsed - oneday_parsed).total_seconds())
+        assert time_diff < 3600, f"'today' and '1d' should be similar times, diff: {time_diff}s"
+
+
+class TestObservationContentLength:
+    """Test observation content length validation matches DB schema."""
+
+    def test_observation_accepts_long_content(self):
+        """Observation content should accept unlimited length to match DB Text column."""
+        from basic_memory.schemas.base import Observation
+
+        # Very long content that would have failed with old MaxLen(1000) limit
+        long_content = "x" * 10000
+
+        obs = Observation(category="test", content=long_content)
+        assert len(obs.content) == 10000
+
+    def test_observation_accepts_very_long_content(self):
+        """Observation content should accept very long content like JSON schemas."""
+        from basic_memory.schemas.base import Observation
+
+        # Simulate the JSON schema content from issue #385 (1458+ chars)
+        json_schema_content = '{"$schema": "http://json-schema.org/draft-07/schema#"' + "x" * 50000
+
+        obs = Observation(category="schema", content=json_schema_content)
+        assert len(obs.content) > 50000
+
+    def test_observation_still_requires_non_empty_content(self):
+        """Observation content must still be non-empty after stripping."""
+        from basic_memory.schemas.base import Observation
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            Observation(category="test", content="")
+
+        with pytest.raises(ValidationError):
+            Observation(category="test", content="   ")  # whitespace only
+
+    def test_observation_strips_whitespace(self):
+        """Observation content should have whitespace stripped."""
+        from basic_memory.schemas.base import Observation
+
+        obs = Observation(category="test", content="  some content  ")
+        assert obs.content == "some content"

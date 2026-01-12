@@ -16,7 +16,8 @@ class DirectoryNode(BaseModel):
     children: List["DirectoryNode"] = []  # Default to empty list
     title: Optional[str] = None
     permalink: Optional[str] = None
-    entity_id: Optional[int] = None
+    external_id: Optional[str] = None  # UUID (primary API identifier for v2)
+    entity_id: Optional[int] = None  # Internal numeric ID
     entity_type: Optional[str] = None
     content_type: Optional[str] = None
     updated_at: Optional[datetime] = None

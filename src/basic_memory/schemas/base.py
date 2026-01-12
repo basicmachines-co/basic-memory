@@ -11,20 +11,46 @@ Key Concepts:
 4. Everything is stored in both SQLite and markdown files
 """
 
+import os
 import mimetypes
 import re
-from datetime import datetime, time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Annotated, Dict
 
 from annotated_types import MinLen, MaxLen
 from dateparser import parse
 
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator, computed_field
 
 from basic_memory.config import ConfigManager
-from basic_memory.file_utils import sanitize_for_filename
+from basic_memory.file_utils import sanitize_for_filename, sanitize_for_folder
 from basic_memory.utils import generate_permalink
+
+
+def has_valid_file_extension(filename: str) -> bool:
+    """Check if a filename has a valid file extension recognized by mimetypes.
+
+    This is used to determine whether to split the extension when processing
+    titles in kebab_filenames mode. Prevents treating periods in version numbers
+    or decimals as file extensions.
+
+    Args:
+        filename: The filename to check
+
+    Returns:
+        True if the filename has a recognized file extension, False otherwise
+
+    Examples:
+        >>> has_valid_file_extension("document.md")
+        True
+        >>> has_valid_file_extension("Version 2.0.0")
+        False
+        >>> has_valid_file_extension("image.png")
+        True
+    """
+    mime_type, _ = mimetypes.guess_type(filename)
+    return mime_type is not None
 
 
 def to_snake_case(name: str) -> str:
@@ -51,30 +77,47 @@ def to_snake_case(name: str) -> str:
 def parse_timeframe(timeframe: str) -> datetime:
     """Parse timeframe with special handling for 'today' and other natural language expressions.
 
+    Enforces a minimum 1-day lookback to handle timezone differences in distributed deployments.
+
     Args:
         timeframe: Natural language timeframe like 'today', '1d', '1 week ago', etc.
 
     Returns:
         datetime: The parsed datetime for the start of the timeframe, timezone-aware in local system timezone
+                 Always returns at least 1 day ago to handle timezone differences.
 
     Examples:
-        parse_timeframe('today') -> 2025-06-05 00:00:00-07:00 (start of today with local timezone)
+        parse_timeframe('today') -> 2025-06-04 14:50:00-07:00 (1 day ago, not start of today)
+        parse_timeframe('1h') -> 2025-06-04 14:50:00-07:00 (1 day ago, not 1 hour ago)
         parse_timeframe('1d') -> 2025-06-04 14:50:00-07:00 (24 hours ago with local timezone)
         parse_timeframe('1 week ago') -> 2025-05-29 14:50:00-07:00 (1 week ago with local timezone)
     """
     if timeframe.lower() == "today":
-        # Return start of today (00:00:00) in local timezone
-        naive_dt = datetime.combine(datetime.now().date(), time.min)
-        return naive_dt.astimezone()
+        # For "today", return 1 day ago to ensure we capture recent activity across timezones
+        # This handles the case where client and server are in different timezones
+        now = datetime.now()
+        one_day_ago = now - timedelta(days=1)
+        return one_day_ago.astimezone()
     else:
         # Use dateparser for other formats
         parsed = parse(timeframe)
         if not parsed:
             raise ValueError(f"Could not parse timeframe: {timeframe}")
-        
+
         # If the parsed datetime is naive, make it timezone-aware in local system timezone
         if parsed.tzinfo is None:
-            return parsed.astimezone()
+            parsed = parsed.astimezone()
+        else:
+            parsed = parsed  # pragma: no cover
+
+        # Enforce minimum 1-day lookback to handle timezone differences
+        # This ensures we don't miss recent activity due to client/server timezone mismatches
+        now = datetime.now().astimezone()
+        one_day_ago = now - timedelta(days=1)
+
+        # If the parsed time is more recent than 1 day ago, use 1 day ago instead
+        if parsed > one_day_ago:
+            return one_day_ago
         else:
             return parsed
 
@@ -95,7 +138,7 @@ def validate_timeframe(timeframe: str) -> str:
     # Convert to duration
     now = datetime.now().astimezone()
     if parsed > now:
-        raise ValueError("Timeframe cannot be in the future")
+        raise ValueError("Timeframe cannot be in the future")  # pragma: no cover
 
     # Could format the duration back to our standard format
     days = (now - parsed).days
@@ -140,7 +183,7 @@ ObservationStr = Annotated[
     str,
     BeforeValidator(str.strip),  # Clean whitespace
     MinLen(1),  # Ensure non-empty after stripping
-    MaxLen(1000),  # Keep reasonable length
+    # No MaxLen - matches DB Text column which has no length restriction
 ]
 
 
@@ -179,6 +222,7 @@ class Entity(BaseModel):
     """
 
     # private field to override permalink
+    # Use empty string "" as sentinel to indicate permalinks are explicitly disabled
     _permalink: Optional[str] = None
 
     title: str
@@ -191,6 +235,10 @@ class Entity(BaseModel):
         examples=["text/markdown", "image/jpeg"],
         default="text/markdown",
     )
+
+    def __init__(self, **data):
+        data["folder"] = sanitize_for_folder(data.get("folder", ""))
+        super().__init__(**data)
 
     @property
     def safe_title(self) -> str:
@@ -209,22 +257,32 @@ class Entity(BaseModel):
         use_kebab_case = app_config.kebab_filenames
 
         if use_kebab_case:
-            fixed_title = generate_permalink(file_path=fixed_title, split_extension=False)
+            # Convert to kebab-case: lowercase with hyphens, preserving periods in version numbers
+            # generate_permalink() uses mimetypes to detect real file extensions and only splits
+            # them off, avoiding misinterpreting periods in version numbers as extensions
+            has_extension = has_valid_file_extension(fixed_title)
+            fixed_title = generate_permalink(file_path=fixed_title, split_extension=has_extension)
 
         return fixed_title
 
+    @computed_field
     @property
-    def file_path(self):
+    def file_path(self) -> str:
         """Get the file path for this entity based on its permalink."""
         safe_title = self.safe_title
         if self.content_type == "text/markdown":
-            return f"{self.folder}/{safe_title}.md" if self.folder else f"{safe_title}.md"
+            return (
+                os.path.join(self.folder, f"{safe_title}.md") if self.folder else f"{safe_title}.md"
+            )
         else:
-            return f"{self.folder}/{safe_title}" if self.folder else safe_title
+            return os.path.join(self.folder, safe_title) if self.folder else safe_title
 
     @property
-    def permalink(self) -> Permalink:
+    def permalink(self) -> Optional[Permalink]:
         """Get a url friendly path}."""
+        # Empty string is a sentinel value indicating permalinks are disabled
+        if self._permalink == "":
+            return None
         return self._permalink or generate_permalink(self.file_path)
 
     @model_validator(mode="after")

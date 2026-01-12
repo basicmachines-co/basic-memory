@@ -113,9 +113,11 @@ class TestNormalizeMemoryUrl:
             )
 
     def test_empty_url(self):
-        """Test that empty URLs return empty string."""
-        assert normalize_memory_url(None) == ""
-        assert normalize_memory_url("") == ""
+        """Test that empty URLs raise ValueError."""
+        with pytest.raises(ValueError, match="cannot be empty"):
+            normalize_memory_url(None)
+        with pytest.raises(ValueError, match="cannot be empty"):
+            normalize_memory_url("")
 
     def test_invalid_double_slashes(self):
         """Test that URLs with double slashes raise ValueError."""
@@ -145,14 +147,14 @@ class TestNormalizeMemoryUrl:
 
     def test_whitespace_only(self):
         """Test that whitespace-only URLs raise ValueError."""
-        invalid_urls = [
+        whitespace_urls = [
             "   ",
             "\t",
             "\n",
             "  \n  ",
         ]
 
-        for url in invalid_urls:
+        for url in whitespace_urls:
             with pytest.raises(ValueError, match="cannot be empty or whitespace"):
                 normalize_memory_url(url)
 
@@ -206,9 +208,9 @@ class TestMemoryUrlPydanticValidation:
             error_msg = str(exc_info.value)
             assert "value_error" in error_msg, f"Should be a value_error for '{url}'"
 
-    def test_empty_string_fails_minlength(self):
-        """Test that empty strings fail MinLen validation."""
-        with pytest.raises(ValidationError, match="at least 1"):
+    def test_empty_string_fails_validation(self):
+        """Test that empty strings fail validation."""
+        with pytest.raises(ValidationError, match="cannot be empty"):
             memory_url.validate_python("")
 
     def test_very_long_urls_fail_maxlength(self):

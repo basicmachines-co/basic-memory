@@ -2,9 +2,9 @@
 
 import tempfile
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Union
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Body
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Body, Response
 from fastapi.responses import FileResponse, JSONResponse
 from loguru import logger
 
@@ -25,6 +25,17 @@ from datetime import datetime
 router = APIRouter(prefix="/resource", tags=["resources"])
 
 
+def _mtime_to_datetime(entity: EntityModel) -> datetime:
+    """Convert entity mtime (file modification time) to datetime.
+
+    Returns the file's actual modification time, falling back to updated_at
+    if mtime is not available.
+    """
+    if entity.mtime:  # pragma: no cover
+        return datetime.fromtimestamp(entity.mtime).astimezone()  # pragma: no cover
+    return entity.updated_at
+
+
 def get_entity_ids(item: SearchIndexRow) -> set[int]:
     match item.type:
         case SearchItemType.ENTITY:
@@ -39,7 +50,7 @@ def get_entity_ids(item: SearchIndexRow) -> set[int]:
             raise ValueError(f"Unexpected type: {item.type}")
 
 
-@router.get("/{identifier:path}")
+@router.get("/{identifier:path}", response_model=None)
 async def get_resource_content(
     config: ProjectConfigDep,
     link_resolver: LinkResolverDep,
@@ -50,7 +61,7 @@ async def get_resource_content(
     identifier: str,
     page: int = 1,
     page_size: int = 10,
-) -> FileResponse:
+) -> Union[Response, FileResponse]:
     """Get resource content by identifier: name or permalink."""
     logger.debug(f"Getting content for: {identifier}")
 
@@ -81,13 +92,16 @@ async def get_resource_content(
     # return single response
     if len(results) == 1:
         entity = results[0]
-        file_path = Path(f"{config.home}/{entity.file_path}")
-        if not file_path.exists():
+        # Check file exists via file_service (for cloud compatibility)
+        if not await file_service.exists(entity.file_path):
             raise HTTPException(
                 status_code=404,
-                detail=f"File not found: {file_path}",
+                detail=f"File not found: {entity.file_path}",
             )
-        return FileResponse(path=file_path)
+        # Read content via file_service as bytes (works with both local and S3)
+        content = await file_service.read_file_bytes(entity.file_path)
+        content_type = file_service.content_type(entity.file_path)
+        return Response(content=content, media_type=content_type)
 
     # for multiple files, initialize a temporary file for writing the results
     with tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".md") as tmp_file:
@@ -97,7 +111,7 @@ async def get_resource_content(
             # Read content for each entity
             content = await file_service.read_entity_content(result)
             memory_url = normalize_memory_url(result.permalink)
-            modified_date = result.updated_at.isoformat()
+            modified_date = _mtime_to_datetime(result).isoformat()
             checksum = result.checksum[:8] if result.checksum else ""
 
             # Prepare the delimited content
@@ -151,27 +165,37 @@ async def write_resource(
     try:
         # Get content from request body
 
+        # Defensive type checking: ensure content is a string
+        # FastAPI should validate this, but if a dict somehow gets through
+        # (e.g., via JSON body parsing), we need to catch it here
+        if isinstance(content, dict):
+            logger.error(  # pragma: no cover
+                f"Error writing resource {file_path}: "
+                f"content is a dict, expected string. Keys: {list(content.keys())}"
+            )
+            raise HTTPException(  # pragma: no cover
+                status_code=400,
+                detail="content must be a string, not a dict. "
+                "Ensure request body is sent as raw string content, not JSON object.",
+            )
+
         # Ensure it's UTF-8 string content
         if isinstance(content, bytes):  # pragma: no cover
             content_str = content.decode("utf-8")
         else:
             content_str = str(content)
 
-        # Get full file path
-        full_path = Path(f"{config.home}/{file_path}")
-
-        # Ensure parent directory exists
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write content to file
-        checksum = await file_service.write_file(full_path, content_str)
+        # Cloud compatibility: do not assume a local filesystem path structure.
+        # Delegate directory creation + writes to the configured FileService (local or S3).
+        await file_service.ensure_directory(Path(file_path).parent)
+        checksum = await file_service.write_file(file_path, content_str)
 
         # Get file info
-        file_stats = file_service.file_stats(full_path)
+        file_metadata = await file_service.get_file_metadata(file_path)
 
         # Determine file details
         file_name = Path(file_path).name
-        content_type = file_service.content_type(full_path)
+        content_type = file_service.content_type(file_path)
 
         entity_type = "canvas" if file_path.endswith(".canvas") else "file"
 
@@ -188,7 +212,7 @@ async def write_resource(
                     "content_type": content_type,
                     "file_path": file_path,
                     "checksum": checksum,
-                    "updated_at": datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+                    "updated_at": file_metadata.modified_at,
                 },
             )
             status_code = 200
@@ -200,8 +224,8 @@ async def write_resource(
                 content_type=content_type,
                 file_path=file_path,
                 checksum=checksum,
-                created_at=datetime.fromtimestamp(file_stats.st_ctime).astimezone(),
-                updated_at=datetime.fromtimestamp(file_stats.st_mtime).astimezone(),
+                created_at=file_metadata.created_at,
+                updated_at=file_metadata.modified_at,
             )
             entity = await entity_repository.add(entity)
             status_code = 201
@@ -215,9 +239,9 @@ async def write_resource(
             content={
                 "file_path": file_path,
                 "checksum": checksum,
-                "size": file_stats.st_size,
-                "created_at": file_stats.st_ctime,
-                "modified_at": file_stats.st_mtime,
+                "size": file_metadata.size,
+                "created_at": file_metadata.created_at.timestamp(),
+                "modified_at": file_metadata.modified_at.timestamp(),
             },
         )
     except Exception as e:  # pragma: no cover

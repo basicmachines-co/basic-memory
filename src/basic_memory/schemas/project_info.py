@@ -2,6 +2,7 @@
 
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from pydantic import Field, BaseModel
@@ -76,16 +77,6 @@ class SystemStatus(BaseModel):
 
     # System information
     timestamp: datetime = Field(description="Timestamp when the information was collected")
-
-
-class ProjectDetail(BaseModel):
-    """Detailed information about a project."""
-
-    path: str = Field(description="Path to the project directory")
-    active: bool = Field(description="Whether the project is active")
-    id: Optional[int] = Field(description="Database ID of the project if available")
-    is_default: bool = Field(description="Whether this is the default project")
-    permalink: str = Field(description="URL-friendly identifier for the project")
 
 
 class ProjectInfoResponse(BaseModel):
@@ -182,6 +173,8 @@ class ProjectWatchStatus(BaseModel):
 class ProjectItem(BaseModel):
     """Simple representation of a project."""
 
+    id: int
+    external_id: str  # UUID string for API references (required after migration)
     name: str
     path: str
     is_default: bool = False
@@ -189,6 +182,14 @@ class ProjectItem(BaseModel):
     @property
     def permalink(self) -> str:  # pragma: no cover
         return generate_permalink(self.name)
+
+    @property
+    def home(self) -> Path:  # pragma: no cover
+        return Path(self.path).expanduser()
+
+    @property
+    def project_url(self) -> str:  # pragma: no cover
+        return f"/{generate_permalink(self.name)}"
 
 
 class ProjectList(BaseModel):
