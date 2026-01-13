@@ -24,6 +24,9 @@ from basic_memory.mcp.tools.project_management import (
     delete_project,
 )
 
+# Reindex tool
+from basic_memory.mcp.tools.reindex import force_reindex
+
 # ChatGPT-compatible tools
 from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 
@@ -35,6 +38,7 @@ __all__ = [
     "delete_project",
     "edit_note",
     "fetch",
+    "force_reindex",
     "list_directory",
     "list_memory_projects",
     "move_note",
