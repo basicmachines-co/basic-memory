@@ -219,6 +219,9 @@ def setup_logging(
         log_to_stdout: Write to stderr (for Docker/cloud deployments)
         structured_context: Bind tenant_id, fly_region, etc. for cloud observability
     """
+    # Normalize log level to uppercase to handle case sensitivity
+    log_level = log_level.upper()
+    
     # Remove default handler and any existing handlers
     logger.remove()
 

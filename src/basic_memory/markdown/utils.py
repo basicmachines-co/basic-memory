@@ -1,5 +1,6 @@
 """Utilities for converting between markdown and entity models."""
 
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -38,7 +39,13 @@ def entity_model_from_markdown(
         raise ValueError("Both created and modified dates are required in markdown")
 
     # Create or update entity
-    model = entity or Entity()
+    if entity is None:
+        model = Entity()
+        # Explicitly set external_id for new entities since SQLAlchemy's INSERT-time
+        # default isn't reliably invoked in async contexts with aiosqlite
+        model.external_id = str(uuid.uuid4())
+    else:
+        model = entity
 
     # Update basic fields
     model.title = markdown.frontmatter.title

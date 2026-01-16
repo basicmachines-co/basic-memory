@@ -53,4 +53,5 @@ ENV/
 # claude action
 claude-output
 **/.claude/settings.local.json
+.cursor/
 .mcp.json

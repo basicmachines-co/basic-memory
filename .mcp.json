@@ -1,0 +1,16 @@
+{
+	"mcpServers": {
+		"Sequential Thinking": {
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+		},
+		"context7": {
+			"command": "npx",
+			"args": ["-y", "@upstash/context7-mcp"]
+		},
+		"basic-memory": {
+			"command": "uvx",
+			"args": ["basic-memory", "--project=basic-memory", "mcp"]
+		}
+	}
+}
