@@ -9,6 +9,7 @@ Key differences from v1:
 - More RESTful: POST for create, PUT for update, GET for read
 """
 
+import uuid
 from pathlib import Path as PathLib
 
 from fastapi import APIRouter, HTTPException, Response, Path
@@ -147,7 +148,9 @@ async def create_resource(
         entity_type = "canvas" if data.file_path.endswith(".canvas") else "file"
 
         # Create a new entity model
+        # Explicitly set external_id to ensure NOT NULL constraint is satisfied (fixes #512)
         entity = EntityModel(
+            external_id=str(uuid.uuid4()),
             title=file_name,
             entity_type=entity_type,
             content_type=content_type,

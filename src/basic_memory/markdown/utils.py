@@ -1,5 +1,6 @@
 """Utilities for converting between markdown and entity models."""
 
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,6 +40,12 @@ def entity_model_from_markdown(
 
     # Create or update entity
     model = entity or Entity()
+
+    # Ensure external_id is set for new entities
+    # SQLAlchemy's Python-side default may not always evaluate,
+    # so we explicitly set it here for reliability (fixes #512)
+    if not model.external_id:
+        model.external_id = str(uuid.uuid4())
 
     # Update basic fields
     model.title = markdown.frontmatter.title

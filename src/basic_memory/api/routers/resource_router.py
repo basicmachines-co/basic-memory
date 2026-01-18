@@ -1,6 +1,7 @@
 """Routes for getting entity content."""
 
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Annotated, Union
 
@@ -218,7 +219,9 @@ async def write_resource(
             status_code = 200
         else:
             # Create a new entity model
+            # Explicitly set external_id to ensure NOT NULL constraint is satisfied (fixes #512)
             entity = EntityModel(
+                external_id=str(uuid.uuid4()),
                 title=file_name,
                 entity_type=entity_type,
                 content_type=content_type,
