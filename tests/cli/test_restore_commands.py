@@ -6,7 +6,6 @@ SPEC-29 Phase 3: Tests for restore command.
 from unittest.mock import Mock, patch
 
 import httpx
-import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
@@ -260,7 +259,13 @@ class TestRestoreCommand:
         # First call is browse, second would be restore (should not happen)
         mock_browse_response = Mock(spec=httpx.Response)
         mock_browse_response.status_code = 200
-        mock_browse_response.json.return_value = {"files": ["notes/project.md"]}
+        mock_browse_response.json.return_value = {
+            "files": [
+                {"key": "notes/project.md", "size": 1024, "last_modified": "2025-01-18T12:00:00Z"}
+            ],
+            "prefix": "notes/project.md",
+            "snapshot_version": "12345",
+        }
 
         call_count = 0
 
@@ -342,9 +347,7 @@ class TestRestoreCommand:
 
                 assert result.exit_code == 0
                 # Verify the path was normalized (no leading slash)
-                assert any(
-                    data.get("path") == "notes/project.md" for data in captured_json_data
-                )
+                assert any(data.get("path") == "notes/project.md" for data in captured_json_data)
 
     def test_restore_api_error(self):
         """Test handling generic API errors during restore."""

@@ -14,6 +14,7 @@ from basic_memory.cli.commands.cloud.api_client import (
     SubscriptionRequiredError,
     make_api_request,
 )
+from basic_memory.cli.commands.cloud.schemas import BucketSnapshotBrowseResponse
 from basic_memory.config import ConfigManager
 
 console = Console()
@@ -73,20 +74,21 @@ def restore(
                         method="GET",
                         url=browse_url,
                     )
-                    data = response.json()
-                    files = data.get("files", [])
+                    browse_response = BucketSnapshotBrowseResponse.model_validate(response.json())
 
-                    if files:
-                        if len(files) <= 10:
+                    if browse_response.files:
+                        if len(browse_response.files) <= 10:
                             console.print("\n  Files to restore:")
-                            for file_path in files:
-                                console.print(f"    - {file_path}")
+                            for file_info in browse_response.files:
+                                console.print(f"    - {file_info.key}")
                         else:
-                            console.print(f"\n  {len(files)} files will be restored")
+                            console.print(
+                                f"\n  {len(browse_response.files)} files will be restored"
+                            )
                             console.print("  First 5 files:")
-                            for file_path in files[:5]:
-                                console.print(f"    - {file_path}")
-                            console.print(f"    ... and {len(files) - 5} more")
+                            for file_info in browse_response.files[:5]:
+                                console.print(f"    - {file_info.key}")
+                            console.print(f"    ... and {len(browse_response.files) - 5} more")
                     else:
                         console.print(
                             f"\n[yellow]No files found matching '{normalized_path}' "

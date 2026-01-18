@@ -16,6 +16,7 @@ from basic_memory.cli.commands.cloud.api_client import (
     SubscriptionRequiredError,
     make_api_request,
 )
+from basic_memory.cli.commands.cloud.schemas import BucketSnapshotBrowseResponse
 from basic_memory.config import ConfigManager
 
 console = Console()
@@ -330,19 +331,21 @@ def browse(
                 url=url,
             )
 
-            data = response.json()
-            files = data.get("files", [])
+            browse_response = BucketSnapshotBrowseResponse.model_validate(response.json())
 
-            if not files:
+            if not browse_response.files:
                 if prefix:
                     console.print(f"[yellow]No files found with prefix '{prefix}'[/yellow]")
                 else:
                     console.print("[yellow]No files found in snapshot[/yellow]")
                 return
 
-            console.print(f"[bold blue]Snapshot Contents ({len(files)} files)[/bold blue]")
-            for file_path in files:
-                console.print(f"  {file_path}")
+            console.print(
+                f"[bold blue]Snapshot Contents ({len(browse_response.files)} files)[/bold blue]"
+            )
+            for file_info in browse_response.files:
+                size_kb = file_info.size // 1024
+                console.print(f"  {file_info.key} ({size_kb} KB)")
 
             console.print(
                 f"\n[dim]Use 'bm cloud restore <path> --snapshot {snapshot_id}' "

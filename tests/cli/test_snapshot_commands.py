@@ -3,10 +3,9 @@
 SPEC-29 Phase 3: Tests for snapshot create, list, delete, show, browse commands.
 """
 
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import httpx
-import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
@@ -83,9 +82,7 @@ class TestSnapshotCreateCommand:
                 "basic_memory.cli.commands.cloud.snapshot.ConfigManager",
                 return_value=mock_config_manager,
             ):
-                result = runner.invoke(
-                    app, ["cloud", "snapshot", "create", "test snapshot"]
-                )
+                result = runner.invoke(app, ["cloud", "snapshot", "create", "test snapshot"])
 
                 assert result.exit_code == 1
                 assert "Subscription Required" in result.stdout
@@ -111,9 +108,7 @@ class TestSnapshotCreateCommand:
                 "basic_memory.cli.commands.cloud.snapshot.ConfigManager",
                 return_value=mock_config_manager,
             ):
-                result = runner.invoke(
-                    app, ["cloud", "snapshot", "create", "test snapshot"]
-                )
+                result = runner.invoke(app, ["cloud", "snapshot", "create", "test snapshot"])
 
                 assert result.exit_code == 1
                 assert "Failed to create snapshot" in result.stdout
@@ -209,7 +204,12 @@ class TestSnapshotListCommand:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "snapshots": [
-                {"id": f"snap_{i}", "name": f"snap-{i}", "auto": False, "created_at": "2024-12-24T12:00:00Z"}
+                {
+                    "id": f"snap_{i}",
+                    "name": f"snap-{i}",
+                    "auto": False,
+                    "created_at": "2024-12-24T12:00:00Z",
+                }
                 for i in range(20)
             ],
             "total": 20,
@@ -265,9 +265,7 @@ class TestSnapshotDeleteCommand:
                 "basic_memory.cli.commands.cloud.snapshot.ConfigManager",
                 return_value=mock_config_manager,
             ):
-                result = runner.invoke(
-                    app, ["cloud", "snapshot", "delete", "snap_123", "--force"]
-                )
+                result = runner.invoke(app, ["cloud", "snapshot", "delete", "snap_123", "--force"])
 
                 assert result.exit_code == 0
                 assert "deleted successfully" in result.stdout
@@ -409,9 +407,7 @@ class TestSnapshotShowCommand:
                 "basic_memory.cli.commands.cloud.snapshot.ConfigManager",
                 return_value=mock_config_manager,
             ):
-                result = runner.invoke(
-                    app, ["cloud", "snapshot", "show", "snap_nonexistent"]
-                )
+                result = runner.invoke(app, ["cloud", "snapshot", "show", "snap_nonexistent"])
 
                 assert result.exit_code == 1
                 assert "Snapshot not found" in result.stdout
@@ -428,10 +424,12 @@ class TestSnapshotBrowseCommand:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "files": [
-                "notes/project.md",
-                "notes/ideas.md",
-                "research/paper.md",
-            ]
+                {"key": "notes/project.md", "size": 1024, "last_modified": "2025-01-18T12:00:00Z"},
+                {"key": "notes/ideas.md", "size": 2048, "last_modified": "2025-01-18T12:00:00Z"},
+                {"key": "research/paper.md", "size": 4096, "last_modified": "2025-01-18T12:00:00Z"},
+            ],
+            "prefix": "",
+            "snapshot_version": "12345",
         }
 
         async def mock_make_api_request(*args, **kwargs):
@@ -465,9 +463,11 @@ class TestSnapshotBrowseCommand:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "files": [
-                "notes/project.md",
-                "notes/ideas.md",
-            ]
+                {"key": "notes/project.md", "size": 1024, "last_modified": "2025-01-18T12:00:00Z"},
+                {"key": "notes/ideas.md", "size": 2048, "last_modified": "2025-01-18T12:00:00Z"},
+            ],
+            "prefix": "notes/",
+            "snapshot_version": "12345",
         }
 
         async def mock_make_api_request(*args, **kwargs):
@@ -501,7 +501,11 @@ class TestSnapshotBrowseCommand:
 
         mock_response = Mock(spec=httpx.Response)
         mock_response.status_code = 200
-        mock_response.json.return_value = {"files": []}
+        mock_response.json.return_value = {
+            "files": [],
+            "prefix": "",
+            "snapshot_version": "12345",
+        }
 
         async def mock_make_api_request(*args, **kwargs):
             return mock_response

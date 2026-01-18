@@ -13,4 +13,4 @@ from basic_memory.cli.commands.cloud.snapshot import snapshot_app
 cloud_app.add_typer(snapshot_app, name="snapshot")
 
 # Register restore command (directly on cloud_app via decorator)
-from basic_memory.cli.commands.cloud.restore import restore  # noqa: F401
+from basic_memory.cli.commands.cloud.restore import restore  # noqa: F401, E402
