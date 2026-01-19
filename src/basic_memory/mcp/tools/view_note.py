@@ -8,7 +8,6 @@ from fastmcp import Context
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.telemetry import track_mcp_tool
 
 
 @mcp.tool(
@@ -55,7 +54,6 @@ async def view_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If identifier attempts path traversal
     """
-    track_mcp_tool("view_note")
     logger.info(f"Viewing note: {identifier} in project: {project}")
 
     # Call the existing read_note logic

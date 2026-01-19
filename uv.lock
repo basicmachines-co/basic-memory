@@ -156,7 +156,6 @@ dependencies = [
     { name = "mdformat-frontmatter" },
     { name = "mdformat-gfm" },
     { name = "nest-asyncio" },
-    { name = "openpanel" },
     { name = "pillow" },
     { name = "psycopg" },
     { name = "pybars3" },
@@ -212,7 +211,6 @@ requires-dist = [
     { name = "mdformat-frontmatter", specifier = ">=2.0.8" },
     { name = "mdformat-gfm", specifier = ">=0.3.7" },
     { name = "nest-asyncio", specifier = ">=1.6.0" },
-    { name = "openpanel", specifier = ">=0.0.1" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "psycopg", specifier = "==3.3.1" },
     { name = "pybars3", specifier = ">=0.9.7" },
@@ -1357,18 +1355,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/82/af/fe2d7618d6eae6fb3a82766a44ed87cd8d6d82b4564ed1c7cfb0f6378e91/openapi_spec_validator-0.7.2.tar.gz", hash = "sha256:cc029309b5c5dbc7859df0372d55e9d1ff43e96d678b9ba087f7c56fc586f734", size = 36855, upload-time = "2025-06-07T14:48:56.299Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/dd/b3fd642260cb17532f66cc1e8250f3507d1e580483e209dc1e9d13bd980d/openapi_spec_validator-0.7.2-py3-none-any.whl", hash = "sha256:4bbdc0894ec85f1d1bea1d6d9c8b2c3c8d7ccaa13577ef40da9c006c9fd0eb60", size = 39713, upload-time = "2025-06-07T14:48:54.077Z" },
-]
-
-[[package]]
-name = "openpanel"
-version = "0.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/42/d2/1ca167988225113a2162fcc528ef309715f348e1ee2bcaa8405222fea08c/openpanel-0.0.1.tar.gz", hash = "sha256:96a27848d670218c03a75528b95b8e3efbd4898665d57b3ee9c81c4b3c06f922", size = 3721, upload-time = "2024-10-16T14:19:41.923Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f9/73/44ad513438c56d3e9c8dbdbea647a2f79e8be03a80967eeaa873f29a0527/openpanel-0.0.1-py3-none-any.whl", hash = "sha256:c4d5a31694d4307975bbf70bbb2fa9fae920df0fb4b8ff97fa7b78ee8fe667b2", size = 15865, upload-time = "2024-10-22T19:27:53.139Z" },
 ]
 
 [[package]]

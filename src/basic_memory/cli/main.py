@@ -13,7 +13,6 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     mcp,
     project,
     status,
-    telemetry,
     tool,
 )
 

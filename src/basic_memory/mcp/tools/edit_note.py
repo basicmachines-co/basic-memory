@@ -8,7 +8,6 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, add_project_metadata
 from basic_memory.mcp.server import mcp
-from basic_memory.telemetry import track_mcp_tool
 
 
 def _format_error_response(
@@ -213,7 +212,6 @@ async def edit_note(
         search_notes() first to find the correct identifier. The tool provides detailed
         error messages with suggestions if operations fail.
     """
-    track_mcp_tool("edit_note")
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
 

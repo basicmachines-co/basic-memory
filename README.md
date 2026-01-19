@@ -466,39 +466,6 @@ tail -f ~/.basic-memory/basic-memory.log
 BASIC_MEMORY_CLOUD_MODE=true uvicorn basic_memory.api.app:app
 ```
 
-## Telemetry
-
-Basic Memory collects anonymous usage statistics to help improve the software. This follows the [Homebrew model](https://docs.brew.sh/Analytics) - telemetry is on by default with easy opt-out.
-
-**What we collect:**
-- App version, Python version, OS, architecture
-- Feature usage (which MCP tools and CLI commands are used)
-- Error types (sanitized - no file paths or personal data)
-
-**What we NEVER collect:**
-- Note content, file names, or paths
-- Personal information
-- IP addresses
-
-**Opting out:**
-```bash
-# Disable telemetry
-basic-memory telemetry disable
-
-# Check status
-basic-memory telemetry status
-
-# Re-enable
-basic-memory telemetry enable
-```
-
-Or set the environment variable:
-```bash
-export BASIC_MEMORY_TELEMETRY_ENABLED=false
-```
-
-For more details, see the [Telemetry documentation](https://basicmemory.com/telemetry).
-
 ## Development
 
 ### Running Tests

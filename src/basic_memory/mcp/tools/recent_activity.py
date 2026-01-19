@@ -10,7 +10,6 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project, resolve_project_parameter
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
-from basic_memory.telemetry import track_mcp_tool
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     GraphContext,
@@ -100,7 +99,6 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
-    track_mcp_tool("recent_activity")
     async with get_client() as client:
         # Build common parameters for API calls
         params = {

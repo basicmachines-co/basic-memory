@@ -9,7 +9,6 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.telemetry import track_mcp_tool
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
 
 
@@ -330,7 +329,6 @@ async def search_notes(
         # Explicit project specification
         results = await search_notes("project planning", project="my-project")
     """
-    track_mcp_tool("search_notes")
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     types = types or []
     entity_types = entity_types or []

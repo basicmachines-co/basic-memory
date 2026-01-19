@@ -8,9 +8,8 @@ To keep the default CI signal **stable and meaningful**, the default `pytest` co
 - highly environment-dependent (OS/DB tuning)
 - inherently interactive (CLI)
 - background-task orchestration (watchers/sync runners)
-- external analytics
 
-### What’s excluded (and why)
+### What's excluded (and why)
 
 Coverage excludes are configured in `pyproject.toml` under `[tool.coverage.report].omit`.
 
@@ -19,7 +18,6 @@ Current exclusions include:
 - `src/basic_memory/db.py`: platform/backend tuning paths (SQLite/Postgres/Windows), covered by integration tests and targeted runs.
 - `src/basic_memory/services/initialization.py`: startup orchestration/background tasks; covered indirectly by app/MCP entrypoints.
 - `src/basic_memory/sync/sync_service.py`: heavy filesystem↔DB integration; validated in integration suite (not enforced in unit coverage).
-- `src/basic_memory/telemetry.py`: external analytics; exercised lightly but excluded from strict coverage gate.
 
 ### Recommended additional runs
 

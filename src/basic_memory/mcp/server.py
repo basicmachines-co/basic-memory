@@ -10,7 +10,6 @@ from loguru import logger
 from basic_memory import db
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app
-from basic_memory.telemetry import show_notice_if_needed, track_app_started
 
 
 @asynccontextmanager
@@ -19,7 +18,6 @@ async def lifespan(app: FastMCP):
 
     Handles:
     - Database initialization and migrations
-    - Telemetry notice and tracking
     - File sync via SyncCoordinator (if enabled and not in cloud mode)
     - Proper cleanup on shutdown
     """
@@ -29,10 +27,6 @@ async def lifespan(app: FastMCP):
     set_container(container)
 
     logger.debug(f"Starting Basic Memory MCP server (mode={container.mode.name})")
-
-    # Show telemetry notice (first run only) and track startup
-    show_notice_if_needed()
-    track_app_started("mcp")
 
     # Track if we created the engine (vs test fixtures providing it)
     # This prevents disposing an engine provided by test fixtures when

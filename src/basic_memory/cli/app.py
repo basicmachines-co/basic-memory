@@ -10,7 +10,6 @@ import typer  # noqa: E402
 
 from basic_memory.cli.container import CliContainer, set_container  # noqa: E402
 from basic_memory.config import init_cli_logging  # noqa: E402
-from basic_memory.telemetry import show_notice_if_needed, track_app_started  # noqa: E402
 
 
 def version_callback(value: bool) -> None:
@@ -46,13 +45,6 @@ def app_callback(
     # Create container and read config (single point of config access)
     container = CliContainer.create()
     set_container(container)
-
-    # Show telemetry notice and track CLI startup
-    # Skip for 'mcp' command - it handles its own telemetry in lifespan
-    # Skip for 'telemetry' command - avoid issues when user is managing telemetry
-    if ctx.invoked_subcommand not in {"mcp", "telemetry"}:
-        show_notice_if_needed()
-        track_app_started("cli")
 
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization

@@ -8,7 +8,6 @@ from mcp.server.fastmcp.exceptions import ToolError
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.async_client import get_client
-from basic_memory.telemetry import track_mcp_tool
 
 
 def _format_delete_error_response(project: str, error_message: str, identifier: str) -> str:
@@ -202,7 +201,6 @@ async def delete_note(
         with suggestions for finding the correct identifier, including search
         commands and alternative formats to try.
     """
-    track_mcp_tool("delete_note")
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
 
