@@ -78,6 +78,34 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then:
 2. Verify formula version matches release
 3. Test Homebrew installation: `brew install basicmachines-co/basic-memory/basic-memory`
 
+#### MCP Registry Publication
+
+After PyPI release is published, update the MCP registry:
+
+1. **Verify PyPI Release**
+   - Confirm package is live: https://pypi.org/project/basic-memory/<version>/
+   - The `server.json` version was auto-updated by `just release`
+
+2. **Publish to MCP Registry**
+   ```bash
+   cd /Users/drew/code/basic-memory
+   mcp-publisher publish
+   ```
+
+   If not authenticated:
+   ```bash
+   mcp-publisher login github
+   # Follow device authentication flow
+   mcp-publisher publish
+   ```
+
+3. **Verify Publication**
+   ```bash
+   curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=basic-memory"
+   ```
+
+**Note:** The `mcp-publisher` CLI can be installed via Homebrew (`brew install mcp-publisher`) or from GitHub releases.
+
 #### Website Updates
 
 **1. basicmachines.co** (`/Users/drew/code/basicmachines.co`)
@@ -145,6 +173,7 @@ Before starting, verify:
 📋 GitHub Release: https://github.com/basicmachines-co/basic-memory/releases/tag/v0.13.2
 📦 PyPI: https://pypi.org/project/basic-memory/0.13.2/
 🍺 Homebrew: https://github.com/basicmachines-co/homebrew-basic-memory
+🔌 MCP Registry: https://registry.modelcontextprotocol.io
 🚀 GitHub Actions: Completed
 
 Install with pip/uv:
@@ -162,8 +191,9 @@ Users can now upgrade:
 - This creates production releases used by end users
 - Must pass all quality gates before proceeding
 - Uses the automated justfile target for consistency
-- Version is automatically updated in `__init__.py`
+- Version is automatically updated in `__init__.py` and `server.json`
 - Triggers automated GitHub release with changelog
 - Package is published to PyPI for `pip` and `uv` users
 - Homebrew formula is automatically updated for stable releases
+- MCP Registry is updated manually via `mcp-publisher publish`
 - Supports multiple installation methods (uv, pip, Homebrew)
