@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.basicmachines-co/basic-memory",
+  "description": "Local-first knowledge management with bi-directional LLM sync via Markdown files.",
+  "repository": {
+    "url": "https://github.com/basicmachines-co/basic-memory.git",
+    "source": "github"
+  },
+  "version": "0.17.6",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "basic-memory",
+      "version": "0.17.6",
+      "runtimeHint": "uvx",
+      "runtimeArguments": ["basic-memory", "mcp"],
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
