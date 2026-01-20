@@ -240,6 +240,8 @@ See SPEC-16 for full context manager refactor details.
 - Logout: `basic-memory cloud logout`
 - Check cloud status: `basic-memory cloud status`
 - Setup cloud sync: `basic-memory cloud setup`
+- Manage snapshots: `basic-memory cloud snapshot [create|list|delete|show|browse]`
+- Restore from snapshot: `basic-memory cloud restore <path> --snapshot <id>`
 
 ### MCP Capabilities
 
