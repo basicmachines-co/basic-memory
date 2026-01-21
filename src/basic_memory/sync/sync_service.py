@@ -35,6 +35,7 @@ from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
+from basic_memory.sync.dataview_refresh_manager import DataviewRefreshManager
 
 # Circuit breaker configuration
 MAX_CONSECUTIVE_FAILURES = 3
@@ -146,6 +147,11 @@ class SyncService:
         # Use OrderedDict for LRU behavior with bounded size to prevent unbounded memory growth
         self._file_failures: OrderedDict[str, FileFailureInfo] = OrderedDict()
         self._max_tracked_failures = 100  # Limit failure cache size
+        # Initialize Dataview refresh manager for automatic relation updates
+        self.dataview_refresh_manager = DataviewRefreshManager(
+            sync_service=self,
+            debounce_seconds=5.0
+        )
 
     async def _should_skip_file(self, path: str) -> bool:
         """Check if file should be skipped due to repeated failures.
@@ -731,6 +737,15 @@ class SyncService:
             f"observation_count={len(entity.observations)}, relation_count={len(entity.relations)}, "
             f"checksum={final_checksum[:8]}"
         )
+
+        # Trigger debounced Dataview refresh for impacted entities
+        if entity:
+            await self.dataview_refresh_manager.on_file_changed(
+                file_path=path,
+                entity_type=entity_markdown.frontmatter.type if entity_markdown.frontmatter else None,
+                folder=str(Path(path).parent),
+                metadata=entity_markdown.frontmatter.model_dump() if entity_markdown.frontmatter else {}
+            )
 
         # Return the final checksum to ensure everything is consistent
         return entity, final_checksum
