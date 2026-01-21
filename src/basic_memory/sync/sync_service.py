@@ -1290,6 +1290,13 @@ class SyncService:
                 if not target:
                     continue
                 
+                # Skip non-string targets (e.g., datetime objects from Dataview)
+                if not isinstance(target, str):
+                    logger.debug(
+                        f"Skipping non-string dataview_link target: {target} (type: {type(target).__name__})"
+                    )
+                    continue
+                
                 # Resolve the target entity
                 resolved_entity = await self.entity_service.link_resolver.resolve_link(
                     target
