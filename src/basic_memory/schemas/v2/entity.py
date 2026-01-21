@@ -77,6 +77,21 @@ class MoveDirectoryRequestV2(BaseModel):
     )
 
 
+class DeleteDirectoryRequestV2(BaseModel):
+    """V2 request schema for deleting all entities in a directory.
+
+    This deletes all entities within a directory, removing them from the
+    database and file system.
+    """
+
+    directory: str = Field(
+        ...,
+        description="Directory path to delete (relative to project root)",
+        min_length=1,
+        max_length=500,
+    )
+
+
 class EntityResponseV2(BaseModel):
     """V2 entity response with external_id as the primary API identifier.
 

@@ -26,7 +26,12 @@ from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
-from basic_memory.schemas.response import DirectoryMoveResult, DirectoryMoveError
+from basic_memory.schemas.response import (
+    DirectoryMoveResult,
+    DirectoryMoveError,
+    DirectoryDeleteResult,
+    DirectoryDeleteError,
+)
 from basic_memory.services import BaseService, FileService
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.link_resolver import LinkResolver
@@ -954,5 +959,80 @@ class EntityService(BaseService[EntityModel]):
             successful_moves=successful_moves,
             failed_moves=failed_moves,
             moved_files=moved_files,
+            errors=errors,
+        )
+
+    async def delete_directory(
+        self,
+        directory: str,
+    ) -> DirectoryDeleteResult:
+        """Delete all entities in a directory.
+
+        This operation deletes all files within a directory, updating database
+        records and search indexes. The operation tracks successes and failures
+        individually to provide detailed feedback.
+
+        Args:
+            directory: Directory path relative to project root
+
+        Returns:
+            DirectoryDeleteResult with counts and details of deleted files
+        """
+        logger.info(f"Deleting directory: {directory}")
+
+        # Normalize directory path (remove trailing slashes)
+        directory = directory.strip("/")
+
+        # Find all entities in the directory
+        entities = await self.repository.find_by_directory_prefix(directory)
+
+        if not entities:
+            logger.warning(f"No entities found in directory: {directory}")
+            return DirectoryDeleteResult(
+                total_files=0,
+                successful_deletes=0,
+                failed_deletes=0,
+                deleted_files=[],
+                errors=[],
+            )
+
+        # Track results
+        deleted_files: list[str] = []
+        errors: list[DirectoryDeleteError] = []
+        successful_deletes = 0
+        failed_deletes = 0
+
+        # Process each entity
+        for entity in entities:
+            try:
+                file_path = entity.file_path
+
+                # Delete the entity (this handles file deletion and database cleanup)
+                deleted = await self.delete_entity(entity.id)
+
+                if deleted:
+                    deleted_files.append(file_path)
+                    successful_deletes += 1
+                    logger.debug(f"Deleted entity: {file_path}")
+                else:
+                    failed_deletes += 1
+                    errors.append(DirectoryDeleteError(path=file_path, error="Delete returned False"))
+                    logger.warning(f"Delete returned False for entity: {file_path}")
+
+            except Exception as e:
+                failed_deletes += 1
+                errors.append(DirectoryDeleteError(path=entity.file_path, error=str(e)))
+                logger.error(f"Failed to delete entity {entity.file_path}: {e}")
+
+        logger.info(
+            f"Directory delete complete: {successful_deletes} succeeded, {failed_deletes} failed "
+            f"(directory={directory})"
+        )
+
+        return DirectoryDeleteResult(
+            total_files=len(entities),
+            successful_deletes=successful_deletes,
+            failed_deletes=failed_deletes,
+            deleted_files=deleted_files,
             errors=errors,
         )

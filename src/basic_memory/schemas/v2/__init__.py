@@ -6,6 +6,7 @@ from basic_memory.schemas.v2.entity import (
     EntityResponseV2,
     MoveEntityRequestV2,
     MoveDirectoryRequestV2,
+    DeleteDirectoryRequestV2,
     ProjectResolveRequest,
     ProjectResolveResponse,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "EntityResponseV2",
     "MoveEntityRequestV2",
     "MoveDirectoryRequestV2",
+    "DeleteDirectoryRequestV2",
     "ProjectResolveRequest",
     "ProjectResolveResponse",
     "CreateResourceRequest",

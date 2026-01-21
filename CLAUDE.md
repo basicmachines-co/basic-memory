@@ -254,7 +254,7 @@ See SPEC-16 for full context manager refactor details.
     - `view_note(identifier, page, page_size)` - View notes as formatted artifacts for better readability
     - `edit_note(identifier, operation, content)` - Edit notes incrementally (append, prepend, find/replace, replace_section)
     - `move_note(identifier, destination_path, is_directory)` - Move notes or directories to new locations, updating database and maintaining links
-    - `delete_note(identifier)` - Delete notes from the knowledge base
+    - `delete_note(identifier, is_directory)` - Delete notes or directories from the knowledge base
 
   **Knowledge Graph Navigation:**
     - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation continuity

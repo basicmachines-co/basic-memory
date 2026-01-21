@@ -8,7 +8,12 @@ from typing import Any
 from httpx import AsyncClient
 
 from basic_memory.mcp.tools.utils import call_get, call_post, call_put, call_patch, call_delete
-from basic_memory.schemas.response import EntityResponse, DeleteEntitiesResponse, DirectoryMoveResult
+from basic_memory.schemas.response import (
+    EntityResponse,
+    DeleteEntitiesResponse,
+    DirectoryMoveResult,
+    DirectoryDeleteResult,
+)
 
 
 class KnowledgeClient:
@@ -177,6 +182,25 @@ class KnowledgeClient:
             },
         )
         return DirectoryMoveResult.model_validate(response.json())
+
+    async def delete_directory(self, directory: str) -> DirectoryDeleteResult:
+        """Delete all entities in a directory.
+
+        Args:
+            directory: Directory path to delete (relative to project root)
+
+        Returns:
+            DirectoryDeleteResult with counts and details of deleted files
+
+        Raises:
+            ToolError: If the request fails
+        """
+        response = await call_post(
+            self.http_client,
+            f"{self._base_path}/delete-directory",
+            json={"directory": directory},
+        )
+        return DirectoryDeleteResult.model_validate(response.json())
 
     # --- Resolution ---
 
