@@ -56,14 +56,26 @@ class DataviewExecutor:
             raise DataviewExecutionError(f"Unsupported query type: {query.query_type}")
 
     def _filter_by_from(self, from_source: str | None) -> list[dict[str, Any]]:
-        """Filter notes by FROM clause."""
+        """Filter notes by FROM clause.
+        
+        Supports both flat and nested note structures:
+        - Flat: {"path": "...", "folder": "...", ...}
+        - Nested: {"file": {"path": "...", "folder": "..."}, ...}
+        """
         if not from_source:
             return self.notes
 
         # Simple path matching
         filtered = []
         for note in self.notes:
-            path = note.get("path", "")
+            # Support both flat and nested structures
+            # Try flat structure first (legacy)
+            path = note.get("path")
+            if path is None:
+                # Try nested structure (from sync_service)
+                file_info = note.get("file", {})
+                path = file_info.get("path", "")
+            
             # Match exact path or folder prefix
             if from_source in path or path.startswith(from_source):
                 filtered.append(note)
@@ -105,6 +117,10 @@ class DataviewExecutor:
         for note in notes:
             evaluator = ExpressionEvaluator(note)
             row = {}
+            # Always include title for link discovery
+            row["title"] = note.get("title", "Untitled")
+            row["file.link"] = f"[[{note.get('title', 'Untitled')}]]"
+            
             for field in query.fields:
                 field_name = field.alias or self._get_field_name(field.expression)
                 try:

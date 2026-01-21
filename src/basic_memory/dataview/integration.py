@@ -101,15 +101,14 @@ class DataviewIntegration:
             # Get notes for execution
             notes = self._get_notes_for_query()
 
-            # Execute query
+            # Execute query and get structured results
             executor = DataviewExecutor(notes)
-            result_markdown = executor.execute(query_ast)
+            result_markdown, structured_results = self._execute_and_extract_results(
+                executor, query_ast
+            )
 
             # Calculate execution time
             execution_time_ms = int((time.time() - start_time) * 1000)
-
-            # Parse results to extract structured data
-            structured_results = self._parse_result_markdown(result_markdown, query_ast.query_type)
 
             return {
                 "query_id": query_id,
@@ -184,6 +183,95 @@ class DataviewIntegration:
                 logger.warning(f"Failed to get notes from provider: {e}")
                 return []
         return []
+
+    def _execute_and_extract_results(
+        self, executor: DataviewExecutor, query_ast
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        """
+        Execute query and extract both markdown and structured results.
+        
+        This method duplicates the executor logic to get structured results
+        before they're formatted to markdown.
+        """
+        from basic_memory.dataview.ast import QueryType
+        
+        # Filter notes (same as executor)
+        filtered_notes = executor._filter_by_from(query_ast.from_source)
+        if query_ast.where_clause:
+            filtered_notes = executor._filter_by_where(filtered_notes, query_ast.where_clause)
+        
+        # Execute based on query type and get structured results
+        if query_ast.query_type == QueryType.TABLE:
+            # Get structured results before formatting
+            results = []
+            field_names = []
+            
+            for field in query_ast.fields:
+                field_name = field.alias or executor._get_field_name(field.expression)
+                field_names.append(field_name)
+            
+            for note in filtered_notes:
+                from basic_memory.dataview.executor.expression_eval import ExpressionEvaluator
+                evaluator = ExpressionEvaluator(note)
+                row = {}
+                # Always include title for link discovery
+                row["title"] = note.get("title", "Untitled")
+                row["file.link"] = f"[[{note.get('title', 'Untitled')}]]"
+                row["type"] = "table_row"
+                
+                for field in query_ast.fields:
+                    field_name = field.alias or executor._get_field_name(field.expression)
+                    try:
+                        value = evaluator.evaluate(field.expression)
+                        row[field_name] = value
+                    except Exception:
+                        row[field_name] = None
+                results.append(row)
+            
+            # Apply SORT
+            if query_ast.sort_clauses:
+                results = executor._apply_sort(results, query_ast.sort_clauses)
+            
+            # Apply LIMIT
+            if query_ast.limit:
+                results = results[: query_ast.limit]
+            
+            # Format to markdown
+            markdown = executor.formatter.format_table(results, field_names)
+            return markdown, results
+            
+        elif query_ast.query_type == QueryType.LIST:
+            results = []
+            for note in filtered_notes:
+                results.append({
+                    "type": "list_item",
+                    "file.link": f"[[{note.get('title', 'Untitled')}]]",
+                    "title": note.get("title", "Untitled"),
+                })
+            
+            # Apply SORT
+            if query_ast.sort_clauses:
+                results = executor._apply_sort(results, query_ast.sort_clauses)
+            
+            # Apply LIMIT
+            if query_ast.limit:
+                results = results[: query_ast.limit]
+            
+            markdown = executor.formatter.format_list(results)
+            return markdown, results
+            
+        elif query_ast.query_type == QueryType.TASK:
+            # For tasks, use executor's method
+            markdown = executor._execute_task(filtered_notes, query_ast)
+            # Parse markdown to get structured results
+            results = self._parse_result_markdown(markdown, query_ast.query_type)
+            return markdown, results
+        
+        else:
+            # Fallback: execute normally and parse markdown
+            markdown = executor.execute(query_ast)
+            results = self._parse_result_markdown(markdown, query_ast.query_type)
+            return markdown, results
 
     def _format_query_source(self, query_text: str, block_type: str) -> str:
         """Format query source for display."""
@@ -288,22 +376,36 @@ class DataviewIntegration:
                     links.append(link)
 
             elif result_type == "table_row":
-                # Extract first column as potential link
-                # (often file.link or title)
-                for key, value in result.items():
-                    if key in ("file.link", "title", "name") and value:
-                        # Clean wikilink syntax if present
-                        clean_value = value.strip()
-                        if clean_value.startswith("[[") and clean_value.endswith("]]"):
-                            clean_value = clean_value[2:-2]
-
-                        link = {
-                            "target": clean_value,
-                            "type": "note",
-                            "metadata": {k: v for k, v in result.items() if k != "type"},
-                        }
-                        links.append(link)
-                        break  # Only extract one link per row
+                # For table rows, always extract title or file.link
+                # These fields are now always present in results (added by executor)
+                target = None
+                
+                # Try file.link first (has wikilink format)
+                if "file.link" in result:
+                    clean_value = result["file.link"].strip()
+                    if clean_value.startswith("[[") and clean_value.endswith("]]"):
+                        target = clean_value[2:-2]
+                    else:
+                        target = clean_value
+                
+                # Fallback to title
+                if not target and "title" in result:
+                    target = result["title"]
+                
+                # Fallback to other common fields
+                if not target:
+                    for key in ("name", "file", "path"):
+                        if key in result and result[key]:
+                            target = result[key]
+                            break
+                
+                if target:
+                    link = {
+                        "target": target,
+                        "type": "note",
+                        "metadata": {k: v for k, v in result.items() if k not in ("type", "title", "file.link")},
+                    }
+                    links.append(link)
 
         return links
 

@@ -17,9 +17,12 @@ from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.dataview.detector import DataviewDetector
+from basic_memory.dataview.integration import DataviewIntegration
 from basic_memory.file_utils import has_frontmatter
 from basic_memory.ignore_utils import load_bmignore_patterns, should_ignore_path
 from basic_memory.markdown import EntityParser, MarkdownProcessor
+from basic_memory.markdown.schemas import Relation as MarkdownRelation
 from basic_memory.models import Entity, Project
 from basic_memory.repository import (
     EntityRepository,
@@ -684,6 +687,8 @@ class SyncService:
 
                 entity_markdown.frontmatter.metadata["permalink"] = permalink
                 await self.file_service.update_frontmatter(path, {"permalink": permalink})
+                # Relire le fichier pour avoir le contenu à jour pour Dataview
+                file_content = await self.file_service.read_file_content(path)
 
         # if the file is new, create an entity
         if new:
@@ -695,6 +700,9 @@ class SyncService:
         else:
             logger.debug(f"Updating entity from markdown, path={path}")
             await self.entity_service.update_entity_and_observations(Path(path), entity_markdown)
+
+        # Process Dataview queries if present (after entity creation so other entities exist)
+        await self._process_dataview_queries(file_content, entity_markdown)
 
         # Update relations and search index
         entity = await self.entity_service.update_entity_relations(path, entity_markdown)
@@ -726,6 +734,109 @@ class SyncService:
 
         # Return the final checksum to ensure everything is consistent
         return entity, final_checksum
+
+    async def _process_dataview_queries(self, file_content: str, entity_markdown) -> None:
+        """Process Dataview queries and add discovered links as relations.
+        
+        Args:
+            file_content: Raw markdown content
+            entity_markdown: Parsed EntityMarkdown object to add relations to
+        """
+        logger.debug(f"_process_dataview_queries called, content length: {len(file_content)}")
+        logger.debug(f"First 200 chars of content: {repr(file_content[:200])}")
+        
+        # Detect if file contains Dataview queries
+        detector = DataviewDetector()
+        blocks = detector.detect_queries(file_content)
+        
+        logger.debug(f"Detector found {len(blocks)} Dataview blocks")
+        
+        if not blocks:
+            # No Dataview queries found
+            logger.debug("No Dataview queries found, returning early")
+            return
+        
+        logger.debug(f"Found {len(blocks)} Dataview queries, executing to discover links")
+        
+        # Get all entities in the project for query execution
+        entities = await self.entity_repository.find_all()
+        notes = []
+        for entity in entities:
+            # Convert entity to note format expected by Dataview
+            note = {
+                "file": {
+                    "path": entity.file_path,
+                    "name": Path(entity.file_path).name,
+                    "folder": str(Path(entity.file_path).parent),
+                },
+                "title": entity.title,
+                "type": entity.entity_type,
+            }
+            # Add frontmatter fields if available
+            if entity.permalink:
+                note["permalink"] = entity.permalink
+            # Add entity_metadata as frontmatter for Dataview field resolution
+            if entity.entity_metadata:
+                note["frontmatter"] = entity.entity_metadata
+            notes.append(note)
+        
+        # Create notes provider that returns the notes
+        def notes_provider():
+            return notes
+        
+        # Execute queries
+        integration = DataviewIntegration(notes_provider=notes_provider)
+        results = integration.process_note(file_content)
+        
+        logger.debug(f"Dataview integration returned {len(results)} results")
+        for i, result in enumerate(results):
+            logger.debug(f"Result {i}: {result.keys()}")
+        
+        # Extract discovered links and add as dataview_link relations
+        total_links_added = 0
+        for result in results:
+            logger.debug(f"Processing Dataview result: status={result.get('status')}, query_id={result.get('query_id')}, result_count={result.get('result_count')}")
+            
+            if result.get("status") != "success":
+                logger.debug(f"Skipping failed query: {result.get('error', 'unknown error')}")
+                continue
+                
+            discovered_links = result.get("discovered_links", [])
+            logger.debug(f"Found {len(discovered_links)} discovered links in query {result.get('query_id')}")
+            
+            for link in discovered_links:
+                target = link.get("target")
+                if not target:
+                    logger.debug(f"Skipping link with no target: {link}")
+                    continue
+                
+                logger.debug(f"Processing discovered link: target={target}, type={link.get('type')}")
+                
+                # Create a dataview_link relation
+                relation = MarkdownRelation(
+                    type="dataview_link",
+                    target=target,
+                    context=f"Discovered by Dataview query: {result.get('query_id')}"
+                )
+                
+                # Add to entity_markdown relations if not already present
+                # Check for duplicates to avoid adding the same link multiple times
+                existing = any(
+                    r.target == relation.target and r.type == relation.type
+                    for r in entity_markdown.relations
+                )
+                if not existing:
+                    entity_markdown.relations.append(relation)
+                    total_links_added += 1
+                    logger.debug(f"Added dataview_link relation to {target}")
+                else:
+                    logger.debug(f"Skipped duplicate relation to {target}")
+        
+        if results:
+            logger.debug(
+                f"Processed {len(results)} Dataview queries, "
+                f"added {total_links_added} dataview_link relations"
+            )
 
     async def sync_regular_file(self, path: str, new: bool = True) -> Tuple[Optional[Entity], str]:
         """Sync a non-markdown file with basic tracking.
@@ -1039,6 +1150,189 @@ class SyncService:
                     except Exception as e:
                         # Log but don't fail - the relation may have been deleted already
                         logger.debug(f"Could not delete duplicate relation {relation.id}: {e}")
+
+    async def refresh_dataview_relations(self) -> None:
+        """Refresh all Dataview relations by re-executing queries.
+        
+        This method re-evaluates all Dataview queries in entities that have them,
+        and updates the dataview_link relations accordingly. This is useful when:
+        - Notes are synced in an order where targets don't exist yet
+        - Note properties change (status, type, etc.) affecting query results
+        - You want to ensure the knowledge graph is in sync with current state
+        
+        The method:
+        1. Finds all entities with Dataview queries
+        2. Re-executes each query to get current results
+        3. Removes old dataview_link relations
+        4. Creates new dataview_link relations based on current query results
+        """
+        logger.info("Starting Dataview relations refresh")
+        
+        # Get all entities (we need to check each one for Dataview queries)
+        all_entities = await self.entity_repository.find_all()
+        
+        entities_with_queries = []
+        for entity in all_entities:
+            # Only process markdown files
+            if not entity.file_path.endswith('.md'):
+                continue
+                
+            # Read file content to check for Dataview queries
+            try:
+                file_content, _ = await self.file_service.read_file(entity.file_path)
+            except Exception as e:
+                logger.warning(f"Could not read content for entity {entity.permalink}: {e}")
+                continue
+            
+            # Check if entity has Dataview queries
+            detector = DataviewDetector()
+            blocks = detector.detect_queries(file_content)
+            
+            if blocks:
+                entities_with_queries.append((entity, file_content))
+                logger.debug(
+                    f"Entity {entity.permalink} has {len(blocks)} Dataview queries"
+                )
+        
+        logger.info(
+            f"Found {len(entities_with_queries)} entities with Dataview queries"
+        )
+        
+        # Process each entity with Dataview queries
+        for entity, file_content in entities_with_queries:
+            await self._refresh_entity_dataview_relations(entity, file_content)
+        
+        logger.info("Completed Dataview relations refresh")
+    
+    async def _refresh_entity_dataview_relations(
+        self, entity: Entity, file_content: str
+    ) -> None:
+        """Refresh Dataview relations for a single entity.
+        
+        Args:
+            entity: The entity to refresh relations for
+            file_content: The markdown content of the entity
+        """
+        logger.debug(f"Refreshing Dataview relations for entity {entity.permalink}")
+        
+        # Remove all existing dataview_link relations for this entity
+        existing_dataview_relations = [
+            r for r in entity.relations if r.relation_type == "dataview_link"
+        ]
+        
+        for relation in existing_dataview_relations:
+            try:
+                await self.relation_repository.delete(relation.id)
+                logger.debug(
+                    f"Deleted old dataview_link relation {relation.id} "
+                    f"from {entity.permalink} to {relation.to_name}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Could not delete dataview_link relation {relation.id}: {e}"
+                )
+        
+        # Re-execute Dataview queries to get current results
+        # Build notes collection with frontmatter for Dataview execution
+        all_entities = await self.entity_repository.find_all()
+        notes = []
+        for e in all_entities:
+            # Convert entity to note format expected by Dataview
+            note = {
+                "file": {
+                    "path": e.file_path,
+                    "name": Path(e.file_path).name,
+                    "folder": str(Path(e.file_path).parent),
+                },
+                "title": e.title,
+                "type": e.entity_type,
+            }
+            
+            # Add permalink if available
+            if e.permalink:
+                note["permalink"] = e.permalink
+            
+            # Load frontmatter to get custom fields (status, milestone, etc.)
+            try:
+                file_content_entity, _ = await self.file_service.read_file(e.file_path)
+                # Parse frontmatter using frontmatter library
+                import frontmatter
+                post = frontmatter.loads(file_content_entity)
+                if post.metadata:
+                    # Add all frontmatter fields to the note
+                    note.update(post.metadata)
+            except Exception as ex:
+                logger.debug(f"Could not load frontmatter for {e.permalink}: {ex}")
+            
+            notes.append(note)
+        
+        # Execute queries with notes provider that returns the pre-built list
+        integration = DataviewIntegration(notes_provider=lambda: notes)
+        results = integration.process_note(file_content)
+        
+        # Extract discovered links and create new dataview_link relations
+        total_links_added = 0
+        for result in results:
+            if result.get("status") != "success":
+                logger.debug(
+                    f"Skipping failed query {result.get('query_id')}: "
+                    f"{result.get('error', 'unknown error')}"
+                )
+                continue
+            
+            discovered_links = result.get("discovered_links", [])
+            logger.debug(
+                f"Query {result.get('query_id')} discovered {len(discovered_links)} links"
+            )
+            
+            for link in discovered_links:
+                target = link.get("target")
+                if not target:
+                    continue
+                
+                # Resolve the target entity
+                resolved_entity = await self.entity_service.link_resolver.resolve_link(
+                    target
+                )
+                
+                if not resolved_entity:
+                    logger.debug(
+                        f"Could not resolve dataview_link target: {target}"
+                    )
+                    continue
+                
+                # Don't create self-referencing relations
+                if resolved_entity.id == entity.id:
+                    continue
+                
+                # Create the dataview_link relation
+                from basic_memory.models import Relation
+                
+                relation = Relation(
+                    from_id=entity.id,
+                    to_id=resolved_entity.id,
+                    to_name=resolved_entity.title,
+                    relation_type="dataview_link",
+                )
+                
+                try:
+                    await self.relation_repository.add(relation)
+                    total_links_added += 1
+                    logger.debug(
+                        f"Created dataview_link relation from {entity.permalink} "
+                        f"to {resolved_entity.permalink}"
+                    )
+                except IntegrityError:
+                    # Relation already exists (duplicate), skip
+                    logger.debug(
+                        f"Dataview_link relation already exists: "
+                        f"{entity.permalink} -> {resolved_entity.permalink}"
+                    )
+        
+        logger.debug(
+            f"Refreshed Dataview relations for {entity.permalink}: "
+            f"removed {len(existing_dataview_relations)}, added {total_links_added}"
+        )
 
     async def _quick_count_files(self, directory: Path) -> int:
         """Fast file count using find command.

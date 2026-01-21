@@ -60,6 +60,12 @@ class RelationRepository(Repository[Relation]):
         result = await self.execute_query(query)
         return result.scalars().all()
 
+    async def find_by_source(self, entity_id: int) -> Sequence[Relation]:
+        """Find all relations where the given entity is the source (from_id)."""
+        query = select(Relation).where(Relation.from_id == entity_id)
+        result = await self.execute_query(query)
+        return result.scalars().all()
+
     async def delete_outgoing_relations_from_entity(self, entity_id: int) -> None:
         """Delete outgoing relations for an entity.
 
