@@ -8,7 +8,7 @@ from typing import Any
 from httpx import AsyncClient
 
 from basic_memory.mcp.tools.utils import call_get, call_post, call_put, call_patch, call_delete
-from basic_memory.schemas.response import EntityResponse, DeleteEntitiesResponse
+from basic_memory.schemas.response import EntityResponse, DeleteEntitiesResponse, DirectoryMoveResult
 
 
 class KnowledgeClient:
@@ -152,6 +152,31 @@ class KnowledgeClient:
             json={"destination_path": destination_path},
         )
         return EntityResponse.model_validate(response.json())
+
+    async def move_directory(
+        self, source_directory: str, destination_directory: str
+    ) -> DirectoryMoveResult:
+        """Move all entities in a directory to a new location.
+
+        Args:
+            source_directory: Source directory path (relative to project root)
+            destination_directory: Destination directory path (relative to project root)
+
+        Returns:
+            DirectoryMoveResult with counts and details of moved files
+
+        Raises:
+            ToolError: If the request fails
+        """
+        response = await call_post(
+            self.http_client,
+            f"{self._base_path}/move-directory",
+            json={
+                "source_directory": source_directory,
+                "destination_directory": destination_directory,
+            },
+        )
+        return DirectoryMoveResult.model_validate(response.json())
 
     # --- Resolution ---
 

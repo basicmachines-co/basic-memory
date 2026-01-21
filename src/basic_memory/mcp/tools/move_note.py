@@ -342,34 +342,41 @@ delete_note("{identifier}")
 
 
 @mcp.tool(
-    description="Move a note to a new location, updating database and maintaining links.",
+    description="Move a note or directory to a new location, updating database and maintaining links.",
 )
 async def move_note(
     identifier: str,
     destination_path: str,
+    is_directory: bool = False,
     project: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
-    """Move a note to a new file location within the same project.
+    """Move a note or directory to a new location within the same project.
 
-    Moves a note from one location to another within the project, updating all
-    database references and maintaining semantic content. Uses stateless architecture -
-    project parameter optional with server resolution.
+    Moves a note or directory from one location to another within the project,
+    updating all database references and maintaining semantic content. Uses stateless
+    architecture - project parameter optional with server resolution.
 
     Args:
-        identifier: Exact entity identifier (title, permalink, or memory:// URL).
+        identifier: For files: exact entity identifier (title, permalink, or memory:// URL).
+                   For directories: the directory path (e.g., "docs", "projects/2025").
                    Must be an exact match - fuzzy matching is not supported for move operations.
-                   Use search_notes() or read_note() first to find the correct identifier if uncertain.
-        destination_path: New path relative to project root (e.g., "work/meetings/2025-05-26.md")
+                   Use search_notes() or list_directory() first to find the correct path if uncertain.
+        destination_path: For files: new path relative to project root (e.g., "work/meetings/note.md")
+                         For directories: new directory path (e.g., "archive/docs")
+        is_directory: If True, moves an entire directory and all its contents.
+                     When True, identifier and destination_path should be directory paths
+                     (without file extensions). Defaults to False.
         project: Project name to move within. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:
         Success message with move details and project information.
+        For directories, includes count of files moved and any errors.
 
     Examples:
-        # Move to new folder (exact title match)
+        # Move a single note to new folder (exact title match)
         move_note("My Note", "work/notes/my-note.md")
 
         # Move by exact permalink
@@ -380,6 +387,12 @@ async def move_note(
 
         # Explicit project specification
         move_note("My Note", "work/notes/my-note.md", project="work-project")
+
+        # Move entire directory
+        move_note("docs", "archive/docs", is_directory=True)
+
+        # Move nested directory
+        move_note("projects/2024", "archive/projects/2024", is_directory=True)
 
         # If uncertain about identifier, search first:
         # search_notes("my note")  # Find available notes
@@ -400,7 +413,9 @@ async def move_note(
     - Maintains all observations and relations
     """
     async with get_client() as client:
-        logger.debug(f"Moving note: {identifier} to {destination_path} in project: {project}")
+        logger.debug(
+            f"Moving {'directory' if is_directory else 'note'}: {identifier} to {destination_path} in project: {project}"
+        )
 
         active_project = await get_active_project(client, project, context)
 
@@ -426,7 +441,73 @@ The destination path '{destination_path}' is not allowed - paths must stay withi
 move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
-        # Check for potential cross-project move attempts
+        # Handle directory moves
+        if is_directory:
+            # Import here to avoid circular import
+            from basic_memory.mcp.clients import KnowledgeClient
+
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+            try:
+                result = await knowledge_client.move_directory(identifier, destination_path)
+
+                # Build success message for directory move
+                result_lines = [
+                    "# Directory Moved Successfully",
+                    "",
+                    f"**Source:** `{identifier}`",
+                    f"**Destination:** `{destination_path}`",
+                    "",
+                    "## Summary",
+                    f"- Total files: {result.total_files}",
+                    f"- Successfully moved: {result.successful_moves}",
+                    f"- Failed: {result.failed_moves}",
+                ]
+
+                if result.moved_files:
+                    result_lines.extend(["", "## Moved Files"])
+                    for file_path in result.moved_files[:10]:  # Show first 10
+                        result_lines.append(f"- `{file_path}`")
+                    if len(result.moved_files) > 10:
+                        result_lines.append(f"- ... and {len(result.moved_files) - 10} more")
+
+                if result.errors:
+                    result_lines.extend(["", "## Errors"])
+                    for error in result.errors[:5]:  # Show first 5 errors
+                        result_lines.append(f"- `{error.path}`: {error.error}")
+                    if len(result.errors) > 5:
+                        result_lines.append(f"- ... and {len(result.errors) - 5} more errors")
+
+                result_lines.extend(["", f"<!-- Project: {active_project.name} -->"])
+
+                logger.info(
+                    f"Directory move completed: {identifier} -> {destination_path}, "
+                    f"moved={result.successful_moves}, failed={result.failed_moves}"
+                )
+
+                return "\n".join(result_lines)
+
+            except Exception as e:
+                logger.error(f"Directory move failed for '{identifier}' to '{destination_path}': {e}")
+                return f"""# Directory Move Failed
+
+Error moving directory '{identifier}' to '{destination_path}': {str(e)}
+
+## Troubleshooting:
+1. **Verify the directory exists**: Use `list_directory("{identifier}")` to check
+2. **Check for conflicts**: The destination may already contain files
+3. **Try individual moves**: Move files one at a time if bulk move fails
+
+## Alternative approach:
+```
+# List directory contents first
+list_directory("{identifier}")
+
+# Then move individual files
+move_note("path/to/file.md", "{destination_path}/file.md")
+```"""
+
+        # Check for potential cross-project move attempts (file moves only)
         cross_project_error = await _detect_cross_project_move_attempt(
             client, identifier, destination_path, active_project.name
         )

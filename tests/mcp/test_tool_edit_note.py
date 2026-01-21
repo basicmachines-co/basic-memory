@@ -13,7 +13,7 @@ async def test_edit_note_append_operation(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test Note\nOriginal content here.",
     )
 
@@ -41,7 +41,7 @@ async def test_edit_note_prepend_operation(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Meeting Notes",
-        folder="meetings",
+        directory="meetings",
         content="# Meeting Notes\nExisting content.",
     )
 
@@ -69,7 +69,7 @@ async def test_edit_note_find_replace_operation(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Config Document",
-        folder="config",
+        directory="config",
         content="# Configuration\nVersion: v0.12.0\nSettings for v0.12.0 release.",
     )
 
@@ -98,7 +98,7 @@ async def test_edit_note_replace_section_operation(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="API Specification",
-        folder="specs",
+        directory="specs",
         content="# API Spec\n\n## Overview\nAPI overview here.\n\n## Implementation\nOld implementation details.\n\n## Testing\nTest info here.",
     )
 
@@ -142,7 +142,7 @@ async def test_edit_note_invalid_operation(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nContent here.",
     )
 
@@ -164,7 +164,7 @@ async def test_edit_note_find_replace_missing_find_text(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nContent here.",
     )
 
@@ -186,7 +186,7 @@ async def test_edit_note_replace_section_missing_section(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nContent here.",
     )
 
@@ -208,7 +208,7 @@ async def test_edit_note_replace_section_nonexistent_section(client, test_projec
     await write_note.fn(
         project=test_project.name,
         title="Document",
-        folder="docs",
+        directory="docs",
         content="# Document\n\n## Existing Section\nSome content here.",
     )
 
@@ -236,7 +236,7 @@ async def test_edit_note_with_observations_and_relations(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Feature Spec",
-        folder="features",
+        directory="features",
         content="# Feature Spec\n\n- [design] Initial design thoughts #architecture\n- implements [[Base System]]\n\nOriginal content.",
     )
 
@@ -261,7 +261,7 @@ async def test_edit_note_identifier_variations(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Document",
-        folder="docs",
+        directory="docs",
         content="# Test Document\nOriginal content.",
     )
 
@@ -293,7 +293,7 @@ async def test_edit_note_find_replace_no_matches(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test Note\nSome content here.",
     )
 
@@ -319,7 +319,7 @@ async def test_edit_note_empty_content_operations(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test Note\nOriginal content.",
     )
 
@@ -340,7 +340,7 @@ async def test_edit_note_find_replace_wrong_count(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Config Document",
-        folder="config",
+        directory="config",
         content="# Configuration\nVersion: v0.12.0\nSettings for v0.12.0 release.",
     )
 
@@ -369,7 +369,7 @@ async def test_edit_note_replace_section_multiple_sections(client, test_project)
     await write_note.fn(
         project=test_project.name,
         title="Sample Note",
-        folder="docs",
+        directory="docs",
         content="# Main Title\n\n## Section 1\nFirst instance\n\n## Section 2\nSome content\n\n## Section 1\nSecond instance",
     )
 
@@ -396,7 +396,7 @@ async def test_edit_note_find_replace_empty_find_text(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test Note\nSome content here.",
     )
 
@@ -426,7 +426,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test Note\nOriginal content here.",
     )
 

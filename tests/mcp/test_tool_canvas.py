@@ -35,7 +35,7 @@ async def test_create_canvas(app, project_config, test_project):
 
     # Execute
     result = await canvas.fn(
-        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+        project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
     # Verify result message
@@ -74,7 +74,7 @@ async def test_create_canvas_with_extension(app, project_config, test_project):
 
     # Execute
     result = await canvas.fn(
-        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+        project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
     # Verify
@@ -109,7 +109,7 @@ async def test_update_existing_canvas(app, project_config, test_project):
     folder = "visualizations"
 
     # Create initial canvas
-    await canvas.fn(project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder)
+    await canvas.fn(project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder)
 
     # Verify file exists
     file_path = Path(project_config.home) / folder / f"{title}.canvas"
@@ -137,7 +137,7 @@ async def test_update_existing_canvas(app, project_config, test_project):
         nodes=updated_nodes,
         edges=updated_edges,
         title=title,
-        folder=folder,
+        directory=folder,
     )
 
     # Verify result indicates update
@@ -170,7 +170,7 @@ async def test_create_canvas_with_nested_folders(app, project_config, test_proje
 
     # Execute
     result = await canvas.fn(
-        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+        project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
     # Verify
@@ -255,7 +255,7 @@ async def test_create_canvas_complex_content(app, project_config, test_project):
 
     # Execute
     result = await canvas.fn(
-        project=test_project.name, nodes=nodes, edges=edges, title=title, folder=folder
+        project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
     # Verify

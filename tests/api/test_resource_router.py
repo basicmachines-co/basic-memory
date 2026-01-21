@@ -133,7 +133,7 @@ async def test_get_resource_observation(client, project_config, entity_repositor
     content = "# Test Content\n\n- [note] an observation."
     data = {
         "title": "Test Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content}",
     }
@@ -173,7 +173,7 @@ async def test_get_resource_entities(client, project_config, entity_repository, 
     content1 = "# Test Content\n"
     data = {
         "title": "Test Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content1}",
     }
@@ -184,7 +184,7 @@ async def test_get_resource_entities(client, project_config, entity_repository, 
     content2 = "# Related Content\n- links to [[Test Entity]]"
     data = {
         "title": "Related Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content2}",
     }
@@ -229,7 +229,7 @@ async def test_get_resource_entities_pagination(
     content1 = "# Test Content\n"
     data = {
         "title": "Test Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content1}",
     }
@@ -241,7 +241,7 @@ async def test_get_resource_entities_pagination(
     content2 = "# Related Content\n- links to [[Test Entity]]"
     data = {
         "title": "Related Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content2}",
     }
@@ -281,7 +281,7 @@ async def test_get_resource_relation(client, project_config, entity_repository, 
     content1 = "# Test Content\n"
     data = {
         "title": "Test Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content1}",
     }
@@ -292,7 +292,7 @@ async def test_get_resource_relation(client, project_config, entity_repository, 
     content2 = "# Related Content\n- links to [[Test Entity]]"
     data = {
         "title": "Related Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content": f"{content2}",
     }

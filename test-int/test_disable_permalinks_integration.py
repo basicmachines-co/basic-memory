@@ -61,7 +61,7 @@ async def test_disable_permalinks_create_entity(tmp_path, engine_factory, app_co
     # Create entity via API
     entity_data = EntitySchema(
         title="Test Note",
-        folder="test",
+        directory="test",
         entity_type="note",
         content="Test content",
     )

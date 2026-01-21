@@ -21,7 +21,7 @@ TagType = Union[List[str], str, None]
 async def write_note(
     title: str,
     content: str,
-    folder: str,
+    directory: str,
     project: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
@@ -57,9 +57,9 @@ async def write_note(
     Args:
         title: The title of the note
         content: Markdown content for the note, can include observations and relations
-        folder: Folder path relative to project root where the file should be saved.
-                Use forward slashes (/) as separators. Use "/" or "" to write to project root.
-                Examples: "notes", "projects/2025", "research/ml", "/" (root)
+        directory: Directory path relative to project root where the file should be saved.
+                   Use forward slashes (/) as separators. Use "/" or "" to write to project root.
+                   Examples: "notes", "projects/2025", "research/ml", "/" (root)
         project: Project name to write to. Optional - server will resolve using the
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
@@ -88,7 +88,7 @@ async def write_note(
         write_note(
             project="my-research",
             title="Meeting Notes",
-            folder="meetings",
+            directory="meetings",
             content="# Weekly Standup\\n\\n- [decision] Use SQLite for storage #tech"
         )
 
@@ -96,45 +96,45 @@ async def write_note(
         write_note(
             project="work-project",
             title="API Design",
-            folder="specs",
+            directory="specs",
             content="# REST API Specification\\n\\n- implements [[Authentication]]",
             tags=["api", "design"],
             note_type="guide"
         )
 
-        # Update existing note (same title/folder)
+        # Update existing note (same title/directory)
         write_note(
             project="my-research",
             title="Meeting Notes",
-            folder="meetings",
+            directory="meetings",
             content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech"
         )
 
     Raises:
         HTTPError: If project doesn't exist or is inaccessible
-        SecurityError: If folder path attempts path traversal
+        SecurityError: If directory path attempts path traversal
     """
     async with get_client() as client:
         logger.info(
-            f"MCP tool call tool=write_note project={project} folder={folder}, title={title}, tags={tags}"
+            f"MCP tool call tool=write_note project={project} directory={directory}, title={title}, tags={tags}"
         )
 
         # Get and validate the project (supports optional project parameter)
         active_project = await get_active_project(client, project, context)
 
-        # Normalize "/" to empty string for root folder (must happen before validation)
-        if folder == "/":
-            folder = ""
+        # Normalize "/" to empty string for root directory (must happen before validation)
+        if directory == "/":
+            directory = ""
 
-        # Validate folder path to prevent path traversal attacks
+        # Validate directory path to prevent path traversal attacks
         project_path = active_project.home
-        if folder and not validate_project_path(folder, project_path):
+        if directory and not validate_project_path(directory, project_path):
             logger.warning(
                 "Attempted path traversal attack blocked",
-                folder=folder,
+                directory=directory,
                 project=active_project.name,
             )
-            return f"# Error\n\nFolder path '{folder}' is not allowed - paths must stay within project boundaries"
+            return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
 
         # Process tags using the helper function
         tag_list = parse_tags(tags)
@@ -142,7 +142,7 @@ async def write_note(
         metadata = {"tags": tag_list} if tag_list else None
         entity = Entity(
             title=title,
-            folder=folder,
+            directory=directory,
             entity_type=note_type,
             content_type="text/markdown",
             content=content,

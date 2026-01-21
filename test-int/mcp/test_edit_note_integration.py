@@ -19,7 +19,7 @@ async def test_edit_note_append_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Append Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Append Test Note\n\nOriginal content here.",
                 "tags": "test,append",
             },
@@ -69,7 +69,7 @@ async def test_edit_note_prepend_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Prepend Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Prepend Test Note\n\nExisting content.",
                 "tags": "test,prepend",
             },
@@ -122,7 +122,7 @@ async def test_edit_note_find_replace_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Find Replace Test",
-                "folder": "test",
+                "directory": "test",
                 "content": """# Find Replace Test
 
 This is version v1.0.0 of the system.
@@ -182,7 +182,7 @@ async def test_edit_note_replace_section_operation(mcp_server, app, test_project
             {
                 "project": test_project.name,
                 "title": "Section Replace Test",
-                "folder": "test",
+                "directory": "test",
                 "content": """# Section Replace Test
 
 ## Overview
@@ -268,7 +268,7 @@ Current endpoints include user management."""
             {
                 "project": test_project.name,
                 "title": "API Documentation",
-                "folder": "docs",
+                "directory": "docs",
                 "content": complex_content,
                 "tags": "api,docs",
             },
@@ -356,7 +356,7 @@ async def test_edit_note_error_handling_text_not_found(mcp_server, app, test_pro
             {
                 "project": test_project.name,
                 "title": "Error Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Error Test Note\n\nThis note has specific content.",
                 "tags": "test,error",
             },
@@ -394,7 +394,7 @@ async def test_edit_note_error_handling_wrong_replacement_count(mcp_server, app,
             {
                 "project": test_project.name,
                 "title": "Count Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": """# Count Test Note
 
 The word "test" appears here.
@@ -437,7 +437,7 @@ async def test_edit_note_invalid_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Invalid Op Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Invalid Op Test\n\nSome content.",
                 "tags": "test",
             },
@@ -472,7 +472,7 @@ async def test_edit_note_missing_required_parameters(mcp_server, app, test_proje
             {
                 "project": test_project.name,
                 "title": "Param Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Param Test Note\n\nContent here.",
                 "tags": "test",
             },
@@ -507,7 +507,7 @@ async def test_edit_note_special_characters_in_content(mcp_server, app, test_pro
             {
                 "project": test_project.name,
                 "title": "Special Chars Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Special Chars Test\n\nBasic content here.",
                 "tags": "test,unicode",
             },
@@ -582,7 +582,7 @@ async def test_edit_note_using_different_identifiers(mcp_server, app, test_proje
             {
                 "project": test_project.name,
                 "title": "Identifier Test Note",
-                "folder": "docs",
+                "directory": "docs",
                 "content": "# Identifier Test Note\n\nOriginal content.",
                 "tags": "test,identifier",
             },

@@ -15,7 +15,7 @@ async def test_search_text(client, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Search Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a searchable test note",
         tags=["test", "search"],
     )
@@ -41,7 +41,7 @@ async def test_search_title(client, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Search Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a searchable test note",
         tags=["test", "search"],
     )
@@ -69,7 +69,7 @@ async def test_search_permalink(client, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Search Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a searchable test note",
         tags=["test", "search"],
     )
@@ -97,7 +97,7 @@ async def test_search_permalink_match(client, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Search Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a searchable test note",
         tags=["test", "search"],
     )
@@ -125,7 +125,7 @@ async def test_search_pagination(client, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Search Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a searchable test note",
         tags=["test", "search"],
     )
@@ -153,7 +153,7 @@ async def test_search_with_type_filter(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Entity Type Test",
-        folder="test",
+        directory="test",
         content="# Test\nFiltered by type",
     )
 
@@ -176,7 +176,7 @@ async def test_search_with_entity_type_filter(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Entity Type Test",
-        folder="test",
+        directory="test",
         content="# Test\nFiltered by type",
     )
 
@@ -201,7 +201,7 @@ async def test_search_with_date_filter(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Recent Note",
-        folder="test",
+        directory="test",
         content="# Test\nRecent content",
     )
 

@@ -28,7 +28,7 @@ async def test_read_file_text_file(app, synced_files, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Text Resource",
-        folder="test",
+        directory="test",
         content="This is a test text resource",
         tags=["test", "resource"],
     )
@@ -56,7 +56,7 @@ async def test_read_content_file_path(app, synced_files, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Text Resource",
-        folder="test",
+        directory="test",
         content="This is a test text resource",
         tags=["test", "resource"],
     )
@@ -138,7 +138,7 @@ async def test_read_file_memory_url(app, synced_files, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Memory URL Test",
-        folder="test",
+        directory="test",
         content="Testing memory:// URL handling for resources",
     )
 

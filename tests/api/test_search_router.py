@@ -132,7 +132,7 @@ async def test_reindex(
     await entity_service.create_entity(
         EntitySchema(
             title="TestEntity1",
-            folder="test",
+            directory="test",
             entity_type="test",
         ),
     )

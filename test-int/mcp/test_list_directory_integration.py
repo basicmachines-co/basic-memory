@@ -19,7 +19,7 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Root Note",
-                "folder": "",  # Root folder
+                "directory": "",  # Root folder
                 "content": "# Root Note\n\nThis is in the root directory.",
                 "tags": "test,root",
             },
@@ -30,7 +30,7 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Project Planning",
-                "folder": "projects",
+                "directory": "projects",
                 "content": "# Project Planning\n\nPlanning document for projects.",
                 "tags": "planning,project",
             },
@@ -41,7 +41,7 @@ async def test_list_directory_basic_operation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Meeting Notes",
-                "folder": "meetings",
+                "directory": "meetings",
                 "content": "# Meeting Notes\n\nNotes from the meeting.",
                 "tags": "meeting,notes",
             },
@@ -83,7 +83,7 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Task List",
-                "folder": "work",
+                "directory": "work",
                 "content": "# Task List\n\nWork tasks for today.",
                 "tags": "work,tasks",
             },
@@ -94,7 +94,7 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Project Alpha",
-                "folder": "work/projects",
+                "directory": "work/projects",
                 "content": "# Project Alpha\n\nAlpha project documentation.",
                 "tags": "project,alpha",
             },
@@ -105,7 +105,7 @@ async def test_list_directory_specific_folder(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Daily Standup",
-                "folder": "work/meetings",
+                "directory": "work/meetings",
                 "content": "# Daily Standup\n\nStandup meeting notes.",
                 "tags": "meeting,standup",
             },
@@ -143,7 +143,7 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Deep Note",
-                "folder": "research/ml/algorithms/neural-networks",
+                "directory": "research/ml/algorithms/neural-networks",
                 "content": "# Deep Note\n\nDeep learning research.",
                 "tags": "research,ml,deep",
             },
@@ -154,7 +154,7 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "ML Overview",
-                "folder": "research/ml",
+                "directory": "research/ml",
                 "content": "# ML Overview\n\nMachine learning overview.",
                 "tags": "research,ml,overview",
             },
@@ -165,7 +165,7 @@ async def test_list_directory_with_depth(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Research Index",
-                "folder": "research",
+                "directory": "research",
                 "content": "# Research Index\n\nIndex of research topics.",
                 "tags": "research,index",
             },
@@ -203,7 +203,7 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Meeting 2025-01-15",
-                "folder": "meetings",
+                "directory": "meetings",
                 "content": "# Meeting 2025-01-15\n\nMonday meeting notes.",
                 "tags": "meeting,january",
             },
@@ -214,7 +214,7 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Meeting 2025-01-22",
-                "folder": "meetings",
+                "directory": "meetings",
                 "content": "# Meeting 2025-01-22\n\nMonday meeting notes.",
                 "tags": "meeting,january",
             },
@@ -225,7 +225,7 @@ async def test_list_directory_with_glob_pattern(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Project Status",
-                "folder": "meetings",
+                "directory": "meetings",
                 "content": "# Project Status\n\nProject status update.",
                 "tags": "meeting,project",
             },
@@ -285,7 +285,7 @@ async def test_list_directory_glob_no_matches(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Document One",
-                "folder": "docs",
+                "directory": "docs",
                 "content": "# Document One\n\nFirst document.",
                 "tags": "doc",
             },
@@ -320,7 +320,7 @@ async def test_list_directory_various_file_types(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Simple Note",
-                "folder": "mixed",
+                "directory": "mixed",
                 "content": "# Simple Note\n\nA simple note.",
                 "tags": "simple",
             },
@@ -331,7 +331,7 @@ async def test_list_directory_various_file_types(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Complex Document with Long Title",
-                "folder": "mixed",
+                "directory": "mixed",
                 "content": "# Complex Document with Long Title\n\nA more complex document.",
                 "tags": "complex,long",
             },
@@ -369,7 +369,7 @@ async def test_list_directory_default_parameters(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Default Test",
-                "folder": "default-test",
+                "directory": "default-test",
                 "content": "# Default Test\n\nTesting default parameters.",
                 "tags": "default",
             },
@@ -401,7 +401,7 @@ async def test_list_directory_deep_recursion(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Level 5 Note",
-                "folder": "level1/level2/level3/level4/level5",
+                "directory": "level1/level2/level3/level4/level5",
                 "content": "# Level 5 Note\n\nVery deep note.",
                 "tags": "deep,level5",
             },
@@ -412,7 +412,7 @@ async def test_list_directory_deep_recursion(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Level 3 Note",
-                "folder": "level1/level2/level3",
+                "directory": "level1/level2/level3",
                 "content": "# Level 3 Note\n\nMid-level note.",
                 "tags": "medium,level3",
             },
@@ -449,7 +449,7 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
             {
                 "project": test_project.name,
                 "title": "Project Alpha Plan",
-                "folder": "patterns",
+                "directory": "patterns",
                 "content": "# Project Alpha Plan\n\nAlpha planning.",
                 "tags": "project,alpha",
             },
@@ -460,7 +460,7 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
             {
                 "project": test_project.name,
                 "title": "Project Beta Plan",
-                "folder": "patterns",
+                "directory": "patterns",
                 "content": "# Project Beta Plan\n\nBeta planning.",
                 "tags": "project,beta",
             },
@@ -471,7 +471,7 @@ async def test_list_directory_complex_glob_patterns(mcp_server, app, test_projec
             {
                 "project": test_project.name,
                 "title": "Meeting Minutes",
-                "folder": "patterns",
+                "directory": "patterns",
                 "content": "# Meeting Minutes\n\nMeeting notes.",
                 "tags": "meeting",
             },
@@ -508,7 +508,7 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
             {
                 "project": test_project.name,
                 "title": "Artifact One",
-                "folder": "artifacts",
+                "directory": "artifacts",
                 "content": "# Artifact One\n\nFirst artifact document.",
                 "tags": "artifact,test",
             },
@@ -519,7 +519,7 @@ async def test_list_directory_dot_slash_prefix_paths(mcp_server, app, test_proje
             {
                 "project": test_project.name,
                 "title": "Artifact Two",
-                "folder": "artifacts",
+                "directory": "artifacts",
                 "content": "# Artifact Two\n\nSecond artifact document.",
                 "tags": "artifact,test",
             },

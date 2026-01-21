@@ -15,7 +15,7 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
             {
                 "project": test_project.name,
                 "title": "Parent Entity",
-                "folder": "testing",
+                "directory": "testing",
                 "content": "# Parent Entity\n\nMain entity for testing underscore relations.",
                 "tags": "test,parent",
             },
@@ -27,7 +27,7 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
             {
                 "project": test_project.name,
                 "title": "Child with Underscore",
-                "folder": "testing",
+                "directory": "testing",
                 "content": """# Child with Underscore
 
 - part_of [[Parent Entity]]
@@ -42,7 +42,7 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
             {
                 "project": test_project.name,
                 "title": "Child with Hyphen",
-                "folder": "testing",
+                "directory": "testing",
                 "content": """# Child with Hyphen
 
 - part-of [[Parent Entity]]
@@ -124,7 +124,7 @@ async def test_build_context_complex_underscore_paths(mcp_server, app, test_proj
             {
                 "project": test_project.name,
                 "title": "workflow_manager_agent",
-                "folder": "specs",
+                "directory": "specs",
                 "content": """# Workflow Manager Agent
 
 Specification for the workflow manager agent.
@@ -138,7 +138,7 @@ Specification for the workflow manager agent.
             {
                 "project": test_project.name,
                 "title": "task_parser",
-                "folder": "components",
+                "directory": "components",
                 "content": """# Task Parser
 
 - part_of [[workflow_manager_agent]]

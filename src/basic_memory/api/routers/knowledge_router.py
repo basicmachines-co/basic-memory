@@ -29,7 +29,8 @@ from basic_memory.schemas import (
     DeleteEntitiesResponse,
     DeleteEntitiesRequest,
 )
-from basic_memory.schemas.request import EditEntityRequest, MoveEntityRequest
+from basic_memory.schemas.request import EditEntityRequest, MoveEntityRequest, MoveDirectoryRequest
+from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.schemas.base import Permalink, Entity
 
 router = APIRouter(
@@ -228,6 +229,50 @@ async def move_entity(
 
     except Exception as e:
         logger.error(f"Error moving entity: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/move-directory")
+async def move_directory(
+    data: MoveDirectoryRequest,
+    background_tasks: BackgroundTasks,
+    entity_service: EntityServiceDep,
+    project_config: ProjectConfigDep,
+    app_config: AppConfigDep,
+    search_service: SearchServiceDep,
+) -> DirectoryMoveResult:
+    """Move all entities in a directory to a new location.
+
+    This endpoint moves all files within a source directory to a destination
+    directory, updating database records and optionally updating permalinks.
+    """
+    logger.info(
+        f"API request: endpoint='move_directory', source='{data.source_directory}', destination='{data.destination_directory}'"
+    )
+
+    try:
+        # Move the directory using the service
+        result = await entity_service.move_directory(
+            source_directory=data.source_directory,
+            destination_directory=data.destination_directory,
+            project_config=project_config,
+            app_config=app_config,
+        )
+
+        # Reindex moved entities
+        for file_path in result.moved_files:
+            entity = await entity_service.link_resolver.resolve_link(file_path)
+            if entity:
+                await search_service.index_entity(entity, background_tasks=background_tasks)
+
+        logger.info(
+            f"API response: endpoint='move_directory', "
+            f"total={result.total_files}, success={result.successful_moves}, failed={result.failed_moves}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Error moving directory: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 

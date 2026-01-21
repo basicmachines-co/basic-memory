@@ -64,7 +64,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     result_a = await write_note.fn(
         project=test_project.name,
         title="Node A",
-        folder="edge-cases",
+        directory="edge-cases",
         content="# Node A\n\nOriginal content for Node A\n\n## Relations\n- links_to [[Node B]]",
     )
 
@@ -81,7 +81,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     result_b = await write_note.fn(
         project=test_project.name,
         title="Node B",
-        folder="edge-cases",
+        directory="edge-cases",
         content="# Node B\n\nContent for Node B",
     )
 
@@ -93,7 +93,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     result_c = await write_note.fn(
         project=test_project.name,
         title="Node C",
-        folder="edge-cases",
+        directory="edge-cases",
         content="# Node C\n\nContent for Node C\n\n## Relations\n- links_to [[Node A]]",
     )
 
@@ -165,7 +165,7 @@ async def test_notes_with_similar_titles_maintain_separate_files(app, test_proje
         result = await write_note.fn(
             project=test_project.name,
             title=title,
-            folder=folder,
+            directory=folder,
             content=f"# {title}\n\nUnique content for {title}",
         )
 
@@ -210,7 +210,7 @@ async def test_sequential_note_creation_preserves_all_files(app, test_project):
         result = await write_note.fn(
             project=test_project.name,
             title=title,
-            folder="sequence-test",
+            directory="sequence-test",
             content=content,
         )
         assert "# Created note" in result or "# Updated note" in result

@@ -12,7 +12,7 @@ async def test_write_note_tags_yaml_format(app, project_config, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="YAML Format Test",
-        folder="test",
+        directory="test",
         content="Testing YAML tag formatting",
         tags=["system", "overview", "reference"],
     )
@@ -44,7 +44,7 @@ async def test_write_note_stringified_json_tags(app, project_config, test_projec
     result = await write_note.fn(
         project=test_project.name,
         title="Stringified JSON Test",
-        folder="test",
+        directory="test",
         content="Testing stringified JSON tag input",
         tags='["python", "testing", "json"]',  # Stringified JSON array
     )
@@ -74,7 +74,7 @@ async def test_write_note_single_tag_yaml_format(app, project_config, test_proje
     await write_note.fn(
         project=test_project.name,
         title="Single Tag Test",
-        folder="test",
+        directory="test",
         content="Testing single tag formatting",
         tags=["solo-tag"],
     )
@@ -93,7 +93,7 @@ async def test_write_note_no_tags(app, project_config, test_project):
     await write_note.fn(
         project=test_project.name,
         title="No Tags Test",
-        folder="test",
+        directory="test",
         content="Testing note without tags",
         tags=None,
     )
@@ -112,7 +112,7 @@ async def test_write_note_empty_tags_list(app, project_config, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Empty Tags Test",
-        folder="test",
+        directory="test",
         content="Testing empty tag list",
         tags=[],
     )
@@ -131,7 +131,7 @@ async def test_write_note_update_preserves_yaml_format(app, project_config, test
     await write_note.fn(
         project=test_project.name,
         title="Update Format Test",
-        folder="test",
+        directory="test",
         content="Initial content",
         tags=["initial", "tag"],
     )
@@ -140,7 +140,7 @@ async def test_write_note_update_preserves_yaml_format(app, project_config, test
     result = await write_note.fn(
         project=test_project.name,
         title="Update Format Test",
-        folder="test",
+        directory="test",
         content="Updated content",
         tags=["updated", "new-tag", "format"],
     )
@@ -173,7 +173,7 @@ async def test_complex_tags_yaml_format(app, project_config, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Complex Tags Test",
-        folder="test",
+        directory="test",
         content="Testing complex tag formats",
         tags=["python-3.9", "api_integration", "v2.0", "nested/category", "under_score"],
     )

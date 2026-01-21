@@ -42,7 +42,7 @@ async def test_move_note_success(app, client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="source",
+        directory="source",
         content="# Test Note\nOriginal content here.",
     )
 
@@ -77,7 +77,7 @@ async def test_move_note_with_folder_creation(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Deep Note",
-        folder="",
+        directory="",
         content="# Deep Note\nContent in root folder.",
     )
 
@@ -104,7 +104,7 @@ async def test_move_note_with_observations_and_relations(app, client, test_proje
     await write_note.fn(
         project=test_project.name,
         title="Complex Entity",
-        folder="source",
+        directory="source",
         content="""# Complex Entity
 
 ## Observations
@@ -145,7 +145,7 @@ async def test_move_note_by_title(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="UniqueTestTitle",
-        folder="source",
+        directory="source",
         content="# UniqueTestTitle\nTest content.",
     )
 
@@ -172,7 +172,7 @@ async def test_move_note_by_file_path(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="PathTest",
-        folder="source",
+        directory="source",
         content="# PathTest\nContent for path test.",
     )
 
@@ -215,7 +215,7 @@ async def test_move_note_invalid_destination_path(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="TestNote",
-        folder="source",
+        directory="source",
         content="# TestNote\nTest content.",
     )
 
@@ -239,7 +239,7 @@ async def test_move_note_missing_file_extension(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="ExtensionTest",
-        folder="source",
+        directory="source",
         content="# Extension Test\nTesting extension validation.",
     )
 
@@ -281,7 +281,7 @@ async def test_move_note_file_extension_mismatch(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="MarkdownNote",
-        folder="source",
+        directory="source",
         content="# Markdown Note\nThis is a markdown file.",
     )
 
@@ -313,7 +313,7 @@ async def test_move_note_preserves_file_extension(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="PreserveExtension",
-        folder="source",
+        directory="source",
         content="# Preserve Extension\nTesting that extension is preserved.",
     )
 
@@ -348,7 +348,7 @@ async def test_move_note_destination_exists(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="SourceNote",
-        folder="source",
+        directory="source",
         content="# SourceNote\nSource content.",
     )
 
@@ -356,7 +356,7 @@ async def test_move_note_destination_exists(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="DestinationNote",
-        folder="target",
+        directory="target",
         content="# DestinationNote\nDestination content.",
     )
 
@@ -380,7 +380,7 @@ async def test_move_note_same_location(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="SameLocationTest",
-        folder="test",
+        directory="test",
         content="# SameLocationTest\nContent here.",
     )
 
@@ -404,7 +404,7 @@ async def test_move_note_rename_only(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="OriginalName",
-        folder="test",
+        directory="test",
         content="# OriginalName\nContent to rename.",
     )
 
@@ -436,7 +436,7 @@ async def test_move_note_complex_filename(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Meeting Notes 2025",
-        folder="meetings",
+        directory="meetings",
         content="# Meeting Notes 2025\nMeeting content with dates.",
     )
 
@@ -465,7 +465,7 @@ async def test_move_note_with_tags(app, client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Tagged Note",
-        folder="source",
+        directory="source",
         content="# Tagged Note\nContent with tags.",
         tags=["important", "work", "project"],
     )
@@ -494,7 +494,7 @@ async def test_move_note_empty_string_destination(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="TestNote",
-        folder="source",
+        directory="source",
         content="# TestNote\nTest content.",
     )
 
@@ -518,7 +518,7 @@ async def test_move_note_parent_directory_path(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="TestNote",
-        folder="source",
+        directory="source",
         content="# TestNote\nTest content.",
     )
 
@@ -542,7 +542,7 @@ async def test_move_note_identifier_variations(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Document",
-        folder="docs",
+        directory="docs",
         content="# Test Document\nContent for testing identifiers.",
     )
 
@@ -569,7 +569,7 @@ async def test_move_note_preserves_frontmatter(app, client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Custom Frontmatter Note",
-        folder="source",
+        directory="source",
         content="# Custom Frontmatter Note\nContent with custom metadata.",
     )
 
@@ -641,7 +641,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -675,7 +675,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -708,7 +708,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -743,7 +743,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -776,7 +776,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -807,7 +807,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -844,7 +844,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -868,7 +868,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 
@@ -890,7 +890,7 @@ class TestMoveNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Test Note",
-            folder="source",
+            directory="source",
             content="# Test Note\nTest content for security testing.",
         )
 

@@ -170,8 +170,8 @@ async def test_recent_activity_discovery_mode_multiple_active_projects(
     )
     assert result.startswith("✓")
 
-    await write_note.fn(project=test_project.name, title="One", folder="notes", content="one")
-    await write_note.fn(project="second-project", title="Two", folder="notes", content="two")
+    await write_note.fn(project=test_project.name, title="One", directory="notes", content="one")
+    await write_note.fn(project="second-project", title="Two", directory="notes", content="two")
 
     out = await recent_activity.fn()
     assert "Recent Activity Summary" in out

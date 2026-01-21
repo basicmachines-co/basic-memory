@@ -110,3 +110,27 @@ class MoveEntityRequest(BaseModel):
         if not v.strip():
             raise ValueError("destination_path cannot be empty or whitespace only")
         return v.strip()
+
+
+class MoveDirectoryRequest(BaseModel):
+    """Request schema for moving an entire directory to a new location.
+
+    This moves all entities within a directory to a new location while
+    maintaining project consistency and updating database references.
+    """
+
+    source_directory: Annotated[str, MinLen(1), MaxLen(500)]
+    destination_directory: Annotated[str, MinLen(1), MaxLen(500)]
+    project: Optional[str] = None
+
+    @field_validator("source_directory", "destination_directory")
+    @classmethod
+    def validate_directory_path(cls, v):
+        """Ensure directory path is relative and valid."""
+        if v.startswith("/"):
+            raise ValueError("directory path must be relative, not absolute")
+        if ".." in v:
+            raise ValueError("directory path cannot contain '..' path components")
+        if not v.strip():
+            raise ValueError("directory path cannot be empty or whitespace only")
+        return v.strip()

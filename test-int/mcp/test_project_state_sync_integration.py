@@ -41,7 +41,7 @@ async def test_project_state_sync_after_default_change(
             {
                 "project": "minerva",
                 "title": "Test Consistency Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Test Note\n\nThis note tests project state consistency.\n\n- [test] Project state sync working",
                 "tags": "test,consistency",
             },

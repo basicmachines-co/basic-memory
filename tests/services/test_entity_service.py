@@ -23,7 +23,7 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
-        folder="",
+        directory="",
         entity_type="test",
     )
 
@@ -62,7 +62,7 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
-        folder="",
+        directory="",
         entity_type="test",
         content="first",
     )
@@ -81,7 +81,7 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
 
     entity_data = EntitySchema(
         title="Test Entity",
-        folder="",
+        directory="",
         entity_type="test",
         content="second",
     )
@@ -100,7 +100,7 @@ async def test_create_entity_unique_permalink(
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
 
@@ -132,14 +132,14 @@ async def test_get_by_permalink(entity_service: EntityService):
     """Test finding entity by type and name combination."""
     entity1_data = EntitySchema(
         title="TestEntity1",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     entity1 = await entity_service.create_entity(entity1_data)
 
     entity2_data = EntitySchema(
         title="TestEntity2",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     entity2 = await entity_service.create_entity(entity2_data)
@@ -166,7 +166,7 @@ async def test_get_entity_success(entity_service: EntityService):
     """Test successful entity retrieval."""
     entity_data = EntitySchema(
         title="TestEntity",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     await entity_service.create_entity(entity_data)
@@ -184,7 +184,7 @@ async def test_delete_entity_success(entity_service: EntityService):
     """Test successful entity deletion."""
     entity_data = EntitySchema(
         title="TestEntity",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     await entity_service.create_entity(entity_data)
@@ -203,7 +203,7 @@ async def test_delete_entity_by_id(entity_service: EntityService):
     """Test successful entity deletion."""
     entity_data = EntitySchema(
         title="TestEntity",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     created = await entity_service.create_entity(entity_data)
@@ -236,7 +236,7 @@ async def test_create_entity_with_special_chars(entity_service: EntityService):
     name = "TestEntity_$pecial chars & symbols!"  # Note: Using valid path characters
     entity_data = EntitySchema(
         title=name,
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     entity = await entity_service.create_entity(entity_data)
@@ -253,12 +253,12 @@ async def test_get_entities_by_permalinks(entity_service: EntityService):
     # Create test entities
     entity1_data = EntitySchema(
         title="Entity1",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     entity2_data = EntitySchema(
         title="Entity2",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     await entity_service.create_entity(entity1_data)
@@ -286,7 +286,7 @@ async def test_get_entities_some_not_found(entity_service: EntityService):
     # Create one test entity
     entity_data = EntitySchema(
         title="Entity1",
-        folder="test",
+        directory="test",
         entity_type="test",
     )
     await entity_service.create_entity(entity_data)
@@ -317,7 +317,7 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
     # Create test entity
     schema = EntitySchema(
         title="test",
-        folder="test",
+        directory="test",
         entity_type="note",
         entity_metadata={"status": "draft"},
     )
@@ -354,7 +354,7 @@ async def test_create_or_update_new(entity_service: EntityService, file_service:
     entity, created = await entity_service.create_or_update_entity(
         EntitySchema(
             title="test",
-            folder="test",
+            directory="test",
             entity_type="test",
             entity_metadata={"status": "draft"},
         )
@@ -370,7 +370,7 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
     entity = await entity_service.create_entity(
         EntitySchema(
             title="test",
-            folder="test",
+            directory="test",
             entity_type="test",
             content="Test entity",
             entity_metadata={"status": "final"},
@@ -413,7 +413,7 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
     entity, created = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Git Workflow Guide",
-            folder="test",
+            directory="test",
             entity_type="test",
             content=content,
         )
@@ -480,7 +480,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
         EntitySchema(
             title="Git Workflow Guide",
             entity_type="test",
-            folder="test",
+            directory="test",
             content=content,
         )
     )
@@ -538,7 +538,7 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
     entity, created = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Git Workflow Guide",
-            folder="test",
+            directory="test",
             entity_type="test",
             content=update_content,
         )
@@ -612,7 +612,7 @@ async def test_edit_entity_append(entity_service: EntityService, file_service: F
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -638,7 +638,7 @@ async def test_edit_entity_prepend(entity_service: EntityService, file_service: 
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -664,7 +664,7 @@ async def test_edit_entity_find_replace(entity_service: EntityService, file_serv
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="This is old content that needs updating",
         )
@@ -704,7 +704,7 @@ async def test_edit_entity_replace_section(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -735,7 +735,7 @@ async def test_edit_entity_replace_section_create_new(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="# Main Title\n\nSome content",
         )
@@ -772,7 +772,7 @@ async def test_edit_entity_invalid_operation(entity_service: EntityService):
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -791,7 +791,7 @@ async def test_edit_entity_find_replace_missing_find_text(entity_service: Entity
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -810,7 +810,7 @@ async def test_edit_entity_replace_section_missing_section(entity_service: Entit
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -840,7 +840,7 @@ async def test_edit_entity_with_observations_and_relations(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -949,7 +949,7 @@ async def test_edit_entity_find_replace_not_found(entity_service: EntityService)
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="This is some content",
         )
@@ -974,7 +974,7 @@ async def test_edit_entity_find_replace_multiple_occurrences_expected_one(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content="The word banana appears here. Another banana word here.",
         )
@@ -1000,7 +1000,7 @@ async def test_edit_entity_find_replace_multiple_occurrences_success(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content="The word banana appears here. Another banana word here.",
         )
@@ -1028,7 +1028,7 @@ async def test_edit_entity_find_replace_empty_find_text(entity_service: EntitySe
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Some content",
         )
@@ -1063,7 +1063,7 @@ async def test_edit_entity_find_replace_multiline(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1105,7 +1105,7 @@ async def test_edit_entity_replace_section_multiple_sections_error(entity_servic
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1128,7 +1128,7 @@ async def test_edit_entity_replace_section_empty_section(entity_service: EntityS
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Some content",
         )
@@ -1163,7 +1163,7 @@ async def test_edit_entity_replace_section_header_variations(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1203,7 +1203,7 @@ async def test_edit_entity_replace_section_at_end_of_document(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1250,7 +1250,7 @@ async def test_edit_entity_replace_section_with_subsections(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1294,7 +1294,7 @@ async def test_edit_entity_replace_section_strips_duplicate_header(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Sample Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1336,7 +1336,7 @@ async def test_move_entity_success(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="original",
+            directory="original",
             entity_type="note",
             content="Original content",
         )
@@ -1385,7 +1385,7 @@ async def test_move_entity_with_permalink_update(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="original",
+            directory="original",
             entity_type="note",
             content="Original content",
         )
@@ -1426,7 +1426,7 @@ async def test_move_entity_creates_destination_directory(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="original",
+            directory="original",
             entity_type="note",
             content="Original content",
         )
@@ -1476,7 +1476,7 @@ async def test_move_entity_source_file_missing(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -1508,7 +1508,7 @@ async def test_move_entity_destination_exists(
     entity1 = await entity_service.create_entity(
         EntitySchema(
             title="Test Note 1",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Content 1",
         )
@@ -1517,7 +1517,7 @@ async def test_move_entity_destination_exists(
     entity2 = await entity_service.create_entity(
         EntitySchema(
             title="Test Note 2",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Content 2",
         )
@@ -1545,7 +1545,7 @@ async def test_move_entity_invalid_destination_path(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="test",
+            directory="test",
             entity_type="note",
             content="Original content",
         )
@@ -1584,7 +1584,7 @@ async def test_move_entity_by_title(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="original",
+            directory="original",
             entity_type="note",
             content="Original content",
         )
@@ -1629,7 +1629,7 @@ async def test_move_entity_preserves_observations_and_relations(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="original",
+            directory="original",
             entity_type="note",
             content=content,
         )
@@ -1676,7 +1676,7 @@ async def test_move_entity_rollback_on_database_failure(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Test Note",
-            folder="original",
+            directory="original",
             entity_type="note",
             content="Original content",
         )
@@ -1736,7 +1736,7 @@ async def test_move_entity_with_complex_observations(
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Complex Note",
-            folder="docs",
+            directory="docs",
             entity_type="note",
             content=content,
         )
@@ -1868,7 +1868,7 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     # Step 1: Create first entity "Node A"
     entity_a = EntitySchema(
         title="Node A",
-        folder="edge-cases",
+        directory="edge-cases",
         entity_type="note",
         content="# Node A\n\nOriginal content for Node A",
     )
@@ -1892,7 +1892,7 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     # Step 2: Create Node B to match live test scenario
     entity_b = EntitySchema(
         title="Node B",
-        folder="edge-cases",
+        directory="edge-cases",
         entity_type="note",
         content="# Node B\n\nContent for Node B",
     )
@@ -1905,7 +1905,7 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     # BUG: This will incorrectly match Node A via fuzzy search
     entity_c = EntitySchema(
         title="Node C",
-        folder="edge-cases",
+        directory="edge-cases",
         entity_type="note",
         content="# Node C\n\nContent for Node C",
     )

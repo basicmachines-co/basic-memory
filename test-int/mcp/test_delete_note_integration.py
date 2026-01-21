@@ -19,7 +19,7 @@ async def test_delete_note_by_title(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Note to Delete",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Note to Delete\n\nThis note will be deleted.",
                 "tags": "test,delete",
             },
@@ -77,7 +77,7 @@ async def test_delete_note_by_permalink(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Permalink Delete Test",
-                "folder": "tests",
+                "directory": "tests",
                 "content": "# Permalink Delete Test\n\nTesting deletion by permalink.",
                 "tags": "test,permalink",
             },
@@ -140,7 +140,7 @@ The system handles multiple projects and users."""
             {
                 "project": test_project.name,
                 "title": "Project Management System",
-                "folder": "projects",
+                "directory": "projects",
                 "content": complex_content,
                 "tags": "project,management,system",
             },
@@ -208,7 +208,7 @@ async def test_delete_note_special_characters_in_title(mcp_server, app, test_pro
                 {
                     "project": test_project.name,
                     "title": title,
-                    "folder": "special",
+                    "directory": "special",
                     "content": f"# {title}\n\nContent for {title}",
                     "tags": "special,characters",
                 },
@@ -275,7 +275,7 @@ async def test_delete_note_by_file_path(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "File Path Delete",
-                "folder": "docs",
+                "directory": "docs",
                 "content": "# File Path Delete\n\nTesting deletion by file path.",
                 "tags": "test,filepath",
             },
@@ -320,7 +320,7 @@ async def test_delete_note_case_insensitive(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "CamelCase Note Title",
-                "folder": "test",
+                "directory": "test",
                 "content": "# CamelCase Note Title\n\nTesting case sensitivity.",
                 "tags": "test,case",
             },
@@ -359,7 +359,7 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app, test_project)
                 {
                     "project": test_project.name,
                     "title": title,
-                    "folder": "batch",
+                    "directory": "batch",
                     "content": f"# {title}\n\nContent for {title}",
                     "tags": "batch,test",
                 },
@@ -421,7 +421,7 @@ This note contains various Unicode characters:
             {
                 "project": test_project.name,
                 "title": "Unicode Test Note",
-                "folder": "unicode",
+                "directory": "unicode",
                 "content": unicode_content,
                 "tags": "unicode,test,emoji",
             },

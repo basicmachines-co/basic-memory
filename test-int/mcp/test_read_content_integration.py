@@ -29,7 +29,7 @@ async def test_read_content_markdown_file(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Content Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Content Test\n\nThis is test content with **markdown**.",
                 "tags": "test,content",
             },
@@ -72,7 +72,7 @@ async def test_read_content_by_permalink(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Permalink Test",
-                "folder": "docs",
+                "directory": "docs",
                 "content": "# Permalink Test\n\nTesting permalink-based content reading.",
             },
         )
@@ -105,7 +105,7 @@ async def test_read_content_memory_url(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Memory URL Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Memory URL Test\n\nTesting memory:// URL handling.",
                 "tags": "memory,url",
             },
@@ -143,7 +143,7 @@ async def test_read_content_unicode_file(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Unicode Content Test",
-                "folder": "test",
+                "directory": "test",
                 "content": unicode_content,
                 "tags": "unicode,emoji",
             },
@@ -204,7 +204,7 @@ Regular markdown content continues here."""
             {
                 "project": test_project.name,
                 "title": "Complex Note",
-                "folder": "docs",
+                "directory": "docs",
                 "content": complex_content,
                 "tags": "complex,frontmatter",
             },
@@ -263,7 +263,7 @@ async def test_read_content_empty_file(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Empty Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "",  # Empty content
             },
         )
@@ -316,7 +316,7 @@ eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
             {
                 "project": test_project.name,
                 "title": "Large Content Note",
-                "folder": "test",
+                "directory": "test",
                 "content": large_content,
                 "tags": "large,content,test",
             },
@@ -362,7 +362,7 @@ async def test_read_content_special_characters_in_filename(mcp_server, app, test
                 {
                     "project": test_project.name,
                     "title": title,
-                    "folder": folder,
+                    "directory": folder,
                     "content": f"# {title}\n\nContent for {title}",
                 },
             )

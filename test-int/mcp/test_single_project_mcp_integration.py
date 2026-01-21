@@ -26,7 +26,7 @@ async def test_project_constraint_override_content_tools(mcp_server, app, test_p
                 {
                     "project": "some-other-project",  # Should be ignored
                     "title": "Constraint Test Note",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Constraint Test\n\nThis should go to the constrained project.",
                     "tags": "constraint,test",
                 },
@@ -62,7 +62,7 @@ async def test_project_constraint_read_note_override(mcp_server, app, test_proje
                 {
                     "project": test_project.name,
                     "title": "Read Test Note",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Read Test\n\nContent for reading test.",
                 },
             )
@@ -103,7 +103,7 @@ async def test_project_constraint_search_notes_override(mcp_server, app, test_pr
                 {
                     "project": test_project.name,
                     "title": "Searchable Note",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Searchable\n\nThis content has unique searchable terms.",
                 },
             )
@@ -221,7 +221,7 @@ async def test_normal_mode_without_constraint(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Normal Mode Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Normal Mode\n\nThis should work normally.",
             },
         )
@@ -254,7 +254,7 @@ async def test_constraint_with_multiple_content_tools(mcp_server, app, test_proj
                 {
                     "project": "wrong-project",
                     "title": "Multi Tool Test",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Multi Tool Test\n\n- [note] Testing multiple tools",
                 },
             )
@@ -324,7 +324,7 @@ async def test_constraint_with_invalid_project_override(mcp_server, app, test_pr
                     {
                         "project": invalid_project,
                         "title": f"Test Invalid {i} {invalid_project[:5]}",
-                        "folder": "test",
+                        "directory": "test",
                         "content": f"Testing with invalid project: {invalid_project}",
                     },
                 )

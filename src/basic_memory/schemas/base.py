@@ -24,7 +24,7 @@ from dateparser import parse
 from pydantic import BaseModel, BeforeValidator, Field, model_validator, computed_field
 
 from basic_memory.config import ConfigManager
-from basic_memory.file_utils import sanitize_for_filename, sanitize_for_folder
+from basic_memory.file_utils import sanitize_for_filename, sanitize_for_directory
 from basic_memory.utils import generate_permalink
 
 
@@ -227,7 +227,7 @@ class Entity(BaseModel):
 
     title: str
     content: Optional[str] = None
-    folder: str
+    directory: str
     entity_type: EntityType = "note"
     entity_metadata: Optional[Dict] = Field(default=None, description="Optional metadata")
     content_type: ContentType = Field(
@@ -237,7 +237,7 @@ class Entity(BaseModel):
     )
 
     def __init__(self, **data):
-        data["folder"] = sanitize_for_folder(data.get("folder", ""))
+        data["directory"] = sanitize_for_directory(data.get("directory", ""))
         super().__init__(**data)
 
     @property
@@ -272,10 +272,12 @@ class Entity(BaseModel):
         safe_title = self.safe_title
         if self.content_type == "text/markdown":
             return (
-                os.path.join(self.folder, f"{safe_title}.md") if self.folder else f"{safe_title}.md"
+                os.path.join(self.directory, f"{safe_title}.md")
+                if self.directory
+                else f"{safe_title}.md"
             )
         else:
-            return os.path.join(self.folder, safe_title) if self.folder else safe_title
+            return os.path.join(self.directory, safe_title) if self.directory else safe_title
 
     @property
     def permalink(self) -> Optional[Permalink]:

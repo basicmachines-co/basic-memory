@@ -19,7 +19,7 @@ async def test_resolve_identifier_by_permalink(
     # Create an entity first
     entity_data = {
         "title": "TestResolve",
-        "folder": "test",
+        "directory": "test",
         "content": "Test content for resolve",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
@@ -57,7 +57,7 @@ async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url,
     # Create an entity first
     entity_data = {
         "title": "TestGetById",
-        "folder": "test",
+        "directory": "test",
         "content": "Test content for get by ID",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
@@ -94,7 +94,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
     """Test creating an entity via v2 endpoint."""
     data = {
         "title": "TestV2Entity",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "test",
         "content_type": "text/markdown",
         "content": "TestContent for V2",
@@ -127,7 +127,7 @@ async def test_create_entity_with_observations_and_relations(
     """Test creating an entity with observations and relations via v2."""
     data = {
         "title": "TestV2Complex",
-        "folder": "test",
+        "directory": "test",
         "content": """
 # TestV2Complex
 
@@ -164,7 +164,7 @@ async def test_update_entity_by_id(
     # Create an entity first
     create_data = {
         "title": "TestUpdate",
-        "folder": "test",
+        "directory": "test",
         "content": "Original content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
@@ -178,7 +178,7 @@ async def test_update_entity_by_id(
     # Update it by external_id
     update_data = {
         "title": "TestUpdate",
-        "folder": "test",
+        "directory": "test",
         "content": "Updated content via V2",
     }
     response = await client.put(
@@ -208,7 +208,7 @@ async def test_edit_entity_by_id_append(
     # Create an entity first
     create_data = {
         "title": "TestEdit",
-        "folder": "test",
+        "directory": "test",
         "content": "# TestEdit\n\nOriginal content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
@@ -251,7 +251,7 @@ async def test_edit_entity_by_id_find_replace(
     # Create an entity first
     create_data = {
         "title": "TestFindReplace",
-        "folder": "test",
+        "directory": "test",
         "content": "# TestFindReplace\n\nOld text that will be replaced",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
@@ -295,7 +295,7 @@ async def test_delete_entity_by_id(
     # Create an entity first
     create_data = {
         "title": "TestDelete",
-        "folder": "test",
+        "directory": "test",
         "content": "Content to be deleted",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
@@ -337,7 +337,7 @@ async def test_move_entity(client: AsyncClient, file_service, v2_project_url, en
     # Create an entity first
     create_data = {
         "title": "TestMove",
-        "folder": "test",
+        "directory": "test",
         "content": "Content to be moved",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
@@ -390,7 +390,7 @@ async def test_entity_response_v2_has_api_version(
     # Create an entity
     entity_data = {
         "title": "TestApiVersion",
-        "folder": "test",
+        "directory": "test",
         "content": "Test content",
     }
     response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)

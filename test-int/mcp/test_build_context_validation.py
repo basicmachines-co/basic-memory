@@ -15,7 +15,7 @@ async def test_build_context_valid_urls(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "URL Validation Test",
-                "folder": "testing",
+                "directory": "testing",
                 "content": "# URL Validation Test\n\nThis note tests URL validation.",
                 "tags": "test,validation",
             },
@@ -169,7 +169,7 @@ async def test_build_context_pattern_matching_works(mcp_server, app, test_projec
                 {
                     "project": test_project.name,
                     "title": title,
-                    "folder": folder,
+                    "directory": folder,
                     "content": content,
                 },
             )

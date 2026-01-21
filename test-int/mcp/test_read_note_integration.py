@@ -19,7 +19,7 @@ async def test_read_note_after_write(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Test Note\n\nThis is test content.",
                 "tags": "test,integration",
             },
@@ -64,7 +64,7 @@ async def test_read_note_underscored_folder_by_permalink(mcp_server, app, test_p
             {
                 "project": test_project.name,
                 "title": "Example Note",
-                "folder": "_archive/articles",
+                "directory": "_archive/articles",
                 "content": "# Example Note\n\nThis is a test note in an underscored folder.",
                 "tags": "test,archive",
             },

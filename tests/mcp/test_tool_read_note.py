@@ -14,7 +14,7 @@ async def test_read_note_by_title(app, test_project):
     """Test reading a note by its title."""
     # First create a note
     await write_note.fn(
-        project=test_project.name, title="Special Note", folder="test", content="Note content here"
+        project=test_project.name, title="Special Note", directory="test", content="Note content here"
     )
 
     # Should be able to read it by title
@@ -28,7 +28,7 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
     await write_note.fn(
         project=test_project.name,
         title="Fallback Title Note",
-        folder="test",
+        directory="test",
         content="fallback content",
     )
 
@@ -109,7 +109,7 @@ async def test_note_unicode_content(app, test_project):
     """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
     result = await write_note.fn(
-        project=test_project.name, title="Unicode Test", folder="test", content=content
+        project=test_project.name, title="Unicode Test", directory="test", content=content
     )
 
     # Check that note was created (checksum is now "unknown" in v2)
@@ -136,7 +136,7 @@ async def test_multiple_notes(app, test_project):
 
     for _, title, folder, content, tags in notes_data:
         await write_note.fn(
-            project=test_project.name, title=title, folder=folder, content=content, tags=tags
+            project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
     # Should be able to read each one individually
@@ -161,7 +161,7 @@ async def test_multiple_notes_pagination(app, test_project):
 
     for _, title, folder, content, tags in notes_data:
         await write_note.fn(
-            project=test_project.name, title=title, folder=folder, content=content, tags=tags
+            project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
     # Should be able to read each one individually with pagination
@@ -187,7 +187,7 @@ async def test_read_note_memory_url(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Memory URL Test",
-        folder="test",
+        directory="test",
         content="Testing memory:// URL handling",
     )
     assert result
@@ -365,7 +365,7 @@ class TestReadNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Security Test Note",
-            folder="security-tests",
+            directory="security-tests",
             content="# Security Test Note\nThis is a legitimate note for security testing.",
         )
 
@@ -423,7 +423,7 @@ class TestReadNoteSecurityValidation:
         await write_note.fn(
             project=test_project.name,
             title="Full Feature Security Test Note",
-            folder="security-tests",
+            directory="security-tests",
             content=dedent("""
                 # Full Feature Security Test Note
                 

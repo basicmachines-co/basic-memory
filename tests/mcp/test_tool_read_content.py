@@ -148,7 +148,7 @@ async def test_read_content_allows_safe_path_integration(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Meeting",
-        folder="notes",
+        directory="notes",
         content="This is a safe note for read_content()",
     )
 

@@ -20,7 +20,7 @@ async def test_write_note(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a test note",
         tags=["test", "documentation"],
     )
@@ -60,7 +60,7 @@ async def test_write_note(app, test_project):
 async def test_write_note_no_tags(app, test_project):
     """Test creating a note without tags."""
     result = await write_note.fn(
-        project=test_project.name, title="Simple Note", folder="test", content="Just some text"
+        project=test_project.name, title="Simple Note", directory="test", content="Just some text"
     )
 
     assert result
@@ -100,7 +100,7 @@ async def test_write_note_update_existing(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a test note",
         tags=["test", "documentation"],
     )
@@ -117,7 +117,7 @@ async def test_write_note_update_existing(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is an updated note",
         tags=["test", "documentation"],
     )
@@ -173,7 +173,7 @@ async def test_issue_93_write_note_respects_custom_permalink_new_note(app, test_
     result = await write_note.fn(
         project=test_project.name,
         title="My New Note",
-        folder="notes",
+        directory="notes",
         content=content_with_custom_permalink,
     )
 
@@ -193,7 +193,7 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
     result1 = await write_note.fn(
         project=test_project.name,
         title="Existing Note",
-        folder="test",
+        directory="test",
         content="Initial content without custom permalink",
     )
 
@@ -225,7 +225,7 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
     result2 = await write_note.fn(
         project=test_project.name,
         title="Existing Note",
-        folder="test",
+        directory="test",
         content=updated_content,
     )
 
@@ -249,7 +249,7 @@ async def test_delete_note_existing(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test\nThis is a test note",
         tags=["test", "documentation"],
     )
@@ -284,7 +284,7 @@ async def test_write_note_with_tag_array_from_bug_report(app, test_project):
     bug_payload = {
         "project": test_project.name,
         "title": "Title",
-        "folder": "folder",
+        "directory": "folder",
         "content": "CONTENT",
         "tags": ["hipporag", "search", "fallback", "symfony", "error-handling"],
     }
@@ -313,7 +313,7 @@ async def test_write_note_verbose(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="""
 # Test\nThis is a test note
 
@@ -352,7 +352,7 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
     await write_note.fn(
         project=test_project.name,
         title="Custom Metadata Note",
-        folder="test",
+        directory="test",
         content="# Initial content",
         tags=["test"],
     )
@@ -380,7 +380,7 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
     result = await write_note.fn(
         project=test_project.name,
         title="Custom Metadata Note",
-        folder="test",
+        directory="test",
         content="# Updated content",
         tags=["test", "updated"],
     )
@@ -415,7 +415,7 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content=dedent(
             """
             ---
@@ -475,7 +475,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     result1 = await write_note.fn(
         project=test_project.name,
         title="Note 1",
-        folder="test",
+        directory="test",
         content="Original content for note 1",
     )
     assert "# Created note" in result1
@@ -484,7 +484,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
 
     # Step 2: Create second note with different title
     result2 = await write_note.fn(
-        project=test_project.name, title="Note 2", folder="test", content="Content for note 2"
+        project=test_project.name, title="Note 2", directory="test", content="Content for note 2"
     )
     assert "# Created note" in result2
     assert f"project: {test_project.name}" in result2
@@ -495,7 +495,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     result3 = await write_note.fn(
         project=test_project.name,
         title="Note 1",  # Same title as first note
-        folder="test",  # Same folder as first note
+        directory="test",  # Same folder as first note
         content="Replacement content for note 1",  # Different content
     )
 
@@ -535,7 +535,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Guide",
-        folder="guides",
+        directory="guides",
         content="# Guide Content\nThis is a guide",
         tags=["guide", "documentation"],
         note_type="guide",
@@ -578,7 +578,7 @@ async def test_write_note_with_report_entity_type(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Monthly Report",
-        folder="reports",
+        directory="reports",
         content="# Monthly Report\nThis is a monthly report",
         tags=["report", "monthly"],
         note_type="report",
@@ -603,7 +603,7 @@ async def test_write_note_with_config_entity_type(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="System Config",
-        folder="config",
+        directory="config",
         content="# System Configuration\nThis is a config file",
         note_type="config",
     )
@@ -631,7 +631,7 @@ async def test_write_note_entity_type_default_behavior(app, test_project):
     result = await write_note.fn(
         project=test_project.name,
         title="Default Type Test",
-        folder="test",
+        directory="test",
         content="# Default Type Test\nThis should be type 'note'",
         tags=["test"],
     )
@@ -656,7 +656,7 @@ async def test_write_note_update_existing_with_different_entity_type(app, test_p
     result1 = await write_note.fn(
         project=test_project.name,
         title="Changeable Type",
-        folder="test",
+        directory="test",
         content="# Initial Content\nThis starts as a note",
         tags=["test"],
         note_type="note",
@@ -670,7 +670,7 @@ async def test_write_note_update_existing_with_different_entity_type(app, test_p
     result2 = await write_note.fn(
         project=test_project.name,
         title="Changeable Type",
-        folder="test",
+        directory="test",
         content="# Updated Content\nThis is now a guide",
         tags=["guide"],
         note_type="guide",
@@ -711,7 +711,7 @@ async def test_write_note_respects_frontmatter_entity_type(app, test_project):
 
     # Call write_note without entity_type parameter - it should respect frontmatter type
     result = await write_note.fn(
-        project=test_project.name, title="Test Guide", folder="guides", content=note
+        project=test_project.name, title="Test Guide", directory="guides", content=note
     )
 
     assert result
@@ -752,7 +752,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Test Note",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Test Content\nThis should be blocked by security validation.",
             )
 
@@ -781,7 +781,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Test Note",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Test Content\nThis should be blocked by security validation.",
             )
 
@@ -810,7 +810,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Test Note",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Test Content\nThis should be blocked by security validation.",
             )
 
@@ -838,7 +838,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Test Note",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Test Content\nThis should be blocked by security validation.",
             )
 
@@ -864,7 +864,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Test Note",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Test Content\nThis should be blocked by security validation.",
             )
 
@@ -891,7 +891,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title=f"Test Note in {safe_folder.replace('/', '-')}",
-                folder=safe_folder,
+                directory=safe_folder,
                 content="# Test Content\nThis should work normally with security validation.",
                 tags=["test", "security"],
             )
@@ -911,7 +911,7 @@ class TestWriteNoteSecurityValidation:
         result = await write_note.fn(
             project=test_project.name,
             title="Root Note",
-            folder="",
+            directory="",
             content="# Root Note\nThis note should be created in the project root.",
         )
 
@@ -930,7 +930,7 @@ class TestWriteNoteSecurityValidation:
         result = await write_note.fn(
             project=test_project.name,
             title="Root Folder Note",
-            folder="",  # Empty string instead of None since folder is required
+            directory="",  # Empty string instead of None since folder is required
             content="# Root Folder Note\nThis note should be created in the project root.",
         )
 
@@ -955,7 +955,7 @@ class TestWriteNoteSecurityValidation:
             result = await write_note.fn(
                 project=test_project.name,
                 title=f"Current Dir Test {safe_folder.replace('/', '-').replace('.', 'dot')}",
-                folder=safe_folder,
+                directory=safe_folder,
                 content="# Current Directory Test\nThis should work with current directory references.",
             )
 
@@ -973,7 +973,7 @@ class TestWriteNoteSecurityValidation:
         result = await write_note.fn(
             project=test_project.name,
             title="Security Test with All Params",
-            folder="../../../etc/malicious",
+            directory="../../../etc/malicious",
             content="# Malicious Content\nThis should be blocked by security validation.",
             tags=["malicious", "test"],
             note_type="guide",
@@ -991,7 +991,7 @@ class TestWriteNoteSecurityValidation:
         result = await write_note.fn(
             project=test_project.name,
             title="Security Logging Test",
-            folder="../../../etc/passwd_folder",
+            directory="../../../etc/passwd_folder",
             content="# Test Content\nThis should trigger security logging.",
         )
 
@@ -1009,7 +1009,7 @@ class TestWriteNoteSecurityValidation:
         result = await write_note.fn(
             project=test_project.name,
             title="Full Feature Security Test",
-            folder="security-tests",
+            directory="security-tests",
             content=dedent("""
                 # Full Feature Security Test
 
@@ -1064,7 +1064,7 @@ class TestWriteNoteSecurityEdgeCases:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Unicode Attack Test",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Unicode Attack\nThis should be blocked.",
             )
 
@@ -1081,7 +1081,7 @@ class TestWriteNoteSecurityEdgeCases:
         result = await write_note.fn(
             project=test_project.name,
             title="Long Attack Test",
-            folder=long_attack_folder,
+            directory=long_attack_folder,
             content="# Long Attack\nThis should be blocked.",
         )
 
@@ -1104,7 +1104,7 @@ class TestWriteNoteSecurityEdgeCases:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Case Variation Attack Test",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Case Attack\nThis should be blocked.",
             )
 
@@ -1127,7 +1127,7 @@ class TestWriteNoteSecurityEdgeCases:
             result = await write_note.fn(
                 project=test_project.name,
                 title="Whitespace Attack Test",
-                folder=attack_folder,
+                directory=attack_folder,
                 content="# Whitespace Attack\nThis should be blocked.",
             )
 

@@ -276,7 +276,7 @@ async def test_project_lifecycle_workflow(mcp_server, app, test_project, tmp_pat
             {
                 "project": project_name,
                 "title": "Lifecycle Test Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Lifecycle Test\\n\\nThis note tests the project lifecycle.\\n\\n- [test] Lifecycle testing",
                 "tags": "lifecycle,test",
             },
@@ -390,7 +390,7 @@ async def test_case_insensitive_project_switching(mcp_server, app, test_project,
                 {
                     "project": test_input,  # Use different case
                     "title": f"Case Test {test_input}",
-                    "folder": "case-test",
+                    "directory": "case-test",
                     "content": f"# Case Test\n\nTesting with {test_input}",
                 },
             )
@@ -427,7 +427,7 @@ async def test_case_insensitive_project_operations(mcp_server, app, test_project
             {
                 "project": project_name,
                 "title": "Case Test Note",
-                "folder": "case-test",
+                "directory": "case-test",
                 "content": "# Case Test Note\n\nTesting case-insensitive operations.\n\n- [test] Case insensitive switch\n- relates_to [[Another Note]]",
                 "tags": "case,test",
             },
@@ -478,7 +478,7 @@ async def test_case_insensitive_error_handling(mcp_server, app, test_project):
                     {
                         "project": test_case,
                         "title": "Test Note",
-                        "folder": "test",
+                        "directory": "test",
                         "content": "# Test\n\nTest content.",
                     },
                 )
@@ -524,7 +524,7 @@ async def test_case_preservation_in_project_list(mcp_server, app, test_project, 
                 {
                     "project": project_name,  # Use exact project name
                     "title": f"Test Note {project_name}",
-                    "folder": "test",
+                    "directory": "test",
                     "content": f"# Test\n\nTesting {project_name}",
                 },
             )

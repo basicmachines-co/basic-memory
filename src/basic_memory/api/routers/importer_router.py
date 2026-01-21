@@ -27,13 +27,13 @@ router = APIRouter(prefix="/import", tags=["import"])
 async def import_chatgpt(
     importer: ChatGPTImporterDep,
     file: UploadFile,
-    folder: str = Form("conversations"),
+    directory: str = Form("conversations"),
 ) -> ChatImportResult:
     """Import conversations from ChatGPT JSON export.
 
     Args:
         file: The ChatGPT conversations.json file.
-        folder: The folder to place the files in.
+        directory: The directory to place the files in.
         markdown_processor: MarkdownProcessor instance.
 
     Returns:
@@ -42,20 +42,20 @@ async def import_chatgpt(
     Raises:
         HTTPException: If import fails.
     """
-    return await import_file(importer, file, folder)
+    return await import_file(importer, file, directory)
 
 
 @router.post("/claude/conversations", response_model=ChatImportResult)
 async def import_claude_conversations(
     importer: ClaudeConversationsImporterDep,
     file: UploadFile,
-    folder: str = Form("conversations"),
+    directory: str = Form("conversations"),
 ) -> ChatImportResult:
     """Import conversations from Claude conversations.json export.
 
     Args:
         file: The Claude conversations.json file.
-        folder: The folder to place the files in.
+        directory: The directory to place the files in.
         markdown_processor: MarkdownProcessor instance.
 
     Returns:
@@ -64,20 +64,20 @@ async def import_claude_conversations(
     Raises:
         HTTPException: If import fails.
     """
-    return await import_file(importer, file, folder)
+    return await import_file(importer, file, directory)
 
 
 @router.post("/claude/projects", response_model=ProjectImportResult)
 async def import_claude_projects(
     importer: ClaudeProjectsImporterDep,
     file: UploadFile,
-    folder: str = Form("projects"),
+    directory: str = Form("projects"),
 ) -> ProjectImportResult:
     """Import projects from Claude projects.json export.
 
     Args:
         file: The Claude projects.json file.
-        base_folder: The base folder to place the files in.
+        directory: The directory to place the files in.
         markdown_processor: MarkdownProcessor instance.
 
     Returns:
@@ -86,20 +86,20 @@ async def import_claude_projects(
     Raises:
         HTTPException: If import fails.
     """
-    return await import_file(importer, file, folder)
+    return await import_file(importer, file, directory)
 
 
 @router.post("/memory-json", response_model=EntityImportResult)
 async def import_memory_json(
     importer: MemoryJsonImporterDep,
     file: UploadFile,
-    folder: str = Form("conversations"),
+    directory: str = Form("conversations"),
 ) -> EntityImportResult:
     """Import entities and relations from a memory.json file.
 
     Args:
         file: The memory.json file.
-        destination_folder: Optional destination folder within the project.
+        directory: Optional destination directory within the project.
         markdown_processor: MarkdownProcessor instance.
 
     Returns:
@@ -116,7 +116,7 @@ async def import_memory_json(
             json_data = json.loads(line)
             file_data.append(json_data)
 
-        result = await importer.import_data(file_data, folder)
+        result = await importer.import_data(file_data, directory)
         if not result.success:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

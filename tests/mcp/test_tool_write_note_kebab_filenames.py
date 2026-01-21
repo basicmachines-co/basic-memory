@@ -32,7 +32,7 @@ async def test_write_note_spaces_to_hyphens(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="My Awesome Note",
-        folder="test",
+        directory="test",
         content="Testing space conversion",
     )
 
@@ -48,7 +48,7 @@ async def test_write_note_underscores_to_hyphens(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="my_note_with_underscores",
-        folder="test",
+        directory="test",
         content="Testing underscore conversion",
     )
 
@@ -64,7 +64,7 @@ async def test_write_note_camelcase_to_kebab(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="MyAwesomeFeature",
-        folder="test",
+        directory="test",
         content="Testing CamelCase conversion",
     )
 
@@ -80,7 +80,7 @@ async def test_write_note_mixed_case_to_lowercase(app, test_project, app_config)
     result = await write_note.fn(
         project=test_project.name,
         title="MIXED_Case_Example",
-        folder="test",
+        directory="test",
         content="Testing case conversion",
     )
 
@@ -105,7 +105,7 @@ async def test_write_note_single_period_preserved(app, test_project, app_config)
     result = await write_note.fn(
         project=test_project.name,
         title="Test 3.0 Version",
-        folder="test",
+        directory="test",
         content="Testing period preservation",
     )
 
@@ -121,7 +121,7 @@ async def test_write_note_multiple_periods_preserved(app, test_project, app_conf
     result = await write_note.fn(
         project=test_project.name,
         title="Version 1.2.3 Release",
-        folder="test",
+        directory="test",
         content="Testing multiple period preservation",
     )
 
@@ -142,7 +142,7 @@ async def test_write_note_special_chars_to_hyphens(app, test_project, app_config
     result = await write_note.fn(
         project=test_project.name,
         title="Test 2.0: New Feature",
-        folder="test",
+        directory="test",
         content="Testing special character conversion",
     )
 
@@ -158,7 +158,7 @@ async def test_write_note_parentheses_removed(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="Feature (v2.0) Update",
-        folder="test",
+        directory="test",
         content="Testing parentheses handling",
     )
 
@@ -174,7 +174,7 @@ async def test_write_note_apostrophes_removed(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="User's Guide",
-        folder="test",
+        directory="test",
         content="Testing apostrophe handling",
     )
 
@@ -195,7 +195,7 @@ async def test_write_note_all_transformations_combined(app, test_project, app_co
     result = await write_note.fn(
         project=test_project.name,
         title="MyProject_v3.0: Feature Update (DRAFT)",
-        folder="test",
+        directory="test",
         content="Testing combined transformations",
     )
 
@@ -211,7 +211,7 @@ async def test_write_note_consecutive_special_chars_collapsed(app, test_project,
     result = await write_note.fn(
         project=test_project.name,
         title="Test___Multiple---Separators",
-        folder="test",
+        directory="test",
         content="Testing consecutive special character collapse",
     )
 
@@ -233,7 +233,7 @@ async def test_write_note_leading_trailing_hyphens_trimmed(app, test_project, ap
     result = await write_note.fn(
         project=test_project.name,
         title="---Test Note---",
-        folder="test",
+        directory="test",
         content="Testing leading/trailing hyphen trimming",
     )
 
@@ -249,7 +249,7 @@ async def test_write_note_all_special_chars_becomes_valid_filename(app, test_pro
     result = await write_note.fn(
         project=test_project.name,
         title="!!!Test!!!",
-        folder="test",
+        directory="test",
         content="Testing all special characters",
     )
 
@@ -270,7 +270,7 @@ async def test_write_note_folder_path_unaffected(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="My_Folder/Sub Folder",  # Folder should remain as-is
+        directory="My_Folder/Sub Folder",  # Folder should remain as-is
         content="Testing folder path preservation",
     )
 
@@ -287,7 +287,7 @@ async def test_write_note_root_folder_with_kebab(app, test_project, app_config):
     result = await write_note.fn(
         project=test_project.name,
         title="Test 3.0 Note",
-        folder="",  # Root folder
+        directory="",  # Root folder
         content="Testing root folder",
     )
 
@@ -308,7 +308,7 @@ async def test_write_note_kebab_disabled_preserves_original(app, test_project, a
     result = await write_note.fn(
         project=test_project.name,
         title="Test 3.0 Version",
-        folder="test",
+        directory="test",
         content="Testing backward compatibility",
     )
 
@@ -326,7 +326,7 @@ async def test_write_note_kebab_disabled_preserves_underscores(app, test_project
     result = await write_note.fn(
         project=test_project.name,
         title="my_note_example",
-        folder="test",
+        directory="test",
         content="Testing underscore preservation",
     )
 
@@ -342,7 +342,7 @@ async def test_write_note_kebab_disabled_preserves_case(app, test_project, app_c
     result = await write_note.fn(
         project=test_project.name,
         title="MyAwesomeNote",
-        folder="test",
+        directory="test",
         content="Testing case preservation",
     )
 
@@ -369,7 +369,7 @@ async def test_permalinks_always_kebab_case(app, test_project, app_config):
     result1 = await write_note.fn(
         project=test_project.name,
         title="Test Note 1",
-        folder="test",
+        directory="test",
         content="Testing permalink consistency",
     )
 
@@ -383,7 +383,7 @@ async def test_permalinks_always_kebab_case(app, test_project, app_config):
     result2 = await write_note.fn(
         project=test_project.name,
         title="Test Note 2",
-        folder="test",
+        directory="test",
         content="Testing permalink consistency",
     )
 

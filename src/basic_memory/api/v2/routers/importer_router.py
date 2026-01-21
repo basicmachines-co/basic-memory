@@ -32,14 +32,14 @@ async def import_chatgpt(
     importer: ChatGPTImporterV2ExternalDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
-    folder: str = Form("conversations"),
+    directory: str = Form("conversations"),
 ) -> ChatImportResult:
     """Import conversations from ChatGPT JSON export.
 
     Args:
         project_id: Project external UUID from URL path
         file: The ChatGPT conversations.json file.
-        folder: The folder to place the files in.
+        directory: The directory to place the files in.
         importer: ChatGPT importer instance.
 
     Returns:
@@ -49,7 +49,7 @@ async def import_chatgpt(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing ChatGPT conversations for project {project_id}")
-    return await import_file(importer, file, folder)
+    return await import_file(importer, file, directory)
 
 
 @router.post("/claude/conversations", response_model=ChatImportResult)
@@ -57,14 +57,14 @@ async def import_claude_conversations(
     importer: ClaudeConversationsImporterV2ExternalDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
-    folder: str = Form("conversations"),
+    directory: str = Form("conversations"),
 ) -> ChatImportResult:
     """Import conversations from Claude conversations.json export.
 
     Args:
         project_id: Project external UUID from URL path
         file: The Claude conversations.json file.
-        folder: The folder to place the files in.
+        directory: The directory to place the files in.
         importer: Claude conversations importer instance.
 
     Returns:
@@ -74,7 +74,7 @@ async def import_claude_conversations(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing Claude conversations for project {project_id}")
-    return await import_file(importer, file, folder)
+    return await import_file(importer, file, directory)
 
 
 @router.post("/claude/projects", response_model=ProjectImportResult)
@@ -82,14 +82,14 @@ async def import_claude_projects(
     importer: ClaudeProjectsImporterV2ExternalDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
-    folder: str = Form("projects"),
+    directory: str = Form("projects"),
 ) -> ProjectImportResult:
     """Import projects from Claude projects.json export.
 
     Args:
         project_id: Project external UUID from URL path
         file: The Claude projects.json file.
-        folder: The base folder to place the files in.
+        directory: The base directory to place the files in.
         importer: Claude projects importer instance.
 
     Returns:
@@ -99,7 +99,7 @@ async def import_claude_projects(
         HTTPException: If import fails.
     """
     logger.info(f"V2 Importing Claude projects for project {project_id}")
-    return await import_file(importer, file, folder)
+    return await import_file(importer, file, directory)
 
 
 @router.post("/memory-json", response_model=EntityImportResult)
@@ -107,14 +107,14 @@ async def import_memory_json(
     importer: MemoryJsonImporterV2ExternalDep,
     file: UploadFile,
     project_id: str = Path(..., description="Project external UUID"),
-    folder: str = Form("conversations"),
+    directory: str = Form("conversations"),
 ) -> EntityImportResult:
     """Import entities and relations from a memory.json file.
 
     Args:
         project_id: Project external UUID from URL path
         file: The memory.json file.
-        folder: Optional destination folder within the project.
+        directory: Optional destination directory within the project.
         importer: Memory JSON importer instance.
 
     Returns:
@@ -132,7 +132,7 @@ async def import_memory_json(
             json_data = json.loads(line)
             file_data.append(json_data)
 
-        result = await importer.import_data(file_data, folder)
+        result = await importer.import_data(file_data, directory)
         if not result.success:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -147,13 +147,13 @@ async def import_memory_json(
     return result
 
 
-async def import_file(importer: Importer, file: UploadFile, destination_folder: str):
+async def import_file(importer: Importer, file: UploadFile, destination_directory: str):
     """Helper function to import a file using an importer instance.
 
     Args:
         importer: The importer instance to use
         file: The file to import
-        destination_folder: Destination folder for imported content
+        destination_directory: Destination directory for imported content
 
     Returns:
         Import result from the importer
@@ -164,7 +164,7 @@ async def import_file(importer: Importer, file: UploadFile, destination_folder: 
     try:
         # Process file
         json_data = json.load(file.file)
-        result = await importer.import_data(json_data, destination_folder)
+        result = await importer.import_data(json_data, destination_directory)
         if not result.success:  # pragma: no cover
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

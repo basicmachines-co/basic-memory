@@ -450,16 +450,16 @@ def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     return text.strip(replacement)
 
 
-def sanitize_for_folder(folder: str) -> str:
+def sanitize_for_directory(directory: str) -> str:
     """
-    Sanitize folder path to be safe for use in file system paths.
+    Sanitize directory path to be safe for use in file system paths.
     Removes leading/trailing whitespace, compresses multiple slashes,
     and removes special characters except for /, -, and _.
     """
-    if not folder:
+    if not directory:
         return ""
 
-    sanitized = folder.strip()
+    sanitized = directory.strip()
 
     if sanitized.startswith("./"):
         sanitized = sanitized[2:]

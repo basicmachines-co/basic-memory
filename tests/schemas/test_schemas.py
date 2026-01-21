@@ -19,7 +19,7 @@ from basic_memory.schemas.base import to_snake_case, TimeFrame, parse_timeframe,
 
 def test_entity_project_name():
     """Test creating EntityIn with minimal required fields."""
-    data = {"title": "Test Entity", "folder": "test", "entity_type": "knowledge"}
+    data = {"title": "Test Entity", "directory": "test", "entity_type": "knowledge"}
     entity = Entity.model_validate(data)
     assert entity.file_path == os.path.join("test", "Test Entity.md")
     assert entity.permalink == "test/test-entity"
@@ -28,7 +28,7 @@ def test_entity_project_name():
 
 def test_entity_project_id():
     """Test creating EntityIn with minimal required fields."""
-    data = {"project": 2, "title": "Test Entity", "folder": "test", "entity_type": "knowledge"}
+    data = {"project": 2, "title": "Test Entity", "directory": "test", "entity_type": "knowledge"}
     entity = Entity.model_validate(data)
     assert entity.file_path == os.path.join("test", "Test Entity.md")
     assert entity.permalink == "test/test-entity"
@@ -39,7 +39,7 @@ def test_entity_non_markdown():
     """Test entity for regular non-markdown file."""
     data = {
         "title": "Test Entity.txt",
-        "folder": "test",
+        "directory": "test",
         "entity_type": "file",
         "content_type": "text/plain",
     }
@@ -243,11 +243,11 @@ def test_path_sanitization():
 def test_permalink_generation():
     """Test permalink property generates correct paths."""
     test_cases = [
-        ({"title": "BasicMemory", "folder": "test"}, "test/basic-memory"),
-        ({"title": "Memory Service", "folder": "test"}, "test/memory-service"),
-        ({"title": "API Gateway", "folder": "test"}, "test/api-gateway"),
-        ({"title": "TestCase1", "folder": "test"}, "test/test-case1"),
-        ({"title": "TestCaseRoot", "folder": ""}, "test-case-root"),
+        ({"title": "BasicMemory", "directory": "test"}, "test/basic-memory"),
+        ({"title": "Memory Service", "directory": "test"}, "test/memory-service"),
+        ({"title": "API Gateway", "directory": "test"}, "test/api-gateway"),
+        ({"title": "TestCase1", "directory": "test"}, "test/test-case1"),
+        ({"title": "TestCaseRoot", "directory": ""}, "test-case-root"),
     ]
 
     for input_data, expected_path in test_cases:

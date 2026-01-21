@@ -56,6 +56,27 @@ class MoveEntityRequestV2(BaseModel):
     )
 
 
+class MoveDirectoryRequestV2(BaseModel):
+    """V2 request schema for moving an entire directory to a new location.
+
+    This moves all entities within a source directory to a destination directory
+    while maintaining project consistency and updating database references.
+    """
+
+    source_directory: str = Field(
+        ...,
+        description="Source directory path (relative to project root)",
+        min_length=1,
+        max_length=500,
+    )
+    destination_directory: str = Field(
+        ...,
+        description="Destination directory path (relative to project root)",
+        min_length=1,
+        max_length=500,
+    )
+
+
 class EntityResponseV2(BaseModel):
     """V2 entity response with external_id as the primary API identifier.
 

@@ -22,7 +22,7 @@ async def canvas(
     nodes: List[Dict[str, Any]],
     edges: List[Dict[str, Any]],
     title: str,
-    folder: str,
+    directory: str,
     project: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
@@ -43,8 +43,8 @@ async def canvas(
         nodes: List of node objects following JSON Canvas 1.0 spec
         edges: List of edge objects following JSON Canvas 1.0 spec
         title: The title of the canvas (will be saved as title.canvas)
-        folder: Folder path relative to project root where the canvas should be saved.
-                Use forward slashes (/) as separators. Examples: "diagrams", "projects/2025", "visual/maps"
+        directory: Directory path relative to project root where the canvas should be saved.
+                   Use forward slashes (/) as separators. Examples: "diagrams", "projects/2025", "visual/maps"
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -52,7 +52,7 @@ async def canvas(
 
     Important Notes:
     - When referencing files, use the exact file path as shown in Obsidian
-      Example: "folder/Document Name.md" (not permalink format)
+      Example: "docs/Document Name.md" (not permalink format)
     - For file nodes, the "file" attribute must reference an existing file
     - Nodes require id, type, x, y, width, height properties
     - Edges require id, fromNode, toNode properties
@@ -66,7 +66,7 @@ async def canvas(
         {
           "id": "node1",
           "type": "file",  // Options: "file", "text", "link", "group"
-          "file": "folder/Document.md",
+          "file": "docs/Document.md",
           "x": 0,
           "y": 0,
           "width": 400,
@@ -86,20 +86,20 @@ async def canvas(
 
     Examples:
         # Create canvas in project
-        canvas("my-project", nodes=[...], edges=[...], title="My Canvas", folder="diagrams")
+        canvas("my-project", nodes=[...], edges=[...], title="My Canvas", directory="diagrams")
 
         # Create canvas in work project
-        canvas("work-project", nodes=[...], edges=[...], title="Process Flow", folder="visual/maps")
+        canvas("work-project", nodes=[...], edges=[...], title="Process Flow", directory="visual/maps")
 
     Raises:
-        ToolError: If project doesn't exist or folder path is invalid
+        ToolError: If project doesn't exist or directory path is invalid
     """
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
 
         # Ensure path has .canvas extension
         file_title = title if title.endswith(".canvas") else f"{title}.canvas"
-        file_path = f"{folder}/{file_title}"
+        file_path = f"{directory}/{file_title}"
 
         # Create canvas data structure
         canvas_data = {"nodes": nodes, "edges": edges}

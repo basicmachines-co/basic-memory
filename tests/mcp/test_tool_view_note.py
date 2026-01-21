@@ -14,7 +14,7 @@ async def test_view_note_basic_functionality(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test View Note",
-        folder="test",
+        directory="test",
         content="# Test View Note\n\nThis is test content for viewing.",
     )
 
@@ -48,7 +48,7 @@ async def test_view_note_with_frontmatter_title(app, test_project):
     """).strip()
 
     await write_note.fn(
-        project=test_project.name, title="Frontmatter Title", folder="test", content=content
+        project=test_project.name, title="Frontmatter Title", directory="test", content=content
     )
 
     # View the note
@@ -66,7 +66,7 @@ async def test_view_note_with_heading_title(app, test_project):
     content = "# Heading Title\n\nContent with heading title."
 
     await write_note.fn(
-        project=test_project.name, title="Heading Title", folder="test", content=content
+        project=test_project.name, title="Heading Title", directory="test", content=content
     )
 
     # View the note
@@ -83,7 +83,7 @@ async def test_view_note_unicode_content(app, test_project):
     content = "# Unicode Test 🚀\n\nThis note has emoji 🎉 and unicode ♠♣♥♦"
 
     await write_note.fn(
-        project=test_project.name, title="Unicode Test 🚀", folder="test", content=content
+        project=test_project.name, title="Unicode Test 🚀", directory="test", content=content
     )
 
     # View the note
@@ -102,7 +102,7 @@ async def test_view_note_by_permalink(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Permalink Test",
-        folder="test",
+        directory="test",
         content="Content for permalink test.",
     )
 
@@ -121,7 +121,7 @@ async def test_view_note_with_memory_url(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Memory URL Test",
-        folder="test",
+        directory="test",
         content="Testing memory:// URL handling in view_note",
     )
 
@@ -154,7 +154,7 @@ async def test_view_note_pagination(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Pagination Test",
-        folder="test",
+        directory="test",
         content="Content for pagination test.",
     )
 
@@ -173,7 +173,7 @@ async def test_view_note_project_parameter(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Project Test",
-        folder="test",
+        directory="test",
         content="Content for project test.",
     )
 
@@ -191,10 +191,10 @@ async def test_view_note_artifact_identifier_unique(app, test_project):
     """Test that different notes are retrieved correctly with unique identifiers."""
     # Create two notes
     await write_note.fn(
-        project=test_project.name, title="Note One", folder="test", content="Content one"
+        project=test_project.name, title="Note One", directory="test", content="Content one"
     )
     await write_note.fn(
-        project=test_project.name, title="Note Two", folder="test", content="Content two"
+        project=test_project.name, title="Note Two", directory="test", content="Content two"
     )
 
     # View both notes
@@ -215,7 +215,7 @@ async def test_view_note_fallback_identifier_as_title(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Simple Note",
-        folder="test",
+        directory="test",
         content="Just plain content with no headings or frontmatter title",
     )
 
@@ -233,7 +233,7 @@ async def test_view_note_direct_success(app, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Note",
-        folder="test",
+        directory="test",
         content="# Test Note\n\nThis is a test note.",
     )
 

@@ -470,7 +470,7 @@ async def full_entity(sample_entity, entity_repository, file_service, entity_ser
     entity, created = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Search_Entity",
-            folder="test",
+            directory="test",
             entity_type="test",
             content=dedent("""
                 ## Observations
@@ -502,7 +502,7 @@ async def test_graph(
         EntitySchema(
             title="Deeper Entity",
             entity_type="deeper",
-            folder="test",
+            directory="test",
             content=dedent("""
                 # Deeper Entity
                 """),
@@ -513,7 +513,7 @@ async def test_graph(
         EntitySchema(
             title="Deep Entity",
             entity_type="deep",
-            folder="test",
+            directory="test",
             content=dedent("""
                 # Deep Entity
                 - deeper_connection [[Deeper Entity]]
@@ -525,7 +525,7 @@ async def test_graph(
         EntitySchema(
             title="Connected Entity 2",
             entity_type="test",
-            folder="test",
+            directory="test",
             content=dedent("""
                 # Connected Entity 2
                 - deep_connection [[Deep Entity]]
@@ -537,7 +537,7 @@ async def test_graph(
         EntitySchema(
             title="Connected Entity 1",
             entity_type="test",
-            folder="test",
+            directory="test",
             content=dedent("""
                 # Connected Entity 1
                 - [note] Connected 1 note
@@ -550,7 +550,7 @@ async def test_graph(
         EntitySchema(
             title="Root",
             entity_type="test",
-            folder="test",
+            directory="test",
             content=dedent("""
                 # Root Entity
                 - [note] Root note 1

@@ -13,13 +13,13 @@ async def test_search_successful_results(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Document 1",
-        folder="docs",
+        directory="docs",
         content="# Test Document 1\n\nThis is test content for document 1",
     )
     await write_note.fn(
         project=test_project.name,
         title="Test Document 2",
-        folder="docs",
+        directory="docs",
         content="# Test Document 2\n\nThis is test content for document 2",
     )
 
@@ -72,7 +72,7 @@ async def test_fetch_successful_document(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Test Document",
-        folder="docs",
+        directory="docs",
         content="# Test Document\n\nThis is the content of a test document.",
     )
 

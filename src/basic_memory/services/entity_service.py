@@ -26,6 +26,7 @@ from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
+from basic_memory.schemas.response import DirectoryMoveResult, DirectoryMoveError
 from basic_memory.services import BaseService, FileService
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.link_resolver import LinkResolver
@@ -191,7 +192,7 @@ class EntityService(BaseService[EntityModel]):
 
         if await self.file_service.exists(file_path):
             raise EntityCreationError(
-                f"file for entity {schema.folder}/{schema.title} already exists: {file_path}"
+                f"file for entity {schema.directory}/{schema.title} already exists: {file_path}"
             )
 
         # Parse content frontmatter to check for user-specified permalink and entity_type
@@ -862,3 +863,96 @@ class EntityService(BaseService[EntityModel]):
 
             # Re-raise the original error with context
             raise ValueError(f"Move failed: {str(e)}") from e
+
+    async def move_directory(
+        self,
+        source_directory: str,
+        destination_directory: str,
+        project_config: ProjectConfig,
+        app_config: BasicMemoryConfig,
+    ) -> DirectoryMoveResult:
+        """Move all entities in a directory to a new location.
+
+        This operation moves all files within a source directory to a destination
+        directory, updating database records and search indexes. The operation
+        tracks successes and failures individually to provide detailed feedback.
+
+        Args:
+            source_directory: Source directory path relative to project root
+            destination_directory: Destination directory path relative to project root
+            project_config: Project configuration for file operations
+            app_config: App configuration for permalink update settings
+
+        Returns:
+            DirectoryMoveResult with counts and details of moved files
+
+        Raises:
+            ValueError: If source directory is empty or destination conflicts exist
+        """
+
+        logger.info(f"Moving directory: {source_directory} -> {destination_directory}")
+
+        # Normalize directory paths (remove trailing slashes)
+        source_directory = source_directory.strip("/")
+        destination_directory = destination_directory.strip("/")
+
+        # Find all entities in the source directory
+        entities = await self.repository.find_by_directory_prefix(source_directory)
+
+        if not entities:
+            logger.warning(f"No entities found in directory: {source_directory}")
+            return DirectoryMoveResult(
+                total_files=0,
+                successful_moves=0,
+                failed_moves=0,
+                moved_files=[],
+                errors=[],
+            )
+
+        # Track results
+        moved_files: list[str] = []
+        errors: list[DirectoryMoveError] = []
+        successful_moves = 0
+        failed_moves = 0
+
+        # Process each entity
+        for entity in entities:
+            try:
+                # Calculate new path by replacing source prefix with destination
+                old_path = entity.file_path
+                # Replace only the first occurrence of the source directory prefix
+                if old_path.startswith(f"{source_directory}/"):
+                    new_path = old_path.replace(f"{source_directory}/", f"{destination_directory}/", 1)
+                else:
+                    # Entity is directly in the source directory (shouldn't happen with prefix match)
+                    new_path = f"{destination_directory}/{old_path}"
+
+                # Move the individual entity
+                await self.move_entity(
+                    identifier=entity.file_path,
+                    destination_path=new_path,
+                    project_config=project_config,
+                    app_config=app_config,
+                )
+
+                moved_files.append(new_path)
+                successful_moves += 1
+                logger.debug(f"Moved entity: {old_path} -> {new_path}")
+
+            except Exception as e:
+                failed_moves += 1
+                errors.append(DirectoryMoveError(path=entity.file_path, error=str(e)))
+                logger.error(f"Failed to move entity {entity.file_path}: {e}")
+
+        logger.info(
+            f"Directory move complete: {successful_moves} succeeded, {failed_moves} failed "
+            f"(source={source_directory}, dest={destination_directory})"
+        )
+
+        return DirectoryMoveResult(
+            total_files=len(entities),
+            successful_moves=successful_moves,
+            failed_moves=failed_moves,
+            moved_files=moved_files,
+            errors=errors,
+        )

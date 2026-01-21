@@ -139,7 +139,7 @@ async def test_list_directory_with_created_notes(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Project Planning",
-        folder="projects",
+        directory="projects",
         content="# Project Planning\nThis is about planning projects.",
         tags=["planning", "project"],
     )
@@ -147,7 +147,7 @@ async def test_list_directory_with_created_notes(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Meeting Notes",
-        folder="projects",
+        directory="projects",
         content="# Meeting Notes\nNotes from the meeting.",
         tags=["meeting", "notes"],
     )
@@ -155,7 +155,7 @@ async def test_list_directory_with_created_notes(client, test_project):
     await write_note.fn(
         project=test_project.name,
         title="Research Document",
-        folder="research",
+        directory="research",
         content="# Research\nSome research findings.",
         tags=["research"],
     )

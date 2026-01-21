@@ -34,7 +34,7 @@ async def test_default_project_mode_enabled_write_note(mcp_server, app, test_pro
                 "write_note",
                 {
                     "title": "Default Mode Test",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Default Mode Test\n\nThis should use the default project automatically.",
                     "tags": "default,mode,test",
                 },
@@ -86,7 +86,7 @@ async def test_default_project_mode_explicit_override(
                 "write_note",
                 {
                     "title": "Override Test",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Override Test\n\nThis should go to the explicitly specified project.",
                     "project": other_project.name,  # Explicit override
                 },
@@ -120,7 +120,7 @@ async def test_default_project_mode_disabled_requires_project(mcp_server, app, t
                     "write_note",
                     {
                         "title": "Should Fail",
-                        "folder": "test",
+                        "directory": "test",
                         "content": "# Should Fail\n\nThis should fail because no project specified.",
                     },
                 )
@@ -173,7 +173,7 @@ async def test_cli_constraint_overrides_default_project_mode(
                     "write_note",
                     {
                         "title": "CLI Constraint Test",
-                        "folder": "test",
+                        "directory": "test",
                         "content": "# CLI Constraint Test\n\nThis should use CLI constrained project.",
                     },
                 )
@@ -210,7 +210,7 @@ async def test_default_project_mode_read_note(mcp_server, app, test_project):
                 "write_note",
                 {
                     "title": "Read Test Note",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Read Test Note\n\nThis note will be read back.",
                 },
             )
@@ -249,7 +249,7 @@ async def test_default_project_mode_edit_note(mcp_server, app, test_project):
                 "write_note",
                 {
                     "title": "Edit Test Note",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Edit Test Note\n\nOriginal content.",
                 },
             )
@@ -325,7 +325,7 @@ async def test_project_resolution_hierarchy(
                     "write_note",
                     {
                         "title": "CLI Priority Test",
-                        "folder": "test",
+                        "directory": "test",
                         "content": "# CLI Priority Test",
                         "project": explicit_project.name,  # Should be ignored
                     },
@@ -343,7 +343,7 @@ async def test_project_resolution_hierarchy(
                 "write_note",
                 {
                     "title": "Explicit Priority Test",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Explicit Priority Test",
                     "project": explicit_project.name,
                 },
@@ -358,7 +358,7 @@ async def test_project_resolution_hierarchy(
                 "write_note",
                 {
                     "title": "Default Priority Test",
-                    "folder": "test",
+                    "directory": "test",
                     "content": "# Default Priority Test",
                     # No project specified
                 },

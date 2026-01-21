@@ -29,7 +29,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Core Service",
             entity_type="component",
-            folder="components",
+            directory="components",
             project=entity_service.repository.project_id,
         )
     )
@@ -37,7 +37,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Service Config",
             entity_type="config",
-            folder="config",
+            directory="config",
             project=entity_service.repository.project_id,
         )
     )
@@ -45,7 +45,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Auth Service",
             entity_type="component",
-            folder="components",
+            directory="components",
             project=entity_service.repository.project_id,
         )
     )
@@ -53,7 +53,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Core Features",
             entity_type="specs",
-            folder="specs",
+            directory="specs",
             project=entity_service.repository.project_id,
         )
     )
@@ -61,7 +61,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Sub Features 1",
             entity_type="specs",
-            folder="specs/subspec",
+            directory="specs/subspec",
             project=entity_service.repository.project_id,
         )
     )
@@ -69,7 +69,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Sub Features 2",
             entity_type="specs",
-            folder="specs/subspec",
+            directory="specs/subspec",
             project=entity_service.repository.project_id,
         )
     )
@@ -92,7 +92,7 @@ async def test_entities(entity_service, file_service):
         EntitySchema(
             title="Core Service",
             entity_type="component",
-            folder="components2",
+            directory="components2",
             project=entity_service.repository.project_id,
         )
     )

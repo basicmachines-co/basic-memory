@@ -159,7 +159,7 @@ async def test_import_chatgpt(
     # Create a multipart form with the file
     with open(file_path, "rb") as f:
         files = {"file": ("conversations.json", f, "application/json")}
-        data = {"folder": "test_chatgpt"}
+        data = {"directory": "test_chatgpt"}
 
         # Send request
         response = await client.post(f"{v2_project_url}/import/chatgpt", files=files, data=data)
@@ -192,7 +192,7 @@ async def test_import_chatgpt_invalid_file(client: AsyncClient, tmp_path, v2_pro
     # Create multipart form with invalid file
     with open(file_path, "rb") as f:
         files = {"file": ("invalid.json", f, "application/json")}
-        data = {"folder": "test_chatgpt"}
+        data = {"directory": "test_chatgpt"}
 
         # Send request - this should return an error
         response = await client.post(f"{v2_project_url}/import/chatgpt", files=files, data=data)
@@ -217,7 +217,7 @@ async def test_import_claude_conversations(
     # Create a multipart form with the file
     with open(file_path, "rb") as f:
         files = {"file": ("conversations.json", f, "application/json")}
-        data = {"folder": "test_claude_conversations"}
+        data = {"directory": "test_claude_conversations"}
 
         # Send request
         response = await client.post(
@@ -254,7 +254,7 @@ async def test_import_claude_conversations_invalid_file(
     # Create multipart form with invalid file
     with open(file_path, "rb") as f:
         files = {"file": ("invalid.json", f, "application/json")}
-        data = {"folder": "test_claude_conversations"}
+        data = {"directory": "test_claude_conversations"}
 
         # Send request - this should return an error
         response = await client.post(
@@ -277,7 +277,7 @@ async def test_import_claude_projects(
     # Create a multipart form with the file
     with open(file_path, "rb") as f:
         files = {"file": ("projects.json", f, "application/json")}
-        data = {"folder": "test_claude_projects"}
+        data = {"directory": "test_claude_projects"}
 
         # Send request
         response = await client.post(
@@ -319,7 +319,7 @@ async def test_import_claude_projects_invalid_file(
     # Create multipart form with invalid file
     with open(file_path, "rb") as f:
         files = {"file": ("invalid.json", f, "application/json")}
-        data = {"folder": "test_claude_projects"}
+        data = {"directory": "test_claude_projects"}
 
         # Send request - this should return an error
         response = await client.post(
@@ -345,7 +345,7 @@ async def test_import_memory_json(
     # Create a multipart form with the file
     with open(json_file, "rb") as f:
         files = {"file": ("memory.json", f, "application/json")}
-        data = {"folder": "test_memory_json"}
+        data = {"directory": "test_memory_json"}
 
         # Send request
         response = await client.post(f"{v2_project_url}/import/memory-json", files=files, data=data)
@@ -409,7 +409,7 @@ async def test_import_memory_json_invalid_file(client: AsyncClient, tmp_path, v2
     # Create multipart form with invalid file
     with open(file_path, "rb") as f:
         files = {"file": ("invalid.json", f, "application/json")}
-        data = {"folder": "test_memory_json"}
+        data = {"directory": "test_memory_json"}
 
         # Send request - this should return an error
         response = await client.post(f"{v2_project_url}/import/memory-json", files=files, data=data)
@@ -430,7 +430,7 @@ async def test_v2_import_endpoints_use_project_id_not_name(
     # Try using project name instead of ID - should fail
     with open(file_path, "rb") as f:
         files = {"file": ("conversations.json", f, "application/json")}
-        data = {"folder": "test"}
+        data = {"directory": "test"}
 
         response = await client.post(
             f"/v2/projects/{test_project.name}/import/chatgpt",
@@ -459,7 +459,7 @@ async def test_import_invalid_project_id(client: AsyncClient, tmp_path, chatgpt_
     for endpoint in endpoints:
         with open(file_path, "rb") as f:
             files = {"file": ("test.json", f, "application/json")}
-            data = {"folder": "test"}
+            data = {"directory": "test"}
 
             response = await client.post(
                 f"/v2/projects/999999{endpoint}",
@@ -474,7 +474,7 @@ async def test_import_invalid_project_id(client: AsyncClient, tmp_path, chatgpt_
 async def test_import_missing_file(client: AsyncClient, v2_project_url: str):
     """Test importing with missing file via v2 endpoint."""
     # Send a request without a file
-    response = await client.post(f"{v2_project_url}/import/chatgpt", data={"folder": "test_folder"})
+    response = await client.post(f"{v2_project_url}/import/chatgpt", data={"directory": "test_folder"})
 
     # Check that the request was rejected
     assert response.status_code in [400, 422]  # Either bad request or unprocessable entity
@@ -491,7 +491,7 @@ async def test_import_empty_file(client: AsyncClient, tmp_path, v2_project_url: 
     # Create multipart form with empty file
     with open(file_path, "rb") as f:
         files = {"file": ("empty.json", f, "application/json")}
-        data = {"folder": "test_chatgpt"}
+        data = {"directory": "test_chatgpt"}
 
         # Send request
         response = await client.post(f"{v2_project_url}/import/chatgpt", files=files, data=data)
@@ -511,10 +511,10 @@ async def test_import_malformed_json(client: AsyncClient, tmp_path, v2_project_u
 
     # Test all import endpoints
     endpoints = [
-        (f"{v2_project_url}/import/chatgpt", {"folder": "test"}),
-        (f"{v2_project_url}/import/claude/conversations", {"folder": "test"}),
-        (f"{v2_project_url}/import/claude/projects", {"folder": "test"}),
-        (f"{v2_project_url}/import/memory-json", {"folder": "test"}),
+        (f"{v2_project_url}/import/chatgpt", {"directory": "test"}),
+        (f"{v2_project_url}/import/claude/conversations", {"directory": "test"}),
+        (f"{v2_project_url}/import/claude/projects", {"directory": "test"}),
+        (f"{v2_project_url}/import/memory-json", {"directory": "test"}),
     ]
 
     for endpoint, data in endpoints:

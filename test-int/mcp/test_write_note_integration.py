@@ -25,7 +25,7 @@ async def test_write_note_basic_creation(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Simple Note",
-                "folder": "basic",
+                "directory": "basic",
                 "content": "# Simple Note\n\nThis is a simple note for testing.",
                 "tags": "simple,test",
             },
@@ -54,7 +54,7 @@ async def test_write_note_no_tags(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "No Tags Note",
-                "folder": "test",
+                "directory": "test",
                 "content": "Just some plain text without tags.",
             },
         )
@@ -80,7 +80,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Update Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Update Test\n\nOriginal content.",
                 "tags": "original",
             },
@@ -94,7 +94,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Update Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "# Update Test\n\nUpdated content with changes.",
                 "tags": "updated,modified",
             },
@@ -123,7 +123,7 @@ async def test_write_note_tag_array(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Array Tags Test",
-                "folder": "test",
+                "directory": "test",
                 "content": "Testing tag array handling",
                 "tags": ["python", "testing", "integration", "mcp"],
             },
@@ -164,7 +164,7 @@ async def test_write_note_custom_permalink(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Custom Permalink Note",
-                "folder": "notes",
+                "directory": "notes",
                 "content": content_with_custom_permalink,
             },
         )
@@ -192,7 +192,7 @@ async def test_write_note_unicode_content(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Unicode Test 🌟",
-                "folder": "test",
+                "directory": "test",
                 "content": unicode_content,
                 "tags": "unicode,emoji,测试",
             },
@@ -243,7 +243,7 @@ async def test_write_note_complex_content_with_observations_relations(
             {
                 "project": test_project.name,
                 "title": "Complex Knowledge Note",
-                "folder": "knowledge",
+                "directory": "knowledge",
                 "content": complex_content,
                 "tags": "complex,knowledge,relations",
             },
@@ -296,7 +296,7 @@ async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
             {
                 "project": test_project.name,
                 "title": "Frontmatter Note",
-                "folder": "test",
+                "directory": "test",
                 "content": content_with_frontmatter,
                 "tags": "frontmatter,preservation",
             },
@@ -326,7 +326,7 @@ async def test_write_note_kebab_filenames_basic(mcp_server, app, test_project, a
             {
                 "project": test_project.name,
                 "title": "My Note: With/Invalid|Chars?",
-                "folder": "my-folder",
+                "directory": "my-folder",
                 "content": "Testing kebab-case and invalid characters.",
                 "tags": "kebab,invalid,filename",
             },
@@ -355,7 +355,7 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_p
             {
                 "project": test_project.name,
                 "title": 'Crazy<>:"|?*Note/Name',
-                "folder": "my-folder",
+                "directory": "my-folder",
                 "content": "Should be fully kebab-case and safe.",
                 "tags": "crazy,filename,test",
             },
@@ -404,7 +404,7 @@ async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, 
                 {
                     "project": test_project.name,
                     "title": title,
-                    "folder": folder,
+                    "directory": folder,
                     "content": "Testing os.path.join logic.",
                     "tags": "integration,ospath",
                 },
@@ -462,7 +462,7 @@ async def test_write_note_project_path_validation(mcp_server, app, test_project)
             {
                 "project": test_project.name,
                 "title": "Validation Test",
-                "folder": "documents",
+                "directory": "documents",
                 "content": "Testing path validation",
                 "tags": "test",
             },
