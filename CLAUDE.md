@@ -248,12 +248,12 @@ See SPEC-16 for full context manager refactor details.
 - Basic Memory exposes these MCP tools to LLMs:
 
   **Content Management:**
-    - `write_note(title, content, folder, tags)` - Create/update markdown notes with semantic observations and relations
+    - `write_note(title, content, directory, tags)` - Create/update markdown notes with semantic observations and relations
     - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph awareness
     - `read_content(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
     - `view_note(identifier, page, page_size)` - View notes as formatted artifacts for better readability
     - `edit_note(identifier, operation, content)` - Edit notes incrementally (append, prepend, find/replace, replace_section)
-    - `move_note(identifier, destination_path)` - Move notes to new locations, updating database and maintaining links
+    - `move_note(identifier, destination_path, is_directory)` - Move notes or directories to new locations, updating database and maintaining links
     - `delete_note(identifier)` - Delete notes from the knowledge base
 
   **Knowledge Graph Navigation:**
@@ -270,7 +270,7 @@ See SPEC-16 for full context manager refactor details.
     - `delete_project(project_name)` - Delete a project from configuration
 
   **Visualization:**
-    - `canvas(nodes, edges, title, folder)` - Generate Obsidian canvas files for knowledge graph visualization
+    - `canvas(nodes, edges, title, directory)` - Generate Obsidian canvas files for knowledge graph visualization
 
   **ChatGPT-Compatible Tools:**
     - `search(query)` - Search across knowledge base (OpenAI actions compatible)

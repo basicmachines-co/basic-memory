@@ -85,11 +85,11 @@ async def canvas(
     ```
 
     Examples:
-        # Create canvas in project
-        canvas("my-project", nodes=[...], edges=[...], title="My Canvas", directory="diagrams")
+        # Create canvas in default/current project
+        canvas(nodes=[...], edges=[...], title="My Canvas", directory="diagrams")
 
-        # Create canvas in work project
-        canvas("work-project", nodes=[...], edges=[...], title="Process Flow", directory="visual/maps")
+        # Create canvas with explicit project
+        canvas(nodes=[...], edges=[...], title="Process Flow", directory="visual/maps", project="work-project")
 
     Raises:
         ToolError: If project doesn't exist or directory path is invalid
