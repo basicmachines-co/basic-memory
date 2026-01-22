@@ -110,6 +110,7 @@ async def build_context(
 
         # Import here to avoid circular import
         from basic_memory.mcp.clients import MemoryClient
+        from basic_memory.mcp.clients.knowledge import KnowledgeClient
 
         # Use typed MemoryClient for API calls
         memory_client = MemoryClient(client, active_project.external_id)
@@ -125,7 +126,13 @@ async def build_context(
         # Enrich with Dataview if enabled
         if enable_dataview:
             logger.info("Enriching graph context with Dataview queries")
-            integration = create_dataview_integration()
+            
+            # Fetch all notes for Dataview query execution
+            knowledge_client = KnowledgeClient(client, active_project.external_id)
+            notes = await knowledge_client.list_entities_for_dataview()
+            
+            # Create integration with notes_provider
+            integration = create_dataview_integration(notes_provider=lambda: notes)
             
             for context_result in graph_context.results:
                 # Process primary result if it's an entity with content
