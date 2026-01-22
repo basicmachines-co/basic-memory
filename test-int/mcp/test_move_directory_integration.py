@@ -304,3 +304,40 @@ async def test_move_directory_single_file(mcp_server, app, test_project):
             },
         )
         assert "Only note in this directory" in read_result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_move_directory_many_files(mcp_server, app, test_project):
+    """Test moving a directory with more than 10 files shows truncated list."""
+
+    async with Client(mcp_server) as client:
+        # Create 12 notes in the directory
+        for i in range(12):
+            await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": f"ManyDoc {i + 1}",
+                    "directory": "many-files-dir",
+                    "content": f"# Many Doc {i + 1}\n\nContent {i + 1}.",
+                    "tags": "test,many",
+                },
+            )
+
+        # Move the directory
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "many-files-dir",
+                "destination_path": "moved-many",
+                "is_directory": True,
+            },
+        )
+
+        assert len(move_result.content) == 1
+        move_text = move_result.content[0].text
+        assert "Directory Moved Successfully" in move_text
+        assert "Total files: 12" in move_text
+        # Should show truncation message for >10 files
+        assert "... and 2 more" in move_text

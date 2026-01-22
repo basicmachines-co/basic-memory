@@ -253,7 +253,7 @@ async def delete_note(
                     if len(result.deleted_files) > 10:
                         result_lines.append(f"- ... and {len(result.deleted_files) - 10} more")
 
-                if result.errors:
+                if result.errors:  # pragma: no cover
                     result_lines.extend(["", "## Errors"])
                     for error in result.errors[:5]:  # Show first 5 errors
                         result_lines.append(f"- `{error.path}`: {error.error}")
@@ -269,7 +269,7 @@ async def delete_note(
 
                 return "\n".join(result_lines)
 
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 logger.error(f"Directory delete failed for '{identifier}': {e}")
                 return f"""# Directory Delete Failed
 

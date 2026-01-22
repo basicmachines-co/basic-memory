@@ -230,3 +230,39 @@ async def test_delete_directory_search_no_longer_finds(mcp_server, app, test_pro
         search_text = search_after.content[0].text
         # Should not find the deleted note
         assert "Searchable Delete Doc" not in search_text or "No results" in search_text
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_many_files(mcp_server, app, test_project):
+    """Test deleting a directory with more than 10 files shows truncated list."""
+
+    async with Client(mcp_server) as client:
+        # Create 12 notes in the directory
+        for i in range(12):
+            await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": f"DeleteManyDoc {i + 1}",
+                    "directory": "delete-many-dir",
+                    "content": f"# Delete Many Doc {i + 1}\n\nContent {i + 1}.",
+                    "tags": "test,many",
+                },
+            )
+
+        # Delete the entire directory
+        delete_result = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": "delete-many-dir",
+                "is_directory": True,
+            },
+        )
+
+        assert len(delete_result.content) == 1
+        delete_text = delete_result.content[0].text
+        assert "Directory Deleted Successfully" in delete_text
+        assert "Total files: 12" in delete_text
+        # Should show truncation message for >10 files
+        assert "... and 2 more" in delete_text

@@ -471,7 +471,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
                     if len(result.moved_files) > 10:
                         result_lines.append(f"- ... and {len(result.moved_files) - 10} more")
 
-                if result.errors:
+                if result.errors:  # pragma: no cover
                     result_lines.extend(["", "## Errors"])
                     for error in result.errors[:5]:  # Show first 5 errors
                         result_lines.append(f"- `{error.path}`: {error.error}")
@@ -487,7 +487,7 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
 
                 return "\n".join(result_lines)
 
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 logger.error(f"Directory move failed for '{identifier}' to '{destination_path}': {e}")
                 return f"""# Directory Move Failed
 

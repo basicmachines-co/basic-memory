@@ -9,6 +9,7 @@ from basic_memory.schemas import (
     Entity,
     EntityResponse,
 )
+from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.schemas.search import SearchItemType, SearchResponse
 from basic_memory.utils import normalize_newlines
 
@@ -1287,3 +1288,119 @@ async def test_move_entity_by_title(client: AsyncClient, project_url):
     moved_entity = response.json()
     assert moved_entity["file_path"] == "target/MovedByTitle.md"
     assert moved_entity["title"] == "UniqueTestTitle"
+
+
+# --- Move directory tests ---
+
+
+@pytest.mark.asyncio
+async def test_move_directory_success(client: AsyncClient, project_url):
+    """Test POST /move-directory endpoint successfully moves all files in a directory."""
+    # Create multiple notes in a source directory
+    for i in range(3):
+        response = await client.post(
+            f"{project_url}/knowledge/entities",
+            json={
+                "title": f"DirMoveDoc{i + 1}",
+                "directory": "move-source",
+                "entity_type": "note",
+                "content": f"Content for document {i + 1}",
+            },
+        )
+        assert response.status_code == 200
+
+    # Move the entire directory
+    move_data = {
+        "source_directory": "move-source",
+        "destination_directory": "move-dest",
+    }
+    response = await client.post(f"{project_url}/knowledge/move-directory", json=move_data)
+    assert response.status_code == 200
+
+    result = DirectoryMoveResult.model_validate(response.json())
+    assert result.total_files == 3
+    assert result.successful_moves == 3
+    assert result.failed_moves == 0
+    assert len(result.moved_files) == 3
+
+    # Verify notes are accessible at new location
+    for i in range(3):
+        response = await client.get(
+            f"{project_url}/knowledge/entities/move-dest/dir-move-doc{i + 1}"
+        )
+        assert response.status_code == 200
+        entity = response.json()
+        assert entity["file_path"].startswith("move-dest/")
+
+
+@pytest.mark.asyncio
+async def test_move_directory_empty_directory(client: AsyncClient, project_url):
+    """Test move_directory with no files in source returns zero counts."""
+    move_data = {
+        "source_directory": "nonexistent-source-dir",
+        "destination_directory": "some-dest",
+    }
+    response = await client.post(f"{project_url}/knowledge/move-directory", json=move_data)
+    assert response.status_code == 200
+
+    result = DirectoryMoveResult.model_validate(response.json())
+    assert result.total_files == 0
+    assert result.successful_moves == 0
+    assert result.failed_moves == 0
+    assert len(result.moved_files) == 0
+
+
+@pytest.mark.asyncio
+async def test_move_directory_validation_error(client: AsyncClient, project_url):
+    """Test move_directory with missing required fields returns validation error."""
+    # Missing destination_directory
+    move_data = {
+        "source_directory": "some-source",
+    }
+    response = await client.post(f"{project_url}/knowledge/move-directory", json=move_data)
+    assert response.status_code == 422
+
+    # Missing source_directory
+    move_data = {
+        "destination_directory": "some-dest",
+    }
+    response = await client.post(f"{project_url}/knowledge/move-directory", json=move_data)
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_move_directory_nested_structure(client: AsyncClient, project_url):
+    """Test move_directory preserves nested directory structure."""
+    # Create notes in nested structure
+    directories = [
+        "nested-move/2024",
+        "nested-move/2024/q1",
+    ]
+
+    for dir_path in directories:
+        response = await client.post(
+            f"{project_url}/knowledge/entities",
+            json={
+                "title": f"Note in {dir_path.split('/')[-1]}",
+                "directory": dir_path,
+                "entity_type": "note",
+                "content": f"Content in {dir_path}",
+            },
+        )
+        assert response.status_code == 200
+
+    # Move the parent directory
+    move_data = {
+        "source_directory": "nested-move/2024",
+        "destination_directory": "archive/2024",
+    }
+    response = await client.post(f"{project_url}/knowledge/move-directory", json=move_data)
+    assert response.status_code == 200
+
+    result = DirectoryMoveResult.model_validate(response.json())
+    assert result.total_files == 2
+    assert result.successful_moves == 2
+
+    # Verify nested note is at new location
+    response = await client.get(f"{project_url}/knowledge/entities/archive/2024/q1/note-in-q1")
+    assert response.status_code == 200

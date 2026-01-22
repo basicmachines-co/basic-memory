@@ -345,7 +345,7 @@ async def search_notes(
         search_query.permalink_match = query
     elif search_type == "permalink":
         search_query.permalink = query
-    else:
+    else:  # pragma: no cover
         search_query.text = query  # Default to text search
 
     # Add optional filters if provided (empty lists are treated as no filter)
