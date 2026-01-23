@@ -757,10 +757,11 @@ Testing file timestamps
     entity_created_epoch = file_entity.created_at.timestamp()
     entity_updated_epoch = file_entity.updated_at.timestamp()
 
-    # Allow 2s difference on Windows due to filesystem timing precision
-    tolerance = 2 if os.name == "nt" else 1
+    # Allow 2s difference due to filesystem timing precision and database processing delays
+    # Windows has coarser filesystem timestamps, but Postgres can also have slight timing differences
+    tolerance = 2
     assert abs(entity_created_epoch - file_stats.st_ctime) < tolerance
-    assert abs(entity_updated_epoch - file_stats.st_mtime) < tolerance  # Allow tolerance difference
+    assert abs(entity_updated_epoch - file_stats.st_mtime) < tolerance
 
 
 @pytest.mark.asyncio
