@@ -1,32 +1,32 @@
 """Command module for basic-memory project management."""
 
+import json
 import os
+from datetime import datetime
 from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
+from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
-import json
-from datetime import datetime
-
-from rich.panel import Panel
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_get, call_post, call_delete, call_put, call_patch
+from basic_memory.mcp.tools.utils import call_delete, call_get, call_patch, call_post, call_put
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 from basic_memory.utils import generate_permalink, normalize_project_path
 
 # Import rclone commands for project sync
 from basic_memory.cli.commands.cloud.rclone_commands import (
-    SyncProject,
     RcloneError,
-    project_sync,
+    SyncProject,
     project_bisync,
     project_check,
     project_ls,
+    project_sync,
 )
 from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
 
@@ -46,8 +46,22 @@ def format_path(path: str) -> str:
 
 
 @project_app.command("list")
-def list_projects() -> None:
-    """List all Basic Memory projects."""
+def list_projects(
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+) -> None:
+    """List all Basic Memory projects.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
+    try:
+        validate_routing_flags(local, cloud)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     async def _list_projects():
         async with get_client() as client:
@@ -55,19 +69,20 @@ def list_projects() -> None:
             return ProjectList.model_validate(response.json())
 
     try:
-        result = run_with_cleanup(_list_projects())
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(_list_projects())
         config = ConfigManager().config
 
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
         table.add_column("Path", style="green")
 
-        # Add Local Path column if in cloud mode
-        if config.cloud_mode_enabled:
+        # Add Local Path column if in cloud mode and not forcing local
+        if config.cloud_mode_enabled and not local:
             table.add_column("Local Path", style="yellow", no_wrap=True, overflow="fold")
 
         # Show Default column in local mode or if default_project_mode is enabled in cloud mode
-        show_default_column = not config.cloud_mode_enabled or config.default_project_mode
+        show_default_column = local or not config.cloud_mode_enabled or config.default_project_mode
         if show_default_column:
             table.add_column("Default", style="magenta")
 
@@ -78,8 +93,8 @@ def list_projects() -> None:
             # Build row based on mode
             row = [project.name, format_path(normalized_path)]
 
-            # Add local path if in cloud mode
-            if config.cloud_mode_enabled:
+            # Add local path if in cloud mode and not forcing local
+            if config.cloud_mode_enabled and not local:
                 local_path = ""
                 if project.name in config.cloud_projects:
                     local_path = config.cloud_projects[project.name].local_path or ""
@@ -108,8 +123,15 @@ def add_project(
         None, "--local-path", help="Local sync path for cloud mode (optional)"
     ),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
     """Add a new project.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
 
     Cloud mode examples:\n
         bm project add research                           # No local sync\n
@@ -118,14 +140,23 @@ def add_project(
     Local mode example:\n
         bm project add research ~/Documents/research
     """
+    try:
+        validate_routing_flags(local, cloud)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
     config = ConfigManager().config
+
+    # Determine effective mode: local flag forces local mode behavior
+    effective_cloud_mode = config.cloud_mode_enabled and not local
 
     # Resolve local sync path early (needed for both cloud and local mode)
     local_sync_path: str | None = None
     if local_path:
         local_sync_path = Path(os.path.abspath(os.path.expanduser(local_path))).as_posix()
 
-    if config.cloud_mode_enabled:
+    if effective_cloud_mode:
         # Cloud mode: path auto-generated from name, local sync is optional
 
         async def _add_project():
@@ -154,11 +185,12 @@ def add_project(
                 return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = run_with_cleanup(_add_project())
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(_add_project())
         console.print(f"[green]{result.message}[/green]")
 
         # Save local sync path to config if in cloud mode
-        if config.cloud_mode_enabled and local_sync_path:
+        if effective_cloud_mode and local_sync_path:
             from basic_memory.config import CloudProjectConfig
 
             # Create local directory if it doesn't exist
@@ -243,8 +275,21 @@ def remove_project(
     delete_notes: bool = typer.Option(
         False, "--delete-notes", help="Delete project files from disk"
     ),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
-    """Remove a project."""
+    """Remove a project.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
+    try:
+        validate_routing_flags(local, cloud)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
 
     async def _remove_project():
         async with get_client() as client:
@@ -265,11 +310,11 @@ def remove_project(
     try:
         # Get config to check for local sync path and bisync state
         config = ConfigManager().config
-        local_path = None
+        local_path_config = None
         has_bisync_state = False
 
-        if config.cloud_mode_enabled and name in config.cloud_projects:
-            local_path = config.cloud_projects[name].local_path
+        if config.cloud_mode_enabled and not local and name in config.cloud_projects:
+            local_path_config = config.cloud_projects[name].local_path
 
             # Check for bisync state
             from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
@@ -278,17 +323,18 @@ def remove_project(
             has_bisync_state = bisync_state_path.exists()
 
         # Remove project from cloud/API
-        result = run_with_cleanup(_remove_project())
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(_remove_project())
         console.print(f"[green]{result.message}[/green]")
 
         # Clean up local sync directory if it exists and delete_notes is True
-        if delete_notes and local_path:
-            local_dir = Path(local_path)
+        if delete_notes and local_path_config:
+            local_dir = Path(local_path_config)
             if local_dir.exists():
                 import shutil
 
                 shutil.rmtree(local_dir)
-                console.print(f"[green]Removed local sync directory: {local_path}[/green]")
+                console.print(f"[green]Removed local sync directory: {local_path_config}[/green]")
 
         # Clean up bisync state if it exists
         if has_bisync_state:
@@ -301,14 +347,14 @@ def remove_project(
                 console.print("[green]Removed bisync state[/green]")
 
         # Clean up cloud_projects config entry
-        if config.cloud_mode_enabled and name in config.cloud_projects:
+        if config.cloud_mode_enabled and not local and name in config.cloud_projects:
             del config.cloud_projects[name]
             ConfigManager().save_config(config)
 
         # Show informative message if files were not deleted
         if not delete_notes:
-            if local_path:
-                console.print(f"[yellow]Note: Local files remain at {local_path}[/yellow]")
+            if local_path_config:
+                console.print(f"[yellow]Note: Local files remain at {local_path_config}[/yellow]")
 
     except Exception as e:
         console.print(f"[red]Error removing project: {str(e)}[/red]")
@@ -318,15 +364,24 @@ def remove_project(
 @project_app.command("default")
 def set_default_project(
     name: str = typer.Argument(..., help="Name of the project to set as CLI default"),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (required in cloud mode)"
+    ),
 ) -> None:
     """Set the default project when 'config.default_project_mode' is set.
 
-    Note: This command is only available in local mode.
+    In cloud mode, use --local to modify the local configuration.
     """
     config = ConfigManager().config
 
-    if config.cloud_mode_enabled:
-        console.print("[red]Error: 'default' command is not available in cloud mode[/red]")
+    # Trigger: cloud mode enabled without --local flag
+    # Why: default project is a local configuration concept
+    # Outcome: require explicit --local flag to modify local config in cloud mode
+    if config.cloud_mode_enabled and not local:
+        console.print(
+            "[red]Error: 'default' command requires --local flag in cloud mode[/red]\n"
+            "[yellow]Hint: Use 'bm project default <name> --local' to set local default[/yellow]"
+        )
         raise typer.Exit(1)
 
     async def _set_default():
@@ -346,7 +401,8 @@ def set_default_project(
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = run_with_cleanup(_set_default())
+        with force_routing(local=local):
+            result = run_with_cleanup(_set_default())
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
@@ -354,15 +410,25 @@ def set_default_project(
 
 
 @project_app.command("sync-config")
-def synchronize_projects() -> None:
+def synchronize_projects(
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (required in cloud mode)"
+    ),
+) -> None:
     """Synchronize project config between configuration file and database.
 
-    Note: This command is only available in local mode.
+    In cloud mode, use --local to sync local configuration.
     """
     config = ConfigManager().config
 
-    if config.cloud_mode_enabled:
-        console.print("[red]Error: 'sync-config' command is not available in cloud mode[/red]")
+    # Trigger: cloud mode enabled without --local flag
+    # Why: sync-config syncs local config file with local database
+    # Outcome: require explicit --local flag to clarify intent in cloud mode
+    if config.cloud_mode_enabled and not local:
+        console.print(
+            "[red]Error: 'sync-config' command requires --local flag in cloud mode[/red]\n"
+            "[yellow]Hint: Use 'bm project sync-config --local' to sync local config[/yellow]"
+        )
         raise typer.Exit(1)
 
     async def _sync_config():
@@ -371,7 +437,8 @@ def synchronize_projects() -> None:
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = run_with_cleanup(_sync_config())
+        with force_routing(local=local):
+            result = run_with_cleanup(_sync_config())
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:  # pragma: no cover
         console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
@@ -382,15 +449,24 @@ def synchronize_projects() -> None:
 def move_project(
     name: str = typer.Argument(..., help="Name of the project to move"),
     new_path: str = typer.Argument(..., help="New absolute path for the project"),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (required in cloud mode)"
+    ),
 ) -> None:
     """Move a project to a new location.
 
-    Note: This command is only available in local mode.
+    In cloud mode, use --local to modify local project paths.
     """
     config = ConfigManager().config
 
-    if config.cloud_mode_enabled:
-        console.print("[red]Error: 'move' command is not available in cloud mode[/red]")
+    # Trigger: cloud mode enabled without --local flag
+    # Why: moving a project is a local file system operation
+    # Outcome: require explicit --local flag to clarify intent in cloud mode
+    if config.cloud_mode_enabled and not local:
+        console.print(
+            "[red]Error: 'move' command requires --local flag in cloud mode[/red]\n"
+            "[yellow]Hint: Use 'bm project move <name> <path> --local' to move local project[/yellow]"
+        )
         raise typer.Exit(1)
 
     # Resolve to absolute path
@@ -406,7 +482,8 @@ def move_project(
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
-        result = run_with_cleanup(_move_project())
+        with force_routing(local=local):
+            result = run_with_cleanup(_move_project())
         console.print(f"[green]{result.message}[/green]")
 
         # Show important file movement reminder
@@ -779,11 +856,26 @@ def ls_project_command(
 def display_project_info(
     name: str = typer.Argument(..., help="Name of the project"),
     json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Display detailed information and statistics about the current project."""
+    """Display detailed information and statistics about the current project.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
+    try:
+        validate_routing_flags(local, cloud)
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
     try:
         # Get project info
-        info = run_with_cleanup(get_project_info(name))
+        with force_routing(local=local, cloud=cloud):
+            info = run_with_cleanup(get_project_info(name))
 
         if json_output:
             # Convert to JSON and print

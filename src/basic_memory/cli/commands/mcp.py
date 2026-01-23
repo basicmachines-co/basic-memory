@@ -17,60 +17,65 @@ import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
 import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
 from loguru import logger
 
-config = ConfigManager().config
+@app.command()
+def mcp(
+    transport: str = typer.Option(
+        "stdio", help="Transport type: stdio, streamable-http, or sse"
+    ),
+    host: str = typer.Option(
+        "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
+    ),
+    port: int = typer.Option(8000, help="Port for HTTP transports"),
+    path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
+    project: Optional[str] = typer.Option(None, help="Restrict MCP server to single project"),
+):  # pragma: no cover
+    """Run the MCP server with configurable transport options.
 
-if not config.cloud_mode_enabled:
+    This command starts an MCP server using one of three transport options:
 
-    @app.command()
-    def mcp(
-        transport: str = typer.Option(
-            "stdio", help="Transport type: stdio, streamable-http, or sse"
-        ),
-        host: str = typer.Option(
-            "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
-        ),
-        port: int = typer.Option(8000, help="Port for HTTP transports"),
-        path: str = typer.Option("/mcp", help="Path prefix for streamable-http transport"),
-        project: Optional[str] = typer.Option(None, help="Restrict MCP server to single project"),
-    ):  # pragma: no cover
-        """Run the MCP server with configurable transport options.
+    - stdio: Standard I/O (good for local usage)
+    - streamable-http: Recommended for web deployments (default)
+    - sse: Server-Sent Events (for compatibility with existing clients)
 
-        This command starts an MCP server using one of three transport options:
+    Initialization, file sync, and cleanup are handled by the MCP server's lifespan.
 
-        - stdio: Standard I/O (good for local usage)
-        - streamable-http: Recommended for web deployments (default)
-        - sse: Server-Sent Events (for compatibility with existing clients)
+    Note: This command is available regardless of cloud mode setting.
+    Users who have cloud mode enabled can still use local MCP for Claude Code
+    and Claude Desktop while using cloud MCP for web and mobile access.
+    """
+    # Force local routing for local MCP server
+    # Why: The local MCP server should always talk to the local API, not the cloud proxy.
+    # Even when cloud_mode_enabled is True, stdio MCP runs locally and needs local API access.
+    os.environ["BASIC_MEMORY_FORCE_LOCAL"] = "true"
 
-        Initialization, file sync, and cleanup are handled by the MCP server's lifespan.
-        """
-        # Initialize logging for MCP (file only, stdout breaks protocol)
-        init_mcp_logging()
+    # Initialize logging for MCP (file only, stdout breaks protocol)
+    init_mcp_logging()
 
-        # Validate and set project constraint if specified
-        if project:
-            config_manager = ConfigManager()
-            project_name, _ = config_manager.get_project(project)
-            if not project_name:
-                typer.echo(f"No project found named: {project}", err=True)
-                raise typer.Exit(1)
+    # Validate and set project constraint if specified
+    if project:
+        config_manager = ConfigManager()
+        project_name, _ = config_manager.get_project(project)
+        if not project_name:
+            typer.echo(f"No project found named: {project}", err=True)
+            raise typer.Exit(1)
 
-            # Set env var with validated project name
-            os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
-            logger.info(f"MCP server constrained to project: {project_name}")
+        # Set env var with validated project name
+        os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
+        logger.info(f"MCP server constrained to project: {project_name}")
 
-        # Run the MCP server (blocks)
-        # Lifespan handles: initialization, migrations, file sync, cleanup
-        logger.info(f"Starting MCP server with {transport.upper()} transport")
+    # Run the MCP server (blocks)
+    # Lifespan handles: initialization, migrations, file sync, cleanup
+    logger.info(f"Starting MCP server with {transport.upper()} transport")
 
-        if transport == "stdio":
-            mcp_server.run(
-                transport=transport,
-            )
-        elif transport == "streamable-http" or transport == "sse":
-            mcp_server.run(
-                transport=transport,
-                host=host,
-                port=port,
-                path=path,
-                log_level="INFO",
-            )
+    if transport == "stdio":
+        mcp_server.run(
+            transport=transport,
+        )
+    elif transport == "streamable-http" or transport == "sse":
+        mcp_server.run(
+            transport=transport,
+            host=host,
+            port=port,
+            path=path,
+            log_level="INFO",
+        )

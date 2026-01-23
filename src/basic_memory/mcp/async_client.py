@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from typing import AsyncIterator, Callable, Optional
 
@@ -6,6 +7,19 @@ from loguru import logger
 
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.config import ConfigManager
+
+
+def _force_local_mode() -> bool:
+    """Check if local mode is forced via environment variable.
+
+    This allows commands like `bm mcp` to force local routing even when
+    cloud_mode_enabled is True in config. The local MCP server should
+    always talk to the local API, not the cloud proxy.
+
+    Returns:
+        True if BASIC_MEMORY_FORCE_LOCAL is set to a truthy value
+    """
+    return os.environ.get("BASIC_MEMORY_FORCE_LOCAL", "").lower() in ("true", "1", "yes")
 
 
 # Optional factory override for dependency injection
@@ -71,7 +85,17 @@ async def get_client() -> AsyncIterator[AsyncClient]:
             pool=30.0,  # 30 seconds for connection pool
         )
 
-        if config.cloud_mode_enabled:
+        # Trigger: BASIC_MEMORY_FORCE_LOCAL env var is set
+        # Why: allows local MCP server and CLI commands to route locally
+        #      even when cloud_mode_enabled is True
+        # Outcome: uses ASGI transport for in-process local API calls
+        if _force_local_mode():
+            logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
+            async with AsyncClient(
+                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
+            ) as client:
+                yield client
+        elif config.cloud_mode_enabled:
             # CLI cloud mode: inject auth when creating client
             from basic_memory.cli.auth import CLIAuth
 
@@ -126,7 +150,13 @@ def create_client() -> AsyncClient:
         pool=30.0,  # 30 seconds for connection pool
     )
 
-    if config.cloud_mode_enabled:
+    # Check force local first (for local MCP server and CLI --local flag)
+    if _force_local_mode():
+        logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
+        return AsyncClient(
+            transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
+        )
+    elif config.cloud_mode_enabled:
         # Use HTTP transport to proxy endpoint
         proxy_base_url = f"{config.cloud_host}/proxy"
         logger.info(f"Creating HTTP client for proxy at: {proxy_base_url}")

@@ -9,6 +9,7 @@ from rich import print as rprint
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
 
 # Import prompts
@@ -50,12 +51,19 @@ def write_note(
     tags: Annotated[
         Optional[List[str]], typer.Option(help="A list of tags to apply to the note")
     ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
     """Create or update a markdown note. Content can be provided as an argument or read from stdin.
 
     Content can be provided in two ways:
     1. Using the --content parameter
     2. Piping content through stdin (if --content is not provided)
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
 
     Examples:
 
@@ -77,8 +85,13 @@ def write_note(
 
     # Reading from a file
     cat document.md | basic-memory tools write-note --title "Document" --folder "docs"
+
+    # Force local routing in cloud mode
+    basic-memory tools write-note --title "My Note" --folder "notes" --content "..." --local
     """
     try:
+        validate_routing_flags(local, cloud)
+
         # If content is not provided, read from stdin
         if content is None:
             # Check if we're getting data from a pipe or redirect
@@ -109,8 +122,12 @@ def write_note(
         # use the project name, or the default from the config
         project_name = project_name or config_manager.default_project
 
-        note = run_with_cleanup(mcp_write_note.fn(title, content, folder, project_name, tags))
+        with force_routing(local=local, cloud=cloud):
+            note = run_with_cleanup(mcp_write_note.fn(title, content, folder, project_name, tags))
         rprint(note)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during write_note: {e}", err=True)
@@ -129,24 +146,37 @@ def read_note(
     ] = None,
     page: int = 1,
     page_size: int = 10,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Read a markdown note from the knowledge base."""
+    """Read a markdown note from the knowledge base.
 
-    # look for the project in the config
-    config_manager = ConfigManager()
-    project_name = None
-    if project is not None:
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
-
-    # use the project name, or the default from the config
-    project_name = project_name or config_manager.default_project
-
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
     try:
-        note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
+        validate_routing_flags(local, cloud)
+
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
+        with force_routing(local=local, cloud=cloud):
+            note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
         rprint(note)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during read_note: {e}", err=True)
@@ -166,38 +196,51 @@ def build_context(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Get context needed to continue a discussion."""
+    """Get context needed to continue a discussion.
 
-    # look for the project in the config
-    config_manager = ConfigManager()
-    project_name = None
-    if project is not None:
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
-
-    # use the project name, or the default from the config
-    project_name = project_name or config_manager.default_project
-
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
     try:
-        context = run_with_cleanup(
-            mcp_build_context.fn(
-                project=project_name,
-                url=url,
-                depth=depth,
-                timeframe=timeframe,
-                page=page,
-                page_size=page_size,
-                max_related=max_related,
+        validate_routing_flags(local, cloud)
+
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
+        with force_routing(local=local, cloud=cloud):
+            context = run_with_cleanup(
+                mcp_build_context.fn(
+                    project=project_name,
+                    url=url,
+                    depth=depth,
+                    timeframe=timeframe,
+                    page=page,
+                    page_size=page_size,
+                    max_related=max_related,
+                )
             )
-        )
         # Use json module for more controlled serialization
         import json
 
         context_dict = context.model_dump(exclude_none=True)
         print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during build_context: {e}", err=True)
@@ -210,18 +253,32 @@ def recent_activity(
     type: Annotated[Optional[List[SearchItemType]], typer.Option()] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Get recent activity across the knowledge base."""
+    """Get recent activity across the knowledge base.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
     try:
-        result = run_with_cleanup(
-            mcp_recent_activity.fn(
-                type=type,  # pyright: ignore [reportArgumentType]
-                depth=depth,
-                timeframe=timeframe,
+        validate_routing_flags(local, cloud)
+
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_recent_activity.fn(
+                    type=type,  # pyright: ignore [reportArgumentType]
+                    depth=depth,
+                    timeframe=timeframe,
+                )
             )
-        )
         # The tool now returns a formatted string directly
         print(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during recent_activity: {e}", err=True)
@@ -246,26 +303,31 @@ def search_notes(
     ] = None,
     page: int = 1,
     page_size: int = 10,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Search across all content in the knowledge base."""
+    """Search across all content in the knowledge base.
 
-    # look for the project in the config
-    config_manager = ConfigManager()
-    project_name = None
-    if project is not None:
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
-
-    # use the project name, or the default from the config
-    project_name = project_name or config_manager.default_project
-
-    if permalink and title:  # pragma: no cover
-        print("Cannot search both permalink and title")
-        raise typer.Abort()
-
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
     try:
+        validate_routing_flags(local, cloud)
+
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
         if permalink and title:  # pragma: no cover
             typer.echo(
                 "Use either --permalink or --title, not both. Exiting.",
@@ -279,21 +341,25 @@ def search_notes(
         search_type = ("title" if title else None,)
         search_type = "text" if search_type is None else search_type
 
-        results = run_with_cleanup(
-            mcp_search.fn(
-                query,
-                project_name,
-                search_type=search_type,
-                page=page,
-                after_date=after_date,
-                page_size=page_size,
+        with force_routing(local=local, cloud=cloud):
+            results = run_with_cleanup(
+                mcp_search.fn(
+                    query,
+                    project_name,
+                    search_type=search_type,
+                    page=page,
+                    after_date=after_date,
+                    page_size=page_size,
+                )
             )
-        )
         # Use json module for more controlled serialization
         import json
 
         results_dict = results.model_dump(exclude_none=True)
         print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Error during search", e)
@@ -308,12 +374,28 @@ def continue_conversation(
     timeframe: Annotated[
         Optional[str], typer.Option(help="How far back to look for activity")
     ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Prompt to continue a previous conversation or work session."""
+    """Prompt to continue a previous conversation or work session.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
     try:
-        # Prompt functions return formatted strings directly
-        session = run_with_cleanup(mcp_continue_conversation.fn(topic=topic, timeframe=timeframe))  # type: ignore
+        validate_routing_flags(local, cloud)
+
+        with force_routing(local=local, cloud=cloud):
+            # Prompt functions return formatted strings directly
+            session = run_with_cleanup(
+                mcp_continue_conversation.fn(topic=topic, timeframe=timeframe)  # type: ignore[arg-type]
+            )
         rprint(session)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             logger.exception("Error continuing conversation", e)
