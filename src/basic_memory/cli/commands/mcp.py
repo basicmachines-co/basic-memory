@@ -17,11 +17,10 @@ import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
 import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
 from loguru import logger
 
+
 @app.command()
 def mcp(
-    transport: str = typer.Option(
-        "stdio", help="Transport type: stdio, streamable-http, or sse"
-    ),
+    transport: str = typer.Option("stdio", help="Transport type: stdio, streamable-http, or sse"),
     host: str = typer.Option(
         "0.0.0.0", help="Host for HTTP transports (use 0.0.0.0 to allow external connections)"
     ),

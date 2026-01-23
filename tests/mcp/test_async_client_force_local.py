@@ -2,7 +2,6 @@
 
 import os
 
-import pytest
 
 from basic_memory.mcp.async_client import _force_local_mode
 
