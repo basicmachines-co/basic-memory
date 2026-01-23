@@ -322,7 +322,14 @@ async def remove_project(
             )  # pragma: no cover
 
         # Check if trying to delete the default project
-        if name == project_service.default_project:
+        # In cloud mode, database is source of truth; in local mode, check config
+        config_default = project_service.default_project
+        db_default = await project_service.repository.get_default_project()
+
+        # Use database default if available, otherwise fall back to config default
+        default_project_name = db_default.name if db_default else config_default
+
+        if name == default_project_name:
             available_projects = await project_service.list_projects()
             other_projects = [p.name for p in available_projects if p.name != name]
             detail = f"Cannot delete default project '{name}'. "
@@ -418,8 +425,13 @@ async def get_default_project(
     Returns:
         Response with project default information
     """
-    # Get the old default project
-    default_name = project_service.default_project
+    # Get the default project
+    # In cloud mode, database is source of truth; in local mode, check config
+    config_default = project_service.default_project
+    db_default = await project_service.repository.get_default_project()
+
+    # Use database default if available, otherwise fall back to config default
+    default_name = db_default.name if db_default else config_default
     default_project = await project_service.get_project(default_name)
     if not default_project:  # pragma: no cover
         raise HTTPException(  # pragma: no cover
