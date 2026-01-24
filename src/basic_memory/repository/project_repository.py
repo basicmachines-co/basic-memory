@@ -88,7 +88,7 @@ class ProjectRepository(Repository[Project]):
 
     async def get_default_project(self) -> Optional[Project]:
         """Get the default project (the one marked as is_default=True)."""
-        query = self.select().where(Project.is_default.is_not(None))
+        query = self.select().where(Project.is_default.is_(True))
         return await self.find_one(query)
 
     async def get_active_projects(self) -> Sequence[Project]:
