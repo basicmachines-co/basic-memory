@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from textwrap import dedent
 from typing import List
 
-from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     normalize_memory_url,
     EntitySummary,
@@ -25,7 +24,7 @@ class PromptContextItem:
 
 @dataclass
 class PromptContext:
-    timeframe: TimeFrame
+    timeframe: str
     topic: str
     results: List[PromptContextItem]
 

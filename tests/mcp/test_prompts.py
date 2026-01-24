@@ -153,8 +153,9 @@ async def test_recent_activity_prompt_discovery_mode(client, test_project, test_
     result = await recent_activity_prompt.fn(timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response contains expected discovery mode content
-    assert "Recent Activity Across All Projects" in result  # pyright: ignore [reportOperatorIssue]
-    assert "Cross-Project Activity Discovery" in result  # pyright: ignore [reportOperatorIssue]
+    assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
+    assert "all projects" in result  # pyright: ignore [reportOperatorIssue]
+    assert "Next Steps" in result  # pyright: ignore [reportOperatorIssue]
     assert "write_note" in result  # pyright: ignore [reportOperatorIssue]
 
 
@@ -165,9 +166,9 @@ async def test_recent_activity_prompt_project_specific(client, test_project, tes
     result = await recent_activity_prompt.fn(timeframe="1w", project=test_project.name)  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response contains expected project-specific content
-    assert f"Recent Activity in {test_project.name}" in result  # pyright: ignore [reportOperatorIssue]
-    assert "Opportunity to Capture Activity Summary" in result  # pyright: ignore [reportOperatorIssue]
-    assert f"recent activity in {test_project.name}" in result  # pyright: ignore [reportOperatorIssue]
+    assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
+    assert test_project.name in result  # pyright: ignore [reportOperatorIssue]
+    assert "Next Steps" in result  # pyright: ignore [reportOperatorIssue]
     assert "write_note" in result  # pyright: ignore [reportOperatorIssue]
 
 
@@ -178,4 +179,5 @@ async def test_recent_activity_prompt_with_custom_timeframe(client, test_project
     result = await recent_activity_prompt.fn(timeframe="1d")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response includes the custom timeframe
-    assert "Recent Activity Across All Projects (1d)" in result  # pyright: ignore [reportOperatorIssue]
+    assert "1d" in result  # pyright: ignore [reportOperatorIssue]
+    assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]

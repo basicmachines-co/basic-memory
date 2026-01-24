@@ -12,7 +12,6 @@ from basic_memory.config import get_project_config
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
-from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.prompt import SearchPromptRequest
 
 
@@ -23,7 +22,7 @@ from basic_memory.schemas.prompt import SearchPromptRequest
 async def search_prompt(
     query: str,
     timeframe: Annotated[
-        Optional[TimeFrame],
+        Optional[str],
         Field(description="How far back to search (e.g. '1d', '1 week')"),
     ] = None,
 ) -> str:
