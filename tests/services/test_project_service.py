@@ -1348,3 +1348,184 @@ async def test_remove_project_delete_notes_missing_directory(project_service: Pr
                 project_service.config_manager.remove_project(test_project_name)
             except Exception:
                 pass
+
+
+@pytest.mark.asyncio
+async def test_remove_project_cloud_mode_uses_database_not_config(project_service: ProjectService):
+    """Test that in cloud mode, remove_project only checks database for default status.
+
+    Regression test for bug where cloud mode checked config file (stale) instead of
+    database (source of truth) when determining if a project is the default.
+    """
+    test_project_name = f"test-cloud-default-{os.urandom(4).hex()}"
+    test_project_path = f"/tmp/test-cloud-{os.urandom(8).hex()}"
+
+    # Save original cloud_mode setting
+    config = project_service.config_manager.config
+    original_cloud_mode = config.cloud_mode
+    original_default = config.default_project
+
+    try:
+        # Add a test project (not default)
+        await project_service.add_project(test_project_name, test_project_path, set_default=False)
+
+        # Verify project exists and is NOT default in database
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is not None
+        assert db_project.is_default is not True  # Should be None or False
+
+        # Simulate stale config: manually set this project as default in config only
+        # (This simulates what happens when config isn't updated after API calls)
+        config.default_project = test_project_name
+
+        # Enable cloud mode
+        config.cloud_mode = True
+        project_service.config_manager.save_config(config)
+
+        # In cloud mode, should be able to remove the project because database says it's not default
+        # (even though stale config says it is) - this should NOT raise ValueError
+        await project_service.remove_project(test_project_name, delete_notes=False)
+
+        # Verify project was removed from database
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is None
+
+    finally:
+        # Restore original settings
+        config = project_service.config_manager.config
+        config.cloud_mode = original_cloud_mode
+        config.default_project = original_default
+        project_service.config_manager.save_config(config)
+
+        # Cleanup from config if test failed partway
+        try:
+            project_service.config_manager.remove_project(test_project_name)
+        except (ValueError, KeyError):
+            pass  # Project may not be in config
+
+
+@pytest.mark.asyncio
+async def test_remove_project_local_mode_checks_both_config_and_database(
+    project_service: ProjectService,
+):
+    """Test that in local mode, remove_project checks both config AND database for default status.
+
+    In local mode, we check both sources to be safe - if either says the project is default,
+    we prevent deletion.
+    """
+    test_project_name = f"test-local-default-{os.urandom(4).hex()}"
+    test_project_path = f"/tmp/test-local-{os.urandom(8).hex()}"
+
+    # Save original settings
+    config = project_service.config_manager.config
+    original_cloud_mode = config.cloud_mode
+    original_default = config.default_project
+
+    try:
+        # Ensure we're in local mode before adding project
+        config.cloud_mode = False
+        project_service.config_manager.save_config(config)
+
+        # Add a test project (not default) - this will add to both DB and config in local mode
+        await project_service.add_project(test_project_name, test_project_path, set_default=False)
+
+        # Verify project exists and is NOT default in database
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is not None
+        assert db_project.is_default is not True
+
+        # Re-read config to get the updated version (after add_project added the project)
+        config = project_service.config_manager.config
+
+        # Set this project as default in config only (not in DB)
+        config.default_project = test_project_name
+        project_service.config_manager.save_config(config)
+
+        # In local mode, should NOT be able to remove because config says it's default
+        with pytest.raises(ValueError, match="Cannot remove the default project"):
+            await project_service.remove_project(test_project_name, delete_notes=False)
+
+        # Verify project still exists in database
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is not None
+
+    finally:
+        # Restore original settings
+        config = project_service.config_manager.config
+        config.cloud_mode = original_cloud_mode
+        config.default_project = original_default
+        project_service.config_manager.save_config(config)
+
+        # Cleanup
+        try:
+            project_service.config_manager.remove_project(test_project_name)
+        except (ValueError, KeyError):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_remove_project_rejects_database_default_in_both_modes(
+    project_service: ProjectService,
+):
+    """Test that remove_project rejects deletion when project is default in database.
+
+    This should be blocked in BOTH cloud mode and local mode.
+    """
+    test_project_name = f"test-db-default-{os.urandom(4).hex()}"
+    test_project_path = f"/tmp/test-db-default-{os.urandom(8).hex()}"
+
+    # Save original settings
+    original_cloud_mode = project_service.config_manager.config.cloud_mode
+    original_default = project_service.config_manager.config.default_project
+
+    try:
+        # Add a test project and set it as default
+        await project_service.add_project(test_project_name, test_project_path, set_default=True)
+
+        # Verify project is default in database
+        db_project = await project_service.repository.get_by_name(test_project_name)
+        assert db_project is not None
+        assert db_project.is_default is True
+
+        # Test in cloud mode - should reject
+        config = project_service.config_manager.config
+        config.cloud_mode = True
+        project_service.config_manager.save_config(config)
+
+        with pytest.raises(ValueError, match="Cannot remove the default project"):
+            await project_service.remove_project(test_project_name, delete_notes=False)
+
+        # Test in local mode - should also reject
+        config.cloud_mode = False
+        project_service.config_manager.save_config(config)
+
+        with pytest.raises(ValueError, match="Cannot remove the default project"):
+            await project_service.remove_project(test_project_name, delete_notes=False)
+
+        # Verify project still exists in both cases
+        assert test_project_name in project_service.projects
+
+    finally:
+        # Restore original settings
+        config = project_service.config_manager.config
+        config.cloud_mode = original_cloud_mode
+        config.default_project = original_default
+        project_service.config_manager.save_config(config)
+
+        # Set original default back in database so we can clean up
+        if original_default:
+            original_project = await project_service.repository.get_by_name(original_default)
+            if original_project:
+                await project_service.repository.set_as_default(original_project.id)
+
+        # Cleanup test project
+        if test_project_name in project_service.projects:
+            try:
+                # Clear default in DB first
+                db_project = await project_service.repository.get_by_name(test_project_name)
+                if db_project and db_project.is_default:
+                    # Find another project to make default
+                    pass  # Let the config_manager handle it
+                project_service.config_manager.remove_project(test_project_name)
+            except Exception:
+                pass

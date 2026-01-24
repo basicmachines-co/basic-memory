@@ -241,8 +241,13 @@ class ProjectService:
 
         project_path = project.path
 
-        # Check if project is default (in cloud mode, check database; in local mode, check config)
-        if project.is_default or name == self.config_manager.config.default_project:
+        # Check if project is default
+        # In cloud mode: database is source of truth
+        # In local mode: also check config file
+        is_default = project.is_default
+        if not self.config_manager.config.cloud_mode:
+            is_default = is_default or name == self.config_manager.config.default_project
+        if is_default:
             raise ValueError(f"Cannot remove the default project '{name}'")  # pragma: no cover
 
         # Remove from config if it exists there (may not exist in cloud mode)
