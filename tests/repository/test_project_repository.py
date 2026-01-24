@@ -137,6 +137,39 @@ async def test_get_default_project(project_repository: ProjectRepository, test_p
 
 
 @pytest.mark.asyncio
+async def test_get_default_project_with_false_values(project_repository: ProjectRepository):
+    """Test that get_default_project ignores projects with is_default=False.
+
+    Regression test for bug where is_not(None) matched both True and False,
+    causing MultipleResultsFound when multiple projects had different boolean values.
+    """
+    # Create projects with explicit is_default values
+    project_true = await project_repository.create({
+        "name": "Default Project",
+        "path": "/default/path",
+        "is_default": True,
+    })
+
+    await project_repository.create({
+        "name": "Not Default Project",
+        "path": "/not-default/path",
+        "is_default": False,
+    })
+
+    await project_repository.create({
+        "name": "Null Default Project",
+        "path": "/null/path",
+        "is_default": None,
+    })
+
+    # Should return only the project with is_default=True
+    default = await project_repository.get_default_project()
+    assert default is not None
+    assert default.id == project_true.id
+    assert default.name == "Default Project"
+
+
+@pytest.mark.asyncio
 async def test_get_active_projects(project_repository: ProjectRepository):
     """Test getting all active projects."""
     # Create active and inactive projects
