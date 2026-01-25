@@ -357,6 +357,22 @@ basic-memory cloud check
 basic-memory cloud mount
 ```
 
+**Routing Flags** (for users with cloud subscriptions):
+
+When cloud mode is enabled, CLI commands communicate with the cloud API by default. Use routing flags to override this:
+
+```bash
+# Force local routing (useful for local MCP server while cloud mode is enabled)
+basic-memory status --local
+basic-memory project list --local
+
+# Force cloud routing (when cloud mode is disabled but you want cloud access)
+basic-memory status --cloud
+basic-memory project info my-project --cloud
+```
+
+The local MCP server (`basic-memory mcp`) automatically uses local routing, so you can use both local Claude Desktop and cloud-based clients simultaneously.
+
 4. In Claude Desktop, the LLM can now use these tools:
 
 **Content Management:**
@@ -433,6 +449,7 @@ Basic Memory uses [Loguru](https://github.com/Delgan/loguru) for logging. The lo
 |----------|---------|-------------|
 | `BASIC_MEMORY_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
 | `BASIC_MEMORY_CLOUD_MODE` | `false` | When `true`, API logs to stdout with structured context |
+| `BASIC_MEMORY_FORCE_LOCAL` | `false` | When `true`, forces local API routing (ignores cloud mode) |
 | `BASIC_MEMORY_ENV` | `dev` | Set to `test` for test mode (stderr only) |
 
 ### Examples

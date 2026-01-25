@@ -310,6 +310,26 @@ Basic Memory now supports cloud synchronization and storage (requires active sub
 - Background relation resolution (non-blocking startup)
 - API performance optimizations (SPEC-11)
 
+**CLI Routing Flags:**
+
+When cloud mode is enabled, CLI commands route to the cloud API by default. Use `--local` and `--cloud` flags to override:
+
+```bash
+# Force local routing (ignore cloud mode)
+basic-memory status --local
+basic-memory project list --local
+
+# Force cloud routing (when cloud mode is disabled)
+basic-memory status --cloud
+basic-memory project info my-project --cloud
+```
+
+Key behaviors:
+- The local MCP server (`basic-memory mcp`) automatically uses local routing
+- This allows simultaneous use of local Claude Desktop and cloud-based clients
+- Some commands (like `project default`, `project sync-config`, `project move`) require `--local` in cloud mode since they modify local configuration
+- Environment variable `BASIC_MEMORY_FORCE_LOCAL=true` forces local routing globally
+
 ## AI-Human Collaborative Development
 
 Basic Memory emerged from and enables a new kind of development process that combines human and AI capabilities. Instead
