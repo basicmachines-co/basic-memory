@@ -53,6 +53,60 @@ async def test_resolve_identifier_not_found(client: AsyncClient, v2_project_url)
 
 
 @pytest.mark.asyncio
+async def test_resolve_identifier_no_fuzzy_match(client: AsyncClient, v2_project_url):
+    """Test that resolve uses strict mode - no fuzzy search fallback.
+
+    This ensures wiki links only resolve to exact matches (permalink, title, or path),
+    not to similar-sounding entities via fuzzy search.
+    """
+    # Create an entity with a specific name
+    entity_data = {
+        "title": "link-test",
+        "folder": "testing",
+        "content": "A test note",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
+    assert response.status_code == 200
+
+    # Try to resolve "nonexistent" - should NOT fuzzy match to "link-test"
+    resolve_data = {"identifier": "nonexistent"}
+    response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
+
+    # Must return 404, not a fuzzy match to "link-test"
+    assert response.status_code == 404
+    assert "Entity not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_identifier_with_source_path_no_fuzzy_match(client: AsyncClient, v2_project_url):
+    """Test that context-aware resolution also uses strict mode.
+
+    Even with source_path for context-aware resolution, nonexistent
+    links should return 404, not fuzzy match to nearby entities.
+    """
+    # Create entities in a folder structure
+    entity_data = {
+        "title": "link-test",
+        "folder": "testing/nested",
+        "content": "A nested test note",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
+    assert response.status_code == 200
+
+    # Try to resolve "nonexistent" with source_path context
+    # Should NOT fuzzy match to "link-test" in the same or nearby folder
+    resolve_data = {
+        "identifier": "nonexistent",
+        "source_path": "testing/nested/other-note.md",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
+
+    # Must return 404, not a fuzzy match
+    assert response.status_code == 404
+    assert "Entity not found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_get_entity_by_id(client: AsyncClient, test_graph, v2_project_url, entity_repository):
     """Test getting an entity by its external_id (UUID)."""
     # Create an entity first

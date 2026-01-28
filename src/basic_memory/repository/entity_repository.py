@@ -5,7 +5,7 @@ from typing import List, Optional, Sequence, Union, Any
 
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -69,12 +69,21 @@ class EntityRepository(Repository[Entity]):
         return await self.find_one(query)
 
     async def get_by_title(self, title: str) -> Sequence[Entity]:
-        """Get entity by title.
+        """Get entities by title, ordered by shortest path first.
+
+        When multiple entities share the same title (in different folders),
+        returns them ordered by file_path length then alphabetically.
+        This provides "shortest path" resolution for duplicate titles.
 
         Args:
             title: Title of the entity to find
         """
-        query = self.select().where(Entity.title == title).options(*self.get_load_options())
+        query = (
+            self.select()
+            .where(Entity.title == title)
+            .order_by(func.length(Entity.file_path), Entity.file_path)
+            .options(*self.get_load_options())
+        )
         result = await self.execute_query(query)
         return list(result.scalars().all())
 

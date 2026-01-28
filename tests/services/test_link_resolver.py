@@ -357,3 +357,475 @@ async def test_duplicate_title_handling_in_strict_mode(link_resolver, test_entit
     assert result is not None
     # Should return the first match (components/core-service based on test fixture order)
     assert result.permalink == "components/core-service"
+
+
+# ============================================================================
+# Context-aware resolution tests (source_path parameter)
+# ============================================================================
+
+
+@pytest_asyncio.fixture
+async def context_aware_entities(entity_repository):
+    """Create entities for testing context-aware resolution.
+
+    Structure:
+    ├── testing.md                    (title: "testing", root level)
+    ├── main/
+    │   └── testing/
+    │       ├── testing.md            (title: "testing", nested)
+    │       └── another-test.md       (title: "another-test")
+    ├── other/
+    │   └── testing.md                (title: "testing", different branch)
+    └── deep/
+        └── nested/
+            └── folder/
+                └── note.md           (title: "note")
+    """
+    entities = []
+    now = datetime.now(timezone.utc)
+    project_id = entity_repository.project_id
+
+    # Root level testing.md
+    e1 = await entity_repository.add(
+        EntityModel(
+            title="testing",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="testing.md",
+            permalink="testing",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e1)
+
+    # main/testing/testing.md
+    e2 = await entity_repository.add(
+        EntityModel(
+            title="testing",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="main/testing/testing.md",
+            permalink="main/testing/testing",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e2)
+
+    # main/testing/another-test.md
+    e3 = await entity_repository.add(
+        EntityModel(
+            title="another-test",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="main/testing/another-test.md",
+            permalink="main/testing/another-test",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e3)
+
+    # other/testing.md
+    e4 = await entity_repository.add(
+        EntityModel(
+            title="testing",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="other/testing.md",
+            permalink="other/testing",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e4)
+
+    # deep/nested/folder/note.md
+    e5 = await entity_repository.add(
+        EntityModel(
+            title="note",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="deep/nested/folder/note.md",
+            permalink="deep/nested/folder/note",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e5)
+
+    # deep/note.md (for ancestor testing)
+    e6 = await entity_repository.add(
+        EntityModel(
+            title="note",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="deep/note.md",
+            permalink="deep/note",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e6)
+
+    # note.md at root (for ancestor testing)
+    e7 = await entity_repository.add(
+        EntityModel(
+            title="note",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="note.md",
+            permalink="note",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e7)
+
+    return entities
+
+
+@pytest_asyncio.fixture
+async def context_link_resolver(entity_repository, search_service, context_aware_entities):
+    """Create LinkResolver instance with context-aware test data.
+
+    Note: We don't index entities for search because these tests focus on
+    exact title/permalink matching, not fuzzy search. The entities are
+    database-only records (no files on disk).
+    """
+    return LinkResolver(entity_repository, search_service)
+
+
+@pytest.mark.asyncio
+async def test_source_path_same_folder_preference(context_link_resolver):
+    """Test that links prefer notes in the same folder as the source."""
+    # From main/testing/another-test.md, [[testing]] should find main/testing/testing.md
+    result = await context_link_resolver.resolve_link(
+        "testing",
+        source_path="main/testing/another-test.md"
+    )
+    assert result is not None
+    assert result.file_path == "main/testing/testing.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_from_root_prefers_root(context_link_resolver):
+    """Test that links from root-level notes prefer root-level matches."""
+    # From root-note.md, [[testing]] should find testing.md (root level)
+    result = await context_link_resolver.resolve_link(
+        "testing",
+        source_path="some-root-note.md"
+    )
+    assert result is not None
+    assert result.file_path == "testing.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_different_branch_prefers_closest(context_link_resolver):
+    """Test resolution when source is in a different branch of the folder tree."""
+    # From other/testing.md, [[testing]] should find other/testing.md (same folder)
+    # Wait, other/testing.md IS the testing note in that folder, so this tests self-reference
+    # Let's test from a hypothetical other/different.md
+    result = await context_link_resolver.resolve_link(
+        "testing",
+        source_path="other/different.md"
+    )
+    assert result is not None
+    # Should find other/testing.md since it's in the same folder
+    assert result.file_path == "other/testing.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_ancestor_preference(context_link_resolver):
+    """Test that closer ancestors are preferred over distant ones."""
+    # From deep/nested/folder/note.md, [[note]] with multiple "note" titles
+    # should prefer the closest ancestor match
+
+    # First verify there are multiple "note" entities
+    # deep/nested/folder/note.md, deep/note.md, note.md
+
+    # From deep/nested/folder/some-file.md, [[note]] should prefer:
+    # 1. deep/nested/folder/note.md (same folder) - but that's the note itself
+    # Let's say we're linking from a different file in that folder
+    result = await context_link_resolver.resolve_link(
+        "note",
+        source_path="deep/nested/folder/other-file.md"
+    )
+    assert result is not None
+    # Should find deep/nested/folder/note.md (same folder)
+    assert result.file_path == "deep/nested/folder/note.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_parent_folder_preference(context_link_resolver):
+    """Test that parent folder is preferred when no same-folder match exists."""
+    # From deep/nested/folder/x.md where there's no "common" in same folder,
+    # but there's one in deep/nested/ - should prefer closer ancestor
+
+    # For this test, let's check that from deep/nested/other/file.md,
+    # [[note]] finds deep/note.md (ancestor) rather than note.md (root)
+    result = await context_link_resolver.resolve_link(
+        "note",
+        source_path="deep/nested/other/file.md"
+    )
+    assert result is not None
+    # No note.md in deep/nested/other/, so should find deep/note.md (closest ancestor)
+    # Actually deep/nested/folder/note.md might be considered... let me think
+    # deep/nested/other/file.md -> ancestors are deep/nested/, deep/, root
+    # Siblings/cousins like deep/nested/folder/ are NOT ancestors
+    # So should find deep/note.md
+    assert result.file_path == "deep/note.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_no_context_falls_back_to_shortest_path(context_link_resolver):
+    """Test that without source_path, resolution falls back to shortest path."""
+    # Without source_path, should use standard resolution (permalink first, then title)
+    result = await context_link_resolver.resolve_link("testing")
+    assert result is not None
+    # Should get the one with shortest path or matching permalink
+    # "testing" matches permalink "testing" of root testing.md
+    assert result.file_path == "testing.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_unique_title_ignores_context(context_link_resolver):
+    """Test that unique titles resolve correctly regardless of source_path."""
+    # "another-test" only exists in one place
+    result = await context_link_resolver.resolve_link(
+        "another-test",
+        source_path="other/some-file.md"  # Different folder
+    )
+    assert result is not None
+    assert result.file_path == "main/testing/another-test.md"
+
+
+@pytest.mark.asyncio
+async def test_source_path_with_permalink_conflict(context_link_resolver):
+    """Test that same-folder title match beats permalink match from different folder."""
+    # Root testing.md has permalink "testing"
+    # main/testing/testing.md has title "testing"
+    # From main/testing/another-test.md, [[testing]] should prefer the same-folder match
+    # even though there's a permalink match at root
+
+    result = await context_link_resolver.resolve_link(
+        "testing",
+        source_path="main/testing/another-test.md"
+    )
+    assert result is not None
+    # Should prefer same-folder title match over root permalink match
+    assert result.file_path == "main/testing/testing.md"
+
+
+@pytest.mark.asyncio
+async def test_find_closest_entity_same_folder(context_link_resolver, context_aware_entities):
+    """Test _find_closest_entity helper with same folder match."""
+    # Get entities with title "testing"
+    testing_entities = [e for e in context_aware_entities if e.title == "testing"]
+    assert len(testing_entities) == 3  # root, main/testing, other
+
+    closest = context_link_resolver._find_closest_entity(
+        testing_entities,
+        "main/testing/another-test.md"
+    )
+    assert closest.file_path == "main/testing/testing.md"
+
+
+@pytest.mark.asyncio
+async def test_find_closest_entity_ancestor_preference(context_link_resolver, context_aware_entities):
+    """Test _find_closest_entity prefers closer ancestors."""
+    # Get entities with title "note"
+    note_entities = [e for e in context_aware_entities if e.title == "note"]
+    assert len(note_entities) == 3  # deep/nested/folder, deep, root
+
+    # From deep/nested/other/file.md, should prefer deep/note.md over note.md
+    closest = context_link_resolver._find_closest_entity(
+        note_entities,
+        "deep/nested/other/file.md"
+    )
+    assert closest.file_path == "deep/note.md"
+
+
+@pytest.mark.asyncio
+async def test_find_closest_entity_root_source(context_link_resolver, context_aware_entities):
+    """Test _find_closest_entity when source is at root."""
+    testing_entities = [e for e in context_aware_entities if e.title == "testing"]
+
+    # From root level, should prefer root testing.md
+    closest = context_link_resolver._find_closest_entity(
+        testing_entities,
+        "some-root-file.md"
+    )
+    assert closest.file_path == "testing.md"
+
+
+@pytest.mark.asyncio
+async def test_nonexistent_link_with_source_path(context_link_resolver):
+    """Test that non-existent links return None even with source_path."""
+    result = await context_link_resolver.resolve_link(
+        "does-not-exist",
+        source_path="main/testing/another-test.md"
+    )
+    assert result is None
+
+
+# ============================================================================
+# Relative path resolution tests
+# ============================================================================
+
+
+@pytest_asyncio.fixture
+async def relative_path_entities(entity_repository):
+    """Create entities for testing relative path resolution.
+
+    Structure:
+    ├── testing/
+    │   ├── link-test.md               (source file for testing)
+    │   └── nested/
+    │       └── deep-note.md           (target for relative path)
+    ├── nested/
+    │   └── deep-note.md               (different deep-note at root level)
+    └── other/
+        └── file.md
+    """
+    entities = []
+    now = datetime.now(timezone.utc)
+    project_id = entity_repository.project_id
+
+    # testing/link-test.md (source file)
+    e1 = await entity_repository.add(
+        EntityModel(
+            title="link-test",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="testing/link-test.md",
+            permalink="testing/link-test",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e1)
+
+    # testing/nested/deep-note.md (relative target)
+    e2 = await entity_repository.add(
+        EntityModel(
+            title="deep-note",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="testing/nested/deep-note.md",
+            permalink="testing/nested/deep-note",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e2)
+
+    # nested/deep-note.md (absolute path target)
+    e3 = await entity_repository.add(
+        EntityModel(
+            title="deep-note",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="nested/deep-note.md",
+            permalink="nested/deep-note",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e3)
+
+    # other/file.md
+    e4 = await entity_repository.add(
+        EntityModel(
+            title="file",
+            entity_type="note",
+            content_type="text/markdown",
+            file_path="other/file.md",
+            permalink="other/file",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        )
+    )
+    entities.append(e4)
+
+    return entities
+
+
+@pytest_asyncio.fixture
+async def relative_path_resolver(entity_repository, search_service, relative_path_entities):
+    """Create LinkResolver instance with relative path test data."""
+    return LinkResolver(entity_repository, search_service)
+
+
+@pytest.mark.asyncio
+async def test_relative_path_resolution_from_subfolder(relative_path_resolver):
+    """Test that [[nested/deep-note]] from testing/link-test.md resolves to testing/nested/deep-note.md."""
+    # From testing/link-test.md, [[nested/deep-note]] should resolve to testing/nested/deep-note.md
+    result = await relative_path_resolver.resolve_link(
+        "nested/deep-note",
+        source_path="testing/link-test.md"
+    )
+    assert result is not None
+    assert result.file_path == "testing/nested/deep-note.md"
+
+
+@pytest.mark.asyncio
+async def test_relative_path_falls_back_to_absolute(relative_path_resolver):
+    """Test that if relative path doesn't exist, falls back to absolute resolution."""
+    # From other/file.md, [[nested/deep-note]] should resolve to nested/deep-note.md (absolute)
+    # because other/nested/deep-note.md doesn't exist
+    result = await relative_path_resolver.resolve_link(
+        "nested/deep-note",
+        source_path="other/file.md"
+    )
+    assert result is not None
+    assert result.file_path == "nested/deep-note.md"
+
+
+@pytest.mark.asyncio
+async def test_relative_path_without_source_uses_absolute(relative_path_resolver):
+    """Test that without source_path, paths are resolved as absolute."""
+    # Without source_path, [[nested/deep-note]] should resolve to nested/deep-note.md
+    result = await relative_path_resolver.resolve_link("nested/deep-note")
+    assert result is not None
+    assert result.file_path == "nested/deep-note.md"
+
+
+@pytest.mark.asyncio
+async def test_relative_path_from_root_falls_through(relative_path_resolver):
+    """Test that paths from root-level files don't try relative resolution."""
+    # From root-file.md (no folder), [[nested/deep-note]] should resolve to nested/deep-note.md
+    result = await relative_path_resolver.resolve_link(
+        "nested/deep-note",
+        source_path="root-file.md"
+    )
+    assert result is not None
+    assert result.file_path == "nested/deep-note.md"
+
+
+@pytest.mark.asyncio
+async def test_simple_link_no_slash_skips_relative_resolution(relative_path_resolver):
+    """Test that links without '/' don't trigger relative path resolution."""
+    # [[deep-note]] should use context-aware title matching, not relative paths
+    result = await relative_path_resolver.resolve_link(
+        "deep-note",
+        source_path="testing/link-test.md"
+    )
+    assert result is not None
+    # Should find testing/nested/deep-note.md via title match with same-folder preference
+    # Actually both have title "deep-note", so it should prefer the one closer to source
+    # testing/nested/ is not the same folder as testing/, but it's closer than nested/
+    # The context-aware resolution will pick the closest match
+    assert result.file_path == "testing/nested/deep-note.md"
