@@ -48,6 +48,11 @@ class LinkResolver:
         # Clean link text and extract any alias
         clean_text, alias = self._normalize_link_text(link_text)
 
+        # --- Path Resolution ---
+        # Note: All paths in Basic Memory are stored as POSIX strings (forward slashes)
+        # for cross-platform compatibility. See entity_repository.py which normalizes
+        # paths using Path().as_posix(). This allows consistent path operations here.
+
         # --- Relative Path Resolution ---
         # Trigger: source_path is provided AND link contains "/"
         # Why: Resolve paths like [[nested/deep-note]] relative to source folder first
@@ -181,11 +186,12 @@ class LinkResolver:
 
         Context-aware resolution: prefer notes in the same folder or closer in hierarchy.
 
-        Algorithm:
-        1. Same folder as source gets priority 0 (best)
-        2. Parent folders get increasing priority based on how many levels up
-        3. Notes in completely different paths get highest priority (worst)
-        4. Ties are broken by shortest absolute path (consistent behavior)
+        Proximity Scoring Algorithm:
+        - Priority 0: Same folder as source (best match)
+        - Priority 1-N: Ancestor folders (N = levels up from source)
+        - Priority 100+N: Descendant folders (N = levels down, deprioritized)
+        - Priority 1000: Completely unrelated paths (least preferred)
+        - Ties are broken by shortest absolute path (consistent behavior)
 
         Args:
             entities: List of entities with the same title
@@ -205,12 +211,16 @@ class LinkResolver:
             entity_path = entity.file_path
             entity_folder = entity_path.rsplit("/", 1)[0] if "/" in entity_path else ""
 
-            # Same folder - best match (priority 0)
+            # Trigger: entity is in the same folder as source
+            # Why: same-folder notes are most contextually relevant
+            # Outcome: priority = 0 (best), ties broken by shortest path
             if entity_folder == source_folder:
                 return (0, len(entity_path))
 
-            # Check if entity is in an ancestor folder of source
+            # Trigger: entity is in an ancestor folder of source
             # e.g., source is "a/b/c/file.md", entity is "a/b/note.md" -> ancestor
+            # Why: ancestors are contextually relevant (shared parent context)
+            # Outcome: priority = levels_up (1, 2, 3...), closer ancestors preferred
             if source_folder.startswith(entity_folder + "/") if entity_folder else source_folder:
                 # Count how many levels up
                 if entity_folder:
@@ -220,18 +230,21 @@ class LinkResolver:
                     levels_up = source_folder.count("/") + 1
                 return (levels_up, len(entity_path))
 
-            # Check if source is in an ancestor folder of entity
+            # Trigger: entity is in a descendant folder of source
             # e.g., source is "a/file.md", entity is "a/b/c/note.md" -> descendant
+            # Why: descendants are less contextually relevant than ancestors
+            # Outcome: priority = 100 + levels_down, significantly deprioritized
             if entity_folder.startswith(source_folder + "/") if source_folder else entity_folder:
                 if source_folder:
                     levels_down = entity_folder.count("/") - source_folder.count("/")
                 else:
                     # Source is at root
                     levels_down = entity_folder.count("/") + 1
-                # Descendants are less preferred than ancestors
                 return (100 + levels_down, len(entity_path))
 
-            # Completely different path - least preferred
+            # Trigger: entity is in a completely unrelated path
+            # Why: no folder relationship means minimal contextual relevance
+            # Outcome: priority = 1000, only selected if no related paths exist
             return (1000, len(entity_path))
 
         # Sort by proximity (lower is better), then by path length (shorter is better)
