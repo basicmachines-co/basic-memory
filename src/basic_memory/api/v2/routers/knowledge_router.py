@@ -104,10 +104,10 @@ async def resolve_identifier(
 
     # If not found by external_id, try other resolution methods
     # Pass source_path for context-aware resolution (prefers notes closer to source)
-    # Use strict=True to disable fuzzy search - wiki links should only resolve exact matches
+    # Pass strict to control fuzzy search fallback (default False allows fuzzy matching)
     if not entity:
         entity = await link_resolver.resolve_link(
-            data.identifier, source_path=data.source_path, strict=True
+            data.identifier, source_path=data.source_path, strict=data.strict
         )
         if entity:
             # Determine resolution method

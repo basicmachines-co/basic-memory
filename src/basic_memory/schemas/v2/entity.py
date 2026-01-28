@@ -31,6 +31,10 @@ class EntityResolveRequest(BaseModel):
         description="Path of the source file containing the link (for context-aware resolution)",
         max_length=500,
     )
+    strict: bool = Field(
+        False,
+        description="If True, only exact matches are allowed (no fuzzy search fallback)",
+    )
 
 
 class EntityResolveResponse(BaseModel):
