@@ -144,7 +144,7 @@ async def recent_activity(
             )
 
             # Get list of all projects
-            response = await call_get(client, "/projects/projects")
+            response = await call_get(client, "/v2/projects/")
             project_list = ProjectList.model_validate(response.json())
 
             projects_activity = {}

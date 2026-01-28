@@ -13,21 +13,196 @@ Key improvements:
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Body, Query, Path
+from fastapi import APIRouter, HTTPException, Body, Query, Path, BackgroundTasks
 from loguru import logger
 
 from basic_memory.deps import (
     ProjectServiceDep,
     ProjectRepositoryDep,
+    ProjectConfigV2ExternalDep,
+    SyncServiceV2ExternalDep,
 )
+from basic_memory.schemas import SyncReportResponse
 from basic_memory.schemas.project_info import (
     ProjectItem,
+    ProjectList,
+    ProjectInfoRequest,
+    ProjectInfoResponse,
     ProjectStatusResponse,
 )
 from basic_memory.schemas.v2 import ProjectResolveRequest, ProjectResolveResponse
 from basic_memory.utils import normalize_project_path, generate_permalink
 
 router = APIRouter(prefix="/projects", tags=["project_management-v2"])
+
+
+@router.get("/", response_model=ProjectList)
+async def list_projects(
+    project_service: ProjectServiceDep,
+) -> ProjectList:
+    """List all configured projects.
+
+    Returns:
+        A list of all projects with metadata
+    """
+    projects = await project_service.list_projects()
+    default_project = project_service.default_project
+
+    project_items = [
+        ProjectItem(
+            id=project.id,
+            external_id=project.external_id,
+            name=project.name,
+            path=normalize_project_path(project.path),
+            is_default=project.is_default or False,
+        )
+        for project in projects
+    ]
+
+    return ProjectList(
+        projects=project_items,
+        default_project=default_project,
+    )
+
+
+@router.post("/", response_model=ProjectStatusResponse, status_code=201)
+async def add_project(
+    project_data: ProjectInfoRequest,
+    project_service: ProjectServiceDep,
+) -> ProjectStatusResponse:
+    """Add a new project to configuration and database.
+
+    Args:
+        project_data: The project name and path, with option to set as default
+
+    Returns:
+        Response confirming the project was added
+    """
+    # Check if project already exists before attempting to add
+    existing_project = await project_service.get_project(project_data.name)
+    if existing_project:
+        # Project exists - check if paths match for true idempotency
+        # Normalize paths for comparison (resolve symlinks, etc.)
+        from pathlib import Path
+
+        requested_path = Path(project_data.path).resolve()
+        existing_path = Path(existing_project.path).resolve()
+
+        if requested_path == existing_path:
+            # Same name, same path - return 200 OK (idempotent)
+            return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
+                message=f"Project '{project_data.name}' already exists",
+                status="success",
+                default=existing_project.is_default or False,
+                new_project=ProjectItem(
+                    id=existing_project.id,
+                    external_id=existing_project.external_id,
+                    name=existing_project.name,
+                    path=existing_project.path,
+                    is_default=existing_project.is_default or False,
+                ),
+            )
+        else:
+            # Same name, different path - this is an error
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Project '{project_data.name}' already exists with different path. "
+                    f"Existing: {existing_project.path}, Requested: {project_data.path}"
+                ),
+            )
+
+    try:  # pragma: no cover
+        # The service layer handles cloud mode validation and path sanitization
+        await project_service.add_project(
+            project_data.name, project_data.path, set_default=project_data.set_default
+        )
+
+        # Fetch the newly created project to get its ID
+        new_project = await project_service.get_project(project_data.name)
+        if not new_project:
+            raise HTTPException(status_code=500, detail="Failed to retrieve newly created project")
+
+        return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
+            message=f"Project '{new_project.name}' added successfully",
+            status="success",
+            default=project_data.set_default,
+            new_project=ProjectItem(
+                id=new_project.id,
+                external_id=new_project.external_id,
+                name=new_project.name,
+                path=new_project.path,
+                is_default=new_project.is_default or False,
+            ),
+        )
+    except ValueError as e:  # pragma: no cover
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/config/sync", response_model=ProjectStatusResponse)
+async def synchronize_projects(
+    project_service: ProjectServiceDep,
+) -> ProjectStatusResponse:
+    """Synchronize projects between configuration file and database."""
+    try:  # pragma: no cover
+        await project_service.synchronize_projects()
+
+        return ProjectStatusResponse(  # pyright: ignore [reportCallIssue]
+            message="Projects synchronized successfully between configuration and database",
+            status="success",
+            default=False,
+        )
+    except ValueError as e:  # pragma: no cover
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/{project_id}/sync")
+async def sync_project(
+    background_tasks: BackgroundTasks,
+    sync_service: SyncServiceV2ExternalDep,
+    project_config: ProjectConfigV2ExternalDep,
+    project_id: str = Path(..., description="Project external ID (UUID)"),
+    force_full: bool = Query(
+        False, description="Force full scan, bypassing watermark optimization"
+    ),
+    run_in_background: bool = Query(True, description="Run in background"),
+):
+    """Force project filesystem sync to database."""
+    if run_in_background:
+        background_tasks.add_task(
+            sync_service.sync, project_config.home, project_config.name, force_full=force_full
+        )
+        logger.info(
+            f"Filesystem sync initiated for project: {project_config.name} (force_full={force_full})"
+        )
+
+        return {
+            "status": "sync_started",
+            "message": f"Filesystem sync initiated for project '{project_config.name}'",
+        }
+
+    report = await sync_service.sync(
+        project_config.home, project_config.name, force_full=force_full
+    )
+    logger.info(
+        f"Filesystem sync completed for project: {project_config.name} (force_full={force_full})"
+    )
+    return SyncReportResponse.from_sync_report(report)
+
+
+@router.post("/{project_id}/status", response_model=SyncReportResponse)
+async def get_project_status(
+    sync_service: SyncServiceV2ExternalDep,
+    project_config: ProjectConfigV2ExternalDep,
+    project_id: str = Path(..., description="Project external ID (UUID)"),
+    force_full: bool = Query(
+        False, description="Force full scan, bypassing watermark optimization"
+    ),
+) -> SyncReportResponse:
+    """Get sync status of files vs database for a project."""
+    logger.info(f"API v2 request: get_project_status for project_id={project_id}")
+    report = await sync_service.scan(project_config.home, force_full=force_full)
+    return SyncReportResponse.from_sync_report(report)
 
 
 @router.post("/resolve", response_model=ProjectResolveResponse)
@@ -145,6 +320,22 @@ async def get_project_by_id(
         path=normalize_project_path(project.path),
         is_default=project.is_default or False,
     )
+
+
+@router.get("/{project_id}/info", response_model=ProjectInfoResponse)
+async def get_project_info_by_id(
+    project_service: ProjectServiceDep,
+    project_repository: ProjectRepositoryDep,
+    project_id: str = Path(..., description="Project external ID (UUID)"),
+) -> ProjectInfoResponse:
+    """Get detailed project information by external ID."""
+    logger.info(f"API v2 request: get_project_info_by_id for project_id={project_id}")
+    project = await project_repository.get_by_external_id(project_id)
+    if not project:
+        raise HTTPException(
+            status_code=404, detail=f"Project with external_id '{project_id}' not found"
+        )
+    return await project_service.get_project_info(project.name)
 
 
 @router.patch("/{project_id}", response_model=ProjectStatusResponse)

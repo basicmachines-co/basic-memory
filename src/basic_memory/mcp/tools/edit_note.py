@@ -256,7 +256,7 @@ async def edit_note(
                 edit_data["expected_replacements"] = str(expected_replacements)
 
             # Call the PATCH endpoint
-            result = await knowledge_client.patch_entity(entity_id, edit_data)
+            result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
 
             # Format summary
             summary = [

@@ -17,6 +17,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_delete, call_get, call_patch, call_post, call_put
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
+from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.utils import generate_permalink, normalize_project_path
 
 # Import rclone commands for project sync
@@ -65,7 +66,7 @@ def list_projects(
 
     async def _list_projects():
         async with get_client() as client:
-            response = await call_get(client, "/projects/projects")
+            response = await call_get(client, "/v2/projects/")
             return ProjectList.model_validate(response.json())
 
     try:
@@ -167,7 +168,7 @@ def add_project(
                     "local_sync_path": local_sync_path,
                     "set_default": set_default,
                 }
-                response = await call_post(client, "/projects/projects", json=data)
+                response = await call_post(client, "/v2/projects/", json=data)
                 return ProjectStatusResponse.model_validate(response.json())
     else:
         # Local mode: path is required
@@ -181,7 +182,7 @@ def add_project(
         async def _add_project():
             async with get_client() as client:
                 data = {"name": name, "path": resolved_path, "set_default": set_default}
-                response = await call_post(client, "/projects/projects", json=data)
+                response = await call_post(client, "/v2/projects/", json=data)
                 return ProjectStatusResponse.model_validate(response.json())
 
     try:
@@ -234,7 +235,7 @@ def setup_project_sync(
     async def _verify_project_exists():
         """Verify the project exists on cloud by listing all projects."""
         async with get_client() as client:
-            response = await call_get(client, "/projects/projects")
+            response = await call_get(client, "/v2/projects/")
             project_list = response.json()
             project_names = [p["name"] for p in project_list["projects"]]
             if name not in project_names:
@@ -433,7 +434,7 @@ def synchronize_projects(
 
     async def _sync_config():
         async with get_client() as client:
-            response = await call_post(client, "/projects/config/sync")
+            response = await call_post(client, "/v2/projects/config/sync")
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
@@ -475,10 +476,15 @@ def move_project(
     async def _move_project():
         async with get_client() as client:
             data = {"path": resolved_path}
-            project_permalink = generate_permalink(name)
-
-            # TODO fix route to use ProjectPathDep
-            response = await call_patch(client, f"/{name}/project/{project_permalink}", json=data)
+            resolve_response = await call_post(
+                client,
+                "/v2/projects/resolve",
+                json={"identifier": name},
+            )
+            project_info = ProjectResolveResponse.model_validate(resolve_response.json())
+            response = await call_patch(
+                client, f"/v2/projects/{project_info.external_id}", json=data
+            )
             return ProjectStatusResponse.model_validate(response.json())
 
     try:
@@ -530,7 +536,7 @@ def sync_project_command(
         # Get project info
         async def _get_project():
             async with get_client() as client:
-                response = await call_get(client, "/projects/projects")
+                response = await call_get(client, "/v2/projects/")
                 projects_list = ProjectList.model_validate(response.json())
                 for proj in projects_list.projects:
                     if generate_permalink(proj.name) == generate_permalink(name):
@@ -571,9 +577,10 @@ def sync_project_command(
 
                 async def _trigger_db_sync():
                     async with get_client() as client:
-                        permalink = generate_permalink(name)
                         response = await call_post(
-                            client, f"/{permalink}/project/sync?force_full=true", json={}
+                            client,
+                            f"/v2/projects/{project_data.external_id}/sync?force_full=true",
+                            json={},
                         )
                         return response.json()
 
@@ -621,7 +628,7 @@ def bisync_project_command(
         # Get project info
         async def _get_project():
             async with get_client() as client:
-                response = await call_get(client, "/projects/projects")
+                response = await call_get(client, "/v2/projects/")
                 projects_list = ProjectList.model_validate(response.json())
                 for proj in projects_list.projects:
                     if generate_permalink(proj.name) == generate_permalink(name):
@@ -669,9 +676,10 @@ def bisync_project_command(
 
                 async def _trigger_db_sync():
                     async with get_client() as client:
-                        permalink = generate_permalink(name)
                         response = await call_post(
-                            client, f"/{permalink}/project/sync?force_full=true", json={}
+                            client,
+                            f"/v2/projects/{project_data.external_id}/sync?force_full=true",
+                            json={},
                         )
                         return response.json()
 
@@ -715,7 +723,7 @@ def check_project_command(
         # Get project info
         async def _get_project():
             async with get_client() as client:
-                response = await call_get(client, "/projects/projects")
+                response = await call_get(client, "/v2/projects/")
                 projects_list = ProjectList.model_validate(response.json())
                 for proj in projects_list.projects:
                     if generate_permalink(proj.name) == generate_permalink(name):
@@ -816,7 +824,7 @@ def ls_project_command(
         # Get project info
         async def _get_project():
             async with get_client() as client:
-                response = await call_get(client, "/projects/projects")
+                response = await call_get(client, "/v2/projects/")
                 projects_list = ProjectList.model_validate(response.json())
                 for proj in projects_list.projects:
                     if generate_permalink(proj.name) == generate_permalink(name):

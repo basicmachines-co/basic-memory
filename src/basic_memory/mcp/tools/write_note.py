@@ -159,7 +159,7 @@ async def write_note(
         logger.debug(f"Attempting to create entity permalink={entity.permalink}")
         action = "Created"  # Default to created
         try:
-            result = await knowledge_client.create_entity(entity.model_dump())
+            result = await knowledge_client.create_entity(entity.model_dump(), fast=False)
             action = "Created"
         except Exception as e:
             # If creation failed due to conflict (already exists), try to update
@@ -175,7 +175,9 @@ async def write_note(
                             "Entity permalink is required for updates"
                         )  # pragma: no cover
                     entity_id = await knowledge_client.resolve_entity(entity.permalink)
-                    result = await knowledge_client.update_entity(entity_id, entity.model_dump())
+                    result = await knowledge_client.update_entity(
+                        entity_id, entity.model_dump(), fast=False
+                    )
                     action = "Updated"
                 except Exception as update_error:  # pragma: no cover
                     # Re-raise the original error if update also fails

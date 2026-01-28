@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Path
 from loguru import logger
 
-from basic_memory.api.routers.utils import to_graph_context, to_search_results
+from basic_memory.api.v2.utils import to_graph_context, to_search_results
 from basic_memory.api.template_loader import template_loader
 from basic_memory.schemas.base import parse_timeframe
 from basic_memory.deps import (

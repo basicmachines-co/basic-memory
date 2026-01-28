@@ -1,5 +1,6 @@
 """Service for managing entities in the database."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
 
@@ -343,6 +344,194 @@ class EntityService(BaseService[EntityModel]):
         entity = await self.repository.update(entity.id, {"checksum": checksum})
 
         return entity
+
+    async def fast_write_entity(
+        self,
+        schema: EntitySchema,
+        external_id: Optional[str] = None,
+    ) -> EntityModel:
+        """Write file and upsert a minimal entity row for fast responses."""
+        logger.debug(
+            "Fast-writing entity",
+            title=schema.title,
+            external_id=external_id,
+            content_type=schema.content_type,
+        )
+
+        # --- Identity & File Path ---
+        existing = await self.repository.get_by_external_id(external_id) if external_id else None
+
+        # Trigger: external_id already exists
+        # Why: avoid duplicate entities when title-derived paths change
+        # Outcome: update in-place and keep the existing file path
+        file_path = Path(existing.file_path) if existing else Path(schema.file_path)
+
+        if not existing and await self.file_service.exists(file_path):
+            raise EntityCreationError(
+                f"file for entity {schema.directory}/{schema.title} already exists: {file_path}"
+            )
+
+        # --- Frontmatter Overrides ---
+        content_markdown = None
+        if schema.content and has_frontmatter(schema.content):
+            content_frontmatter = parse_frontmatter(schema.content)
+
+            if "type" in content_frontmatter:
+                schema.entity_type = content_frontmatter["type"]
+
+            if "permalink" in content_frontmatter:
+                from basic_memory.markdown.schemas import EntityFrontmatter
+
+                frontmatter_metadata = {
+                    "title": schema.title,
+                    "type": schema.entity_type,
+                    "permalink": content_frontmatter["permalink"],
+                }
+                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
+                content_markdown = EntityMarkdown(
+                    frontmatter=frontmatter_obj,
+                    content="",
+                    observations=[],
+                    relations=[],
+                )
+
+        # --- Permalink Resolution ---
+        if self.app_config and self.app_config.disable_permalinks:
+            schema._permalink = ""
+        else:
+            if existing and not (content_markdown and content_markdown.frontmatter.permalink):
+                schema._permalink = existing.permalink or await self.resolve_permalink(
+                    file_path, skip_conflict_check=True
+                )
+            else:
+                schema._permalink = await self.resolve_permalink(
+                    file_path, content_markdown, skip_conflict_check=True
+                )
+
+        # --- File Write ---
+        post = await schema_to_markdown(schema)
+        final_content = dump_frontmatter(post)
+        checksum = await self.file_service.write_file(file_path, final_content)
+
+        # --- Minimal DB Upsert ---
+        metadata = post.metadata or {}
+        entity_metadata = {k: str(v) for k, v in metadata.items() if v is not None}
+        update_data = {
+            "title": schema.title,
+            "entity_type": schema.entity_type,
+            "file_path": file_path.as_posix(),
+            "content_type": schema.content_type,
+            "entity_metadata": entity_metadata or None,
+            "permalink": schema.permalink,
+            "checksum": checksum,
+            "updated_at": datetime.now().astimezone(),
+        }
+
+        if existing:
+            updated = await self.repository.update(existing.id, update_data)
+            if not updated:
+                raise ValueError(f"Failed to update entity in database: {existing.id}")
+            return updated
+
+        create_data = {
+            **update_data,
+            "external_id": external_id,
+        }
+        return await self.repository.create(create_data)
+
+    async def fast_edit_entity(
+        self,
+        entity: EntityModel,
+        operation: str,
+        content: str,
+        section: Optional[str] = None,
+        find_text: Optional[str] = None,
+        expected_replacements: int = 1,
+    ) -> EntityModel:
+        """Edit an entity quickly and defer full indexing to background."""
+        logger.debug(f"Fast editing entity: {entity.external_id}, operation: {operation}")
+
+        # --- File Edit ---
+        file_path = Path(entity.file_path)
+        current_content, _ = await self.file_service.read_file(file_path)
+        new_content = self.apply_edit_operation(
+            current_content, operation, content, section, find_text, expected_replacements
+        )
+        checksum = await self.file_service.write_file(file_path, new_content)
+
+        # --- Frontmatter Overrides ---
+        update_data = {
+            "checksum": checksum,
+            "updated_at": datetime.now().astimezone(),
+        }
+        content_markdown = None
+        if has_frontmatter(new_content):
+            content_frontmatter = parse_frontmatter(new_content)
+
+            if "title" in content_frontmatter:
+                update_data["title"] = content_frontmatter["title"]
+            if "type" in content_frontmatter:
+                update_data["entity_type"] = content_frontmatter["type"]
+
+            if "permalink" in content_frontmatter:
+                from basic_memory.markdown.schemas import EntityFrontmatter
+
+                frontmatter_metadata = {
+                    "title": update_data.get("title", entity.title),
+                    "type": update_data.get("entity_type", entity.entity_type),
+                    "permalink": content_frontmatter["permalink"],
+                }
+                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
+                content_markdown = EntityMarkdown(
+                    frontmatter=frontmatter_obj,
+                    content="",
+                    observations=[],
+                    relations=[],
+                )
+
+            metadata = content_frontmatter or {}
+            update_data["entity_metadata"] = {
+                k: str(v) for k, v in metadata.items() if v is not None
+            }
+
+        # --- Permalink Resolution ---
+        if self.app_config and self.app_config.disable_permalinks:
+            update_data["permalink"] = None
+        elif content_markdown and content_markdown.frontmatter.permalink:
+            update_data["permalink"] = await self.resolve_permalink(
+                file_path, content_markdown, skip_conflict_check=True
+            )
+
+        updated = await self.repository.update(entity.id, update_data)
+        if not updated:
+            raise ValueError(f"Failed to update entity in database: {entity.id}")
+        return updated
+
+    async def reindex_entity(self, entity_id: int) -> None:
+        """Parse file content and rebuild observations/relations/search for an entity."""
+        entity = await self.repository.find_by_id(entity_id)
+        if not entity:
+            raise EntityNotFoundError(f"Entity not found: {entity_id}")
+
+        # --- Full Parse ---
+        file_path = Path(entity.file_path)
+        content = await self.file_service.read_file_content(file_path)
+        entity_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=content,
+        )
+
+        # --- DB Reindex ---
+        updated = await self.update_entity_and_observations(file_path, entity_markdown)
+        updated = await self.update_entity_relations(file_path.as_posix(), entity_markdown)
+        checksum = await self.file_service.compute_checksum(file_path)
+        updated = await self.repository.update(updated.id, {"checksum": checksum})
+        if not updated:
+            raise ValueError(f"Failed to update entity in database: {entity.id}")
+
+        # --- Search Reindex ---
+        if self.search_service:
+            await self.search_service.index_entity_data(updated, content=content)
 
     async def delete_entity(self, permalink_or_id: str | int) -> bool:
         """Delete entity and its file."""

@@ -25,7 +25,7 @@ class CloudProject(BaseModel):
 
 
 class CloudProjectList(BaseModel):
-    """Response from /proxy/projects/projects endpoint."""
+    """Response from /proxy/v2/projects endpoint."""
 
     projects: list[CloudProject] = Field(default_factory=list, description="List of cloud projects")
 

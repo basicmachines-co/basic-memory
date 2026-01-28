@@ -30,7 +30,7 @@ async def fetch_cloud_projects(
         config = config_manager.config
         host_url = config.cloud_host.rstrip("/")
 
-        response = await api_request(method="GET", url=f"{host_url}/proxy/projects/projects")
+        response = await api_request(method="GET", url=f"{host_url}/proxy/v2/projects/")
 
         return CloudProjectList.model_validate(response.json())
     except Exception as e:
@@ -66,7 +66,7 @@ async def create_cloud_project(
 
         response = await api_request(
             method="POST",
-            url=f"{host_url}/proxy/projects/projects",
+            url=f"{host_url}/proxy/v2/projects/",
             headers={"Content-Type": "application/json"},
             json_data=project_data.model_dump(),
         )

@@ -43,7 +43,9 @@ class KnowledgeClient:
 
     # --- Entity CRUD Operations ---
 
-    async def create_entity(self, entity_data: dict[str, Any]) -> EntityResponse:
+    async def create_entity(
+        self, entity_data: dict[str, Any], *, fast: bool | None = None
+    ) -> EntityResponse:
         """Create a new entity.
 
         Args:
@@ -55,14 +57,22 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        params = {"fast": fast} if fast is not None else None
         response = await call_post(
             self.http_client,
             f"{self._base_path}/entities",
             json=entity_data,
+            params=params,
         )
         return EntityResponse.model_validate(response.json())
 
-    async def update_entity(self, entity_id: str, entity_data: dict[str, Any]) -> EntityResponse:
+    async def update_entity(
+        self,
+        entity_id: str,
+        entity_data: dict[str, Any],
+        *,
+        fast: bool | None = None,
+    ) -> EntityResponse:
         """Update an existing entity (full replacement).
 
         Args:
@@ -75,10 +85,12 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        params = {"fast": fast} if fast is not None else None
         response = await call_put(
             self.http_client,
             f"{self._base_path}/entities/{entity_id}",
             json=entity_data,
+            params=params,
         )
         return EntityResponse.model_validate(response.json())
 
@@ -100,7 +112,13 @@ class KnowledgeClient:
         )
         return EntityResponse.model_validate(response.json())
 
-    async def patch_entity(self, entity_id: str, patch_data: dict[str, Any]) -> EntityResponse:
+    async def patch_entity(
+        self,
+        entity_id: str,
+        patch_data: dict[str, Any],
+        *,
+        fast: bool | None = None,
+    ) -> EntityResponse:
         """Partially update an entity.
 
         Args:
@@ -113,10 +131,12 @@ class KnowledgeClient:
         Raises:
             ToolError: If the request fails
         """
+        params = {"fast": fast} if fast is not None else None
         response = await call_patch(
             self.http_client,
             f"{self._base_path}/entities/{entity_id}",
             json=patch_data,
+            params=params,
         )
         return EntityResponse.model_validate(response.json())
 

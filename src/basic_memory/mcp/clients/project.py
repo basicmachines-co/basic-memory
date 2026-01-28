@@ -47,7 +47,7 @@ class ProjectClient:
         """
         response = await call_get(
             self.http_client,
-            "/projects/projects",
+            "/v2/projects/",
         )
         return ProjectList.model_validate(response.json())
 
@@ -65,7 +65,7 @@ class ProjectClient:
         """
         response = await call_post(
             self.http_client,
-            "/projects/projects",
+            "/v2/projects/",
             json=project_data,
         )
         return ProjectStatusResponse.model_validate(response.json())

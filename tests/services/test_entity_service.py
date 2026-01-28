@@ -1,5 +1,6 @@
 """Tests for EntityService."""
 
+import uuid
 from pathlib import Path
 from textwrap import dedent
 
@@ -345,6 +346,55 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
     _, frontmatter, _ = content.split("---", 2)
     metadata = yaml.safe_load(frontmatter)
     assert metadata.get("status") == "draft"
+
+
+@pytest.mark.asyncio
+async def test_fast_write_and_reindex_entity(
+    entity_repository: EntityRepository,
+    observation_repository,
+    relation_repository,
+    entity_parser: EntityParser,
+    file_service: FileService,
+    link_resolver,
+    search_service: SearchService,
+    app_config: BasicMemoryConfig,
+):
+    """Fast write should defer observations/relations until reindex."""
+    service = EntityService(
+        entity_repository=entity_repository,
+        observation_repository=observation_repository,
+        relation_repository=relation_repository,
+        entity_parser=entity_parser,
+        file_service=file_service,
+        link_resolver=link_resolver,
+        search_service=search_service,
+        app_config=app_config,
+    )
+
+    schema = EntitySchema(
+        title="Reindex Target",
+        directory="test",
+        entity_type="note",
+        content=dedent("""
+            # Reindex Target
+
+            - [note] Deferred observation
+            - relates_to [[Other Entity]]
+            """).strip(),
+    )
+    external_id = str(uuid.uuid4())
+    fast_entity = await service.fast_write_entity(schema, external_id=external_id)
+
+    assert fast_entity.external_id == external_id
+    assert len(fast_entity.observations) == 0
+    assert len(fast_entity.relations) == 0
+
+    await service.reindex_entity(fast_entity.id)
+    reindexed = await entity_repository.get_by_external_id(external_id)
+
+    assert reindexed is not None
+    assert len(reindexed.observations) == 1
+    assert len(reindexed.relations) == 1
 
 
 @pytest.mark.asyncio

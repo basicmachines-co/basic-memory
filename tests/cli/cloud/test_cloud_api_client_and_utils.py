@@ -110,7 +110,7 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(
     seen = {"create_payload": None}
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and request.url.path == "/proxy/projects/projects":
+        if request.method == "GET" and request.url.path == "/proxy/v2/projects/":
             return httpx.Response(
                 200,
                 json={
@@ -121,7 +121,7 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(
                 },
             )
 
-        if request.method == "POST" and request.url.path == "/proxy/projects/projects":
+        if request.method == "POST" and request.url.path == "/proxy/v2/projects/":
             # httpx.Request doesn't have .json(); parse bytes payload.
             seen["create_payload"] = json.loads(request.content.decode("utf-8"))
             return httpx.Response(

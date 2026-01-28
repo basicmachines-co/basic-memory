@@ -16,7 +16,7 @@ from basic_memory.schemas.memory import (
     normalize_memory_url,
 )
 from basic_memory.schemas.search import SearchItemType
-from basic_memory.api.routers.utils import to_graph_context
+from basic_memory.api.v2.utils import to_graph_context
 
 # Note: No prefix here - it's added during registration as /v2/{project_id}/memory
 router = APIRouter(tags=["memory"])

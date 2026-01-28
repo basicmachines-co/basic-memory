@@ -9,8 +9,9 @@ from typing import Annotated, Optional
 from loguru import logger
 from pydantic import Field
 
-from basic_memory.config import get_project_config
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
+from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.prompt import ContinueConversationRequest
@@ -42,17 +43,18 @@ async def continue_conversation(
     logger.info(f"Continuing session, topic: {topic}, timeframe: {timeframe}")
 
     async with get_client() as client:
+        config = ConfigManager().config
+        active_project = await get_active_project(client, project=config.default_project)
+
         # Create request model
         request = ContinueConversationRequest(  # pyright: ignore [reportCallIssue]
             topic=topic, timeframe=timeframe
         )
 
-        project_url = get_project_config().project_url
-
         # Call the prompt API endpoint
         response = await call_post(
             client,
-            f"{project_url}/prompt/continue-conversation",
+            f"/v2/projects/{active_project.external_id}/prompt/continue-conversation",
             json=request.model_dump(exclude_none=True),
         )
 

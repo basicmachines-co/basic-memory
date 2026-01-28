@@ -146,7 +146,7 @@ async def run_status(project: Optional[str] = None, verbose: bool = False):  # p
     try:
         async with get_client() as client:
             project_item = await get_active_project(client, project, None)
-            response = await call_post(client, f"{project_item.project_url}/project/status")
+            response = await call_post(client, f"/v2/projects/{project_item.external_id}/status")
             sync_report = SyncReportResponse.model_validate(response.json())
 
             display_changes(project_item.name, "Status", sync_report, verbose)

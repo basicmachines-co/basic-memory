@@ -6,7 +6,7 @@ V1 uses string-based project names which are less efficient and less stable.
 
 from fastapi import APIRouter, BackgroundTasks, Path
 
-from basic_memory.api.routers.utils import to_search_results
+from basic_memory.api.v2.utils import to_search_results
 from basic_memory.schemas.search import SearchQuery, SearchResponse
 from basic_memory.deps import SearchServiceV2ExternalDep, EntityServiceV2ExternalDep
 

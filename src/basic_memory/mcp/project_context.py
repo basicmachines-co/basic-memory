@@ -19,7 +19,7 @@ from fastmcp import Context
 from basic_memory.config import ConfigManager
 from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
-from basic_memory.utils import generate_permalink
+from basic_memory.schemas.v2 import ProjectResolveResponse
 
 
 async def resolve_project_parameter(
@@ -78,7 +78,7 @@ async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = N
     # Deferred import to avoid circular dependency with tools
     from basic_memory.mcp.tools.utils import call_get
 
-    response = await call_get(client, "/projects/projects", headers=headers)
+    response = await call_get(client, "/v2/projects/", headers=headers)
     project_list = ProjectList.model_validate(response.json())
     return [project.name for project in project_list.projects]
 
@@ -104,7 +104,7 @@ async def get_active_project(
         HTTPError: If project doesn't exist or is inaccessible
     """
     # Deferred import to avoid circular dependency with tools
-    from basic_memory.mcp.tools.utils import call_get
+    from basic_memory.mcp.tools.utils import call_post
 
     resolved_project = await resolve_project_parameter(project)
     if not resolved_project:
@@ -126,9 +126,20 @@ async def get_active_project(
 
     # Validate project exists by calling API
     logger.debug(f"Validating project: {project}")
-    permalink = generate_permalink(project)
-    response = await call_get(client, f"/{permalink}/project/item", headers=headers)
-    active_project = ProjectItem.model_validate(response.json())
+    response = await call_post(
+        client,
+        "/v2/projects/resolve",
+        json={"identifier": project},
+        headers=headers,
+    )
+    resolved = ProjectResolveResponse.model_validate(response.json())
+    active_project = ProjectItem(
+        id=resolved.project_id,
+        external_id=resolved.external_id,
+        name=resolved.name,
+        path=resolved.path,
+        is_default=resolved.is_default,
+    )
 
     # Cache in context if available
     if context:

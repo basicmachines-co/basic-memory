@@ -1,5 +1,7 @@
 """Tests for V2 knowledge graph API routes (ID-based endpoints)."""
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
 
@@ -101,7 +103,9 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
         "content": "TestContent for V2",
     }
 
-    response = await client.post(f"{v2_project_url}/knowledge/entities", json=data)
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities", json=data, params={"fast": False}
+    )
 
     assert response.status_code == 200
     entity = EntityResponseV2.model_validate(response.json())
@@ -138,7 +142,9 @@ async def test_create_entity_with_observations_and_relations(
 """,
     }
 
-    response = await client.post(f"{v2_project_url}/knowledge/entities", json=data)
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities", json=data, params={"fast": False}
+    )
 
     assert response.status_code == 200
     entity = EntityResponseV2.model_validate(response.json())
@@ -199,6 +205,70 @@ async def test_update_entity_by_id(
     file_content, _ = await file_service.read_file(file_path)
     assert "Updated content via V2" in file_content
     assert "Original content" not in file_content
+
+
+@pytest.mark.asyncio
+async def test_update_entity_by_id_fast_does_not_duplicate(
+    client: AsyncClient, v2_project_url, entity_repository
+):
+    """Fast PUT updates the existing external_id without creating duplicates."""
+    create_data = {
+        "title": "07 - Get Started",
+        "directory": "docs",
+        "content": "Original content",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=create_data)
+    assert response.status_code == 200
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    update_data = {
+        "title": "07 Get Started",
+        "directory": "docs",
+        "content": "Updated content",
+    }
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=update_data,
+    )
+    assert response.status_code == 200
+
+    entities = await entity_repository.find_all()
+    assert len(entities) == 1
+    assert entities[0].external_id == created_entity.external_id
+
+
+@pytest.mark.asyncio
+async def test_put_entity_fast_returns_minimal_row(
+    client: AsyncClient, v2_project_url, entity_repository
+):
+    """Fast PUT returns a minimal row and persists the external_id immediately."""
+    external_id = str(uuid.uuid4())
+    update_data = {
+        "title": "FastPutEntity",
+        "directory": "test",
+        "content": """
+# FastPutEntity
+
+## Observations
+- [note] This should be deferred
+
+- related_to [[AnotherEntity]]
+""",
+    }
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        json=update_data,
+        params={"fast": True},
+    )
+
+    assert response.status_code == 201
+    created_entity = EntityResponseV2.model_validate(response.json())
+    assert created_entity.external_id == external_id
+    assert created_entity.observations == []
+    assert created_entity.relations == []
+
+    db_entity = await entity_repository.get_by_external_id(external_id)
+    assert db_entity is not None
 
 
 @pytest.mark.asyncio

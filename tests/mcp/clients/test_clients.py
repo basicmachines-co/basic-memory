@@ -298,7 +298,7 @@ class TestProjectClient:
         }
 
         async def mock_call_get(client, url, **kwargs):
-            assert "/projects/projects" in url
+            assert "/v2/projects" in url
             return mock_response
 
         monkeypatch.setattr(project_mod, "call_get", mock_call_get)

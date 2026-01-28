@@ -8,17 +8,6 @@ from loguru import logger
 
 from basic_memory import __version__ as version
 from basic_memory.api.container import ApiContainer, set_container
-from basic_memory.api.routers import (
-    directory_router,
-    importer_router,
-    knowledge,
-    management,
-    memory,
-    project,
-    resource,
-    search,
-    prompt_router,
-)
 from basic_memory.api.v2.routers import (
     knowledge_router as v2_knowledge,
     project_router as v2_project,
@@ -90,19 +79,7 @@ app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
 
-# Include v1 routers (/{project} is a catch-all, must come after specific prefixes)
-app.include_router(knowledge.router, prefix="/{project}")
-app.include_router(memory.router, prefix="/{project}")
-app.include_router(resource.router, prefix="/{project}")
-app.include_router(search.router, prefix="/{project}")
-app.include_router(project.project_router, prefix="/{project}")
-app.include_router(directory_router.router, prefix="/{project}")
-app.include_router(prompt_router.router, prefix="/{project}")
-app.include_router(importer_router.router, prefix="/{project}")
-
-# Project resource router works across projects
-app.include_router(project.project_resource_router)
-app.include_router(management.router)
+# V2 routers are the only public API surface
 
 
 @app.exception_handler(Exception)

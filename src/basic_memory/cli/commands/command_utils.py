@@ -58,7 +58,7 @@ async def run_sync(
     try:
         async with get_client() as client:
             project_item = await get_active_project(client, project, None)
-            url = f"{project_item.project_url}/project/sync"
+            url = f"/v2/projects/{project_item.external_id}/sync"
             params = []
             if force_full:
                 params.append("force_full=true")
@@ -92,7 +92,7 @@ async def get_project_info(project: str):
     try:
         async with get_client() as client:
             project_item = await get_active_project(client, project, None)
-            response = await call_get(client, f"{project_item.project_url}/project/info")
+            response = await call_get(client, f"/v2/projects/{project_item.external_id}/info")
             return ProjectInfoResponse.model_validate(response.json())
     except (ToolError, ValueError) as e:
         console.print(f"[red]Sync failed: {e}[/red]")
