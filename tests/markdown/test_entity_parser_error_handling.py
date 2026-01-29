@@ -291,3 +291,95 @@ async def test_parse_valid_file_still_works(tmp_path):
     assert result.frontmatter.title == "Valid File"
     assert result.frontmatter.type == "knowledge"
     assert result.frontmatter.tags == ["test", "valid"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_yaml_does_not_add_metadata_key(tmp_path):
+    """Test that invalid YAML doesn't create spurious 'metadata' key in frontmatter (issue #528).
+
+    This tests a bug where `frontmatter.Post(content, metadata={})` was used incorrectly.
+    The `metadata={}` kwarg creates a KEY called "metadata" in the metadata dict,
+    rather than setting the metadata to an empty dict.
+
+    This caused files with invalid YAML to get `metadata: {}` in their frontmatter output,
+    which is incorrect and confusing.
+    """
+    # Create a file with completely broken YAML that will trigger the fallback path
+    test_file = tmp_path / "broken_yaml.md"
+    content = dedent(
+        """
+        ---
+        title: Invalid YAML
+        this is: [not, valid, yaml
+        missing: closing bracket
+        ---
+        # Content
+
+        This file has broken YAML frontmatter.
+        """
+    ).strip()
+    test_file.write_text(content)
+
+    # Parse the file
+    parser = EntityParser(tmp_path)
+    result = await parser.parse_file(test_file)
+
+    # The metadata dict should NOT contain a "metadata" key
+    # This was the bug: frontmatter.Post(content, metadata={}) creates {"metadata": {}}
+    assert "metadata" not in result.frontmatter.metadata, (
+        "Frontmatter metadata should not contain a 'metadata' key. "
+        "This indicates the bug where Post(content, metadata={}) was used incorrectly."
+    )
+
+    # Should still have the expected defaults
+    assert result.frontmatter.title == "broken_yaml"
+    assert result.frontmatter.type == "note"
+
+
+@pytest.mark.asyncio
+async def test_frontmatter_roundtrip_preserves_user_metadata(tmp_path):
+    """Test that parsing and re-serializing frontmatter preserves user fields (issue #528).
+
+    Users reported that after cloud sync, their custom frontmatter fields like 'citekey'
+    were being lost and replaced with defaults. This test ensures user metadata is preserved.
+    """
+    from basic_memory.file_utils import dump_frontmatter
+    import frontmatter
+
+    # Create a file with user's custom frontmatter (like the bug report)
+    test_file = tmp_path / "litnote.md"
+    content = dedent(
+        '''
+        ---
+        title: "My Document Title"
+        type: litnote
+        tags:
+          - research
+          - methodology
+        citekey: authorTitleYear2024
+        ---
+
+        # Content here...
+        '''
+    ).strip()
+    test_file.write_text(content)
+
+    # Parse the file
+    parser = EntityParser(tmp_path)
+    result = await parser.parse_file(test_file)
+
+    # User's custom fields should be preserved
+    assert result.frontmatter.title == "My Document Title"
+    assert result.frontmatter.type == "litnote"  # NOT overwritten to "note"
+    assert "citekey" in result.frontmatter.metadata
+    assert result.frontmatter.metadata["citekey"] == "authorTitleYear2024"
+
+    # Simulate what write_frontmatter does
+    post = frontmatter.Post(result.content, **result.frontmatter.metadata)
+    output = dump_frontmatter(post)
+
+    # The output should NOT have duplicate frontmatter or metadata: {} key
+    assert output.count("---") == 2, "Should have exactly one frontmatter block (two --- delimiters)"
+    assert "metadata:" not in output, "Should not have 'metadata:' key in output"
+    assert "citekey: authorTitleYear2024" in output, "User's citekey should be preserved"
+    assert "type: litnote" in output, "User's type should be preserved"

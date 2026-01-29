@@ -241,7 +241,9 @@ class EntityParser:
                 f"Failed to parse YAML frontmatter in {file_path}: {e}. "
                 f"Treating file as plain markdown without frontmatter."
             )
-            post = frontmatter.Post(content, metadata={})
+            # Use Post(content) not Post(content, metadata={})
+            # The latter creates {"metadata": {}} in the metadata dict (issue #528)
+            post = frontmatter.Post(content)
 
         # Normalize frontmatter values
         metadata = normalize_frontmatter_metadata(post.metadata)
