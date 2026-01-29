@@ -13,7 +13,7 @@ Key improvements:
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Body, Query, Path, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Body, Query, Path
 from loguru import logger
 
 from basic_memory.deps import (
@@ -21,6 +21,8 @@ from basic_memory.deps import (
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
     SyncServiceV2ExternalDep,
+    TaskSchedulerDep,
+    ProjectExternalIdPathDep,
 )
 from basic_memory.schemas import SyncReportResponse
 from basic_memory.schemas.project_info import (
@@ -158,10 +160,10 @@ async def synchronize_projects(
 
 @router.post("/{project_id}/sync")
 async def sync_project(
-    background_tasks: BackgroundTasks,
     sync_service: SyncServiceV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,
-    project_id: str = Path(..., description="Project external ID (UUID)"),
+    task_scheduler: TaskSchedulerDep,
+    project_internal_id: ProjectExternalIdPathDep,
     force_full: bool = Query(
         False, description="Force full scan, bypassing watermark optimization"
     ),
@@ -169,8 +171,10 @@ async def sync_project(
 ):
     """Force project filesystem sync to database."""
     if run_in_background:
-        background_tasks.add_task(
-            sync_service.sync, project_config.home, project_config.name, force_full=force_full
+        task_scheduler.schedule(
+            "sync_project",
+            project_id=project_internal_id,
+            force_full=force_full,
         )
         logger.info(
             f"Filesystem sync initiated for project: {project_config.name} (force_full={force_full})"

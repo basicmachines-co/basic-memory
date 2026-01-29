@@ -168,6 +168,25 @@ class EntityService(BaseService[EntityModel]):
 
         return permalink
 
+    def _build_frontmatter_markdown(
+        self, title: str, entity_type: str, permalink: str
+    ) -> EntityMarkdown:
+        """Build a minimal EntityMarkdown object for permalink resolution."""
+        from basic_memory.markdown.schemas import EntityFrontmatter
+
+        frontmatter_metadata = {
+            "title": title,
+            "type": entity_type,
+            "permalink": permalink,
+        }
+        frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
+        return EntityMarkdown(
+            frontmatter=frontmatter_obj,
+            content="",
+            observations=[],
+            relations=[],
+        )
+
     async def create_or_update_entity(self, schema: EntitySchema) -> Tuple[EntityModel, bool]:
         """Create new entity or update existing one.
         Returns: (entity, is_new) where is_new is True if a new entity was created
@@ -211,20 +230,8 @@ class EntityService(BaseService[EntityModel]):
                 schema.entity_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                # Create a minimal EntityMarkdown object for permalink resolution
-                from basic_memory.markdown.schemas import EntityFrontmatter
-
-                frontmatter_metadata = {
-                    "title": schema.title,
-                    "type": schema.entity_type,
-                    "permalink": content_frontmatter["permalink"],
-                }
-                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
-                content_markdown = EntityMarkdown(
-                    frontmatter=frontmatter_obj,
-                    content="",  # content not needed for permalink resolution
-                    observations=[],
-                    relations=[],
+                content_markdown = self._build_frontmatter_markdown(
+                    schema.title, schema.entity_type, content_frontmatter["permalink"]
                 )
 
         # Get unique permalink (prioritizing content frontmatter) unless disabled
@@ -249,11 +256,8 @@ class EntityService(BaseService[EntityModel]):
             content=final_content,
         )
 
-        # create entity
-        created = await self.create_entity_from_markdown(file_path, entity_markdown)
-
-        # add relations
-        entity = await self.update_entity_relations(created.file_path, entity_markdown)
+        # create entity and relations
+        entity = await self.upsert_entity_from_markdown(file_path, entity_markdown, is_new=True)
 
         # Set final checksum to mark complete
         return await self.repository.update(entity.id, {"checksum": checksum})
@@ -284,20 +288,8 @@ class EntityService(BaseService[EntityModel]):
                 schema.entity_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                # Create a minimal EntityMarkdown object for permalink resolution
-                from basic_memory.markdown.schemas import EntityFrontmatter
-
-                frontmatter_metadata = {
-                    "title": schema.title,
-                    "type": schema.entity_type,
-                    "permalink": content_frontmatter["permalink"],
-                }
-                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
-                content_markdown = EntityMarkdown(
-                    frontmatter=frontmatter_obj,
-                    content="",  # content not needed for permalink resolution
-                    observations=[],
-                    relations=[],
+                content_markdown = self._build_frontmatter_markdown(
+                    schema.title, schema.entity_type, content_frontmatter["permalink"]
                 )
 
         # Check if we need to update the permalink based on content frontmatter (unless disabled)
@@ -334,11 +326,8 @@ class EntityService(BaseService[EntityModel]):
             content=final_content,
         )
 
-        # update entity in db
-        entity = await self.update_entity_and_observations(file_path, entity_markdown)
-
-        # add relations
-        await self.update_entity_relations(file_path.as_posix(), entity_markdown)
+        # update entity and relations
+        entity = await self.upsert_entity_from_markdown(file_path, entity_markdown, is_new=False)
 
         # Set final checksum to match file
         entity = await self.repository.update(entity.id, {"checksum": checksum})
@@ -380,19 +369,8 @@ class EntityService(BaseService[EntityModel]):
                 schema.entity_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                from basic_memory.markdown.schemas import EntityFrontmatter
-
-                frontmatter_metadata = {
-                    "title": schema.title,
-                    "type": schema.entity_type,
-                    "permalink": content_frontmatter["permalink"],
-                }
-                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
-                content_markdown = EntityMarkdown(
-                    frontmatter=frontmatter_obj,
-                    content="",
-                    observations=[],
-                    relations=[],
+                content_markdown = self._build_frontmatter_markdown(
+                    schema.title, schema.entity_type, content_frontmatter["permalink"]
                 )
 
         # --- Permalink Resolution ---
@@ -474,19 +452,10 @@ class EntityService(BaseService[EntityModel]):
                 update_data["entity_type"] = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
-                from basic_memory.markdown.schemas import EntityFrontmatter
-
-                frontmatter_metadata = {
-                    "title": update_data.get("title", entity.title),
-                    "type": update_data.get("entity_type", entity.entity_type),
-                    "permalink": content_frontmatter["permalink"],
-                }
-                frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
-                content_markdown = EntityMarkdown(
-                    frontmatter=frontmatter_obj,
-                    content="",
-                    observations=[],
-                    relations=[],
+                content_markdown = self._build_frontmatter_markdown(
+                    update_data.get("title", entity.title),
+                    update_data.get("entity_type", entity.entity_type),
+                    content_frontmatter["permalink"],
                 )
 
             metadata = content_frontmatter or {}
@@ -522,8 +491,7 @@ class EntityService(BaseService[EntityModel]):
         )
 
         # --- DB Reindex ---
-        updated = await self.update_entity_and_observations(file_path, entity_markdown)
-        updated = await self.update_entity_relations(file_path.as_posix(), entity_markdown)
+        updated = await self.upsert_entity_from_markdown(file_path, entity_markdown, is_new=False)
         checksum = await self.file_service.compute_checksum(file_path)
         updated = await self.repository.update(updated.id, {"checksum": checksum})
         if not updated:
@@ -654,6 +622,20 @@ class EntityService(BaseService[EntityModel]):
             db_entity,
         )
 
+    async def upsert_entity_from_markdown(
+        self,
+        file_path: Path,
+        markdown: EntityMarkdown,
+        *,
+        is_new: bool,
+    ) -> EntityModel:
+        """Create/update entity and relations from parsed markdown."""
+        if is_new:
+            created = await self.create_entity_from_markdown(file_path, markdown)
+        else:
+            created = await self.update_entity_and_observations(file_path, markdown)
+        return await self.update_entity_relations(created.file_path, markdown)
+
     async def update_entity_relations(
         self,
         path: str,
@@ -778,8 +760,7 @@ class EntityService(BaseService[EntityModel]):
         )
 
         # Update entity and its relationships
-        entity = await self.update_entity_and_observations(file_path, entity_markdown)
-        await self.update_entity_relations(file_path.as_posix(), entity_markdown)
+        entity = await self.upsert_entity_from_markdown(file_path, entity_markdown, is_new=False)
 
         # Set final checksum to match file
         entity = await self.repository.update(entity.id, {"checksum": checksum})

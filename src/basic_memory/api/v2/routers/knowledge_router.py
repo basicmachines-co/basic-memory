@@ -19,9 +19,9 @@ from basic_memory.deps import (
     LinkResolverV2ExternalDep,
     ProjectConfigV2ExternalDep,
     AppConfigDep,
-    SyncServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
+    TaskSchedulerDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
@@ -37,26 +37,6 @@ from basic_memory.schemas.v2 import (
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
-
-
-async def resolve_relations_background(sync_service, entity_id: int, entity_permalink: str) -> None:
-    """Background task to resolve relations for a specific entity.
-
-    This runs asynchronously after the API response is sent, preventing
-    long delays when creating entities with many relations.
-    """
-    try:  # pragma: no cover
-        # Only resolve relations for the newly created entity
-        await sync_service.resolve_relations(entity_id=entity_id)  # pragma: no cover
-        logger.debug(  # pragma: no cover
-            f"Background: Resolved relations for entity {entity_permalink} (id={entity_id})"
-        )
-    except Exception as e:  # pragma: no cover
-        # Log but don't fail - this is a background task
-        logger.warning(  # pragma: no cover
-            f"Background: Failed to resolve relations for entity {entity_permalink}: {e}"
-        )
-
 
 ## Resolution endpoint
 
@@ -182,6 +162,7 @@ async def create_entity(
     background_tasks: BackgroundTasks,
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
+    task_scheduler: TaskSchedulerDep,
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
     ),
@@ -201,7 +182,11 @@ async def create_entity(
 
     if fast:
         entity = await entity_service.fast_write_entity(data)
-        background_tasks.add_task(entity_service.reindex_entity, entity.id)
+        task_scheduler.schedule(
+            "reindex_entity",
+            entity_id=entity.id,
+            project_id=project_id,
+        )
     else:
         entity = await entity_service.create_entity(data)
         await search_service.index_entity(entity, background_tasks=background_tasks)
@@ -227,8 +212,8 @@ async def update_entity_by_id(
     project_id: ProjectExternalIdPathDep,
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
-    sync_service: SyncServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    task_scheduler: TaskSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
@@ -255,7 +240,12 @@ async def update_entity_by_id(
     if fast:
         entity = await entity_service.fast_write_entity(data, external_id=entity_id)
         response.status_code = 200 if existing else 201
-        background_tasks.add_task(entity_service.reindex_entity, entity.id)
+        task_scheduler.schedule(
+            "reindex_entity",
+            entity_id=entity.id,
+            project_id=project_id,
+            resolve_relations=created,
+        )
     else:
         if existing:
             # Update the existing entity in-place to avoid path-based duplication
@@ -278,12 +268,6 @@ async def update_entity_by_id(
 
         await search_service.index_entity(entity, background_tasks=background_tasks)
 
-    # Schedule relation resolution for new entities
-    if created:
-        background_tasks.add_task(  # pragma: no cover
-            resolve_relations_background, sync_service, entity.id, entity.permalink or ""
-        )
-
     result = EntityResponseV2.model_validate(entity)
     if fast:
         result = result.model_copy(update={"observations": [], "relations": []})
@@ -302,6 +286,7 @@ async def edit_entity_by_id(
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    task_scheduler: TaskSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
@@ -341,7 +326,11 @@ async def edit_entity_by_id(
                 find_text=data.find_text,
                 expected_replacements=data.expected_replacements,
             )
-            background_tasks.add_task(entity_service.reindex_entity, updated_entity.id)
+            task_scheduler.schedule(
+                "reindex_entity",
+                entity_id=updated_entity.id,
+                project_id=project_id,
+            )
         else:
             # Edit using the entity's permalink or path
             identifier = entity.permalink or entity.file_path

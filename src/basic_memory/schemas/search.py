@@ -29,6 +29,7 @@ class SearchQuery(BaseModel):
     - permalink: Exact permalink match
     - permalink_match: Path pattern with *
     - text: Full-text search of title/content (supports boolean operators: AND, OR, NOT)
+    - title: Title only search
 
     Optionally filter results by:
     - types: Limit to specific item types

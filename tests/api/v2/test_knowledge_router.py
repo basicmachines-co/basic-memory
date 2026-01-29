@@ -272,6 +272,29 @@ async def test_put_entity_fast_returns_minimal_row(
 
 
 @pytest.mark.asyncio
+async def test_fast_create_schedules_reindex_task(
+    client: AsyncClient, v2_project_url, task_scheduler_spy
+):
+    """Fast create should enqueue a background reindex task."""
+    start_count = len(task_scheduler_spy)
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "TaskScheduledEntity",
+            "directory": "test",
+            "content": "Content for task scheduling",
+        },
+        params={"fast": True},
+    )
+    assert response.status_code == 200
+    assert len(task_scheduler_spy) == start_count + 1
+    created_entity = EntityResponseV2.model_validate(response.json())
+    scheduled = task_scheduler_spy[-1]
+    assert scheduled["task_name"] == "reindex_entity"
+    assert scheduled["payload"]["entity_id"] == created_entity.id
+
+
+@pytest.mark.asyncio
 async def test_edit_entity_by_id_append(
     client: AsyncClient, file_service, v2_project_url, entity_repository
 ):

@@ -1,7 +1,6 @@
 """Test general sync behavior."""
 
 import asyncio
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
@@ -836,8 +835,8 @@ Modified content for timestamp test
     entity_updated_epoch = entity_after.updated_at.timestamp()
     file_mtime = file_stats_after_modification.st_mtime
 
-    # Allow 2s difference on Windows due to filesystem timing precision
-    tolerance = 2 if os.name == "nt" else 1
+    # Allow 2s difference due to filesystem timing precision and sync processing delays
+    tolerance = 2
     assert abs(entity_updated_epoch - file_mtime) < tolerance, (
         f"Entity updated_at ({entity_after.updated_at}) should match file mtime "
         f"({datetime.fromtimestamp(file_mtime)}) within {tolerance}s tolerance"

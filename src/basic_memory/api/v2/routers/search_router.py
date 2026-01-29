@@ -4,11 +4,16 @@ This router uses external_id UUIDs for stable, API-friendly routing.
 V1 uses string-based project names which are less efficient and less stable.
 """
 
-from fastapi import APIRouter, BackgroundTasks, Path
+from fastapi import APIRouter, Path
 
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.schemas.search import SearchQuery, SearchResponse
-from basic_memory.deps import SearchServiceV2ExternalDep, EntityServiceV2ExternalDep
+from basic_memory.deps import (
+    SearchServiceV2ExternalDep,
+    EntityServiceV2ExternalDep,
+    TaskSchedulerDep,
+    ProjectExternalIdPathDep,
+)
 
 # Note: No prefix here - it's added during registration as /v2/{project_id}/search
 router = APIRouter(tags=["search"])
@@ -51,9 +56,8 @@ async def search(
 
 @router.post("/search/reindex")
 async def reindex(
-    background_tasks: BackgroundTasks,
-    search_service: SearchServiceV2ExternalDep,
-    project_id: str = Path(..., description="Project external UUID"),
+    task_scheduler: TaskSchedulerDep,
+    project_id: ProjectExternalIdPathDep,
 ):
     """Recreate and populate the search index for a project.
 
@@ -63,11 +67,10 @@ async def reindex(
 
     Args:
         project_id: Project external UUID from URL path
-        background_tasks: FastAPI background tasks handler
-        search_service: Search service scoped to project
+        task_scheduler: Task scheduler for background work
 
     Returns:
         Status message indicating reindex has been initiated
     """
-    await search_service.reindex_all(background_tasks=background_tasks)
+    task_scheduler.schedule("reindex_project", project_id=project_id)
     return {"status": "ok", "message": "Reindex initiated"}

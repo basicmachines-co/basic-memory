@@ -7,7 +7,8 @@ This module provides service-layer dependencies:
 - SyncService, ProjectService, DirectoryService
 """
 
-from typing import Annotated
+import asyncio
+from typing import Annotated, Any, Callable, Coroutine, Mapping, Protocol
 
 from fastapi import Depends
 from loguru import logger
@@ -42,7 +43,6 @@ from basic_memory.services.file_service import FileService
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync import SyncService
-
 
 # --- Entity Parser ---
 
@@ -428,6 +428,87 @@ async def get_sync_service_v2_external(
 
 
 SyncServiceV2ExternalDep = Annotated[SyncService, Depends(get_sync_service_v2_external)]
+
+
+# --- Background Task Scheduler ---
+
+
+class TaskScheduler(Protocol):
+    def schedule(self, task_name: str, **payload: Any) -> None:
+        """Schedule a background task by name."""
+
+
+def _log_task_failure(completed: asyncio.Task) -> None:
+    try:
+        completed.result()
+    except Exception as exc:  # pragma: no cover
+        logger.exception("Background task failed", error=str(exc))
+
+
+class LocalTaskScheduler:
+    """Default scheduler that runs tasks in-process via asyncio.create_task."""
+
+    def __init__(
+        self,
+        handlers: Mapping[str, Callable[..., Coroutine[Any, Any, None]]],
+    ) -> None:
+        self._handlers = handlers
+
+    def schedule(self, task_name: str, **payload: Any) -> None:
+        handler = self._handlers.get(task_name)
+        # Trigger: task name is not registered
+        # Why: avoid silently dropping background work
+        # Outcome: fail fast to surface misconfiguration
+        if not handler:
+            raise ValueError(f"Unknown task name: {task_name}")
+        task = asyncio.create_task(handler(**payload))
+        task.add_done_callback(_log_task_failure)
+
+
+async def get_task_scheduler(
+    entity_service: EntityServiceV2ExternalDep,
+    sync_service: SyncServiceV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+    project_config: ProjectConfigV2ExternalDep,
+) -> TaskScheduler:
+    """Create a scheduler that maps task specs to coroutines."""
+
+    async def _reindex_entity(
+        entity_id: int,
+        resolve_relations: bool = False,
+        **_: Any,
+    ) -> None:
+        await entity_service.reindex_entity(entity_id)
+        # Trigger: caller requests relation resolution
+        # Why: resolve forward references created before the entity existed
+        # Outcome: updates unresolved relations pointing to this entity
+        if resolve_relations:
+            await sync_service.resolve_relations(entity_id=entity_id)
+
+    async def _resolve_relations(entity_id: int, **_: Any) -> None:
+        await sync_service.resolve_relations(entity_id=entity_id)
+
+    async def _sync_project(force_full: bool = False, **_: Any) -> None:
+        await sync_service.sync(
+            project_config.home,
+            project_config.name,
+            force_full=force_full,
+        )
+
+    async def _reindex_project(**_: Any) -> None:
+        await search_service.reindex_all()
+
+    return LocalTaskScheduler(
+        {
+            "reindex_entity": _reindex_entity,
+            "resolve_relations": _resolve_relations,
+            "sync_project": _sync_project,
+            "reindex_project": _reindex_project,
+        }
+    )
+
+
+TaskSchedulerDep = Annotated[TaskScheduler, Depends(get_task_scheduler)]
 
 
 # --- Project Service ---

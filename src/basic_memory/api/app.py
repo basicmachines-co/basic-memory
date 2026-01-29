@@ -79,6 +79,9 @@ app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
 
+# Legacy web app proxy paths (compat with /proxy/projects/projects)
+app.include_router(v2_project, prefix="/proxy/projects")
+
 # V2 routers are the only public API surface
 
 

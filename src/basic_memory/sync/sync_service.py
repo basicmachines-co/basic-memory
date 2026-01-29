@@ -685,19 +685,13 @@ class SyncService:
                 entity_markdown.frontmatter.metadata["permalink"] = permalink
                 await self.file_service.update_frontmatter(path, {"permalink": permalink})
 
-        # if the file is new, create an entity
-        if new:
-            # Create entity with final permalink
-            logger.debug(f"Creating new entity from markdown, path={path}")
-            await self.entity_service.create_entity_from_markdown(Path(path), entity_markdown)
-
-        # otherwise we need to update the entity and observations
-        else:
-            logger.debug(f"Updating entity from markdown, path={path}")
-            await self.entity_service.update_entity_and_observations(Path(path), entity_markdown)
-
-        # Update relations and search index
-        entity = await self.entity_service.update_entity_relations(path, entity_markdown)
+        # Create/update entity and relations in one path
+        logger.debug(
+            f"{'Creating' if new else 'Updating'} entity from markdown, path={path}"
+        )
+        entity = await self.entity_service.upsert_entity_from_markdown(
+            Path(path), entity_markdown, is_new=new
+        )
 
         # After updating relations, we need to compute the checksum again
         # This is necessary for files with wikilinks to ensure consistent checksums
