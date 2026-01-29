@@ -173,3 +173,143 @@ async def test_build_context_dataview_empty_results_still_provides_notes(client,
     # (even though there's no content to process in this case)
     # The notes_provider should still be set up correctly
     assert len(captured_notes) > 0, "Notes should be provided even for empty results"
+
+
+@pytest.mark.asyncio
+async def test_build_context_dataview_results_markdown_included(client, test_graph, test_project):
+    """Test that Dataview query result_markdown is included in content, not just a summary.
+    
+    This is the core test for the bug fix: build_context was only adding a summary
+    like "Dataview: 3 queries executed" instead of including the actual result_markdown.
+    """
+    def mock_create_integration(notes_provider=None):
+        """Mock integration that returns results with markdown."""
+        mock_integration = MagicMock()
+        mock_integration.process_note.return_value = [
+            {
+                'query_id': 1,
+                'line_number': 10,
+                'query_type': 'TABLE',
+                'status': 'success',
+                'execution_time_ms': 15,
+                'result_count': 3,
+                'result_markdown': '| Title | Status |\n|-------|--------|\n| US-001 | Done |\n| US-002 | In Progress |\n| US-003 | Ready |',
+                'discovered_links': []
+            }
+        ]
+        return mock_integration
+    
+    with patch('basic_memory.mcp.tools.build_context.create_dataview_integration',
+               side_effect=mock_create_integration):
+        result = await build_context.fn(
+            project=test_project.name,
+            url="memory://test/root",
+            enable_dataview=True
+        )
+    
+    # Should have results
+    assert len(result.results) > 0
+    
+    # Get the primary result content
+    primary_content = result.results[0].primary_result.content
+    
+    # Verify the result_markdown is included, not just a summary
+    assert '| Title | Status |' in primary_content, "Dataview table header not found"
+    assert '| US-001 | Done |' in primary_content, "Dataview table row not found"
+    assert '| US-002 | In Progress |' in primary_content, "Dataview table row not found"
+    assert '| US-003 | Ready |' in primary_content, "Dataview table row not found"
+    
+    # Verify it's in a proper section
+    assert '## Dataview Query Results' in primary_content, "Dataview section header not found"
+
+
+@pytest.mark.asyncio
+async def test_build_context_dataview_multiple_queries_all_included(client, test_graph, test_project):
+    """Test that multiple Dataview queries all have their result_markdown included."""
+    def mock_create_integration(notes_provider=None):
+        """Mock integration that returns multiple query results."""
+        mock_integration = MagicMock()
+        mock_integration.process_note.return_value = [
+            {
+                'query_id': 1,
+                'line_number': 10,
+                'query_type': 'TABLE',
+                'status': 'success',
+                'execution_time_ms': 15,
+                'result_count': 2,
+                'result_markdown': '| Title | Status |\n|-------|--------|\n| US-001 | Done |',
+                'discovered_links': []
+            },
+            {
+                'query_id': 2,
+                'line_number': 20,
+                'query_type': 'LIST',
+                'status': 'success',
+                'execution_time_ms': 10,
+                'result_count': 3,
+                'result_markdown': '- [[Bug-001]]\n- [[Bug-002]]\n- [[Bug-003]]',
+                'discovered_links': []
+            }
+        ]
+        return mock_integration
+    
+    with patch('basic_memory.mcp.tools.build_context.create_dataview_integration',
+               side_effect=mock_create_integration):
+        result = await build_context.fn(
+            project=test_project.name,
+            url="memory://test/root",
+            enable_dataview=True
+        )
+    
+    # Should have results
+    assert len(result.results) > 0
+    
+    # Get the primary result content
+    primary_content = result.results[0].primary_result.content
+    
+    # Verify both query results are included
+    assert '| US-001 | Done |' in primary_content, "First query result not found"
+    assert '- [[Bug-001]]' in primary_content, "Second query result not found"
+    assert '- [[Bug-002]]' in primary_content, "Second query result not found"
+    assert '- [[Bug-003]]' in primary_content, "Second query result not found"
+
+
+@pytest.mark.asyncio
+async def test_build_context_dataview_failed_query_not_included(client, test_graph, test_project):
+    """Test that failed Dataview queries don't add empty sections."""
+    def mock_create_integration(notes_provider=None):
+        """Mock integration that returns a failed query."""
+        mock_integration = MagicMock()
+        mock_integration.process_note.return_value = [
+            {
+                'query_id': 1,
+                'line_number': 10,
+                'query_type': 'TABLE',
+                'status': 'error',
+                'execution_time_ms': 5,
+                'result_count': 0,
+                'error': 'Invalid syntax',
+                'discovered_links': []
+            }
+        ]
+        return mock_integration
+    
+    with patch('basic_memory.mcp.tools.build_context.create_dataview_integration',
+               side_effect=mock_create_integration):
+        result = await build_context.fn(
+            project=test_project.name,
+            url="memory://test/root",
+            enable_dataview=True
+        )
+    
+    # Should have results
+    assert len(result.results) > 0
+    
+    # Get the primary result content
+    primary_content = result.results[0].primary_result.content
+    
+    # Failed queries should not add markdown sections
+    # (only successful queries with result_markdown should be included)
+    assert '## Dataview Query Results' not in primary_content or \
+           primary_content.count('## Dataview Query Results') == 0 or \
+           'Invalid syntax' not in primary_content
