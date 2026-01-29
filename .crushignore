@@ -1,0 +1,51 @@
+# Crush Ignore File
+# Fichiers et dossiers à exclure du contexte Crush
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Dependencies lock (trop volumineux)
+uv.lock
+
+# Git
+.git/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# Temporary
+tmp/
+*.tmp
+
+# Config OpenCode (pour éviter confusion)
+opencode.json
+
+# Documentation générée
+docs/_build/
+site/

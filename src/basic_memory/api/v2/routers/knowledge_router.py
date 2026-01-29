@@ -22,6 +22,7 @@ from basic_memory.deps import (
     SyncServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
+    FileServiceV2ExternalDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
@@ -140,6 +141,77 @@ async def resolve_identifier(
 
 
 ## Read endpoints
+
+
+@router.get("/entities/dataview")
+async def list_entities_for_dataview(
+    project_id: ProjectExternalIdPathDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+) -> list[dict]:
+    """List all entities in a format suitable for Dataview query execution.
+
+    Returns entities with file metadata and frontmatter fields needed by Dataview:
+    - file.path, file.name, file.folder
+    - title
+    - type (entity_type)
+    - permalink (optional)
+    - All frontmatter fields from the source file
+
+    This endpoint is used by build_context to provide notes to the Dataview integration.
+
+    Args:
+        project_id: Project external ID from URL path
+
+    Returns:
+        List of note dictionaries with Dataview-compatible structure
+    """
+    from pathlib import Path as PathLib
+    import frontmatter
+
+    logger.info(f"API v2 request: list_entities_for_dataview for project {project_id}")
+
+    # Get all entities in the project
+    all_entities = await entity_repository.find_all()
+
+    notes = []
+    for entity in all_entities:
+        # Convert entity to note format expected by Dataview
+        note = {
+            "file": {
+                "path": entity.file_path,
+                "name": PathLib(entity.file_path).name,
+                "folder": str(PathLib(entity.file_path).parent),
+            },
+            "title": entity.title,
+            "type": entity.entity_type,
+        }
+
+        # Add permalink if available
+        if entity.permalink:
+            note["permalink"] = entity.permalink
+
+        # Add entity_metadata as frontmatter for Dataview field resolution
+        if entity.entity_metadata:
+            note.update(entity.entity_metadata)
+
+        # Try to load additional frontmatter from the file
+        try:
+            file_content, _ = await file_service.read_file(entity.file_path)
+            post = frontmatter.loads(file_content)
+            if post.metadata:
+                # Add all frontmatter fields to the note (don't overwrite existing)
+                for key, value in post.metadata.items():
+                    if key not in note:
+                        note[key] = value
+        except Exception as ex:
+            logger.debug(f"Could not load frontmatter for {entity.permalink}: {ex}")
+
+        notes.append(note)
+
+    logger.info(f"API v2 response: list_entities_for_dataview returned {len(notes)} notes")
+
+    return notes
 
 
 @router.get("/entities/{entity_id}", response_model=EntityResponseV2)
