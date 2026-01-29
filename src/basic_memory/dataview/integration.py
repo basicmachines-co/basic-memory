@@ -217,6 +217,7 @@ class DataviewIntegration:
                 # Always include title for link discovery
                 row["title"] = note.get("title", "Untitled")
                 row["file.link"] = f"[[{note.get('title', 'Untitled')}]]"
+                row["file.path"] = note.get("file", {}).get("path", "")
                 row["type"] = "table_row"
                 
                 for field in query_ast.fields:
@@ -247,6 +248,7 @@ class DataviewIntegration:
                     "type": "list_item",
                     "file.link": f"[[{note.get('title', 'Untitled')}]]",
                     "title": note.get("title", "Untitled"),
+                    "file.path": note.get("file", {}).get("path", ""),
                 })
             
             # Apply SORT
@@ -366,10 +368,13 @@ class DataviewIntegration:
 
             elif result_type == "list_item":
                 # Extract note reference
-                title = result.get("title", "")
-                if title:
+                # Try file.path first (most reliable)
+                file_path = result.get("file.path", "")
+                target = file_path if file_path else result.get("title", "")
+                
+                if target:
                     link = {
-                        "target": title,
+                        "target": target,
                         "type": "note",
                         "metadata": {},
                     }
@@ -380,8 +385,13 @@ class DataviewIntegration:
                 # These fields are now always present in results (added by executor)
                 target = None
                 
-                # Try file.link first (has wikilink format)
-                if "file.link" in result:
+                # Try file.path first (most reliable)
+                file_path = result.get("file.path", "")
+                if file_path:
+                    target = file_path
+                
+                # Fallback to file.link (has wikilink format)
+                if not target and "file.link" in result:
                     clean_value = result["file.link"].strip()
                     if clean_value.startswith("[[") and clean_value.endswith("]]"):
                         target = clean_value[2:-2]

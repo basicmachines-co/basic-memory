@@ -11,11 +11,12 @@ class FieldResolver:
     """Resolves field values from note data."""
 
     # Special fields that map to file metadata
+    # Support both nested (note["file"]["name"]) and flat (note["title"]) formats
     FILE_FIELDS = {
-        "file.name": lambda note: note.get("title", ""),
+        "file.name": lambda note: note.get("file", {}).get("name") or note.get("title", ""),
         "file.link": lambda note: f"[[{note.get('title', '')}]]",
-        "file.path": lambda note: note.get("path", ""),
-        "file.folder": lambda note: note.get("folder", ""),
+        "file.path": lambda note: note.get("file", {}).get("path") or note.get("path", ""),
+        "file.folder": lambda note: note.get("file", {}).get("folder") or note.get("folder", ""),
         "file.size": lambda note: note.get("size", 0),
         "file.ctime": lambda note: note.get("created_at", ""),
         "file.mtime": lambda note: note.get("updated_at", ""),

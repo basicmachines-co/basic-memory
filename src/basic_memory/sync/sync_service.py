@@ -336,6 +336,9 @@ class SyncService:
         # If no files changed, no new unresolved relations could have been created
         if report.total > 0:
             await self.resolve_relations()
+            # Refresh Dataview relations after all files are synced
+            # This ensures queries can find all notes that were just synced
+            await self.dataview_refresh_manager.force_refresh_all()
         else:
             logger.info("Skipping relation resolution - no file changes detected")
 

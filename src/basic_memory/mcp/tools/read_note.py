@@ -15,20 +15,24 @@ from basic_memory.utils import validate_project_path
 from basic_memory.dataview.integration import create_dataview_integration
 
 
-async def _enrich_with_dataview(content: str, project_name: str) -> str:
+async def _enrich_with_dataview(content: str, project_name: str, knowledge_client) -> str:
     """
     Enrich note content with executed Dataview queries.
     
     Args:
         content: The markdown content
         project_name: Name of the project (for logging)
+        knowledge_client: KnowledgeClient instance for fetching notes
         
     Returns:
         Content with Dataview results appended
     """
     try:
-        # Create integration (without notes provider for now)
-        integration = create_dataview_integration()
+        # Fetch all notes for Dataview queries
+        notes = await knowledge_client.list_entities_for_dataview()
+        
+        # Create integration with notes provider
+        integration = create_dataview_integration(notes_provider=lambda: notes)
         
         # Process the note
         dataview_results = integration.process_note(content)
@@ -177,7 +181,7 @@ async def read_note(
                 
                 # Execute Dataview queries if enabled
                 if enable_dataview:
-                    content = await _enrich_with_dataview(content, active_project.name)
+                    content = await _enrich_with_dataview(content, active_project.name, knowledge_client)
                 
                 return content
         except Exception as e:  # pragma: no cover
@@ -207,7 +211,7 @@ async def read_note(
                         
                         # Execute Dataview queries if enabled
                         if enable_dataview:
-                            content = await _enrich_with_dataview(content, active_project.name)
+                            content = await _enrich_with_dataview(content, active_project.name, knowledge_client)
                         
                         return content
                 except Exception as e:  # pragma: no cover

@@ -131,9 +131,11 @@ class DataviewRefreshManager:
         all_entities = await self.sync_service.entity_repository.find_all()
         
         for entity in all_entities:
-            if entity.content and '```dataview' in entity.content:
+            # Read file content to check for dataview queries
+            content = await self.sync_service.file_service.read_entity_content(entity)
+            if content and '```dataview' in content:
                 # Extract FROM clauses to know which folders this entity watches
-                from_clauses = self._extract_from_clauses(entity.content)
+                from_clauses = self._extract_from_clauses(content)
                 entities_with_dataview[entity.id] = {
                     'id': entity.id,
                     'path': entity.file_path,
