@@ -457,6 +457,66 @@ async def test_get_by_title(entity_repository: EntityRepository, session_maker):
 
 
 @pytest.mark.asyncio
+async def test_get_by_title_returns_shortest_path_first(
+    entity_repository: EntityRepository, session_maker
+):
+    """Test that duplicate titles are returned with shortest path first.
+
+    When multiple entities share the same title in different folders,
+    the one with the shortest file path should be returned first.
+    This provides consistent, predictable link resolution.
+    """
+    async with db.scoped_session(session_maker) as session:
+        # Create entities with same title but different path lengths
+        # Insert in reverse order to ensure we're testing ordering, not insertion order
+        entities = [
+            Entity(
+                project_id=entity_repository.project_id,
+                title="My Note",
+                entity_type="note",
+                permalink="archive/old/2024/my-note",
+                file_path="archive/old/2024/My Note.md",  # longest path
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="My Note",
+                entity_type="note",
+                permalink="docs/my-note",
+                file_path="docs/My Note.md",  # medium path
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+            Entity(
+                project_id=entity_repository.project_id,
+                title="My Note",
+                entity_type="note",
+                permalink="my-note",
+                file_path="My Note.md",  # shortest path (root)
+                content_type="text/markdown",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        ]
+        session.add_all(entities)
+        await session.flush()
+
+    # Get all entities with title "My Note"
+    found = await entity_repository.get_by_title("My Note")
+
+    # Should return all 3
+    assert len(found) == 3
+
+    # Should be ordered by path length (shortest first)
+    assert found[0].file_path == "My Note.md"  # shortest
+    assert found[1].file_path == "docs/My Note.md"  # medium
+    assert found[2].file_path == "archive/old/2024/My Note.md"  # longest
+
+
+@pytest.mark.asyncio
 async def test_get_by_file_path(entity_repository: EntityRepository, session_maker):
     """Test getting an entity by title."""
     # Create test entities

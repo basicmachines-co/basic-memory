@@ -15,6 +15,9 @@ class EntityResolveRequest(BaseModel):
     - Permalinks (e.g., "specs/search")
     - Titles (e.g., "Search Specification")
     - File paths (e.g., "specs/search.md")
+
+    When source_path is provided, resolution prefers notes closer to the source
+    (context-aware resolution for duplicate titles).
     """
 
     identifier: str = Field(
@@ -22,6 +25,15 @@ class EntityResolveRequest(BaseModel):
         description="Entity identifier to resolve (permalink, title, or file path)",
         min_length=1,
         max_length=500,
+    )
+    source_path: Optional[str] = Field(
+        None,
+        description="Path of the source file containing the link (for context-aware resolution)",
+        max_length=500,
+    )
+    strict: bool = Field(
+        False,
+        description="If True, only exact matches are allowed (no fuzzy search fallback)",
     )
 
 
