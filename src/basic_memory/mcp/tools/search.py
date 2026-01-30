@@ -10,6 +10,7 @@ from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
+from basic_memory.dataview.integration import create_dataview_integration
 
 
 def _format_search_error_response(
@@ -207,6 +208,7 @@ async def search_notes(
     types: List[str] | None = None,
     entity_types: List[str] | None = None,
     after_date: Optional[str] = None,
+    enable_dataview: bool = False,
     context: Context | None = None,
 ) -> SearchResponse | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
@@ -265,6 +267,7 @@ async def search_notes(
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
+        enable_dataview: Execute Dataview queries in search results (default: False for performance)
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -380,6 +383,26 @@ async def search_notes(
                 )
                 # Don't treat this as an error, but the user might want guidance
                 # We return the empty result as normal - the user can decide if they need help
+
+            # Enrich with Dataview if enabled and results have content
+            if enable_dataview and result.results:
+                logger.info(f"Enriching {len(result.results)} search results with Dataview")
+                integration = create_dataview_integration()
+                
+                for search_result in result.results:
+                    if search_result.content:
+                        try:
+                            dataview_results = integration.process_note(search_result.content)
+                            if dataview_results:
+                                # Add Dataview info to metadata
+                                if not search_result.metadata:
+                                    search_result.metadata = {}
+                                search_result.metadata["dataview_results"] = dataview_results
+                                search_result.metadata["dataview_query_count"] = len(dataview_results)
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to process Dataview for result {search_result.permalink}: {e}"
+                            )
 
             return result
 

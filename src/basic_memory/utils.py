@@ -432,6 +432,26 @@ def validate_project_path(path: str, project_path: Path) -> bool:
         return False  # pragma: no cover
 
 
+def parse_datetime(value: datetime | str, cloud_mode: bool | None = None) -> datetime:
+    """Parse a datetime value from string or datetime, ensuring timezone-awareness.
+
+    SQLite raw SQL queries return datetime columns as strings. This function
+    handles both string and datetime inputs, parsing strings to datetime and
+    ensuring the result is timezone-aware.
+
+    Args:
+        value: Either a datetime object or an ISO format string
+        cloud_mode: Optional explicit cloud_mode setting. If None, loads from config.
+
+    Returns:
+        A timezone-aware datetime
+    """
+    if isinstance(value, str):
+        # Parse ISO format string from SQLite
+        value = datetime.fromisoformat(value)
+    return ensure_timezone_aware(value, cloud_mode)
+
+
 def ensure_timezone_aware(dt: datetime, cloud_mode: bool | None = None) -> datetime:
     """Ensure a datetime is timezone-aware.
 

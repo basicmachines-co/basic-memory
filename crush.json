@@ -1,0 +1,65 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "mcp": {
+    "basic-memory": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/Users/donaldo/Developer/basic-memory",
+        "basic-memory",
+        "mcp",
+        "--project",
+        "main"
+      ],
+      "timeout": 120
+    },
+    "apple-mail": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/donaldo/Developer/mcp/apple-mail-mcp",
+        "run",
+        "apple-mail-mcp"
+      ],
+      "timeout": 60
+    }
+  },
+  "permissions": {
+    "allowed_tools": [
+      "view",
+      "ls",
+      "grep",
+      "edit",
+      "mcp_basic-memory_list_directory",
+      "mcp_basic-memory_read_note",
+      "mcp_basic-memory_search_notes",
+      "mcp_basic-memory_recent_activity",
+      "mcp_basic-memory_build_context",
+      "mcp_basic-memory_write_note",
+      "mcp_basic-memory_edit_note",
+      "mcp_basic-memory_move_note",
+      "mcp_apple-mail_list_accounts",
+      "mcp_apple-mail_list_mailboxes",
+      "mcp_apple-mail_list_inbox_emails",
+      "mcp_apple-mail_get_email_with_content",
+      "mcp_apple-mail_get_recent_emails",
+      "mcp_apple-mail_search_emails",
+      "mcp_apple-mail_get_email_thread",
+      "mcp_apple-mail_get_unread_count",
+      "mcp_apple-mail_get_inbox_overview",
+      "mcp_apple-mail_get_statistics",
+      "mcp_apple-mail_list_email_attachments"
+    ]
+  },
+  "options": {
+    "initialize_as": "CRUSH.md",
+    "debug": false,
+    "attribution": {
+      "trailer_style": "assisted-by",
+      "generated_with": true
+    }
+  }
+}
