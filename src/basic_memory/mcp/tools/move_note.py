@@ -488,7 +488,9 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
                 return "\n".join(result_lines)
 
             except Exception as e:  # pragma: no cover
-                logger.error(f"Directory move failed for '{identifier}' to '{destination_path}': {e}")
+                logger.error(
+                    f"Directory move failed for '{identifier}' to '{destination_path}': {e}"
+                )
                 return f"""# Directory Move Failed
 
 Error moving directory '{identifier}' to '{destination_path}': {str(e)}

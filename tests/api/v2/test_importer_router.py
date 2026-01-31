@@ -474,7 +474,9 @@ async def test_import_invalid_project_id(client: AsyncClient, tmp_path, chatgpt_
 async def test_import_missing_file(client: AsyncClient, v2_project_url: str):
     """Test importing with missing file via v2 endpoint."""
     # Send a request without a file
-    response = await client.post(f"{v2_project_url}/import/chatgpt", data={"directory": "test_folder"})
+    response = await client.post(
+        f"{v2_project_url}/import/chatgpt", data={"directory": "test_folder"}
+    )
 
     # Check that the request was rejected
     assert response.status_code in [400, 422]  # Either bad request or unprocessable entity

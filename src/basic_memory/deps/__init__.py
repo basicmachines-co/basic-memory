@@ -229,6 +229,8 @@ __all__ = [
     "FileServiceV2Dep",
     "get_file_service_v2_external",
     "FileServiceV2ExternalDep",
+    "get_task_scheduler",
+    "TaskSchedulerDep",
     "get_search_service",
     "SearchServiceDep",
     "get_search_service_v2",

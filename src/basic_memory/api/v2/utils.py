@@ -75,7 +75,7 @@ async def to_graph_context(
                     observation_id=item.id,
                     entity_id=item.entity_id,  # pyright: ignore
                     entity_external_id=entity_ext_id,
-                    title=entity_title_lookup.get(item.entity_id) ,  # pyright: ignore
+                    title=entity_title_lookup.get(item.entity_id),  # pyright: ignore
                     file_path=item.file_path,
                     category=item.category,  # pyright: ignore
                     content=item.content,  # pyright: ignore

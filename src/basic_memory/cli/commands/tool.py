@@ -412,9 +412,6 @@ def search_notes(
                     status=status,
                 )
             )
-        # Use json module for more controlled serialization
-        import json
-
         results_dict = results.model_dump(exclude_none=True)
         print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:

@@ -1095,7 +1095,9 @@ class EntityService(BaseService[EntityModel]):
                 old_path = entity.file_path
                 # Replace only the first occurrence of the source directory prefix
                 if old_path.startswith(f"{source_directory}/"):
-                    new_path = old_path.replace(f"{source_directory}/", f"{destination_directory}/", 1)
+                    new_path = old_path.replace(
+                        f"{source_directory}/", f"{destination_directory}/", 1
+                    )
                 else:  # pragma: no cover
                     # Entity is directly in the source directory (shouldn't happen with prefix match)
                     new_path = f"{destination_directory}/{old_path}"
@@ -1184,7 +1186,9 @@ class EntityService(BaseService[EntityModel]):
                     logger.debug(f"Deleted entity: {file_path}")
                 else:  # pragma: no cover
                     failed_deletes += 1
-                    errors.append(DirectoryDeleteError(path=file_path, error="Delete returned False"))
+                    errors.append(
+                        DirectoryDeleteError(path=file_path, error="Delete returned False")
+                    )
                     logger.warning(f"Delete returned False for entity: {file_path}")
 
             except Exception as e:  # pragma: no cover

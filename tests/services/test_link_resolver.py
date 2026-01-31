@@ -509,8 +509,7 @@ async def test_source_path_same_folder_preference(context_link_resolver):
     """Test that links prefer notes in the same folder as the source."""
     # From main/testing/another-test.md, [[testing]] should find main/testing/testing.md
     result = await context_link_resolver.resolve_link(
-        "testing",
-        source_path="main/testing/another-test.md"
+        "testing", source_path="main/testing/another-test.md"
     )
     assert result is not None
     assert result.file_path == "main/testing/testing.md"
@@ -520,10 +519,7 @@ async def test_source_path_same_folder_preference(context_link_resolver):
 async def test_source_path_from_root_prefers_root(context_link_resolver):
     """Test that links from root-level notes prefer root-level matches."""
     # From root-note.md, [[testing]] should find testing.md (root level)
-    result = await context_link_resolver.resolve_link(
-        "testing",
-        source_path="some-root-note.md"
-    )
+    result = await context_link_resolver.resolve_link("testing", source_path="some-root-note.md")
     assert result is not None
     assert result.file_path == "testing.md"
 
@@ -534,10 +530,7 @@ async def test_source_path_different_branch_prefers_closest(context_link_resolve
     # From other/testing.md, [[testing]] should find other/testing.md (same folder)
     # Wait, other/testing.md IS the testing note in that folder, so this tests self-reference
     # Let's test from a hypothetical other/different.md
-    result = await context_link_resolver.resolve_link(
-        "testing",
-        source_path="other/different.md"
-    )
+    result = await context_link_resolver.resolve_link("testing", source_path="other/different.md")
     assert result is not None
     # Should find other/testing.md since it's in the same folder
     assert result.file_path == "other/testing.md"
@@ -556,8 +549,7 @@ async def test_source_path_ancestor_preference(context_link_resolver):
     # 1. deep/nested/folder/note.md (same folder) - but that's the note itself
     # Let's say we're linking from a different file in that folder
     result = await context_link_resolver.resolve_link(
-        "note",
-        source_path="deep/nested/folder/other-file.md"
+        "note", source_path="deep/nested/folder/other-file.md"
     )
     assert result is not None
     # Should find deep/nested/folder/note.md (same folder)
@@ -573,8 +565,7 @@ async def test_source_path_parent_folder_preference(context_link_resolver):
     # For this test, let's check that from deep/nested/other/file.md,
     # [[note]] finds deep/note.md (ancestor) rather than note.md (root)
     result = await context_link_resolver.resolve_link(
-        "note",
-        source_path="deep/nested/other/file.md"
+        "note", source_path="deep/nested/other/file.md"
     )
     assert result is not None
     # No note.md in deep/nested/other/, so should find deep/note.md (closest ancestor)
@@ -602,7 +593,7 @@ async def test_source_path_unique_title_ignores_context(context_link_resolver):
     # "another-test" only exists in one place
     result = await context_link_resolver.resolve_link(
         "another-test",
-        source_path="other/some-file.md"  # Different folder
+        source_path="other/some-file.md",  # Different folder
     )
     assert result is not None
     assert result.file_path == "main/testing/another-test.md"
@@ -617,8 +608,7 @@ async def test_source_path_with_permalink_conflict(context_link_resolver):
     # even though there's a permalink match at root
 
     result = await context_link_resolver.resolve_link(
-        "testing",
-        source_path="main/testing/another-test.md"
+        "testing", source_path="main/testing/another-test.md"
     )
     assert result is not None
     # Should prefer same-folder title match over root permalink match
@@ -633,24 +623,22 @@ async def test_find_closest_entity_same_folder(context_link_resolver, context_aw
     assert len(testing_entities) == 3  # root, main/testing, other
 
     closest = context_link_resolver._find_closest_entity(
-        testing_entities,
-        "main/testing/another-test.md"
+        testing_entities, "main/testing/another-test.md"
     )
     assert closest.file_path == "main/testing/testing.md"
 
 
 @pytest.mark.asyncio
-async def test_find_closest_entity_ancestor_preference(context_link_resolver, context_aware_entities):
+async def test_find_closest_entity_ancestor_preference(
+    context_link_resolver, context_aware_entities
+):
     """Test _find_closest_entity prefers closer ancestors."""
     # Get entities with title "note"
     note_entities = [e for e in context_aware_entities if e.title == "note"]
     assert len(note_entities) == 3  # deep/nested/folder, deep, root
 
     # From deep/nested/other/file.md, should prefer deep/note.md over note.md
-    closest = context_link_resolver._find_closest_entity(
-        note_entities,
-        "deep/nested/other/file.md"
-    )
+    closest = context_link_resolver._find_closest_entity(note_entities, "deep/nested/other/file.md")
     assert closest.file_path == "deep/note.md"
 
 
@@ -660,10 +648,7 @@ async def test_find_closest_entity_root_source(context_link_resolver, context_aw
     testing_entities = [e for e in context_aware_entities if e.title == "testing"]
 
     # From root level, should prefer root testing.md
-    closest = context_link_resolver._find_closest_entity(
-        testing_entities,
-        "some-root-file.md"
-    )
+    closest = context_link_resolver._find_closest_entity(testing_entities, "some-root-file.md")
     assert closest.file_path == "testing.md"
 
 
@@ -671,8 +656,7 @@ async def test_find_closest_entity_root_source(context_link_resolver, context_aw
 async def test_nonexistent_link_with_source_path(context_link_resolver):
     """Test that non-existent links return None even with source_path."""
     result = await context_link_resolver.resolve_link(
-        "does-not-exist",
-        source_path="main/testing/another-test.md"
+        "does-not-exist", source_path="main/testing/another-test.md"
     )
     assert result is None
 
@@ -774,8 +758,7 @@ async def test_relative_path_resolution_from_subfolder(relative_path_resolver):
     """Test that [[nested/deep-note]] from testing/link-test.md resolves to testing/nested/deep-note.md."""
     # From testing/link-test.md, [[nested/deep-note]] should resolve to testing/nested/deep-note.md
     result = await relative_path_resolver.resolve_link(
-        "nested/deep-note",
-        source_path="testing/link-test.md"
+        "nested/deep-note", source_path="testing/link-test.md"
     )
     assert result is not None
     assert result.file_path == "testing/nested/deep-note.md"
@@ -787,8 +770,7 @@ async def test_relative_path_falls_back_to_absolute(relative_path_resolver):
     # From other/file.md, [[nested/deep-note]] should resolve to nested/deep-note.md (absolute)
     # because other/nested/deep-note.md doesn't exist
     result = await relative_path_resolver.resolve_link(
-        "nested/deep-note",
-        source_path="other/file.md"
+        "nested/deep-note", source_path="other/file.md"
     )
     assert result is not None
     assert result.file_path == "nested/deep-note.md"
@@ -808,8 +790,7 @@ async def test_relative_path_from_root_falls_through(relative_path_resolver):
     """Test that paths from root-level files don't try relative resolution."""
     # From root-file.md (no folder), [[nested/deep-note]] should resolve to nested/deep-note.md
     result = await relative_path_resolver.resolve_link(
-        "nested/deep-note",
-        source_path="root-file.md"
+        "nested/deep-note", source_path="root-file.md"
     )
     assert result is not None
     assert result.file_path == "nested/deep-note.md"
@@ -820,8 +801,7 @@ async def test_simple_link_no_slash_skips_relative_resolution(relative_path_reso
     """Test that links without '/' don't trigger relative path resolution."""
     # [[deep-note]] should use context-aware title matching, not relative paths
     result = await relative_path_resolver.resolve_link(
-        "deep-note",
-        source_path="testing/link-test.md"
+        "deep-note", source_path="testing/link-test.md"
     )
     assert result is not None
     # Should find testing/nested/deep-note.md via title match with same-folder preference

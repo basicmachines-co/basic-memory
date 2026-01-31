@@ -12,7 +12,10 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
-from basic_memory.repository.metadata_filters import parse_metadata_filters, build_postgres_json_path
+from basic_memory.repository.metadata_filters import (
+    parse_metadata_filters,
+    build_postgres_json_path,
+)
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -318,14 +321,15 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 if filt.op == "contains":
                     import json as _json
 
+                    base_param = f"meta_val_{idx}"
                     tag_conditions = []
                     # Require all values to be present
                     for j, val in enumerate(filt.value):
-                        tag_param = f"{value_param}_{j}"
+                        tag_param = f"{base_param}_{j}"
                         params[tag_param] = _json.dumps([val])
-                        like_param = f"{value_param}_{j}_like"
+                        like_param = f"{base_param}_{j}_like"
                         params[like_param] = f'%"{val}"%'
-                        like_param_single = f"{value_param}_{j}_like_single"
+                        like_param_single = f"{base_param}_{j}_like_single"
                         params[like_param_single] = f"%'{val}'%"
                         tag_conditions.append(
                             f"({json_expr} @> :{tag_param}::jsonb "
@@ -372,7 +376,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Build SQL with ts_rank() for scoring
         # Note: If no text search, score will be NULL, so we use COALESCE to default to 0
         if search_text and search_text.strip() and search_text.strip() != "*":
-            score_expr = "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text))"
+            score_expr = (
+                "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text))"
+            )
         else:
             score_expr = "0"
 

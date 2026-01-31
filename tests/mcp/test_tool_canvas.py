@@ -109,7 +109,9 @@ async def test_update_existing_canvas(app, project_config, test_project):
     folder = "visualizations"
 
     # Create initial canvas
-    await canvas.fn(project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder)
+    await canvas.fn(
+        project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
+    )
 
     # Verify file exists
     file_path = Path(project_config.home) / folder / f"{title}.canvas"

@@ -92,16 +92,11 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
                 continue
 
             if op == "$between":
-                if (
-                    not isinstance(value, list)
-                    or len(value) != 2
-                ):
+                if not isinstance(value, list) or len(value) != 2:
                     raise ValueError(f"$between requires [min, max] for '{raw_key}'")
                 normalized = [_normalize_scalar(v) for v in value]
                 comparison = "numeric" if _is_numeric_collection(normalized) else "text"
-                parsed.append(
-                    ParsedMetadataFilter(path_parts, "between", normalized, comparison)
-                )
+                parsed.append(ParsedMetadataFilter(path_parts, "between", normalized, comparison))
                 continue
 
             raise ValueError(f"Unsupported operator '{op}' in metadata filter for '{raw_key}'")
@@ -111,7 +106,9 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
             if not raw_value:
                 raise ValueError(f"Empty list not allowed for metadata filter '{raw_key}'")
             parsed.append(
-                ParsedMetadataFilter(path_parts, "contains", [_normalize_scalar(v) for v in raw_value])
+                ParsedMetadataFilter(
+                    path_parts, "contains", [_normalize_scalar(v) for v in raw_value]
+                )
             )
             continue
 
@@ -125,7 +122,7 @@ def build_sqlite_json_path(parts: List[str]) -> str:
     """Build a SQLite JSON path for json_extract/json_each."""
     path = "$"
     for part in parts:
-        path += f'.\"{part}\"'
+        path += f'."{part}"'
     return path
 
 

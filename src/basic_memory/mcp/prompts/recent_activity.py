@@ -46,9 +46,7 @@ async def recent_activity_prompt(
 
     # Call the tool function - it returns a well-formatted string
     # Pass type as string values (not enum) to match the tool's expected input
-    activity_summary = await recent_activity.fn(
-        project=project, timeframe=timeframe, type="entity"
-    )
+    activity_summary = await recent_activity.fn(project=project, timeframe=timeframe, type="entity")
 
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly
@@ -92,7 +90,7 @@ async def recent_activity_prompt(
             - summarizes [[Recent Work]]
             ''',
             folder="insights",
-            project="{project or 'default'}"
+            project="{project or "default"}"
         )
         ```
     """)

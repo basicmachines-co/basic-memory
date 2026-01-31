@@ -48,7 +48,7 @@ def index_exists(connection, index_name: str) -> bool:
 
 # revision identifiers, used by Alembic.
 revision: str = "d7e8f9a0b1c2"
-down_revision: Union[str, None] = "g9a0b3c4d5e6"
+down_revision: Union[str, None] = "6830751f5fb6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -142,8 +142,7 @@ def downgrade() -> None:
         op.execute("DROP INDEX IF EXISTS idx_entity_tags_json")
         op.execute("DROP INDEX IF EXISTS idx_entity_metadata_gin")
         op.execute(
-            "ALTER TABLE entity ALTER COLUMN entity_metadata "
-            "TYPE json USING entity_metadata::json"
+            "ALTER TABLE entity ALTER COLUMN entity_metadata TYPE json USING entity_metadata::json"
         )
         return
 

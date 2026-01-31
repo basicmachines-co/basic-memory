@@ -14,7 +14,10 @@ async def test_read_note_by_title(app, test_project):
     """Test reading a note by its title."""
     # First create a note
     await write_note.fn(
-        project=test_project.name, title="Special Note", directory="test", content="Note content here"
+        project=test_project.name,
+        title="Special Note",
+        directory="test",
+        content="Note content here",
     )
 
     # Should be able to read it by title

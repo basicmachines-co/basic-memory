@@ -144,23 +144,29 @@ async def test_get_default_project_with_false_values(project_repository: Project
     causing MultipleResultsFound when multiple projects had different boolean values.
     """
     # Create projects with explicit is_default values
-    project_true = await project_repository.create({
-        "name": "Default Project",
-        "path": "/default/path",
-        "is_default": True,
-    })
+    project_true = await project_repository.create(
+        {
+            "name": "Default Project",
+            "path": "/default/path",
+            "is_default": True,
+        }
+    )
 
-    await project_repository.create({
-        "name": "Not Default Project",
-        "path": "/not-default/path",
-        "is_default": False,
-    })
+    await project_repository.create(
+        {
+            "name": "Not Default Project",
+            "path": "/not-default/path",
+            "is_default": False,
+        }
+    )
 
-    await project_repository.create({
-        "name": "Null Default Project",
-        "path": "/null/path",
-        "is_default": None,
-    })
+    await project_repository.create(
+        {
+            "name": "Null Default Project",
+            "path": "/null/path",
+            "is_default": None,
+        }
+    )
 
     # Should return only the project with is_default=True
     default = await project_repository.get_default_project()

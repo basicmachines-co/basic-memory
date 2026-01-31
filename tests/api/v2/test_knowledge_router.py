@@ -80,7 +80,9 @@ async def test_resolve_identifier_no_fuzzy_match(client: AsyncClient, v2_project
 
 
 @pytest.mark.asyncio
-async def test_resolve_identifier_with_source_path_no_fuzzy_match(client: AsyncClient, v2_project_url):
+async def test_resolve_identifier_with_source_path_no_fuzzy_match(
+    client: AsyncClient, v2_project_url
+):
     """Test that context-aware resolution also uses strict mode.
 
     Even with source_path for context-aware resolution, nonexistent

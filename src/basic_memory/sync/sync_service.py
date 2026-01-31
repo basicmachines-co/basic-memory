@@ -686,9 +686,7 @@ class SyncService:
                 await self.file_service.update_frontmatter(path, {"permalink": permalink})
 
         # Create/update entity and relations in one path
-        logger.debug(
-            f"{'Creating' if new else 'Updating'} entity from markdown, path={path}"
-        )
+        logger.debug(f"{'Creating' if new else 'Updating'} entity from markdown, path={path}")
         entity = await self.entity_service.upsert_entity_from_markdown(
             Path(path), entity_markdown, is_new=new
         )
