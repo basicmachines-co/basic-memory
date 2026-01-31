@@ -22,6 +22,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 10, 30, 0)
 
         entity = EntitySummary(
+            external_id="550e8400-e29b-41d4-a716-446655440000",
             entity_id=1,
             permalink="test/entity",
             title="Test Entity",
@@ -36,6 +37,7 @@ class TestDateTimeSerialization:
         assert data["created_at"] == "2023-12-08T10:30:00"
         assert data["type"] == "entity"
         assert data["title"] == "Test Entity"
+        assert data["external_id"] == "550e8400-e29b-41d4-a716-446655440000"
 
     def test_relation_summary_datetime_serialization(self):
         """Test RelationSummary serializes datetime as ISO format string."""
@@ -105,6 +107,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 9, 30, 15)
 
         entity = EntitySummary(
+            external_id="550e8400-e29b-41d4-a716-446655440000",
             entity_id=1,
             permalink="test/entity",
             title="Test Entity",
@@ -139,6 +142,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 14, 20, 10)
 
         entity = EntitySummary(
+            external_id="550e8400-e29b-41d4-a716-446655440000",
             entity_id=1,
             permalink="test/entity",
             title="Test Entity",
@@ -168,6 +172,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 10, 30, 0, 123456)
 
         entity = EntitySummary(
+            external_id="550e8400-e29b-41d4-a716-446655440000",
             entity_id=1,
             permalink="test/entity",
             title="Test Entity",
@@ -186,6 +191,7 @@ class TestDateTimeSerialization:
         test_datetime = datetime(2023, 12, 8, 10, 30, 0)
 
         entity = EntitySummary(
+            external_id="550e8400-e29b-41d4-a716-446655440000",
             entity_id=1,
             permalink="test/entity",
             title="Test Entity",
@@ -223,6 +229,7 @@ class TestDateTimeSerialization:
 
             if model_class == EntitySummary:
                 instance = model_class(
+                    external_id="550e8400-e29b-41d4-a716-446655440000",
                     entity_id=1,
                     permalink="test",
                     title="Test",

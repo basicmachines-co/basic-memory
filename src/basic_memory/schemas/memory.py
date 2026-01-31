@@ -124,6 +124,7 @@ class EntitySummary(BaseModel):
     """Simplified entity representation."""
 
     type: Literal["entity"] = "entity"
+    external_id: str  # UUID for v2 API routing
     entity_id: int  # Database ID for v2 API consistency
     permalink: Optional[str]
     title: str
@@ -150,8 +151,10 @@ class RelationSummary(BaseModel):
     relation_type: str
     from_entity: Optional[str] = None
     from_entity_id: Optional[int] = None  # ID of source entity
+    from_entity_external_id: Optional[str] = None  # UUID of source entity for v2 API routing
     to_entity: Optional[str] = None
     to_entity_id: Optional[int] = None  # ID of target entity
+    to_entity_external_id: Optional[str] = None  # UUID of target entity for v2 API routing
     created_at: Annotated[
         datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
     ]
@@ -167,6 +170,7 @@ class ObservationSummary(BaseModel):
     type: Literal["observation"] = "observation"
     observation_id: int  # Database ID for v2 API consistency
     entity_id: Optional[int] = None  # ID of the entity this observation belongs to
+    entity_external_id: Optional[str] = None  # UUID of parent entity for v2 API routing
     title: str
     file_path: str
     permalink: str

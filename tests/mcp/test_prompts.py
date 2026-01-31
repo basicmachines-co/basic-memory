@@ -116,6 +116,7 @@ def test_prompt_context_with_file_path_no_permalink():
 
     # Create a mock context with a file that has no permalink (like a binary file)
     test_entity = EntitySummary(
+        external_id="550e8400-e29b-41d4-a716-446655440000",
         entity_id=1,
         type="entity",
         title="Test File",

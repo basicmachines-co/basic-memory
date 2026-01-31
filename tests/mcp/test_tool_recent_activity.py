@@ -233,6 +233,7 @@ async def test_recent_activity_get_project_activity_timezone_normalization(monke
                     {
                         "primary_result": {
                             "type": "entity",
+                            "external_id": "550e8400-e29b-41d4-a716-446655440001",
                             "entity_id": 1,
                             "permalink": "notes/x",
                             "title": "X",
@@ -247,6 +248,7 @@ async def test_recent_activity_get_project_activity_timezone_normalization(monke
                     {
                         "primary_result": {
                             "type": "entity",
+                            "external_id": "550e8400-e29b-41d4-a716-446655440002",
                             "entity_id": 2,
                             "permalink": "notes/y",
                             "title": "Y",
@@ -341,6 +343,7 @@ def test_recent_activity_format_discovery_output_includes_other_active_projects_
         results=[
             ContextResult(
                 primary_result=EntitySummary(
+                    external_id="550e8400-e29b-41d4-a716-446655440001",
                     entity_id=1,
                     permalink="docs/complete-feature",
                     title="Complete Feature Spec",
@@ -358,6 +361,7 @@ def test_recent_activity_format_discovery_output_includes_other_active_projects_
         results=[
             ContextResult(
                 primary_result=EntitySummary(
+                    external_id="550e8400-e29b-41d4-a716-446655440002",
                     entity_id=2,
                     permalink="docs/other",
                     title="Other Note",

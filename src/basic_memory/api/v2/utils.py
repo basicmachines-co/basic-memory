@@ -24,29 +24,42 @@ async def to_graph_context(
     page: Optional[int] = None,
     page_size: Optional[int] = None,
 ):
-    # First pass: collect all entity IDs needed for relations
+    # First pass: collect all entity IDs needed for external_id lookup
+    # This includes: entity primary results, observation parent entities, relation from/to entities
     entity_ids_needed: set[int] = set()
     for context_item in context_result.results:
         for item in (
             [context_item.primary_result] + context_item.observations + context_item.related_results
         ):
-            if item.type == SearchItemType.RELATION:
+            if item.type == SearchItemType.ENTITY:
+                # Entity's own ID for its external_id
+                entity_ids_needed.add(item.id)
+            elif item.type == SearchItemType.OBSERVATION:
+                # Parent entity ID for entity_external_id
+                if item.entity_id:  # pyright: ignore
+                    entity_ids_needed.add(item.entity_id)  # pyright: ignore
+            elif item.type == SearchItemType.RELATION:
+                # Source and target entity IDs for external_ids
                 if item.from_id:  # pyright: ignore
                     entity_ids_needed.add(item.from_id)  # pyright: ignore
                 if item.to_id:
                     entity_ids_needed.add(item.to_id)
 
-    # Batch fetch all entities at once
-    entity_lookup: dict[int, str] = {}
+    # Batch fetch all entities at once - get both title and external_id
+    entity_title_lookup: dict[int, str] = {}
+    entity_external_id_lookup: dict[int, str] = {}
     if entity_ids_needed:
         entities = await entity_repository.find_by_ids(list(entity_ids_needed))
-        entity_lookup = {e.id: e.title for e in entities}
+        for e in entities:
+            entity_title_lookup[e.id] = e.title
+            entity_external_id_lookup[e.id] = e.external_id
 
     # Helper function to convert items to summaries
     def to_summary(item: SearchIndexRow | ContextResultRow):
         match item.type:
             case SearchItemType.ENTITY:
                 return EntitySummary(
+                    external_id=entity_external_id_lookup.get(item.id, ""),
                     entity_id=item.id,
                     title=item.title,  # pyright: ignore
                     permalink=item.permalink,
@@ -55,10 +68,14 @@ async def to_graph_context(
                     created_at=item.created_at,
                 )
             case SearchItemType.OBSERVATION:
+                entity_ext_id = None
+                if item.entity_id:  # pyright: ignore
+                    entity_ext_id = entity_external_id_lookup.get(item.entity_id)  # pyright: ignore
                 return ObservationSummary(
                     observation_id=item.id,
                     entity_id=item.entity_id,  # pyright: ignore
-                    title=item.title,  # pyright: ignore
+                    entity_external_id=entity_ext_id,
+                    title=entity_title_lookup.get(item.entity_id) ,  # pyright: ignore
                     file_path=item.file_path,
                     category=item.category,  # pyright: ignore
                     content=item.content,  # pyright: ignore
@@ -66,8 +83,10 @@ async def to_graph_context(
                     created_at=item.created_at,
                 )
             case SearchItemType.RELATION:
-                from_title = entity_lookup.get(item.from_id) if item.from_id else None  # pyright: ignore
-                to_title = entity_lookup.get(item.to_id) if item.to_id else None
+                from_title = entity_title_lookup.get(item.from_id) if item.from_id else None  # pyright: ignore
+                to_title = entity_title_lookup.get(item.to_id) if item.to_id else None
+                from_ext_id = entity_external_id_lookup.get(item.from_id) if item.from_id else None  # pyright: ignore
+                to_ext_id = entity_external_id_lookup.get(item.to_id) if item.to_id else None
                 return RelationSummary(
                     relation_id=item.id,
                     entity_id=item.entity_id,  # pyright: ignore
@@ -77,8 +96,10 @@ async def to_graph_context(
                     relation_type=item.relation_type,  # pyright: ignore
                     from_entity=from_title,
                     from_entity_id=item.from_id,  # pyright: ignore
+                    from_entity_external_id=from_ext_id,
                     to_entity=to_title,
                     to_entity_id=item.to_id,
+                    to_entity_external_id=to_ext_id,
                     created_at=item.created_at,
                 )
             case _:  # pragma: no cover
