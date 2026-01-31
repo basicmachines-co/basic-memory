@@ -1,5 +1,6 @@
 """CLI tool commands for Basic Memory."""
 
+import json
 import sys
 from typing import Annotated, List, Optional
 
@@ -288,7 +289,10 @@ def recent_activity(
 
 @tool_app.command("search-notes")
 def search_notes(
-    query: str,
+    query: Annotated[
+        Optional[str],
+        typer.Argument(help="Search query string (optional when using metadata filters)"),
+    ] = "",
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
     project: Annotated[
@@ -300,6 +304,26 @@ def search_notes(
     after_date: Annotated[
         Optional[str],
         typer.Option("--after_date", help="Search results after date, eg. '2d', '1 week'"),
+    ] = None,
+    tags: Annotated[
+        Optional[List[str]],
+        typer.Option("--tag", help="Filter by frontmatter tag (repeatable)"),
+    ] = None,
+    status: Annotated[
+        Optional[str],
+        typer.Option("--status", help="Filter by frontmatter status"),
+    ] = None,
+    note_types: Annotated[
+        Optional[List[str]],
+        typer.Option("--type", help="Filter by frontmatter type (repeatable)"),
+    ] = None,
+    meta: Annotated[
+        Optional[List[str]],
+        typer.Option("--meta", help="Filter by frontmatter key=value (repeatable)"),
+    ] = None,
+    filter_json: Annotated[
+        Optional[str],
+        typer.Option("--filter", help="JSON metadata filter (advanced)"),
     ] = None,
     page: int = 1,
     page_size: int = 10,
@@ -335,21 +359,57 @@ def search_notes(
             )
             raise typer.Exit(1)
 
+        # Build metadata filters from --filter and --meta
+        metadata_filters = {}
+        if filter_json:
+            try:
+                metadata_filters = json.loads(filter_json)
+                if not isinstance(metadata_filters, dict):
+                    raise ValueError("Metadata filter JSON must be an object")
+            except json.JSONDecodeError as e:
+                typer.echo(f"Invalid JSON for --filter: {e}", err=True)
+                raise typer.Exit(1)
+
+        if meta:
+            for item in meta:
+                if "=" not in item:
+                    typer.echo(
+                        f"Invalid --meta entry '{item}'. Use key=value format.",
+                        err=True,
+                    )
+                    raise typer.Exit(1)
+                key, value = item.split("=", 1)
+                key = key.strip()
+                if not key:
+                    typer.echo(f"Invalid --meta entry '{item}'.", err=True)
+                    raise typer.Exit(1)
+                metadata_filters[key] = value
+
+        if not metadata_filters:
+            metadata_filters = None
+
         # set search type
-        search_type = ("permalink" if permalink else None,)
-        search_type = ("permalink_match" if permalink and "*" in query else None,)
-        search_type = ("title" if title else None,)
-        search_type = "text" if search_type is None else search_type
+        search_type = "text"
+        if permalink:
+            search_type = "permalink"
+            if query and "*" in query:
+                search_type = "permalink"
+        if title:
+            search_type = "title"
 
         with force_routing(local=local, cloud=cloud):
             results = run_with_cleanup(
                 mcp_search.fn(
-                    query,
+                    query or "",
                     project_name,
                     search_type=search_type,
                     page=page,
                     after_date=after_date,
                     page_size=page_size,
+                    types=note_types,
+                    metadata_filters=metadata_filters,
+                    tags=tags,
+                    status=status,
                 )
             )
         # Use json module for more controlled serialization

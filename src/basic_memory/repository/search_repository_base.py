@@ -78,6 +78,7 @@ class SearchRepositoryBase(ABC):
         types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -91,6 +92,7 @@ class SearchRepositoryBase(ABC):
             types: Filter by entity types (from metadata.entity_type)
             after_date: Filter by created_at > after_date
             search_item_types: Filter by SearchItemType (ENTITY, OBSERVATION, RELATION)
+            metadata_filters: Structured frontmatter metadata filters
             limit: Maximum results to return
             offset: Number of results to skip
 

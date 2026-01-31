@@ -214,15 +214,28 @@ Example tool using typed client:
 
 ```python
 @mcp.tool()
-async def search_notes(query: str, project: str | None = None) -> SearchResponse:
+async def search_notes(
+    query: str,
+    project: str | None = None,
+    metadata_filters: dict | None = None,
+    tags: list[str] | None = None,
+    status: str | None = None,
+) -> SearchResponse:
     async with get_client() as client:
         active_project = await get_active_project(client, project)
 
         # Import client inside function to avoid circular imports
         from basic_memory.mcp.clients import SearchClient
+        from basic_memory.schemas.search import SearchQuery
 
+        search_query = SearchQuery(
+            text=query,
+            metadata_filters=metadata_filters,
+            tags=tags,
+            status=status,
+        )
         search_client = SearchClient(client, active_project.external_id)
-        return await search_client.search(query)
+        return await search_client.search(search_query.model_dump())
 ```
 
 ## Sync Coordination

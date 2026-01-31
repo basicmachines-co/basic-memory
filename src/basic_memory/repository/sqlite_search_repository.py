@@ -13,6 +13,7 @@ from basic_memory import db
 from basic_memory.models.search import CREATE_SEARCH_INDEX
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -25,6 +26,17 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     - Special character quoting for syntax safety
     - Prefix wildcard matching with *
     """
+
+    def __init__(self, session_maker, project_id: int):
+        super().__init__(session_maker, project_id)
+        self._entity_columns: set[str] | None = None
+
+    async def _get_entity_columns(self) -> set[str]:
+        if self._entity_columns is None:
+            async with db.scoped_session(self.session_maker) as session:
+                result = await session.execute(text("PRAGMA table_info(entity)"))
+                self._entity_columns = {row[1] for row in result.fetchall()}
+        return self._entity_columns
 
     async def init_search_index(self):
         """Create FTS5 virtual table for search if it doesn't exist.
@@ -287,6 +299,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -294,6 +307,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         conditions = []
         params = {}
         order_by_clause = ""
+        from_clause = "search_index"
 
         # Handle text search for title and content
         if search_text:
@@ -305,18 +319,20 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 # Use _prepare_search_term to handle both Boolean and non-Boolean queries
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
-                conditions.append("(title MATCH :text OR content_stems MATCH :text)")
+                conditions.append(
+                    "(search_index.title MATCH :text OR search_index.content_stems MATCH :text)"
+                )
 
         # Handle title match search
         if title:
             title_text = self._prepare_search_term(title.strip(), is_prefix=False)
             params["title_text"] = title_text
-            conditions.append("title MATCH :title_text")
+            conditions.append("search_index.title MATCH :title_text")
 
         # Handle permalink exact search
         if permalink:
             params["permalink"] = permalink
-            conditions.append("permalink = :permalink")
+            conditions.append("search_index.permalink = :permalink")
 
         # Handle permalink match search, supports *
         if permalink_match:
@@ -325,38 +341,122 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             permalink_text = permalink_match.lower().strip()
             params["permalink"] = permalink_text
             if "*" in permalink_match:
-                conditions.append("permalink GLOB :permalink")
+                conditions.append("search_index.permalink GLOB :permalink")
             else:
                 # For exact matches without *, we can use FTS5 MATCH
                 # but only prepare the term if it doesn't look like a path
                 if "/" in permalink_text:
-                    conditions.append("permalink = :permalink")
+                    conditions.append("search_index.permalink = :permalink")
                 else:
                     permalink_text = self._prepare_search_term(permalink_text, is_prefix=False)
                     params["permalink"] = permalink_text
-                    conditions.append("permalink MATCH :permalink")
+                    conditions.append("search_index.permalink MATCH :permalink")
 
         # Handle entity type filter
         if search_item_types:
             type_list = ", ".join(f"'{t.value}'" for t in search_item_types)
-            conditions.append(f"type IN ({type_list})")
+            conditions.append(f"search_index.type IN ({type_list})")
 
         # Handle type filter
         if types:
             type_list = ", ".join(f"'{t}'" for t in types)
-            conditions.append(f"json_extract(metadata, '$.entity_type') IN ({type_list})")
+            conditions.append(
+                f"json_extract(search_index.metadata, '$.entity_type') IN ({type_list})"
+            )
 
         # Handle date filter using datetime() for proper comparison
         if after_date:
             params["after_date"] = after_date
-            conditions.append("datetime(created_at) > datetime(:after_date)")
+            conditions.append("datetime(search_index.created_at) > datetime(:after_date)")
 
             # order by most recent first
-            order_by_clause = ", updated_at DESC"
+            order_by_clause = ", search_index.updated_at DESC"
+
+        # Handle structured metadata filters (frontmatter)
+        if metadata_filters:
+            parsed_filters = parse_metadata_filters(metadata_filters)
+            from_clause = "search_index JOIN entity ON search_index.entity_id = entity.id"
+            entity_columns = await self._get_entity_columns()
+
+            for idx, filt in enumerate(parsed_filters):
+                path_param = f"meta_path_{idx}"
+                extract_expr = None
+                use_tags_column = False
+
+                if filt.path_parts == ["status"] and "frontmatter_status" in entity_columns:
+                    extract_expr = "entity.frontmatter_status"
+                elif filt.path_parts == ["type"] and "frontmatter_type" in entity_columns:
+                    extract_expr = "entity.frontmatter_type"
+                elif filt.path_parts == ["tags"] and "tags_json" in entity_columns:
+                    extract_expr = "entity.tags_json"
+                    use_tags_column = True
+
+                if extract_expr is None:
+                    params[path_param] = build_sqlite_json_path(filt.path_parts)
+                    extract_expr = f"json_extract(entity.entity_metadata, :{path_param})"
+
+                if filt.op == "eq":
+                    value_param = f"meta_val_{idx}"
+                    params[value_param] = filt.value
+                    conditions.append(f"{extract_expr} = :{value_param}")
+                    continue
+
+                if filt.op == "in":
+                    placeholders = []
+                    for j, val in enumerate(filt.value):
+                        value_param = f"meta_val_{idx}_{j}"
+                        params[value_param] = val
+                        placeholders.append(f":{value_param}")
+                    conditions.append(f"{extract_expr} IN ({', '.join(placeholders)})")
+                    continue
+
+                if filt.op == "contains":
+                    tag_conditions = []
+                    for j, val in enumerate(filt.value):
+                        value_param = f"meta_val_{idx}_{j}"
+                        params[value_param] = val
+                        like_param = f"{value_param}_like"
+                        params[like_param] = f'%"{val}"%'
+                        like_param_single = f"{value_param}_like_single"
+                        params[like_param_single] = f"%'{val}'%"
+                        json_each_expr = (
+                            "json_each(entity.tags_json)"
+                            if use_tags_column
+                            else f"json_each(entity.entity_metadata, :{path_param})"
+                        )
+                        tag_conditions.append(
+                            "("
+                            f"EXISTS (SELECT 1 FROM {json_each_expr} WHERE value = :{value_param}) "
+                            f"OR {extract_expr} LIKE :{like_param} "
+                            f"OR {extract_expr} LIKE :{like_param_single}"
+                            ")"
+                        )
+                    conditions.append(" AND ".join(tag_conditions))
+                    continue
+
+                if filt.op in {"gt", "gte", "lt", "lte", "between"}:
+                    compare_expr = (
+                        f"CAST({extract_expr} AS REAL)"
+                        if filt.comparison == "numeric"
+                        else extract_expr
+                    )
+
+                    if filt.op == "between":
+                        min_param = f"meta_val_{idx}_min"
+                        max_param = f"meta_val_{idx}_max"
+                        params[min_param] = filt.value[0]
+                        params[max_param] = filt.value[1]
+                        conditions.append(f"{compare_expr} BETWEEN :{min_param} AND :{max_param}")
+                    else:
+                        value_param = f"meta_val_{idx}"
+                        params[value_param] = filt.value
+                        operator = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}[filt.op]
+                        conditions.append(f"{compare_expr} {operator} :{value_param}")
+                    continue
 
         # Always filter by project_id
         params["project_id"] = self.project_id
-        conditions.append("project_id = :project_id")
+        conditions.append("search_index.project_id = :project_id")
 
         # set limit on search query
         params["limit"] = limit
@@ -367,23 +467,23 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         sql = f"""
             SELECT
-                project_id,
-                id,
-                title,
-                permalink,
-                file_path,
-                type,
-                metadata,
-                from_id,
-                to_id,
-                relation_type,
-                entity_id,
-                content_snippet,
-                category,
-                created_at,
-                updated_at,
+                search_index.project_id,
+                search_index.id,
+                search_index.title,
+                search_index.permalink,
+                search_index.file_path,
+                search_index.type,
+                search_index.metadata,
+                search_index.from_id,
+                search_index.to_id,
+                search_index.relation_type,
+                search_index.entity_id,
+                search_index.content_snippet,
+                search_index.category,
+                search_index.created_at,
+                search_index.updated_at,
                 bm25(search_index) as score
-            FROM search_index
+            FROM {from_clause}
             WHERE {where_clause}
             ORDER BY score ASC {order_by_clause}
             LIMIT :limit

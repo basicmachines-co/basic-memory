@@ -12,6 +12,7 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.metadata_filters import parse_metadata_filters, build_postgres_json_path
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -215,6 +216,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -222,6 +224,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         conditions = []
         params = {}
         order_by_clause = ""
+        from_clause = "search_index"
 
         # Handle text search for title and content using tsvector
         if search_text:
@@ -233,18 +236,22 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
                 # Use @@ operator for tsvector matching
-                conditions.append("textsearchable_index_col @@ to_tsquery('english', :text)")
+                conditions.append(
+                    "search_index.textsearchable_index_col @@ to_tsquery('english', :text)"
+                )
 
         # Handle title search
         if title:
             title_text = self._prepare_search_term(title.strip(), is_prefix=False)
             params["title_text"] = title_text
-            conditions.append("to_tsvector('english', title) @@ to_tsquery('english', :title_text)")
+            conditions.append(
+                "to_tsvector('english', search_index.title) @@ to_tsquery('english', :title_text)"
+            )
 
         # Handle permalink exact search
         if permalink:
             params["permalink"] = permalink
-            conditions.append("permalink = :permalink")
+            conditions.append("search_index.permalink = :permalink")
 
         # Handle permalink pattern match
         if permalink_match:
@@ -255,14 +262,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # Convert * to % for SQL LIKE
                 permalink_pattern = permalink_text.replace("*", "%")
                 params["permalink"] = permalink_pattern
-                conditions.append("permalink LIKE :permalink")
+                conditions.append("search_index.permalink LIKE :permalink")
             else:
-                conditions.append("permalink = :permalink")
+                conditions.append("search_index.permalink = :permalink")
 
         # Handle search item type filter
         if search_item_types:
             type_list = ", ".join(f"'{t.value}'" for t in search_item_types)
-            conditions.append(f"type IN ({type_list})")
+            conditions.append(f"search_index.type IN ({type_list})")
 
         # Handle entity type filter using JSONB containment
         if types:
@@ -270,19 +277,90 @@ class PostgresSearchRepository(SearchRepositoryBase):
             type_conditions = []
             for entity_type in types:
                 # Create JSONB containment condition for each type
-                type_conditions.append(f'metadata @> \'{{"entity_type": "{entity_type}"}}\'')
+                type_conditions.append(
+                    f'search_index.metadata @> \'{{"entity_type": "{entity_type}"}}\''
+                )
             conditions.append(f"({' OR '.join(type_conditions)})")
 
         # Handle date filter
         if after_date:
             params["after_date"] = after_date
-            conditions.append("created_at > :after_date")
+            conditions.append("search_index.created_at > :after_date")
             # order by most recent first
-            order_by_clause = ", updated_at DESC"
+            order_by_clause = ", search_index.updated_at DESC"
+
+        # Handle structured metadata filters (frontmatter)
+        if metadata_filters:
+            parsed_filters = parse_metadata_filters(metadata_filters)
+            from_clause = "search_index JOIN entity ON search_index.entity_id = entity.id"
+            metadata_expr = "entity.entity_metadata::jsonb"
+
+            for idx, filt in enumerate(parsed_filters):
+                path = build_postgres_json_path(filt.path_parts)
+                text_expr = f"({metadata_expr} #>> '{path}')"
+                json_expr = f"({metadata_expr} #> '{path}')"
+
+                if filt.op == "eq":
+                    value_param = f"meta_val_{idx}"
+                    params[value_param] = filt.value
+                    conditions.append(f"{text_expr} = :{value_param}")
+                    continue
+
+                if filt.op == "in":
+                    placeholders = []
+                    for j, val in enumerate(filt.value):
+                        value_param = f"meta_val_{idx}_{j}"
+                        params[value_param] = val
+                        placeholders.append(f":{value_param}")
+                    conditions.append(f"{text_expr} IN ({', '.join(placeholders)})")
+                    continue
+
+                if filt.op == "contains":
+                    import json as _json
+
+                    tag_conditions = []
+                    # Require all values to be present
+                    for j, val in enumerate(filt.value):
+                        tag_param = f"{value_param}_{j}"
+                        params[tag_param] = _json.dumps([val])
+                        like_param = f"{value_param}_{j}_like"
+                        params[like_param] = f'%"{val}"%'
+                        like_param_single = f"{value_param}_{j}_like_single"
+                        params[like_param_single] = f"%'{val}'%"
+                        tag_conditions.append(
+                            f"({json_expr} @> :{tag_param}::jsonb "
+                            f"OR {text_expr} LIKE :{like_param} "
+                            f"OR {text_expr} LIKE :{like_param_single})"
+                        )
+                    conditions.append(" AND ".join(tag_conditions))
+                    continue
+
+                if filt.op in {"gt", "gte", "lt", "lte", "between"}:
+                    if filt.comparison == "numeric":
+                        numeric_expr = (
+                            f"CASE WHEN ({text_expr}) ~ '^-?\\\\d+(\\\\.\\\\d+)?$' "
+                            f"THEN ({text_expr})::double precision END"
+                        )
+                        compare_expr = numeric_expr
+                    else:
+                        compare_expr = text_expr
+
+                    if filt.op == "between":
+                        min_param = f"meta_val_{idx}_min"
+                        max_param = f"meta_val_{idx}_max"
+                        params[min_param] = filt.value[0]
+                        params[max_param] = filt.value[1]
+                        conditions.append(f"{compare_expr} BETWEEN :{min_param} AND :{max_param}")
+                    else:
+                        value_param = f"meta_val_{idx}"
+                        params[value_param] = filt.value
+                        operator = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}[filt.op]
+                        conditions.append(f"{compare_expr} {operator} :{value_param}")
+                    continue
 
         # Always filter by project_id
         params["project_id"] = self.project_id
-        conditions.append("project_id = :project_id")
+        conditions.append("search_index.project_id = :project_id")
 
         # set limit and offset
         params["limit"] = limit
@@ -294,31 +372,31 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Build SQL with ts_rank() for scoring
         # Note: If no text search, score will be NULL, so we use COALESCE to default to 0
         if search_text and search_text.strip() and search_text.strip() != "*":
-            score_expr = "ts_rank(textsearchable_index_col, to_tsquery('english', :text))"
+            score_expr = "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text))"
         else:
             score_expr = "0"
 
         sql = f"""
             SELECT
-                project_id,
-                id,
-                title,
-                permalink,
-                file_path,
-                type,
-                metadata,
-                from_id,
-                to_id,
-                relation_type,
-                entity_id,
-                content_snippet,
-                category,
-                created_at,
-                updated_at,
+                search_index.project_id,
+                search_index.id,
+                search_index.title,
+                search_index.permalink,
+                search_index.file_path,
+                search_index.type,
+                search_index.metadata,
+                search_index.from_id,
+                search_index.to_id,
+                search_index.relation_type,
+                search_index.entity_id,
+                search_index.content_snippet,
+                search_index.category,
+                search_index.created_at,
+                search_index.updated_at,
                 {score_expr} as score
-            FROM search_index
+            FROM {from_clause}
             WHERE {where_clause}
-            ORDER BY score DESC, id ASC {order_by_clause}
+            ORDER BY score DESC, search_index.id ASC {order_by_clause}
             LIMIT :limit
             OFFSET :offset
         """

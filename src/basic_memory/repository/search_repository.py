@@ -40,6 +40,7 @@ class SearchRepository(Protocol):
         types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
+        metadata_filters: Optional[dict] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:

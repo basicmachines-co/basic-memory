@@ -6,7 +6,7 @@ The search system supports three primary modes:
 3. Full-text search across content
 """
 
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Any
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, field_validator
@@ -32,9 +32,12 @@ class SearchQuery(BaseModel):
     - title: Title only search
 
     Optionally filter results by:
-    - types: Limit to specific item types
-    - entity_types: Limit to specific entity types
+    - types: Limit to specific entity types (frontmatter "type")
+    - entity_types: Limit to search item types (entity/observation/relation)
     - after_date: Only items after date
+    - metadata_filters: Structured frontmatter filters (field -> value)
+    - tags: Convenience frontmatter tag filter
+    - status: Convenience frontmatter status filter
 
     Boolean search examples:
     - "python AND flask" - Find items with both terms
@@ -53,6 +56,9 @@ class SearchQuery(BaseModel):
     types: Optional[List[str]] = None  # Filter by type
     entity_types: Optional[List[SearchItemType]] = None  # Filter by entity type
     after_date: Optional[Union[datetime, str]] = None  # Time-based filter
+    metadata_filters: Optional[dict[str, Any]] = None  # Structured frontmatter filters
+    tags: Optional[List[str]] = None  # Convenience tag filter
+    status: Optional[str] = None  # Convenience status filter
 
     @field_validator("after_date")
     @classmethod
@@ -63,14 +69,23 @@ class SearchQuery(BaseModel):
         return v
 
     def no_criteria(self) -> bool:
+        text_is_empty = self.text is None or (isinstance(self.text, str) and not self.text.strip())
+        metadata_is_empty = not self.metadata_filters
+        tags_is_empty = not self.tags
+        status_is_empty = self.status is None or (isinstance(self.status, str) and not self.status)
+        types_is_empty = not self.types
+        entity_types_is_empty = not self.entity_types
         return (
             self.permalink is None
             and self.permalink_match is None
             and self.title is None
-            and self.text is None
+            and text_is_empty
             and self.after_date is None
-            and self.types is None
-            and self.entity_types is None
+            and types_is_empty
+            and entity_types_is_empty
+            and metadata_is_empty
+            and tags_is_empty
+            and status_is_empty
         )
 
     def has_boolean_operators(self) -> bool:

@@ -1038,6 +1038,35 @@ recent_decisions = await search_notes(
 )
 ```
 
+**Structured frontmatter filters**:
+
+```python
+# Filter by tags and status
+results = await search_notes(
+    query="authentication",
+    tags=["security"],
+    status="in-progress",
+    project="main"
+)
+
+# Complex metadata filters (supports $in, $gt, $gte, $lt, $lte, $between)
+results = await search_notes(
+    query="api design",
+    metadata_filters={
+        "type": "spec",
+        "priority": {"$in": ["high", "critical"]},
+        "tags": ["architecture"]
+    },
+    project="main"
+)
+
+# Metadata-only search
+results = await search_by_metadata(
+    filters={"type": "spec", "status": "in-progress"},
+    project="main"
+)
+```
+
 ### Search Types
 
 **Text search (default)**:
@@ -2861,7 +2890,7 @@ contents = await list_directory(
 
 ### Search & Discovery
 
-**search_notes(query, page, page_size, search_type, types, entity_types, after_date, project)**
+**search_notes(query, page, page_size, search_type, types, entity_types, after_date, metadata_filters, tags, status, project)**
 - Search across knowledge base
 - Parameters:
   - `query` (required): Search query
@@ -2871,6 +2900,9 @@ contents = await list_directory(
   - `types` (optional): Entity type filter
   - `entity_types` (optional): Observation category filter
   - `after_date` (optional): Date filter (ISO format)
+  - `metadata_filters` (optional): Structured frontmatter filters (dict)
+  - `tags` (optional): Frontmatter tags filter (list)
+  - `status` (optional): Frontmatter status filter (string)
   - `project` (required unless default_project_mode): Target project
 - Returns: Matching entities with scores
 - Example:
@@ -2879,6 +2911,22 @@ results = await search_notes(
     query="authentication",
     types=["spec", "decision"],
     after_date="2025-01-01",
+    project="main"
+)
+```
+
+**search_by_metadata(filters, limit, offset, project)**
+- Metadata-only search using structured frontmatter
+- Parameters:
+  - `filters` (required): Dict of field -> value (supports $in, $gt/$gte/$lt/$lte, $between)
+  - `limit` (optional): Max results (default: 20)
+  - `offset` (optional): Pagination offset (default: 0)
+  - `project` (required unless default_project_mode): Target project
+- Returns: Matching entities
+- Example:
+```python
+results = await search_by_metadata(
+    filters={"type": "spec", "status": "in-progress"},
     project="main"
 )
 ```

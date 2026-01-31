@@ -1,7 +1,7 @@
 """Search tools for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from loguru import logger
 from fastmcp import Context
@@ -207,6 +207,9 @@ async def search_notes(
     types: List[str] | None = None,
     entity_types: List[str] | None = None,
     after_date: Optional[str] = None,
+    metadata_filters: Optional[Dict[str, Any]] = None,
+    tags: Optional[List[str]] = None,
+    status: Optional[str] = None,
     context: Context | None = None,
 ) -> SearchResponse | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
@@ -248,6 +251,27 @@ async def search_notes(
     - `search_notes("research", "query", entity_types=["observation"])` - Filter by entity type
     - `search_notes("team-docs", "query", after_date="2024-01-01")` - Recent content only
     - `search_notes("my-project", "query", after_date="1 week")` - Relative date filtering
+    - `search_notes("my-project", "query", tags=["security"])` - Filter by frontmatter tags
+    - `search_notes("my-project", "query", status="in-progress")` - Filter by frontmatter status
+    - `search_notes("my-project", "query", metadata_filters={"priority": {"$in": ["high"]}})`
+
+    ### Structured Metadata Filters
+    Filters are exact matches on frontmatter metadata. Supported forms:
+    - Equality: `{"status": "in-progress"}`
+    - Array contains (all): `{"tags": ["security", "oauth"]}`
+    - Operators:
+      - `$in`: `{"priority": {"$in": ["high", "critical"]}}`
+      - `$gt`, `$gte`, `$lt`, `$lte`: `{"schema.confidence": {"$gt": 0.7}}`
+      - `$between`: `{"schema.confidence": {"$between": [0.3, 0.6]}}`
+    - Nested keys use dot notation (e.g., `"schema.confidence"`).
+
+    ### Filter-only Searches
+    You can pass an empty query string when only using structured filters:
+    - `search_notes("my-project", "", metadata_filters={"type": "spec"})`
+
+    ### Convenience Filters
+    `tags` and `status` are shorthand for metadata_filters. If the same key exists in
+    metadata_filters, that value wins.
 
     ### Advanced Pattern Examples
     - `search_notes("work-project", "project AND (meeting OR discussion)")` - Complex boolean logic
@@ -265,6 +289,9 @@ async def search_notes(
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
+        metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"})
+        tags: Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"]
+        status: Optional status filter (frontmatter status); shorthand for metadata_filters["status"]
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -355,6 +382,12 @@ async def search_notes(
         search_query.types = types
     if after_date:
         search_query.after_date = after_date
+    if metadata_filters:
+        search_query.metadata_filters = metadata_filters
+    if tags:
+        search_query.tags = tags
+    if status:
+        search_query.status = status
 
     async with get_client() as client:
         active_project = await get_active_project(client, project, context)
@@ -387,3 +420,82 @@ async def search_notes(
             logger.error(f"Search failed for query '{query}': {e}, project: {active_project.name}")
             # Return formatted error message as string for better user experience
             return _format_search_error_response(active_project.name, str(e), query, search_type)
+
+
+@mcp.tool(
+    description="Search entities by structured frontmatter metadata.",
+)
+async def search_by_metadata(
+    filters: Dict[str, Any],
+    project: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+    context: Context | None = None,
+) -> SearchResponse | str:
+    """Search entities by structured frontmatter metadata.
+
+    Args:
+        filters: Dictionary of metadata filters (e.g., {"status": "in-progress"})
+        project: Project name to search in. Optional - server will resolve using hierarchy.
+        limit: Maximum number of results to return
+        offset: Number of results to skip (for pagination)
+        context: Optional FastMCP context for performance caching.
+
+    Returns:
+        SearchResponse with results, or helpful error guidance if search fails
+    """
+    if limit <= 0:
+        return "# Error\n\n`limit` must be greater than 0."
+
+    # Build a structured-only search query
+    search_query = SearchQuery()
+    search_query.metadata_filters = filters
+    search_query.entity_types = [SearchItemType.ENTITY]
+
+    # Convert offset/limit to page/page_size (API uses paging)
+    page_size = limit
+    page = (offset // limit) + 1
+    offset_within_page = offset % limit
+
+    async with get_client() as client:
+        active_project = await get_active_project(client, project, context)
+        logger.info(
+            f"Structured search in project {active_project.name} filters={filters} limit={limit} offset={offset}"
+        )
+
+        try:
+            from basic_memory.mcp.clients import SearchClient
+
+            search_client = SearchClient(client, active_project.external_id)
+            result = await search_client.search(
+                search_query.model_dump(),
+                page=page,
+                page_size=page_size,
+            )
+
+            # Apply offset within page, fetch next page if needed
+            if offset_within_page:
+                remaining = result.results[offset_within_page:]
+                if len(remaining) < limit:
+                    next_page = page + 1
+                    extra = await search_client.search(
+                        search_query.model_dump(),
+                        page=next_page,
+                        page_size=page_size,
+                    )
+                    remaining.extend(extra.results[: max(0, limit - len(remaining))])
+                result = SearchResponse(
+                    results=remaining[:limit],
+                    current_page=page,
+                    page_size=page_size,
+                )
+
+            return result
+
+        except Exception as e:
+            logger.error(
+                f"Metadata search failed for filters '{filters}': {e}, project: {active_project.name}"
+            )
+            return _format_search_error_response(
+                active_project.name, str(e), str(filters), "metadata"
+            )

@@ -396,6 +396,8 @@ list_directory(dir_name, depth) - Browse directory contents with filtering
 **Search & Discovery:**
 ```
 search(query, page, page_size) - Search across your knowledge base
+search_notes(query, page, page_size, search_type, types, entity_types, after_date, metadata_filters, tags, status, project) - Search with filters
+search_by_metadata(filters, limit, offset, project) - Structured frontmatter search
 ```
 
 **Project Management:**

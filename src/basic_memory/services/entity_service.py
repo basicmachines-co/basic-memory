@@ -18,7 +18,7 @@ from basic_memory.file_utils import (
     dump_frontmatter,
 )
 from basic_memory.markdown import EntityMarkdown
-from basic_memory.markdown.entity_parser import EntityParser
+from basic_memory.markdown.entity_parser import EntityParser, normalize_frontmatter_metadata
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
 from basic_memory.models import Entity as EntityModel
 from basic_memory.models import Observation, Relation
@@ -392,8 +392,8 @@ class EntityService(BaseService[EntityModel]):
         checksum = await self.file_service.write_file(file_path, final_content)
 
         # --- Minimal DB Upsert ---
-        metadata = post.metadata or {}
-        entity_metadata = {k: str(v) for k, v in metadata.items() if v is not None}
+        metadata = normalize_frontmatter_metadata(post.metadata or {})
+        entity_metadata = {k: v for k, v in metadata.items() if v is not None}
         update_data = {
             "title": schema.title,
             "entity_type": schema.entity_type,
@@ -458,10 +458,8 @@ class EntityService(BaseService[EntityModel]):
                     content_frontmatter["permalink"],
                 )
 
-            metadata = content_frontmatter or {}
-            update_data["entity_metadata"] = {
-                k: str(v) for k, v in metadata.items() if v is not None
-            }
+            metadata = normalize_frontmatter_metadata(content_frontmatter or {})
+            update_data["entity_metadata"] = {k: v for k, v in metadata.items() if v is not None}
 
         # --- Permalink Resolution ---
         if self.app_config and self.app_config.disable_permalinks:

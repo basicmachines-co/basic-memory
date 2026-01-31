@@ -2,7 +2,7 @@
 
 import ast
 from datetime import datetime
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict, Any
 
 
 from dateparser import parse
@@ -95,6 +95,15 @@ class SearchService:
             else None
         )
 
+        # Merge structured metadata filters (explicit + convenience fields)
+        metadata_filters: Optional[Dict[str, Any]] = None
+        if query.metadata_filters or query.tags or query.status:
+            metadata_filters = dict(query.metadata_filters or {})
+            if query.tags:
+                metadata_filters.setdefault("tags", query.tags)
+            if query.status:
+                metadata_filters.setdefault("status", query.status)
+
         # search
         results = await self.repository.search(
             search_text=query.text,
@@ -104,6 +113,7 @@ class SearchService:
             types=query.types,
             search_item_types=query.entity_types,
             after_date=after_date,
+            metadata_filters=metadata_filters,
             limit=limit,
             offset=offset,
         )

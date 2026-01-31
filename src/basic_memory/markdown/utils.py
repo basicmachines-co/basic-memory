@@ -9,6 +9,7 @@ from frontmatter import Post
 
 from basic_memory.file_utils import has_frontmatter, remove_frontmatter, parse_frontmatter
 from basic_memory.markdown import EntityMarkdown
+from basic_memory.markdown.entity_parser import normalize_frontmatter_metadata
 from basic_memory.models import Entity
 from basic_memory.models import Observation as ObservationModel
 
@@ -58,9 +59,9 @@ def entity_model_from_markdown(
     model.created_at = markdown.created
     model.updated_at = markdown.modified
 
-    # Handle metadata - ensure all values are strings and filter None
-    metadata = markdown.frontmatter.metadata or {}
-    model.entity_metadata = {k: str(v) for k, v in metadata.items() if v is not None}
+    # Handle metadata - normalize values and filter None (preserve structured data)
+    metadata = normalize_frontmatter_metadata(markdown.frontmatter.metadata or {})
+    model.entity_metadata = {k: v for k, v in metadata.items() if v is not None}
 
     # Get project_id from entity if not provided
     obs_project_id = project_id or (model.project_id if hasattr(model, "project_id") else None)

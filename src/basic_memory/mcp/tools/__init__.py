@@ -13,7 +13,7 @@ from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.view_note import view_note
 from basic_memory.mcp.tools.write_note import write_note
-from basic_memory.mcp.tools.search import search_notes
+from basic_memory.mcp.tools.search import search_notes, search_by_metadata
 from basic_memory.mcp.tools.canvas import canvas
 from basic_memory.mcp.tools.list_directory import list_directory
 from basic_memory.mcp.tools.edit_note import edit_note
@@ -42,6 +42,7 @@ __all__ = [
     "read_note",
     "recent_activity",
     "search",
+    "search_by_metadata",
     "search_notes",
     "view_note",
     "write_note",
