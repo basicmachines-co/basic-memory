@@ -22,6 +22,7 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
     TaskSchedulerDep,
+    FileServiceV2ExternalDep,
 )
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.base import Entity
@@ -167,6 +168,7 @@ async def create_entity(
     entity_service: EntityServiceV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
+    file_service: FileServiceV2ExternalDep,
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
     ),
@@ -178,7 +180,7 @@ async def create_entity(
         fast: If True, defer indexing to background tasks
 
     Returns:
-        Created entity with generated external_id (UUID)
+        Created entity with generated external_id (UUID) and file content
     """
     logger.info(
         "API v2 request", endpoint="create_entity", entity_type=data.entity_type, title=data.title
@@ -199,6 +201,10 @@ async def create_entity(
     if fast:
         result = result.model_copy(update={"observations": [], "relations": []})
 
+    # Always read and return file content
+    content = await file_service.read_file_content(entity.file_path)
+    result = result.model_copy(update={"content": content})
+
     logger.info(
         f"API v2 response: endpoint='create_entity' external_id={entity.external_id}, title={result.title}, permalink={result.permalink}, status_code=201"
     )
@@ -218,6 +224,7 @@ async def update_entity_by_id(
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
+    file_service: FileServiceV2ExternalDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
@@ -233,7 +240,7 @@ async def update_entity_by_id(
         fast: If True, defer indexing to background tasks
 
     Returns:
-        Updated entity
+        Updated entity with file content
     """
     logger.info(f"API v2 request: update_entity_by_id entity_id={entity_id}")
 
@@ -276,6 +283,10 @@ async def update_entity_by_id(
     if fast:
         result = result.model_copy(update={"observations": [], "relations": []})
 
+    # Always read and return file content
+    content = await file_service.read_file_content(entity.file_path)
+    result = result.model_copy(update={"content": content})
+
     logger.info(
         f"API v2 response: external_id={entity_id}, created={created}, status_code={response.status_code}"
     )
@@ -291,6 +302,7 @@ async def edit_entity_by_id(
     search_service: SearchServiceV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
+    file_service: FileServiceV2ExternalDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
@@ -304,7 +316,7 @@ async def edit_entity_by_id(
         fast: If True, defer indexing to background tasks
 
     Returns:
-        Updated entity
+        Updated entity with file content
 
     Raises:
         HTTPException: 404 if entity not found, 400 if edit fails
@@ -352,6 +364,10 @@ async def edit_entity_by_id(
         result = EntityResponseV2.model_validate(updated_entity)
         if fast:
             result = result.model_copy(update={"observations": [], "relations": []})
+
+        # Always read and return file content
+        content = await file_service.read_file_content(updated_entity.file_path)
+        result = result.model_copy(update={"content": content})
 
         logger.info(
             f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=200"

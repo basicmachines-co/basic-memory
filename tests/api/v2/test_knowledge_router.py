@@ -180,6 +180,34 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
 
 
 @pytest.mark.asyncio
+async def test_create_entity_returns_content(client: AsyncClient, file_service, v2_project_url):
+    """Test creating an entity always returns file content with frontmatter."""
+    data = {
+        "title": "TestContentReturn",
+        "directory": "test",
+        "entity_type": "note",
+        "content_type": "text/markdown",
+        "content": "Body content for return test",
+    }
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json=data,
+        params={"fast": False},
+    )
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+
+    # Content should always be populated with frontmatter
+    assert entity.content is not None
+    assert "---" in entity.content  # frontmatter markers
+    assert "title: TestContentReturn" in entity.content
+    assert "type: note" in entity.content
+    assert "permalink:" in entity.content
+    assert data["content"] in entity.content
+
+
+@pytest.mark.asyncio
 async def test_create_entity_with_observations_and_relations(
     client: AsyncClient, file_service, v2_project_url
 ):
