@@ -42,11 +42,11 @@ async def recent_activity_prompt(
     Returns:
         Formatted summary of recent activity
     """
+    timeframe = timeframe or "7d"
     logger.info(f"Getting recent activity, timeframe: {timeframe}, project: {project}")
 
     # Call the tool function - it returns a well-formatted string
-    # Pass type as string values (not enum) to match the tool's expected input
-    activity_summary = await recent_activity.fn(project=project, timeframe=timeframe, type="entity")
+    activity_summary = await recent_activity.fn(project=project, timeframe=timeframe)
 
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly
