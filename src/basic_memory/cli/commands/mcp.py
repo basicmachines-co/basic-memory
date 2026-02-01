@@ -1,21 +1,13 @@
 """MCP server command with streamable HTTP transport."""
 
 import os
-import typer
 from typing import Optional
+
+import typer
+from loguru import logger
 
 from basic_memory.cli.app import app
 from basic_memory.config import ConfigManager, init_mcp_logging
-
-# Import mcp instance (has lifespan that handles initialization and file sync)
-from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
-
-# Import mcp tools to register them
-import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
-
-# Import prompts to register them
-import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
-from loguru import logger
 
 
 @app.command()
@@ -46,6 +38,13 @@ def mcp(
     # Why: The local MCP server should always talk to the local API, not the cloud proxy.
     # Even when cloud_mode_enabled is True, stdio MCP runs locally and needs local API access.
     os.environ["BASIC_MEMORY_FORCE_LOCAL"] = "true"
+
+    # Deferred imports to avoid heavy startup cost for unrelated CLI commands
+    from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
+
+    # Import mcp tools/prompts to register them with the server
+    import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover
+    import basic_memory.mcp.prompts  # noqa: F401  # pragma: no cover
 
     # Initialize logging for MCP (file only, stdout breaks protocol)
     init_mcp_logging()
