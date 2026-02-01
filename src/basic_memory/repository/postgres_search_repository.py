@@ -332,7 +332,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         like_param_single = f"{base_param}_{j}_like_single"
                         params[like_param_single] = f"%'{val}'%"
                         tag_conditions.append(
-                            f"({json_expr} @> :{tag_param}::jsonb "
+                            f"({json_expr} @> CAST(:{tag_param} AS jsonb) "
                             f"OR {text_expr} LIKE :{like_param} "
                             f"OR {text_expr} LIKE :{like_param_single})"
                         )

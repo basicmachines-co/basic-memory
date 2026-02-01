@@ -345,9 +345,9 @@ async def test_boolean_not_search(search_service, test_graph):
 
     # Should find "Root Entity" but not "Connected Entity"
     for result in results:
-        assert "connected" not in result.permalink.lower(), (
-            "Boolean NOT search returned excluded term"
-        )
+        assert (
+            "connected" not in result.permalink.lower()
+        ), "Boolean NOT search returned excluded term"
 
 
 @pytest.mark.asyncio
@@ -366,9 +366,9 @@ async def test_boolean_group_search(search_service, test_graph):
             "root" in result.title.lower() or "connected" in result.title.lower()
         )
 
-        assert contains_entity and contains_root_or_connected, (
-            "Boolean grouped search returned incorrect results"
-        )
+        assert (
+            contains_entity and contains_root_or_connected
+        ), "Boolean grouped search returned incorrect results"
 
 
 @pytest.mark.asyncio
@@ -398,9 +398,9 @@ async def test_boolean_operators_detection(search_service):
 
     for query_text in non_boolean_queries:
         query = SearchQuery(text=query_text)
-        assert not query.has_boolean_operators(), (
-            f"Incorrectly detected boolean operators in: {query_text}"
-        )
+        assert (
+            not query.has_boolean_operators()
+        ), f"Incorrectly detected boolean operators in: {query_text}"
 
 
 # Tests for frontmatter tag search functionality
@@ -512,6 +512,72 @@ async def test_extract_entity_tags_no_tags_key(search_service, session_maker):
 
     tags = search_service._extract_entity_tags(entity)
     assert tags == []
+
+
+@pytest.mark.asyncio
+async def test_search_tag_prefix_maps_to_tags_filter(search_service, entity_service):
+    """`tag:foo` prefix should translate to tags filter and return tagged entities."""
+    from basic_memory.schemas import Entity as EntitySchema
+
+    tagged_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Tagged Note Missing",
+            directory="tags",
+            entity_type="note",
+            content="# Tagged Note",
+            entity_metadata={"tags": ["tier1", "alpha"]},
+        )
+    )
+
+    await search_service.index_entity(tagged_entity)
+
+    results = await search_service.search(SearchQuery(text="tag:tier1"))
+
+    assert any(r.permalink == tagged_entity.permalink for r in results)
+
+
+@pytest.mark.asyncio
+async def test_search_tag_prefix_with_nonexistent_tag_returns_empty(search_service, entity_service):
+    """`tag:missing` should return no results when tags do not match."""
+    from basic_memory.schemas import Entity as EntitySchema
+
+    tagged_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Tagged Note",
+            directory="tags",
+            entity_type="note",
+            content="# Tagged Note",
+            entity_metadata={"tags": ["tier1", "alpha"]},
+        )
+    )
+
+    await search_service.index_entity(tagged_entity)
+
+    results = await search_service.search(SearchQuery(text="tag:missing"))
+
+    assert not results
+
+
+@pytest.mark.asyncio
+async def test_search_tag_prefix_multiple_tags_requires_all(search_service, entity_service):
+    """`tag:tier1,alpha` should match entities containing all listed tags."""
+    from basic_memory.schemas import Entity as EntitySchema
+
+    tagged_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Multi Tagged Note",
+            directory="tags/multi",
+            entity_type="note",
+            content="# Tagged Note",
+            entity_metadata={"tags": ["tier1", "alpha"]},
+        )
+    )
+
+    await search_service.index_entity(tagged_entity)
+
+    results = await search_service.search(SearchQuery(text="tag:tier1,alpha"))
+
+    assert any(r.permalink == tagged_entity.permalink for r in results)
 
 
 @pytest.mark.asyncio

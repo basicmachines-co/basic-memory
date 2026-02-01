@@ -1,6 +1,7 @@
 """Service for search operations."""
 
 import ast
+import re
 from datetime import datetime
 from typing import List, Optional, Set, Dict, Any
 
@@ -79,6 +80,16 @@ class SearchService:
         2. Pattern match: handles * wildcards in paths
         3. Text search: full-text search across title/content
         """
+        # Support tag:<tag> shorthand by mapping to tags filter
+        if query.text:
+            text = query.text.strip()
+            if text.lower().startswith("tag:"):
+                tag_values = re.split(r"[,\s]+", text[4:].strip())
+                tags = [t for t in tag_values if t]
+                if tags:
+                    query.tags = tags
+                    query.text = None
+
         if query.no_criteria():
             logger.debug("no criteria passed to query")
             return []
