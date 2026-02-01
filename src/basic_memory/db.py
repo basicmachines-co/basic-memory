@@ -83,7 +83,15 @@ class DatabaseType(Enum):
             logger.info(f"Using Postgres database: {config.database_url}")
             return config.database_url
 
-        # SQLite databases
+        # --- SQLite URL Handling ---
+        # Trigger: database_url is set with a SQLite URL
+        # Why: allows custom SQLite paths via URL configuration
+        # Outcome: use the provided URL instead of constructing from db_path
+        if config.database_url and config.database_url.startswith("sqlite"):
+            logger.info(f"Using SQLite database from URL: {config.database_url}")
+            return config.database_url
+
+        # SQLite databases (default behavior)
         if db_type == cls.MEMORY:
             logger.info("Using in-memory SQLite database")
             return "sqlite+aiosqlite://"
@@ -206,6 +214,34 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
     return engine
 
 
+def extract_search_path_from_url(db_url: str) -> tuple[str, str]:
+    """Extract search_path from Postgres URL and return clean URL.
+
+    Args:
+        db_url: Postgres connection URL, possibly with ?search_path=schema
+
+    Returns:
+        Tuple of (clean_url without search_path, search_path value)
+
+    Why: asyncpg rejects search_path as a URL query parameter, so we extract it
+    and pass it via server_settings instead.
+    """
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+    parsed = urlparse(db_url)
+    query_params = parse_qs(parsed.query)
+
+    # Extract search_path, default to "public"
+    search_path_list = query_params.pop("search_path", ["public"])
+    search_path = search_path_list[0] if search_path_list else "public"
+
+    # Rebuild URL without search_path
+    new_query = urlencode(query_params, doseq=True)
+    clean_url = urlunparse(parsed._replace(query=new_query))
+
+    return clean_url, search_path
+
+
 def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngine:
     """Create Postgres async engine with appropriate configuration.
 
@@ -216,10 +252,16 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
     Returns:
         Configured async engine for Postgres
     """
+    # --- Extract search_path from URL ---
+    # Trigger: URL contains ?search_path=schema parameter
+    # Why: asyncpg rejects search_path as URL param, must pass via server_settings
+    # Outcome: clean URL for asyncpg, search_path passed to server_settings
+    clean_url, search_path = extract_search_path_from_url(db_url)
+
     # Use NullPool connection issues.
     # Assume connection pooler like PgBouncer handles connection pooling.
     engine = create_async_engine(
-        db_url,
+        clean_url,
         echo=False,
         poolclass=NullPool,  # No pooling - fresh connection per request
         connect_args={
@@ -233,10 +275,12 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
                 "application_name": "basic-memory",
                 # Statement timeout for queries (30s to allow for cold start)
                 "statement_timeout": "30s",
+                # Schema isolation via search_path (extracted from URL or default "public")
+                "search_path": search_path,
             },
         },
     )
-    logger.debug("Created Postgres engine with NullPool (no connection pooling)")
+    logger.debug(f"Created Postgres engine with search_path={search_path}")
 
     return engine
 
@@ -365,6 +409,44 @@ async def engine_session_factory(
             _session_maker = None
 
 
+def get_search_path_from_config(app_config: BasicMemoryConfig) -> Optional[str]:
+    """Extract search_path from config's database_url if present.
+
+    Args:
+        app_config: BasicMemoryConfig with database_url
+
+    Returns:
+        search_path value if present and not "public", else None
+    """
+    if not app_config.database_url:
+        return None
+
+    if not app_config.database_url.startswith("postgresql"):
+        return None
+
+    _, search_path = extract_search_path_from_url(app_config.database_url)
+    return search_path if search_path != "public" else None
+
+
+async def ensure_schema_exists(engine: AsyncEngine, schema: str) -> None:
+    """Create schema if it doesn't exist (Postgres only).
+
+    Args:
+        engine: AsyncEngine connected to Postgres
+        schema: Schema name to create
+
+    Why: When using search_path for schema isolation, the schema must exist
+    before migrations can create tables in it.
+    """
+    if not schema or schema == "public":
+        return
+
+    async with engine.begin() as conn:
+        # Use text() to execute raw SQL - schema names are trusted config values
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+    logger.info(f"Ensured schema exists: {schema}")
+
+
 async def run_migrations(
     app_config: BasicMemoryConfig, database_type=DatabaseType.FILESYSTEM
 ):  # pragma: no cover
@@ -392,6 +474,22 @@ async def run_migrations(
         # No URL conversion needed - env.py now handles both async and sync engines
         db_url = DatabaseType.get_db_url(app_config.database_path, database_type, app_config)
         config.set_main_option("sqlalchemy.url", db_url)
+
+        # --- Schema Creation for Postgres ---
+        # Trigger: Postgres backend with non-public search_path in URL
+        # Why: schema must exist before Alembic can create tables in it
+        # Outcome: CREATE SCHEMA IF NOT EXISTS runs before migrations
+        search_path = get_search_path_from_config(app_config)
+        if search_path and (
+            database_type == DatabaseType.POSTGRES
+            or app_config.database_backend == DatabaseBackend.POSTGRES
+        ):
+            # Create a temporary engine just for schema creation
+            temp_engine = _create_postgres_engine(db_url, app_config)
+            try:
+                await ensure_schema_exists(temp_engine, search_path)
+            finally:
+                await temp_engine.dispose()
 
         command.upgrade(config, "head")
         logger.info("Migrations completed successfully")

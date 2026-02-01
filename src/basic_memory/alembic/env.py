@@ -98,14 +98,50 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def get_version_table_schema(connection) -> str | None:
+    """Determine the schema for Alembic's version table.
+
+    Args:
+        connection: Database connection
+
+    Returns:
+        Schema name if Postgres with non-public search_path, else None
+
+    Why: When using schema isolation, Alembic's alembic_version table should
+    be in the same schema as the application tables.
+    """
+    if connection.dialect.name != "postgresql":
+        return None
+
+    # Check if database_url has search_path parameter
+    if not app_config.database_url or "search_path=" not in app_config.database_url:
+        return None
+
+    from urllib.parse import urlparse, parse_qs
+
+    parsed = urlparse(app_config.database_url)
+    query_params = parse_qs(parsed.query)
+    search_path = query_params.get("search_path", ["public"])[0]
+
+    # Only set version_table_schema for non-public schemas
+    return search_path if search_path != "public" else None
+
+
 def do_run_migrations(connection):
     """Execute migrations with the given connection."""
+    # --- Schema-Aware Migration Tracking ---
+    # Trigger: Postgres with non-public search_path in database_url
+    # Why: Alembic version table should be in same schema as application tables
+    # Outcome: version_table_schema passed to context.configure()
+    version_table_schema = get_version_table_schema(connection)
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         include_object=include_object,
         render_as_batch=True,
         compare_type=True,
+        version_table_schema=version_table_schema,
     )
     with context.begin_transaction():
         context.run_migrations()
