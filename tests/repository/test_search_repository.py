@@ -934,9 +934,7 @@ async def test_search_metadata_filters_numeric_comparisons(search_repository, se
         {"schema": {"confidence": 0.4}},
     )
 
-    results = await search_repository.search(
-        metadata_filters={"schema.confidence": {"$gt": 0.7}}
-    )
+    results = await search_repository.search(metadata_filters={"schema.confidence": {"$gt": 0.7}})
     assert {result.id for result in results} == {entity_high.id}
 
     results = await search_repository.search(
