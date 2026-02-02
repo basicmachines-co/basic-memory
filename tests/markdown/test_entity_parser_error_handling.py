@@ -349,7 +349,7 @@ async def test_frontmatter_roundtrip_preserves_user_metadata(tmp_path):
     # Create a file with user's custom frontmatter (like the bug report)
     test_file = tmp_path / "litnote.md"
     content = dedent(
-        '''
+        """
         ---
         title: "My Document Title"
         type: litnote
@@ -360,7 +360,7 @@ async def test_frontmatter_roundtrip_preserves_user_metadata(tmp_path):
         ---
 
         # Content here...
-        '''
+        """
     ).strip()
     test_file.write_text(content)
 
@@ -379,7 +379,9 @@ async def test_frontmatter_roundtrip_preserves_user_metadata(tmp_path):
     output = dump_frontmatter(post)
 
     # The output should NOT have duplicate frontmatter or metadata: {} key
-    assert output.count("---") == 2, "Should have exactly one frontmatter block (two --- delimiters)"
+    assert output.count("---") == 2, (
+        "Should have exactly one frontmatter block (two --- delimiters)"
+    )
     assert "metadata:" not in output, "Should not have 'metadata:' key in output"
     assert "citekey: authorTitleYear2024" in output, "User's citekey should be preserved"
     assert "type: litnote" in output, "User's type should be preserved"

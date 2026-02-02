@@ -71,6 +71,7 @@ markers = [
     "slow: Slow-running tests (deselect with '-m \"not slow\"')",
     "postgres: Tests that run against Postgres backend (deselect with '-m \"not postgres\"')",
     "windows: Windows-specific tests (deselect with '-m \"not windows\"')",
+    "smoke: Fast end-to-end smoke tests for MCP flows",
 ]
 
 [tool.ruff]
@@ -91,6 +92,7 @@ dev = [
     "testcontainers[postgres]>=4.0.0",
     "psycopg>=3.2.0",
     "pyright>=1.1.408",
+    "pytest-testmon>=2.2.0",
 ]
 
 [tool.hatch.version]

@@ -62,6 +62,22 @@ test-int-postgres:
         BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int
     fi
 
+# Run tests impacted by recent changes (requires pytest-testmon)
+testmon *args:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov --testmon --testmon-forceselect {{args}}
+
+# Run MCP smoke test (fast end-to-end loop)
+test-smoke:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m smoke test-int/mcp/test_smoke_integration.py
+
+# Fast local loop: lint, format, typecheck, impacted tests
+fast-check:
+    just fix
+    just format
+    just typecheck
+    just testmon
+    just test-smoke
+
 # Reset Postgres test database (drops and recreates schema)
 # Useful when Alembic migration state gets out of sync during development
 # Uses credentials from docker-compose-postgres.yml
@@ -148,6 +164,18 @@ format:
 # Run MCP inspector tool
 run-inspector:
     npx @modelcontextprotocol/inspector
+
+# Run doctor checks in an isolated temp home/config
+doctor:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TMP_HOME=$(mktemp -d)
+    TMP_CONFIG=$(mktemp -d)
+    HOME="$TMP_HOME" \
+    BASIC_MEMORY_ENV=test \
+    BASIC_MEMORY_HOME="$TMP_HOME/basic-memory" \
+    BASIC_MEMORY_CONFIG_DIR="$TMP_CONFIG" \
+    ./.venv/bin/python -m basic_memory.cli.main doctor --local
 
 
 # Update all dependencies to latest versions

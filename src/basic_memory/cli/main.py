@@ -6,6 +6,7 @@ from basic_memory.cli.app import app  # pragma: no cover
 from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     cloud,
     db,
+    doctor,
     import_chatgpt,
     import_claude_conversations,
     import_claude_projects,
