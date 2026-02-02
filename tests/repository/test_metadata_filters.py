@@ -31,12 +31,12 @@ def test_parse_in_operator():
 
 def test_parse_comparison_numeric():
     parsed = parse_metadata_filters({"schema.confidence": {"$gt": 0.7}})
-    assert parsed == [ParsedMetadataFilter(["schema", "confidence"], "gt", "0.7", "numeric")]
+    assert parsed == [ParsedMetadataFilter(["schema", "confidence"], "gt", 0.7, "numeric")]
 
 
 def test_parse_between_numeric():
     parsed = parse_metadata_filters({"score": {"$between": [0.3, 0.6]}})
-    assert parsed == [ParsedMetadataFilter(["score"], "between", ["0.3", "0.6"], "numeric")]
+    assert parsed == [ParsedMetadataFilter(["score"], "between", [0.3, 0.6], "numeric")]
 
 
 def test_parse_between_text():
