@@ -340,14 +340,11 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     continue
 
                 if filt.op in {"gt", "gte", "lt", "lte", "between"}:
-                    if filt.comparison == "numeric":
-                        numeric_expr = (
-                            f"CASE WHEN ({text_expr}) ~ '^-?\\\\d+(\\\\.\\\\d+)?$' "
-                            f"THEN ({text_expr})::double precision END"
-                        )
-                        compare_expr = numeric_expr
-                    else:
-                        compare_expr = text_expr
+                    compare_expr = (
+                        f"({metadata_expr} #>> '{path}')::double precision"
+                        if filt.comparison == "numeric"
+                        else text_expr
+                    )
 
                     if filt.op == "between":
                         min_param = f"meta_val_{idx}_min"

@@ -84,8 +84,12 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
                 continue
 
             if op in {"$gt", "$gte", "$lt", "$lte"}:
-                normalized = _normalize_scalar(value)
-                comparison = "numeric" if _is_numeric_value(normalized) else "text"
+                if _is_numeric_value(value):
+                    normalized = float(value)
+                    comparison = "numeric"
+                else:
+                    normalized = _normalize_scalar(value)
+                    comparison = "text"
                 parsed.append(
                     ParsedMetadataFilter(path_parts, op.lstrip("$"), normalized, comparison)
                 )
@@ -94,8 +98,12 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
             if op == "$between":
                 if not isinstance(value, list) or len(value) != 2:
                     raise ValueError(f"$between requires [min, max] for '{raw_key}'")
-                normalized = [_normalize_scalar(v) for v in value]
-                comparison = "numeric" if _is_numeric_collection(normalized) else "text"
+                if _is_numeric_collection(value):
+                    normalized = [float(v) for v in value]
+                    comparison = "numeric"
+                else:
+                    normalized = [_normalize_scalar(v) for v in value]
+                    comparison = "text"
                 parsed.append(ParsedMetadataFilter(path_parts, "between", normalized, comparison))
                 continue
 
