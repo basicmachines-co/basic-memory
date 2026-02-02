@@ -105,7 +105,7 @@ def get_version_table_schema(connection) -> str | None:
         connection: Database connection
 
     Returns:
-        Schema name if Postgres with non-public search_path, else None
+        Schema name if Postgres with explicit search_path, else None
 
     Why: When using schema isolation, Alembic's alembic_version table should
     be in the same schema as the application tables.
@@ -119,7 +119,7 @@ def get_version_table_schema(connection) -> str | None:
     from basic_memory.db import extract_search_path_from_url
 
     _, search_path = extract_search_path_from_url(app_config.database_url)
-    return search_path if search_path != "public" else None
+    return search_path
 
 
 def do_run_migrations(connection):

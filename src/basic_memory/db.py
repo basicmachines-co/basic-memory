@@ -217,26 +217,28 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
     return engine
 
 
-def extract_search_path_from_url(db_url: str) -> tuple[str, str]:
+def extract_search_path_from_url(db_url: str) -> tuple[str, Optional[str]]:
     """Extract search_path from Postgres URL and return clean URL.
 
     Args:
         db_url: Postgres connection URL, possibly with ?search_path=schema
 
     Returns:
-        Tuple of (clean_url without search_path, search_path value)
+        Tuple of (clean_url without search_path, search_path value or None)
 
     Why: asyncpg rejects search_path as a URL query parameter, so we extract it
-    and pass it via server_settings instead.
+    and pass it via server_settings instead. Returns None if no search_path was
+    explicitly provided, allowing the database/role default to be used.
     """
     from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
     parsed = urlparse(db_url)
     query_params = parse_qs(parsed.query)
 
-    # Extract search_path, default to "public"
-    search_path_list = query_params.pop("search_path", ["public"])
-    search_path = search_path_list[0] if search_path_list else "public"
+    # Extract search_path if explicitly provided, otherwise None
+    # Why: Don't override database/role-level default search_path
+    search_path_list = query_params.pop("search_path", None)
+    search_path = search_path_list[0] if search_path_list else None
 
     # Rebuild URL without search_path
     new_query = urlencode(query_params, doseq=True)
@@ -258,8 +260,18 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
     # --- Extract search_path from URL ---
     # Trigger: URL contains ?search_path=schema parameter
     # Why: asyncpg rejects search_path as URL param, must pass via server_settings
-    # Outcome: clean URL for asyncpg, search_path passed to server_settings
+    # Outcome: clean URL for asyncpg, search_path passed to server_settings (if provided)
     clean_url, search_path = extract_search_path_from_url(db_url)
+
+    # Build server_settings - only include search_path if explicitly provided
+    # Why: Don't override database/role-level default search_path when not specified
+    server_settings: dict[str, str] = {
+        "application_name": "basic-memory",
+        # Statement timeout for queries (30s to allow for cold start)
+        "statement_timeout": "30s",
+    }
+    if search_path:
+        server_settings["search_path"] = search_path
 
     # Use NullPool connection issues.
     # Assume connection pooler like PgBouncer handles connection pooling.
@@ -274,16 +286,10 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
             "command_timeout": 30,
             # Allow 30s for initial connection (Neon wake-up time)
             "timeout": 30,
-            "server_settings": {
-                "application_name": "basic-memory",
-                # Statement timeout for queries (30s to allow for cold start)
-                "statement_timeout": "30s",
-                # Schema isolation via search_path (extracted from URL or default "public")
-                "search_path": search_path,
-            },
+            "server_settings": server_settings,
         },
     )
-    logger.debug(f"Created Postgres engine with search_path={search_path}")
+    logger.debug(f"Created Postgres engine with search_path={search_path or '(database default)'}")
 
     return engine
 
@@ -419,7 +425,7 @@ def get_search_path_from_config(app_config: BasicMemoryConfig) -> Optional[str]:
         app_config: BasicMemoryConfig with database_url
 
     Returns:
-        search_path value if present and not "public", else None
+        search_path value if explicitly provided, else None
     """
     if not app_config.database_url:
         return None
@@ -428,7 +434,7 @@ def get_search_path_from_config(app_config: BasicMemoryConfig) -> Optional[str]:
         return None
 
     _, search_path = extract_search_path_from_url(app_config.database_url)
-    return search_path if search_path != "public" else None
+    return search_path
 
 
 async def ensure_schema_exists(engine: AsyncEngine, schema: str) -> None:

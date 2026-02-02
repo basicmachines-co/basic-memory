@@ -82,12 +82,13 @@ class TestPostgresSearchPath:
         assert "search_path" not in clean_url
         assert clean_url == "postgresql+asyncpg://user:pass@host/db"
 
-    def test_extract_search_path_defaults_to_public(self):
-        """No search_path param = default to public."""
+    def test_extract_search_path_returns_none_when_not_provided(self):
+        """No search_path param = None (use database default)."""
         url = "postgresql+asyncpg://user:pass@host/db"
         clean_url, search_path = extract_search_path_from_url(url)
 
-        assert search_path == "public"
+        # None means "don't override database/role default"
+        assert search_path is None
         assert clean_url == url
 
     def test_extract_search_path_preserves_other_params(self):
@@ -116,14 +117,15 @@ class TestPostgresSearchPath:
         search_path = get_search_path_from_config(config)
         assert search_path == "myschema"
 
-    def test_get_search_path_from_config_returns_none_for_public(self):
-        """get_search_path_from_config returns None for public schema."""
+    def test_get_search_path_from_config_returns_public_when_explicit(self):
+        """get_search_path_from_config returns 'public' when explicitly set."""
         config = BasicMemoryConfig(
             database_url="postgresql+asyncpg://user:pass@host/db?search_path=public"
         )
 
+        # Explicit "public" should be returned (user intentionally set it)
         search_path = get_search_path_from_config(config)
-        assert search_path is None
+        assert search_path == "public"
 
     def test_get_search_path_from_config_returns_none_for_sqlite(self):
         """get_search_path_from_config returns None for SQLite URLs."""
