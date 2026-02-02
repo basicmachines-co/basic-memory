@@ -56,3 +56,4 @@ claude-output
 **/.claude/settings.local.json
 .mcp.json
 .mcpregistry_*
+/.testmondata
