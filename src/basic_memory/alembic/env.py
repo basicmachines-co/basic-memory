@@ -113,17 +113,12 @@ def get_version_table_schema(connection) -> str | None:
     if connection.dialect.name != "postgresql":
         return None
 
-    # Check if database_url has search_path parameter
-    if not app_config.database_url or "search_path=" not in app_config.database_url:
+    if not app_config.database_url:
         return None
 
-    from urllib.parse import urlparse, parse_qs
+    from basic_memory.db import extract_search_path_from_url
 
-    parsed = urlparse(app_config.database_url)
-    query_params = parse_qs(parsed.query)
-    search_path = query_params.get("search_path", ["public"])[0]
-
-    # Only set version_table_schema for non-public schemas
+    _, search_path = extract_search_path_from_url(app_config.database_url)
     return search_path if search_path != "public" else None
 
 

@@ -84,11 +84,12 @@ def reset(
                         )
                         raise typer.Exit(1)
         else:
+            # Postgres: drop and recreate schema/tables
             console.print(
                 "[yellow]Note:[/yellow] Using Postgres backend. "
-                "Database files cannot be deleted directly.\n"
-                "Running migrations to recreate tables..."
+                "Dropping and recreating tables..."
             )
+            run_with_cleanup(db.reset_postgres_database(app_config))
 
         # Create a new empty database (preserves project configuration)
         try:

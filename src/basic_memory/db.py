@@ -53,12 +53,15 @@ class DatabaseType(Enum):
 
     @classmethod
     def get_db_url(
-        cls, db_path: Path, db_type: "DatabaseType", config: Optional[BasicMemoryConfig] = None
+        cls,
+        db_path: Optional[Path],
+        db_type: "DatabaseType",
+        config: Optional[BasicMemoryConfig] = None,
     ) -> str:
         """Get SQLAlchemy URL for database path.
 
         Args:
-            db_path: Path to SQLite database file (ignored for Postgres)
+            db_path: Path to SQLite database file (None for Postgres, ignored if database_url set)
             db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
             config: Optional config to check for database backend and URL
 
@@ -286,14 +289,14 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
 
 
 def _create_engine_and_session(
-    db_path: Path,
+    db_path: Optional[Path],
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     config: Optional[BasicMemoryConfig] = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Internal helper to create engine and session maker.
 
     Args:
-        db_path: Path to database file (used for SQLite, ignored for Postgres)
+        db_path: Path to database file (None for Postgres, ignored if database_url set)
         db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
         config: Optional explicit config. If not provided, reads from ConfigManager.
             Prefer passing explicitly from composition roots.
@@ -319,7 +322,7 @@ def _create_engine_and_session(
 
 
 async def get_or_create_db(
-    db_path: Path,
+    db_path: Optional[Path],
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     ensure_migrations: bool = True,
     config: Optional[BasicMemoryConfig] = None,
@@ -327,7 +330,7 @@ async def get_or_create_db(
     """Get or create database engine and session maker.
 
     Args:
-        db_path: Path to database file
+        db_path: Path to database file (None for Postgres, ignored if database_url set)
         db_type: Type of database
         ensure_migrations: Whether to run migrations
         config: Optional explicit config. If not provided, reads from ConfigManager.
@@ -371,7 +374,7 @@ async def shutdown_db() -> None:  # pragma: no cover
 
 @asynccontextmanager
 async def engine_session_factory(
-    db_path: Path,
+    db_path: Optional[Path],
     db_type: DatabaseType = DatabaseType.MEMORY,
     config: Optional[BasicMemoryConfig] = None,
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
@@ -381,7 +384,7 @@ async def engine_session_factory(
     for each test. For production use, use get_or_create_db() instead.
 
     Args:
-        db_path: Path to database file
+        db_path: Path to database file (None for Postgres, ignored if database_url set)
         db_type: Type of database
         config: Optional explicit config. If not provided, reads from ConfigManager.
     """
@@ -441,10 +444,52 @@ async def ensure_schema_exists(engine: AsyncEngine, schema: str) -> None:
     if not schema or schema == "public":
         return
 
+    from sqlalchemy.schema import CreateSchema
+
     async with engine.begin() as conn:
-        # Use text() to execute raw SQL - schema names are trusted config values
-        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        # Use SQLAlchemy's CreateSchema DDL for proper identifier quoting
+        await conn.execute(CreateSchema(schema, if_not_exists=True))
     logger.info(f"Ensured schema exists: {schema}")
+
+
+async def reset_postgres_database(app_config: BasicMemoryConfig) -> None:
+    """Reset Postgres database by dropping and recreating schema/tables.
+
+    Args:
+        app_config: Configuration with database_url
+
+    Why: For Postgres, we can't just delete a file like SQLite. We need to
+    drop tables or schema to reset the database.
+    """
+    if not app_config.database_url:
+        raise ValueError("database_url must be set for Postgres reset")
+
+    from sqlalchemy.schema import DropSchema, CreateSchema
+
+    # Get search_path from config
+    search_path = get_search_path_from_config(app_config)
+    db_url = app_config.database_url
+    engine = _create_postgres_engine(db_url, app_config)
+
+    try:
+        async with engine.begin() as conn:
+            if search_path and search_path != "public":
+                # Custom schema: drop and recreate the entire schema
+                logger.info(f"Dropping schema: {search_path}")
+                await conn.execute(DropSchema(search_path, cascade=True, if_exists=True))
+                await conn.execute(CreateSchema(search_path))
+                logger.info(f"Recreated schema: {search_path}")
+            else:
+                # Public schema: drop only Basic Memory tables
+                # Order matters due to foreign key constraints
+                # SECURITY: table_names is a hardcoded constant list - not user input
+                table_names = ["relation", "observation", "entity", "project", "alembic_version"]
+                for table_name in table_names:
+                    logger.info(f"Dropping table: {table_name}")
+                    await conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+                logger.info("Dropped all Basic Memory tables")
+    finally:
+        await engine.dispose()
 
 
 async def run_migrations(
