@@ -496,16 +496,23 @@ just test
 - `just test-int-postgres` - Run integration tests against Postgres
 - `just test-windows` - Run Windows-specific tests (auto-skips on other platforms)
 - `just test-benchmark` - Run performance benchmark tests
+- `just testmon` - Run tests impacted by recent changes (pytest-testmon)
+- `just test-smoke` - Run fast MCP end-to-end smoke test
+- `just fast-check` - Run fix/format/typecheck + impacted tests + smoke test
+- `just doctor` - Run local file <-> DB consistency checks with temp config
 
 **Postgres Testing:**
 
 Postgres tests use [testcontainers](https://testcontainers-python.readthedocs.io/) which automatically spins up a Postgres instance in Docker. No manual database setup required - just have Docker running.
+
+**Testmon Note:** When no files have changed, `just testmon` may collect 0 tests. That's expected and means no impacted tests were detected.
 
 **Test Markers:**
 
 Tests use pytest markers for selective execution:
 - `windows` - Windows-specific database optimizations
 - `benchmark` - Performance tests (excluded from default runs)
+- `smoke` - Fast MCP end-to-end smoke tests
 
 **Other Development Commands:**
 ```bash
@@ -513,8 +520,15 @@ just install          # Install with dev dependencies
 just lint             # Run linting checks
 just typecheck        # Run type checking
 just format           # Format code with ruff
+just fast-check       # Fast local loop (fix/format/typecheck + testmon + smoke)
+just doctor           # Local consistency check (temp config)
 just check            # Run all quality checks
 just migration "msg"  # Create database migration
+```
+
+**Local Consistency Check:**
+```bash
+basic-memory doctor   # Verifies file <-> database sync in a temp project
 ```
 
 See the [justfile](justfile) for the complete list of development commands.

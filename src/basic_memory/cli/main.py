@@ -14,6 +14,7 @@ if not _version_flag_present(sys.argv[1:]):
     from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
         cloud,
         db,
+        doctor,
         import_chatgpt,
         import_claude_conversations,
         import_claude_projects,
@@ -23,7 +24,6 @@ if not _version_flag_present(sys.argv[1:]):
         status,
         tool,
     )
-
 # Re-apply warning filter AFTER all imports
 # (authlib adds a DeprecationWarning filter that overrides ours)
 import warnings  # pragma: no cover

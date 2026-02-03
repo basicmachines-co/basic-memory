@@ -88,4 +88,21 @@ async def test_recent_activity_prompt_passes_correct_params(monkeypatch):
 
     assert captured_kwargs["timeframe"] == "2d"
     assert captured_kwargs["project"] == "test-proj"
-    assert captured_kwargs["type"] == "entity"
+    assert "type" not in captured_kwargs
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_prompt_defaults_timeframe(monkeypatch):
+    """Prompt should fall back to 7d when timeframe omitted or falsy."""
+    captured_kwargs = {}
+
+    async def fake_fn(**kwargs):
+        captured_kwargs.update(kwargs)
+        return "## Recent Activity"
+
+    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity.fn", fake_fn)
+
+    await recent_activity_prompt.fn(timeframe=None, project=None)  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert captured_kwargs["timeframe"] == "7d"
+    assert captured_kwargs["project"] is None
