@@ -82,6 +82,9 @@ app.include_router(v2_project, prefix="/v2")
 # Legacy web app proxy paths (compat with /proxy/projects/projects)
 app.include_router(v2_project, prefix="/proxy/projects")
 
+# Legacy v1 compat: older CLI versions call GET /projects/projects
+app.include_router(v2_project, prefix="/projects")
+
 # V2 routers are the only public API surface
 
 

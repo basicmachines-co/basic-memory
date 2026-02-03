@@ -340,3 +340,26 @@ async def test_resolve_project_empty_identifier(client: AsyncClient, v2_projects
     response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 422  # Validation error
+
+
+# --- Legacy v1 compatibility tests ---
+
+
+@pytest.mark.asyncio
+async def test_legacy_v1_list_projects_endpoint(client: AsyncClient, test_project: Project):
+    """Test that the legacy /projects/projects endpoint still works for older CLI versions.
+
+    This endpoint was removed when we migrated to v2 but older versions of
+    basic-memory-cloud CLI still call it for `bm project list`.
+    """
+    # The legacy v1 endpoint was at /projects/projects
+    response = await client.get("/projects/projects/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "projects" in data
+    assert "default_project" in data
+
+    # Verify the test project is in the list
+    project_names = [p["name"] for p in data["projects"]]
+    assert test_project.name in project_names
