@@ -182,6 +182,34 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
 
 
 @pytest.mark.asyncio
+async def test_create_entity_conflict_returns_409(client: AsyncClient, v2_project_url):
+    """Test creating a duplicate entity returns 409 Conflict."""
+    data = {
+        "title": "TestV2EntityConflict",
+        "directory": "conflict",
+        "entity_type": "note",
+        "content_type": "text/markdown",
+        "content": "Original content for conflict",
+    }
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json=data,
+        params={"fast": False},
+    )
+    assert response.status_code == 200
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json=data,
+        params={"fast": False},
+    )
+    assert response.status_code == 409
+    expected_detail = "Note already exists. Use edit_note to modify it, or delete it first."
+    assert response.json()["detail"] == expected_detail
+
+
+@pytest.mark.asyncio
 async def test_create_entity_returns_content(client: AsyncClient, file_service, v2_project_url):
     """Test creating an entity always returns file content with frontmatter."""
     data = {

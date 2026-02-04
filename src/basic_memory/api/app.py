@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.routing import APIRouter
 from loguru import logger
@@ -95,7 +95,7 @@ app.include_router(legacy_router)
 
 
 @app.exception_handler(EntityCreationError)
-async def entity_creation_error_handler(request, exc):  # pragma: no cover
+async def entity_creation_error_handler(request: Request, exc: EntityCreationError):
     """Handle entity creation conflicts (e.g., file already exists).
 
     This is expected behavior when users try to create notes that exist,
