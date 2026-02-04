@@ -34,7 +34,11 @@ from basic_memory.schemas.response import (
     DirectoryDeleteError,
 )
 from basic_memory.services import BaseService, FileService
-from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
+from basic_memory.services.exceptions import (
+    EntityAlreadyExistsError,
+    EntityCreationError,
+    EntityNotFoundError,
+)
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import generate_permalink
@@ -216,7 +220,7 @@ class EntityService(BaseService[EntityModel]):
         file_path = Path(schema.file_path)
 
         if await self.file_service.exists(file_path):
-            raise EntityCreationError(
+            raise EntityAlreadyExistsError(
                 f"file for entity {schema.directory}/{schema.title} already exists: {file_path}"
             )
 
@@ -356,7 +360,7 @@ class EntityService(BaseService[EntityModel]):
         file_path = Path(existing.file_path) if existing else Path(schema.file_path)
 
         if not existing and await self.file_service.exists(file_path):
-            raise EntityCreationError(
+            raise EntityAlreadyExistsError(
                 f"file for entity {schema.directory}/{schema.title} already exists: {file_path}"
             )
 

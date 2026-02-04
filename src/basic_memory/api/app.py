@@ -21,7 +21,7 @@ from basic_memory.api.v2.routers import (
 )
 from basic_memory.api.v2.routers.project_router import list_projects
 from basic_memory.config import init_api_logging
-from basic_memory.services.exceptions import EntityCreationError
+from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.initialization import initialize_app
 
 
@@ -94,8 +94,10 @@ app.include_router(legacy_router)
 # V2 routers are the only public API surface
 
 
-@app.exception_handler(EntityCreationError)
-async def entity_creation_error_handler(request: Request, exc: EntityCreationError):
+@app.exception_handler(EntityAlreadyExistsError)
+async def entity_already_exists_error_handler(
+    request: Request, exc: EntityAlreadyExistsError
+):
     """Handle entity creation conflicts (e.g., file already exists).
 
     This is expected behavior when users try to create notes that exist,
