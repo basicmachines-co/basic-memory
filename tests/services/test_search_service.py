@@ -345,9 +345,9 @@ async def test_boolean_not_search(search_service, test_graph):
 
     # Should find "Root Entity" but not "Connected Entity"
     for result in results:
-        assert (
-            "connected" not in result.permalink.lower()
-        ), "Boolean NOT search returned excluded term"
+        assert "connected" not in result.permalink.lower(), (
+            "Boolean NOT search returned excluded term"
+        )
 
 
 @pytest.mark.asyncio
@@ -366,9 +366,9 @@ async def test_boolean_group_search(search_service, test_graph):
             "root" in result.title.lower() or "connected" in result.title.lower()
         )
 
-        assert (
-            contains_entity and contains_root_or_connected
-        ), "Boolean grouped search returned incorrect results"
+        assert contains_entity and contains_root_or_connected, (
+            "Boolean grouped search returned incorrect results"
+        )
 
 
 @pytest.mark.asyncio
@@ -398,9 +398,9 @@ async def test_boolean_operators_detection(search_service):
 
     for query_text in non_boolean_queries:
         query = SearchQuery(text=query_text)
-        assert (
-            not query.has_boolean_operators()
-        ), f"Incorrectly detected boolean operators in: {query_text}"
+        assert not query.has_boolean_operators(), (
+            f"Incorrectly detected boolean operators in: {query_text}"
+        )
 
 
 # Tests for frontmatter tag search functionality
