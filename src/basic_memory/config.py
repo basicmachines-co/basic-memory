@@ -316,12 +316,37 @@ class BasicMemoryConfig(BaseSettings):
             self.default_project = next(iter(self.projects.keys()))
 
     @property
-    def app_database_path(self) -> Path:
+    def app_database_path(self) -> Optional[Path]:
         """Get the path to the app-level database.
 
         This is the single database that will store all knowledge data
         across all projects.
+
+        Returns:
+            Path to SQLite database file, or None for Postgres backends.
         """
+        # --- SQLite URL Handling ---
+        # Trigger: database_url is set and starts with "sqlite"
+        # Why: allows project-local SQLite databases via URL configuration
+        # Outcome: extracts path from URL (e.g., sqlite+aiosqlite:///.basic-memory/memory.db)
+        if self.database_url:
+            if self.database_url.startswith("sqlite"):
+                from urllib.parse import urlparse
+
+                parsed = urlparse(self.database_url)
+                # parsed.path will be "/.basic-memory/memory.db" - strip leading /
+                path = parsed.path[1:] if parsed.path.startswith("/") else parsed.path
+                resolved_path = Path(path).resolve()
+                # Ensure parent directory exists
+                if not resolved_path.parent.exists():  # pragma: no cover
+                    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+                return resolved_path
+            else:
+                # Postgres or other backend - no file path
+                return None
+
+        # --- Default SQLite Path ---
+        # No database_url set - use default ~/.basic-memory/memory.db
         database_path = Path.home() / DATA_DIR_NAME / APP_DATABASE_NAME
         if not database_path.exists():  # pragma: no cover
             database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,11 +354,11 @@ class BasicMemoryConfig(BaseSettings):
         return database_path
 
     @property
-    def database_path(self) -> Path:
+    def database_path(self) -> Optional[Path]:
         """Get SQLite database path.
 
-        Rreturns the app-level database path
-        for backward compatibility in the codebase.
+        Returns the app-level database path for backward compatibility.
+        Returns None when using Postgres backend.
         """
 
         # Load the app-level database path from the global config

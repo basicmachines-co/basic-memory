@@ -868,10 +868,13 @@ class ProjectService:
         """Get system status information."""
         import basic_memory
 
-        # Get database information
+        # Get database information (None for Postgres backend)
         db_path = self.config_manager.config.database_path
-        db_size = db_path.stat().st_size if db_path.exists() else 0
-        db_size_readable = f"{db_size / (1024 * 1024):.2f} MB"
+        if db_path and db_path.exists():
+            db_size = db_path.stat().st_size
+            db_size_readable = f"{db_size / (1024 * 1024):.2f} MB"
+        else:
+            db_size_readable = "N/A (Postgres)"
 
         # Get watch service status if available
         watch_status = None
@@ -886,7 +889,7 @@ class ProjectService:
 
         return SystemStatus(
             version=basic_memory.__version__,
-            database_path=str(db_path),
+            database_path=str(db_path) if db_path else "Postgres (external)",
             database_size=db_size_readable,
             watch_status=watch_status,
             timestamp=datetime.now(),

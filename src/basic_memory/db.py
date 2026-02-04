@@ -53,12 +53,15 @@ class DatabaseType(Enum):
 
     @classmethod
     def get_db_url(
-        cls, db_path: Path, db_type: "DatabaseType", config: Optional[BasicMemoryConfig] = None
+        cls,
+        db_path: Optional[Path],
+        db_type: "DatabaseType",
+        config: Optional[BasicMemoryConfig] = None,
     ) -> str:
         """Get SQLAlchemy URL for database path.
 
         Args:
-            db_path: Path to SQLite database file (ignored for Postgres)
+            db_path: Path to SQLite database file (None for Postgres, ignored if database_url set)
             db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
             config: Optional config to check for database backend and URL
 
@@ -83,7 +86,15 @@ class DatabaseType(Enum):
             logger.info(f"Using Postgres database: {config.database_url}")
             return config.database_url
 
-        # SQLite databases
+        # --- SQLite URL Handling ---
+        # Trigger: database_url is set with a SQLite URL
+        # Why: allows custom SQLite paths via URL configuration
+        # Outcome: use the provided URL instead of constructing from db_path
+        if config.database_url and config.database_url.startswith("sqlite"):
+            logger.info(f"Using SQLite database from URL: {config.database_url}")
+            return config.database_url
+
+        # SQLite databases (default behavior)
         if db_type == cls.MEMORY:
             logger.info("Using in-memory SQLite database")
             return "sqlite+aiosqlite://"
@@ -206,6 +217,36 @@ def _create_sqlite_engine(db_url: str, db_type: DatabaseType) -> AsyncEngine:
     return engine
 
 
+def extract_search_path_from_url(db_url: str) -> tuple[str, Optional[str]]:
+    """Extract search_path from Postgres URL and return clean URL.
+
+    Args:
+        db_url: Postgres connection URL, possibly with ?search_path=schema
+
+    Returns:
+        Tuple of (clean_url without search_path, search_path value or None)
+
+    Why: asyncpg rejects search_path as a URL query parameter, so we extract it
+    and pass it via server_settings instead. Returns None if no search_path was
+    explicitly provided, allowing the database/role default to be used.
+    """
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+
+    parsed = urlparse(db_url)
+    query_params = parse_qs(parsed.query)
+
+    # Extract search_path if explicitly provided, otherwise None
+    # Why: Don't override database/role-level default search_path
+    search_path_list = query_params.pop("search_path", None)
+    search_path = search_path_list[0] if search_path_list else None
+
+    # Rebuild URL without search_path
+    new_query = urlencode(query_params, doseq=True)
+    clean_url = urlunparse(parsed._replace(query=new_query))
+
+    return clean_url, search_path
+
+
 def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngine:
     """Create Postgres async engine with appropriate configuration.
 
@@ -216,10 +257,26 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
     Returns:
         Configured async engine for Postgres
     """
+    # --- Extract search_path from URL ---
+    # Trigger: URL contains ?search_path=schema parameter
+    # Why: asyncpg rejects search_path as URL param, must pass via server_settings
+    # Outcome: clean URL for asyncpg, search_path passed to server_settings (if provided)
+    clean_url, search_path = extract_search_path_from_url(db_url)
+
+    # Build server_settings - only include search_path if explicitly provided
+    # Why: Don't override database/role-level default search_path when not specified
+    server_settings: dict[str, str] = {
+        "application_name": "basic-memory",
+        # Statement timeout for queries (30s to allow for cold start)
+        "statement_timeout": "30s",
+    }
+    if search_path:
+        server_settings["search_path"] = search_path
+
     # Use NullPool connection issues.
     # Assume connection pooler like PgBouncer handles connection pooling.
     engine = create_async_engine(
-        db_url,
+        clean_url,
         echo=False,
         poolclass=NullPool,  # No pooling - fresh connection per request
         connect_args={
@@ -229,27 +286,23 @@ def _create_postgres_engine(db_url: str, config: BasicMemoryConfig) -> AsyncEngi
             "command_timeout": 30,
             # Allow 30s for initial connection (Neon wake-up time)
             "timeout": 30,
-            "server_settings": {
-                "application_name": "basic-memory",
-                # Statement timeout for queries (30s to allow for cold start)
-                "statement_timeout": "30s",
-            },
+            "server_settings": server_settings,
         },
     )
-    logger.debug("Created Postgres engine with NullPool (no connection pooling)")
+    logger.debug(f"Created Postgres engine with search_path={search_path or '(database default)'}")
 
     return engine
 
 
 def _create_engine_and_session(
-    db_path: Path,
+    db_path: Optional[Path],
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     config: Optional[BasicMemoryConfig] = None,
 ) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     """Internal helper to create engine and session maker.
 
     Args:
-        db_path: Path to database file (used for SQLite, ignored for Postgres)
+        db_path: Path to database file (None for Postgres, ignored if database_url set)
         db_type: Type of database (MEMORY, FILESYSTEM, or POSTGRES)
         config: Optional explicit config. If not provided, reads from ConfigManager.
             Prefer passing explicitly from composition roots.
@@ -275,7 +328,7 @@ def _create_engine_and_session(
 
 
 async def get_or_create_db(
-    db_path: Path,
+    db_path: Optional[Path],
     db_type: DatabaseType = DatabaseType.FILESYSTEM,
     ensure_migrations: bool = True,
     config: Optional[BasicMemoryConfig] = None,
@@ -283,7 +336,7 @@ async def get_or_create_db(
     """Get or create database engine and session maker.
 
     Args:
-        db_path: Path to database file
+        db_path: Path to database file (None for Postgres, ignored if database_url set)
         db_type: Type of database
         ensure_migrations: Whether to run migrations
         config: Optional explicit config. If not provided, reads from ConfigManager.
@@ -327,7 +380,7 @@ async def shutdown_db() -> None:  # pragma: no cover
 
 @asynccontextmanager
 async def engine_session_factory(
-    db_path: Path,
+    db_path: Optional[Path],
     db_type: DatabaseType = DatabaseType.MEMORY,
     config: Optional[BasicMemoryConfig] = None,
 ) -> AsyncGenerator[tuple[AsyncEngine, async_sessionmaker[AsyncSession]], None]:
@@ -337,7 +390,7 @@ async def engine_session_factory(
     for each test. For production use, use get_or_create_db() instead.
 
     Args:
-        db_path: Path to database file
+        db_path: Path to database file (None for Postgres, ignored if database_url set)
         db_type: Type of database
         config: Optional explicit config. If not provided, reads from ConfigManager.
     """
@@ -363,6 +416,86 @@ async def engine_session_factory(
             await _engine.dispose()
             _engine = None
             _session_maker = None
+
+
+def get_search_path_from_config(app_config: BasicMemoryConfig) -> Optional[str]:
+    """Extract search_path from config's database_url if present.
+
+    Args:
+        app_config: BasicMemoryConfig with database_url
+
+    Returns:
+        search_path value if explicitly provided, else None
+    """
+    if not app_config.database_url:
+        return None
+
+    if not app_config.database_url.startswith("postgresql"):
+        return None
+
+    _, search_path = extract_search_path_from_url(app_config.database_url)
+    return search_path
+
+
+async def ensure_schema_exists(engine: AsyncEngine, schema: str) -> None:
+    """Create schema if it doesn't exist (Postgres only).
+
+    Args:
+        engine: AsyncEngine connected to Postgres
+        schema: Schema name to create
+
+    Why: When using search_path for schema isolation, the schema must exist
+    before migrations can create tables in it.
+    """
+    if not schema or schema == "public":
+        return
+
+    from sqlalchemy.schema import CreateSchema
+
+    async with engine.begin() as conn:
+        # Use SQLAlchemy's CreateSchema DDL for proper identifier quoting
+        await conn.execute(CreateSchema(schema, if_not_exists=True))
+    logger.info(f"Ensured schema exists: {schema}")
+
+
+async def reset_postgres_database(app_config: BasicMemoryConfig) -> None:
+    """Reset Postgres database by dropping and recreating schema/tables.
+
+    Args:
+        app_config: Configuration with database_url
+
+    Why: For Postgres, we can't just delete a file like SQLite. We need to
+    drop tables or schema to reset the database.
+    """
+    if not app_config.database_url:
+        raise ValueError("database_url must be set for Postgres reset")
+
+    from sqlalchemy.schema import DropSchema, CreateSchema
+
+    # Get search_path from config
+    search_path = get_search_path_from_config(app_config)
+    db_url = app_config.database_url
+    engine = _create_postgres_engine(db_url, app_config)
+
+    try:
+        async with engine.begin() as conn:
+            if search_path and search_path != "public":
+                # Custom schema: drop and recreate the entire schema
+                logger.info(f"Dropping schema: {search_path}")
+                await conn.execute(DropSchema(search_path, cascade=True, if_exists=True))
+                await conn.execute(CreateSchema(search_path))
+                logger.info(f"Recreated schema: {search_path}")
+            else:
+                # Public schema: drop only Basic Memory tables
+                # Order matters due to foreign key constraints
+                # SECURITY: table_names is a hardcoded constant list - not user input
+                table_names = ["relation", "observation", "entity", "project", "alembic_version"]
+                for table_name in table_names:
+                    logger.info(f"Dropping table: {table_name}")
+                    await conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+                logger.info("Dropped all Basic Memory tables")
+    finally:
+        await engine.dispose()
 
 
 async def run_migrations(
@@ -392,6 +525,22 @@ async def run_migrations(
         # No URL conversion needed - env.py now handles both async and sync engines
         db_url = DatabaseType.get_db_url(app_config.database_path, database_type, app_config)
         config.set_main_option("sqlalchemy.url", db_url)
+
+        # --- Schema Creation for Postgres ---
+        # Trigger: Postgres backend with non-public search_path in URL
+        # Why: schema must exist before Alembic can create tables in it
+        # Outcome: CREATE SCHEMA IF NOT EXISTS runs before migrations
+        search_path = get_search_path_from_config(app_config)
+        if search_path and (
+            database_type == DatabaseType.POSTGRES
+            or app_config.database_backend == DatabaseBackend.POSTGRES
+        ):
+            # Create a temporary engine just for schema creation
+            temp_engine = _create_postgres_engine(db_url, app_config)
+            try:
+                await ensure_schema_exists(temp_engine, search_path)
+            finally:
+                await temp_engine.dispose()
 
         command.upgrade(config, "head")
         logger.info("Migrations completed successfully")
