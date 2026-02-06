@@ -10,6 +10,7 @@ from basic_memory.mcp import tools
 EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     "build_context": ["url", "project", "depth", "timeframe", "page", "page_size", "max_related"],
     "canvas": ["nodes", "edges", "title", "directory", "project"],
+    "cloud_info": [],
     "create_memory_project": ["project_name", "project_path", "set_default"],
     "delete_note": ["identifier", "is_directory", "project"],
     "delete_project": ["project_name"],
@@ -28,6 +29,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     "move_note": ["identifier", "destination_path", "is_directory", "project"],
     "read_content": ["path", "project"],
     "read_note": ["identifier", "project", "page", "page_size"],
+    "release_notes": [],
     "recent_activity": ["type", "depth", "timeframe", "project"],
     "search": ["query"],
     "search_by_metadata": ["filters", "project", "limit", "offset"],
@@ -52,6 +54,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
 TOOL_FUNCTIONS: dict[str, object] = {
     "build_context": tools.build_context,
     "canvas": tools.canvas,
+    "cloud_info": tools.cloud_info,
     "create_memory_project": tools.create_memory_project,
     "delete_note": tools.delete_note,
     "delete_project": tools.delete_project,
@@ -62,6 +65,7 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "move_note": tools.move_note,
     "read_content": tools.read_content,
     "read_note": tools.read_note,
+    "release_notes": tools.release_notes,
     "recent_activity": tools.recent_activity,
     "search": tools.search,
     "search_by_metadata": tools.search_by_metadata,
