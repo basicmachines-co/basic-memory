@@ -1,12 +1,13 @@
 """Search tools for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 
 from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.formatting import format_search_results_ascii
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -230,6 +231,7 @@ Error searching for '{query}': {error_message}
 
 @mcp.tool(
     description="Search across all content in the knowledge base with advanced syntax support.",
+    meta={"ui/resourceUri": "ui://basic-memory/search-results"},
 )
 async def search_notes(
     query: str,
@@ -237,6 +239,7 @@ async def search_notes(
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
+    output_format: Literal["default", "ascii", "ansi"] = "default",
     types: List[str] | None = None,
     entity_types: List[str] | None = None,
     after_date: Optional[str] = None,
@@ -320,6 +323,8 @@ async def search_notes(
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of:
                     "text", "title", "permalink", "vector", "hybrid" (default: "text")
+        output_format: "default" returns structured data, "ascii" returns a plain text table,
+            "ansi" returns a colorized table for TUI clients.
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
@@ -451,6 +456,13 @@ async def search_notes(
                 )
                 # Don't treat this as an error, but the user might want guidance
                 # We return the empty result as normal - the user can decide if they need help
+
+            if output_format in ("ascii", "ansi"):
+                return format_search_results_ascii(
+                    result,
+                    query=query,
+                    color=output_format == "ansi",
+                )
 
             return result
 
