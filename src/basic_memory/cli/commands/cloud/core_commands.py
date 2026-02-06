@@ -6,6 +6,7 @@ from rich.console import Console
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.cli.promo import OSS_DISCOUNT_CODE
 from basic_memory.config import ConfigManager
 from basic_memory.cli.commands.cloud.api_client import (
     CloudAPIError,
@@ -57,6 +58,10 @@ def login():
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
             console.print(f"[yellow]{e.args[0]}[/yellow]\n")
+            console.print(
+                f"OSS discount code: [bold]{OSS_DISCOUNT_CODE}[/bold] "
+                "(20% off for 3 months)\n"
+            )
             console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
             console.print(
                 "[dim]Once you have an active subscription, run [bold]bm cloud login[/bold] again.[/dim]"
@@ -191,3 +196,17 @@ def setup() -> None:
     except Exception as e:
         console.print(f"\n[red]Unexpected error during setup: {e}[/red]")
         raise typer.Exit(1)
+
+
+@cloud_app.command("promo")
+def promo(enabled: bool = typer.Option(True, "--on/--off", help="Enable or disable CLI promos.")):
+    """Enable or disable CLI cloud promo messages."""
+    config_manager = ConfigManager()
+    config = config_manager.load_config()
+    config.cloud_promo_opt_out = not enabled
+    config_manager.save_config(config)
+
+    if enabled:
+        console.print("[green]Cloud promo messages enabled[/green]")
+    else:
+        console.print("[yellow]Cloud promo messages disabled[/yellow]")

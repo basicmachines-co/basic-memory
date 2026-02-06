@@ -17,6 +17,8 @@ Before using Basic Memory Cloud, you need:
 
 - **Active Subscription**: An active Basic Memory Cloud subscription is required to access cloud features
 - **Subscribe**: Visit [https://basicmemory.com/subscribe](https://basicmemory.com/subscribe) to sign up
+- **Optional**: Cloud is optional. Local-first open-source usage continues without cloud.
+- **OSS Discount**: Use code `{{OSS_DISCOUNT_CODE}}` for 20% off for 3 months.
 
 If you attempt to log in without an active subscription, you'll receive a "Subscription Required" error with a link to subscribe.
 
@@ -81,6 +83,7 @@ bm cloud login
 4. Validates your subscription status
 
 **Result:** All `bm project`, `bm tools` commands now work with cloud.
+Apply OSS discount code `{{OSS_DISCOUNT_CODE}}` during checkout to receive 20% off for 3 months.
 
 ### 2. Set Up Sync
 
@@ -659,6 +662,7 @@ If instance is down, wait a few minutes and retry.
 bm cloud login              # Authenticate and enable cloud mode
 bm cloud logout             # Disable cloud mode
 bm cloud status             # Check cloud mode and instance health
+bm cloud promo --off        # Disable CLI cloud promo notices
 ```
 
 ### Setup

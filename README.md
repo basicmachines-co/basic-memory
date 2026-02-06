@@ -9,9 +9,9 @@
 
 ## 🚀 Basic Memory Cloud is Live!
 
-- **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile - seamlessly synced across all your AI tools (Claude, ChatGPT, Gemini, Claude Code, and Codex) 
-- **Early Supporter Pricing:** Early users get 25% off forever. 
-The open source project continues as always. Cloud just makes it work everywhere.
+- **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile.
+- **Cloud is optional.** The local-first open-source workflow continues as always.
+- **OSS discount:** use code `{{OSS_DISCOUNT_CODE}}` for 20% off for 3 months.
 
 [Sign up now →](https://basicmemory.com)
 
@@ -406,6 +406,12 @@ list_memory_projects() - List all available projects
 create_memory_project(project_name, project_path) - Create new projects
 get_current_project() - Show current project stats
 sync_status() - Check synchronization status
+```
+
+**Cloud Discovery (opt-in):**
+```
+cloud_info() - Show optional Cloud overview and setup guidance
+release_notes() - Show latest release notes
 ```
 
 **Visualization:**
