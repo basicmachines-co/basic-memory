@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Basic Memory Note Preview - MCP UI</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #fdf2f2;
+        --panel: #ffffff;
+        --ink: #1a1a1d;
+        --muted: #6b6770;
+        --border: #ecd7dd;
+        --accent: #b91c1c;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: "IBM Plex Sans", "Space Grotesk", system-ui, sans-serif;
+        background: radial-gradient(circle at top, #fff7f7 0%, #f7ecec 60%, #f0e3e4 100%);
+        color: var(--ink);
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      .header h1 {
+        margin: 0;
+        font-size: 19px;
+      }
+
+      .badge {
+        font-size: 11px;
+        border-radius: 999px;
+        padding: 4px 10px;
+        border: 1px solid var(--border);
+        background: #fee2e2;
+        color: var(--accent);
+      }
+
+      .subtitle {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.1);
+      }
+
+      pre {
+        margin: 0;
+        font-family: "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        color: #2a2a2a;
+      }
+
+      .empty {
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+        padding: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1 id="title">Note Preview</h1>
+      <div class="badge">mcp-ui style</div>
+    </div>
+    <div class="subtitle" id="subtitle">Waiting for note content...</div>
+
+    <div class="panel">
+      <div id="empty" class="empty" style="display: none;">No content available.</div>
+      <pre id="content"></pre>
+    </div>
+
+    <script>
+      (function () {
+        const title = document.getElementById("title");
+        const subtitle = document.getElementById("subtitle");
+        const contentEl = document.getElementById("content");
+        const emptyEl = document.getElementById("empty");
+        let hasData = false;
+
+        function stripFrontmatter(text) {
+          if (!text.startsWith("---")) return text;
+          const end = text.indexOf("---", 3);
+          if (end === -1) return text;
+          return text.slice(end + 3).trim();
+        }
+
+        function parseTitle(text) {
+          const lines = text.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("# ")) return line.replace("# ", "").trim();
+          }
+          return null;
+        }
+
+        function extractText(toolOutput) {
+          if (!toolOutput) return "";
+          if (typeof toolOutput === "string") return toolOutput;
+
+          const content = toolOutput.content;
+          if (Array.isArray(content)) {
+            const textBlock = content.find(
+              (block) => block && block.type === "text" && typeof block.text === "string"
+            );
+            if (textBlock) return textBlock.text;
+          }
+
+          if (toolOutput.structuredContent) {
+            if (typeof toolOutput.structuredContent === "string") {
+              return toolOutput.structuredContent;
+            }
+          }
+
+          return "";
+        }
+
+        function updateFromRenderData(renderData) {
+          if (!renderData) return;
+          const identifier = renderData.toolInput && renderData.toolInput.identifier;
+          const rawText = extractText(renderData.toolOutput);
+          if (!rawText) {
+            emptyEl.style.display = "block";
+            contentEl.textContent = "";
+            return;
+          }
+
+          emptyEl.style.display = "none";
+          const text = stripFrontmatter(rawText);
+          const previewTitle = parseTitle(text) || identifier || "Note Preview";
+
+          title.textContent = previewTitle;
+          subtitle.textContent = identifier ? `Identifier: ${identifier}` : "Note content";
+          contentEl.textContent = text.slice(0, 1400).trim();
+        }
+
+        function handleMessage(event) {
+          const message = event.data || {};
+          if (message.type === "ui-lifecycle-iframe-render-data") {
+            hasData = true;
+            updateFromRenderData(message.payload && message.payload.renderData);
+          }
+        }
+
+        window.addEventListener("message", handleMessage);
+        window.parent?.postMessage({ type: "ui-lifecycle-iframe-ready" }, "*");
+
+        setTimeout(() => {
+          if (!hasData) {
+            window.parent?.postMessage({ type: "ui-request-render-data" }, "*");
+          }
+        }, 200);
+      })();
+    </script>
+  </body>
+</html>
