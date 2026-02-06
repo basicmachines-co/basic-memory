@@ -6,14 +6,10 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import resolve_project_and_path
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
-from basic_memory.schemas.memory import (
-    GraphContext,
-    MemoryUrl,
-    memory_url_path,
-)
+from basic_memory.schemas.memory import GraphContext, MemoryUrl
 
 
 @mcp.tool(
@@ -100,8 +96,10 @@ async def build_context(
     # URL is already validated and normalized by MemoryUrl type annotation
 
     async with get_client() as client:
-        # Get the active project using the new stateless approach
-        active_project = await get_active_project(client, project, context)
+        # Resolve project and normalize memory:// identifier
+        active_project, resolved_path, _ = await resolve_project_and_path(
+            client, url, project, context
+        )
 
         # Import here to avoid circular import
         from basic_memory.mcp.clients import MemoryClient
@@ -109,7 +107,7 @@ async def build_context(
         # Use typed MemoryClient for API calls
         memory_client = MemoryClient(client, active_project.external_id)
         return await memory_client.build_context(
-            memory_url_path(url),
+            resolved_path,
             depth=depth or 1,
             timeframe=timeframe,
             page=page,

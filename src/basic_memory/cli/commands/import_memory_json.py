@@ -55,7 +55,9 @@ def memory_json(
         markdown_processor, file_service = run_with_cleanup(get_importer_dependencies())
 
         # Create the importer
-        importer = MemoryJsonImporter(config.home, markdown_processor, file_service)
+        importer = MemoryJsonImporter(
+            config.home, markdown_processor, file_service, project_name=config.name
+        )
 
         # Process the file
         base_path = config.home if not destination_folder else config.home / destination_folder

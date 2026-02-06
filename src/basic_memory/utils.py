@@ -7,7 +7,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, Union, runtime_checkable, List
+from typing import Protocol, Union, runtime_checkable, List, Optional
 
 from loguru import logger
 from unidecode import unidecode
@@ -200,6 +200,49 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
         return_val += extension  # pragma: no cover
 
     return return_val
+
+
+def normalize_project_reference(identifier: str) -> str:
+    """Normalize project-prefixed references.
+
+    Converts project namespace syntax ("project::note") to path syntax ("project/note").
+    Leaves non-namespaced identifiers unchanged.
+    """
+    if "::" not in identifier:
+        return identifier
+
+    project, remainder = identifier.split("::", 1)
+    remainder = remainder.lstrip("/")
+    return f"{project}/{remainder}"
+
+
+def build_canonical_permalink(
+    project_permalink: Optional[str],
+    file_path: Union[Path, str, PathLike],
+    include_project: bool = True,
+) -> str:
+    """Build a canonical permalink, optionally prefixed with project slug.
+
+    Args:
+        project_permalink: URL-friendly project identifier (slug). If None, no prefix is added.
+        file_path: Original file path or permalink-like string.
+        include_project: When True, prefix with project slug.
+
+    Returns:
+        Canonical permalink string.
+    """
+    normalized_path = generate_permalink(file_path)
+
+    if not include_project or not project_permalink:
+        return normalized_path
+
+    normalized_project = generate_permalink(project_permalink)
+    if normalized_path == normalized_project or normalized_path.startswith(
+        f"{normalized_project}/"
+    ):
+        return normalized_path
+
+    return f"{normalized_project}/{normalized_path}"
 
 
 def setup_logging(

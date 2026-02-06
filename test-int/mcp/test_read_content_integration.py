@@ -283,7 +283,7 @@ async def test_read_content_empty_file(mcp_server, app, test_project):
 
         # Should still have frontmatter even with empty content
         assert "title: Empty Test" in content
-        assert "permalink: test/empty-test" in content
+        assert f"permalink: {test_project.name}/test/empty-test" in content
 
 
 @pytest.mark.asyncio

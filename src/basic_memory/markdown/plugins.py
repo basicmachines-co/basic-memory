@@ -1,6 +1,8 @@
 """Markdown-it plugins for Basic Memory markdown parsing."""
 
 from typing import List, Any, Dict
+
+from basic_memory.utils import normalize_project_reference
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
@@ -114,7 +116,7 @@ def parse_relation(token: Token) -> Dict[str, Any] | None:
             rel_type = before
 
         # Get target
-        target = content[start + 2 : end].strip()
+        target = normalize_project_reference(content[start + 2 : end].strip())
 
         # Look for context after
         after = content[end + 2 :].strip()
@@ -160,7 +162,7 @@ def parse_inline_relations(content: str) -> List[Dict[str, Any]]:
             # No matching ]] found
             break
 
-        target = content[start + 2 : end].strip()
+        target = normalize_project_reference(content[start + 2 : end].strip())
         if target:
             relations.append({"type": "links_to", "target": target, "context": None})
 
