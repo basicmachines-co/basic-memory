@@ -67,7 +67,7 @@ async def test_move_note_success(app, client, test_project):
     content = await read_note.fn("target/moved-note", project=test_project.name)
     assert "# Test Note" in content
     assert "Original content here" in content
-    assert "permalink: target/moved-note" in content
+    assert f"permalink: {test_project.name}/target/moved-note" in content
 
 
 @pytest.mark.asyncio
@@ -426,7 +426,7 @@ async def test_move_note_rename_only(client, test_project):
     content = await read_note.fn("test/new-name", project=test_project.name)
     assert "# OriginalName" in content  # Title in content remains same
     assert "Content to rename" in content
-    assert "permalink: test/new-name" in content
+    assert f"permalink: {test_project.name}/test/new-name" in content
 
 
 @pytest.mark.asyncio
@@ -587,7 +587,7 @@ async def test_move_note_preserves_frontmatter(app, client, test_project):
     content = await read_note.fn("target/moved-custom-note", project=test_project.name)
     assert "title: Custom Frontmatter Note" in content
     assert "type: note" in content
-    assert "permalink: target/moved-custom-note" in content
+    assert f"permalink: {test_project.name}/target/moved-custom-note" in content
     assert "# Custom Frontmatter Note" in content
     assert "Content with custom metadata" in content
 

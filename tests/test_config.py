@@ -215,6 +215,16 @@ class TestConfigManager:
         config = BasicMemoryConfig(disable_permalinks=True)
         assert config.disable_permalinks is True
 
+    def test_permalinks_include_project_flag_default(self):
+        """Test that permalinks_include_project defaults to True."""
+        config = BasicMemoryConfig()
+        assert config.permalinks_include_project is True
+
+    def test_permalinks_include_project_flag_can_be_disabled(self):
+        """Test that permalinks_include_project can be set to False."""
+        config = BasicMemoryConfig(permalinks_include_project=False)
+        assert config.permalinks_include_project is False
+
     def test_config_manager_respects_custom_config_dir(self, monkeypatch):
         """Test that ConfigManager respects BASIC_MEMORY_CONFIG_DIR environment variable."""
         with tempfile.TemporaryDirectory() as temp_dir:
