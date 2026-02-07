@@ -1,4 +1,7 @@
+import subprocess
 import time
+from pathlib import Path
+from unittest.mock import Mock
 
 from basic_memory.cli.commands.cloud.bisync_commands import convert_bmignore_to_rclone_filters
 from basic_memory.cli.commands.cloud.rclone_config import (
@@ -55,6 +58,38 @@ def test_convert_bmignore_to_rclone_filters_is_cached_when_up_to_date(config_hom
     second = convert_bmignore_to_rclone_filters()
     assert second == first
     assert second.stat().st_mtime >= first_mtime
+
+
+def test_get_rclone_config_path_uses_runtime_detection(monkeypatch, tmp_path):
+    """Test that get_rclone_config_path uses rclone config file for runtime detection."""
+    config_path = tmp_path / "custom" / "rclone.conf"
+
+    def mock_run(cmd, **kwargs):
+        if cmd == ["rclone", "config", "file"]:
+            result = Mock()
+            result.returncode = 0
+            result.stdout = f"Configuration file is stored at:\n{config_path}"
+            return result
+        raise NotImplementedError(f"Unexpected command: {cmd}")
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    detected_path = get_rclone_config_path()
+    assert detected_path == config_path
+    assert detected_path.parent.exists()
+
+
+def test_get_rclone_config_path_falls_back_on_error(monkeypatch):
+    """Test that get_rclone_config_path falls back to default if rclone fails."""
+
+    def mock_run(cmd, **kwargs):
+        raise subprocess.SubprocessError("rclone not found")
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+
+    fallback_path = get_rclone_config_path()
+    expected = Path.home() / ".config" / "rclone" / "rclone.conf"
+    assert fallback_path == expected
 
 
 def test_configure_rclone_remote_writes_config_and_backs_up_existing(config_home):

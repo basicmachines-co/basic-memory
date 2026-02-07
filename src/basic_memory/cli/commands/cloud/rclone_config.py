@@ -7,6 +7,7 @@ Uses a single "basic-memory-cloud" remote for all operations.
 import configparser
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +23,32 @@ class RcloneConfigError(Exception):
 
 
 def get_rclone_config_path() -> Path:
-    """Get the path to rclone configuration file."""
+    """Get the path to rclone configuration file.
+
+    Uses runtime detection via `rclone config file` to support different
+    installation methods (Scoop, Chocolatey, manual) across platforms.
+    Falls back to default location if rclone command fails.
+    """
+    try:
+        # Use rclone to determine its actual config location
+        result = subprocess.run(
+            ["rclone", "config", "file"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            # Output format: "Configuration file is stored at:\n/path/to/rclone.conf"
+            lines = result.stdout.strip().split("\n")
+            if lines:
+                config_path = Path(lines[-1].strip())
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                return config_path
+    except (subprocess.SubprocessError, FileNotFoundError):
+        # If rclone is not available or command fails, fall back to default
+        pass
+
+    # Fallback to default location
     config_dir = Path.home() / ".config" / "rclone"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / "rclone.conf"
