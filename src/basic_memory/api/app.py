@@ -19,7 +19,11 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
 )
-from basic_memory.api.v2.routers.project_router import list_projects
+from basic_memory.api.v2.routers.project_router import (
+    add_project,
+    list_projects,
+    synchronize_projects,
+)
 from basic_memory.config import init_api_logging
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.initialization import initialize_app
@@ -85,19 +89,19 @@ app.include_router(v2_project, prefix="/v2")
 # Legacy web app proxy paths (compat with /proxy/projects/projects)
 app.include_router(v2_project, prefix="/proxy/projects")
 
-# Legacy v1 compat: older CLI versions call GET /projects/projects (without trailing slash)
-# Using router mount causes 307 redirect which proxy doesn't follow, so add explicit route
+# Legacy v1 compat: older CLI versions (v0.18.0 and earlier) call /projects/...
+# Using router mount causes 307 redirect which proxy doesn't follow, so add explicit routes
 legacy_router = APIRouter(tags=["legacy"])
 legacy_router.add_api_route("/projects/projects", list_projects, methods=["GET"])
+legacy_router.add_api_route("/projects/projects", add_project, methods=["POST"])
+legacy_router.add_api_route("/projects/config/sync", synchronize_projects, methods=["POST"])
 app.include_router(legacy_router)
 
 # V2 routers are the only public API surface
 
 
 @app.exception_handler(EntityAlreadyExistsError)
-async def entity_already_exists_error_handler(
-    request: Request, exc: EntityAlreadyExistsError
-):
+async def entity_already_exists_error_handler(request: Request, exc: EntityAlreadyExistsError):
     """Handle entity creation conflicts (e.g., file already exists).
 
     This is expected behavior when users try to create notes that exist,
