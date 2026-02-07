@@ -15,7 +15,7 @@ Validation is soft by default (warn mode). Unmatched observations and relations
 are informational, not errors -- schemas are a subset, not a straitjacket.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dataclass_field
 
 from basic_memory.schema.parser import SchemaDefinition, SchemaField
 
@@ -29,7 +29,7 @@ class FieldResult:
 
     field: SchemaField
     status: str  # "present" | "missing" | "enum_mismatch"
-    values: list[str] = field(default_factory=list)  # Matched values
+    values: list[str] = dataclass_field(default_factory=list)  # Matched values
     message: str | None = None
 
 
@@ -40,11 +40,11 @@ class ValidationResult:
     note_identifier: str
     schema_entity: str
     passed: bool  # True if no errors (warnings are OK)
-    field_results: list[FieldResult] = field(default_factory=list)
-    unmatched_observations: dict[str, int] = field(default_factory=dict)  # category -> count
-    unmatched_relations: list[str] = field(default_factory=list)  # relation types not in schema
-    warnings: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    field_results: list[FieldResult] = dataclass_field(default_factory=list)
+    unmatched_observations: dict[str, int] = dataclass_field(default_factory=dict)  # cat -> count
+    unmatched_relations: list[str] = dataclass_field(default_factory=list)  # types not in schema
+    warnings: list[str] = dataclass_field(default_factory=list)
+    errors: list[str] = dataclass_field(default_factory=list)
 
 
 # --- Validation Logic ---
@@ -255,7 +255,4 @@ def _missing_field_message(schema_field: SchemaField) -> str:
             f"(no '{schema_field.name} [[...]]' relation found)"
         )
 
-    return (
-        f"Missing {kind} field: {schema_field.name} "
-        f"(expected [{schema_field.name}] observation)"
-    )
+    return f"Missing {kind} field: {schema_field.name} (expected [{schema_field.name}] observation)"
