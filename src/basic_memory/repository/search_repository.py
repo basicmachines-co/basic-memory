@@ -96,7 +96,11 @@ def create_search_repository(
         database_backend = config.database_backend
 
     if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
-        return PostgresSearchRepository(session_maker, project_id=project_id)  # pragma: no cover
+        return PostgresSearchRepository(  # pragma: no cover
+            session_maker,
+            project_id=project_id,
+            app_config=app_config,
+        )
     else:
         return SQLiteSearchRepository(session_maker, project_id=project_id, app_config=app_config)
 

@@ -7,13 +7,51 @@ Postgres tsvector-backed search implementation remains well covered.
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import text
 
+from basic_memory import db
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.schemas.search import SearchItemType
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 pytestmark = pytest.mark.postgres
+
+
+class StubEmbeddingProvider:
+    """Deterministic embedding provider for Postgres semantic tests."""
+
+    model_name = "stub"
+    dimensions = 4
+
+    async def embed_query(self, text: str) -> list[float]:
+        return self._vectorize(text)
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._vectorize(text) for text in texts]
+
+    @staticmethod
+    def _vectorize(text: str) -> list[float]:
+        normalized = text.lower()
+        if any(token in normalized for token in ["auth", "token", "session", "login"]):
+            return [1.0, 0.0, 0.0, 0.0]
+        if any(token in normalized for token in ["schema", "migration", "database", "sql"]):
+            return [0.0, 1.0, 0.0, 0.0]
+        if any(token in normalized for token in ["queue", "worker", "async", "task"]):
+            return [0.0, 0.0, 1.0, 0.0]
+        return [0.0, 0.0, 0.0, 1.0]
+
+
+async def _skip_if_pgvector_unavailable(session_maker) -> None:
+    """Skip semantic pgvector tests when extension is not available in test Postgres image."""
+    async with db.scoped_session(session_maker) as session:
+        try:
+            await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await session.commit()
+        except Exception:
+            pytest.skip("pgvector extension is unavailable in this Postgres test environment.")
 
 
 @pytest.fixture(autouse=True)
@@ -197,3 +235,188 @@ async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
         # Use a non-text query so the generated SQL doesn't include to_tsquery(),
         # ensuring we hit the generic "re-raise other db errors" branch.
         await repo.search(permalink="docs/anything")
+
+
+@pytest.mark.asyncio
+async def test_postgres_semantic_vector_search_returns_ranked_entities(
+    session_maker, test_project
+):
+    """Vector mode ranks entities via pgvector distance."""
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    await repo.init_search_index()
+
+    now = datetime.now(timezone.utc)
+    await repo.bulk_index_items(
+        [
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=401,
+                title="Authentication Decisions",
+                content_stems="login session token refresh auth design",
+                content_snippet="auth snippet",
+                permalink="specs/authentication",
+                file_path="specs/authentication.md",
+                type=SearchItemType.ENTITY.value,
+                entity_id=401,
+                metadata={"entity_type": "spec"},
+                created_at=now,
+                updated_at=now,
+            ),
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=402,
+                title="Database Migrations",
+                content_stems="alembic sqlite postgres schema migration ddl",
+                content_snippet="db snippet",
+                permalink="specs/migrations",
+                file_path="specs/migrations.md",
+                type=SearchItemType.ENTITY.value,
+                entity_id=402,
+                metadata={"entity_type": "spec"},
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+    await repo.sync_entity_vectors(401)
+    await repo.sync_entity_vectors(402)
+
+    results = await repo.search(
+        search_text="session token auth",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=5,
+        offset=0,
+    )
+
+    assert results
+    assert results[0].permalink == "specs/authentication"
+    assert all(result.type == SearchItemType.ENTITY.value for result in results)
+
+
+@pytest.mark.asyncio
+async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(
+    session_maker, test_project
+):
+    """Hybrid mode fuses FTS and vector ranks using RRF."""
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    now = datetime.now(timezone.utc)
+    await repo.bulk_index_items(
+        [
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=411,
+                title="Task Queue Worker",
+                content_stems="queue worker retries async processing",
+                content_snippet="worker snippet",
+                permalink="specs/task-queue-worker",
+                file_path="specs/task-queue-worker.md",
+                type=SearchItemType.ENTITY.value,
+                entity_id=411,
+                metadata={"entity_type": "spec"},
+                created_at=now,
+                updated_at=now,
+            ),
+            SearchIndexRow(
+                project_id=test_project.id,
+                id=412,
+                title="Search Index Notes",
+                content_stems="fts bm25 ranking vector search hybrid rrf",
+                content_snippet="search snippet",
+                permalink="specs/search-index",
+                file_path="specs/search-index.md",
+                type=SearchItemType.ENTITY.value,
+                entity_id=412,
+                metadata={"entity_type": "spec"},
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+    )
+    await repo.sync_entity_vectors(411)
+    await repo.sync_entity_vectors(412)
+
+    results = await repo.search(
+        search_text="hybrid vector search",
+        retrieval_mode=SearchRetrievalMode.HYBRID,
+        limit=5,
+        offset=0,
+    )
+
+    assert results
+    assert any(result.permalink == "specs/search-index" for result in results)
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_mode_rejects_non_text_query(session_maker, test_project):
+    """Vector mode should fail fast for title-only queries."""
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    with pytest.raises(ValueError):
+        await repo.search(
+            title="Authentication Decisions",
+            retrieval_mode=SearchRetrievalMode.VECTOR,
+            search_item_types=[SearchItemType.ENTITY],
+        )
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_mode_fails_when_semantic_disabled(session_maker, test_project):
+    """Vector mode should fail fast when semantic search is disabled."""
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=False,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+
+    with pytest.raises(SemanticSearchDisabledError):
+        await repo.search(
+            search_text="auth session",
+            retrieval_mode=SearchRetrievalMode.VECTOR,
+        )
