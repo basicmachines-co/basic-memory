@@ -16,7 +16,7 @@ from basic_memory.repository.metadata_filters import (
     parse_metadata_filters,
     build_postgres_json_path,
 )
-from basic_memory.schemas.search import SearchItemType
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 class PostgresSearchRepository(SearchRepositoryBase):
@@ -220,6 +220,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -530,3 +531,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
             await session.commit()
+
+    async def sync_entity_vectors(self, entity_id: int) -> None:
+        """Vector sync is local-only in this phase."""
+        raise NotImplementedError(
+            "Postgres vector sync is not implemented in local semantic phase."
+        )

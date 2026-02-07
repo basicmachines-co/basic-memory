@@ -46,6 +46,12 @@ dependencies = [
     "httpx>=0.28.0",
 ]
 
+[project.optional-dependencies]
+semantic = [
+    "fastembed>=0.7.4",
+    "sqlite-vec>=0.1.6",
+]
+
 
 [project.urls]
 Homepage = "https://github.com/basicmachines-co/basic-memory"

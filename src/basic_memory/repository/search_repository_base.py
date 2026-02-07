@@ -10,7 +10,7 @@ from sqlalchemy import Executable, Result, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.schemas.search import SearchItemType
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.repository.search_index_row import SearchIndexRow
 
 
@@ -79,6 +79,7 @@ class SearchRepositoryBase(ABC):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:

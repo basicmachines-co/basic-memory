@@ -274,6 +274,31 @@ class TestSearchErrorFormatting:
         assert "The current project is not accessible" in result
         assert "Check available projects" in result
 
+    def test_format_search_error_semantic_disabled(self):
+        """Test formatting for semantic-search-disabled errors."""
+        result = _format_search_error_response(
+            "test-project",
+            "Semantic search is disabled. Set BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true.",
+            "semantic query",
+            "vector",
+        )
+
+        assert "# Search Failed - Semantic Search Disabled" in result
+        assert "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true" in result
+        assert 'search_type="text"' in result
+
+    def test_format_search_error_semantic_dependencies_missing(self):
+        """Test formatting for missing semantic dependencies."""
+        result = _format_search_error_response(
+            "test-project",
+            "Semantic search dependencies are missing. Install with: pip install -e '.[semantic]'",
+            "semantic query",
+            "hybrid",
+        )
+
+        assert "# Search Failed - Semantic Dependencies Missing" in result
+        assert 'pip install -e ".[semantic]"' in result
+
     def test_format_search_error_generic(self):
         """Test formatting for generic errors."""
         result = _format_search_error_response("test-project", "unknown error", "test query")
@@ -351,3 +376,45 @@ class TestSearchToolErrorHandling:
         result = await search_mod.search_notes.fn(project="test-project", query="test query")
         assert isinstance(result, str)
         assert "# Search Failed - Access Error" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_type", ["vector", "hybrid"])
+async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, search_type):
+    """Vector/hybrid search types should populate retrieval_mode in API payload."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        project_url = "http://test"
+        name = "test-project"
+        id = 1
+        external_id = "test-external-id"
+
+    async def fake_get_active_project(*args, **kwargs):
+        return StubProject()
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    result = await search_mod.search_notes.fn(
+        project="test-project",
+        query="semantic lookup",
+        search_type=search_type,
+    )
+
+    assert isinstance(result, SearchResponse)
+    assert captured_payload["text"] == "semantic lookup"
+    assert captured_payload["retrieval_mode"] == search_type
