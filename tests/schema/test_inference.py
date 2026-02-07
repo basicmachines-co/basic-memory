@@ -109,14 +109,12 @@ class TestInferThresholds:
 
     def test_custom_thresholds(self):
         """Custom thresholds override defaults."""
-        notes = [
-            _note(f"n{i}", observations=[("field", f"val{i}")])
-            for i in range(3)
-        ]
+        notes = [_note(f"n{i}", observations=[("field", f"val{i}")]) for i in range(3)]
         notes.append(_note("n3"))
 
         result = infer_schema(
-            "Test", notes,
+            "Test",
+            notes,
             required_threshold=0.80,
             optional_threshold=0.50,
         )
@@ -142,10 +140,7 @@ class TestInferArrayDetection:
         assert tag_freq.is_array is True
 
     def test_single_value_not_array(self):
-        notes = [
-            _note(f"n{i}", observations=[("name", f"Person {i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"Person {i}")]) for i in range(5)]
         result = infer_schema("Person", notes)
         name_freq = next(f for f in result.field_frequencies if f.name == "name")
         assert name_freq.is_array is False
@@ -156,10 +151,7 @@ class TestInferArrayDetection:
 
 class TestInferRelations:
     def test_relation_frequency(self):
-        notes = [
-            _note(f"n{i}", relations=[("works_at", f"Org{i}")])
-            for i in range(3)
-        ]
+        notes = [_note(f"n{i}", relations=[("works_at", f"Org{i}")]) for i in range(3)]
         notes.append(_note("n3"))
         result = infer_schema("Person", notes)
 
@@ -184,19 +176,13 @@ class TestInferRelations:
 
 class TestInferSampleValues:
     def test_sample_values_collected(self):
-        notes = [
-            _note(f"n{i}", observations=[("name", f"Person {i}")])
-            for i in range(3)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"Person {i}")]) for i in range(3)]
         result = infer_schema("Person", notes)
         name_freq = next(f for f in result.field_frequencies if f.name == "name")
         assert len(name_freq.sample_values) == 3
 
     def test_sample_values_capped_at_max(self):
-        notes = [
-            _note(f"n{i}", observations=[("name", f"Person {i}")])
-            for i in range(10)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"Person {i}")]) for i in range(10)]
         result = infer_schema("Person", notes, max_sample_values=5)
         name_freq = next(f for f in result.field_frequencies if f.name == "name")
         assert len(name_freq.sample_values) == 5
@@ -234,10 +220,7 @@ class TestInferSuggestedSchema:
 
     def test_excluded_fields_not_in_schema(self):
         """Fields below threshold not in suggested schema."""
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(10)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(10)]
         notes[0] = _note("n0", observations=[("name", "P0"), ("rare", "x")])
         result = infer_schema("Person", notes)
         for key in result.suggested_schema:

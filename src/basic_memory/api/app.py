@@ -97,9 +97,7 @@ app.include_router(legacy_router)
 
 
 @app.exception_handler(EntityAlreadyExistsError)
-async def entity_already_exists_error_handler(
-    request: Request, exc: EntityAlreadyExistsError
-):
+async def entity_already_exists_error_handler(request: Request, exc: EntityAlreadyExistsError):
     """Handle entity creation conflicts (e.g., file already exists).
 
     This is expected behavior when users try to create notes that exist,

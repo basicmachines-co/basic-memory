@@ -154,12 +154,14 @@ class TestParsePicoschema:
         assert fields[0].enum_values == ["2020", "2021", "2022"]
 
     def test_object_field(self):
-        fields = parse_picoschema({
-            "address?(object)": {
-                "street": "string",
-                "city": "string",
+        fields = parse_picoschema(
+            {
+                "address?(object)": {
+                    "street": "string",
+                    "city": "string",
+                }
             }
-        })
+        )
         assert fields[0].name == "address"
         assert fields[0].type == "object"
         assert len(fields[0].children) == 2
@@ -168,20 +170,24 @@ class TestParsePicoschema:
 
     def test_dict_value_treated_as_object(self):
         """A dict value without explicit (object) is still treated as an object."""
-        fields = parse_picoschema({
-            "metadata": {
-                "source": "string",
+        fields = parse_picoschema(
+            {
+                "metadata": {
+                    "source": "string",
+                }
             }
-        })
+        )
         assert fields[0].type == "object"
         assert len(fields[0].children) == 1
 
     def test_multiple_fields(self):
-        fields = parse_picoschema({
-            "name": "string",
-            "role?": "string",
-            "works_at?": "Organization",
-        })
+        fields = parse_picoschema(
+            {
+                "name": "string",
+                "role?": "string",
+                "works_at?": "Organization",
+            }
+        )
         assert len(fields) == 3
         names = [f.name for f in fields]
         assert "name" in names

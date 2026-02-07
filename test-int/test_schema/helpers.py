@@ -51,9 +51,7 @@ def parse_relations(filepath: Path) -> list[tuple[str, str]]:
     Only matches lines under a ## Relations heading.
     """
     text = filepath.read_text(encoding="utf-8")
-    relations_match = re.search(
-        r"## Relations\n(.*?)(?=\n## |\Z)", text, re.DOTALL
-    )
+    relations_match = re.search(r"## Relations\n(.*?)(?=\n## |\Z)", text, re.DOTALL)
     if not relations_match:
         return []
     relations_text = relations_match.group(1)

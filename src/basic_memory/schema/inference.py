@@ -50,6 +50,7 @@ class InferenceResult:
 # Instead of depending on the ORM Entity model, we accept simple data structures.
 # This keeps the inference engine decoupled from the data access layer.
 
+
 @dataclass
 class NoteData:
     """Minimal note representation for inference analysis.

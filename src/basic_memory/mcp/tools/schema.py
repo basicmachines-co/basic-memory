@@ -84,9 +84,7 @@ async def schema_validate(
             return result
 
         except Exception as e:
-            logger.error(
-                f"Schema validation failed: {e}, project: {active_project.name}"
-            )
+            logger.error(f"Schema validation failed: {e}, project: {active_project.name}")
             return (
                 f"# Schema Validation Failed\n\n"
                 f"Error validating schemas: {e}\n\n"
@@ -163,15 +161,13 @@ async def schema_infer(
             return result
 
         except Exception as e:
-            logger.error(
-                f"Schema inference failed: {e}, project: {active_project.name}"
-            )
+            logger.error(f"Schema inference failed: {e}, project: {active_project.name}")
             return (
                 f"# Schema Inference Failed\n\n"
                 f"Error inferring schema for '{entity_type}': {e}\n\n"
                 f"## Troubleshooting\n"
                 f"1. Ensure notes of type '{entity_type}' exist in the project\n"
-                f"2. Try searching: `search_notes(\"{entity_type}\", types=[\"{entity_type}\"])`\n"
+                f'2. Try searching: `search_notes("{entity_type}", types=["{entity_type}"])`\n'
                 f"3. Verify the project has been synced: `basic-memory status`\n"
             )
 
@@ -237,9 +233,7 @@ async def schema_diff(
             return result
 
         except Exception as e:
-            logger.error(
-                f"Schema diff failed: {e}, project: {active_project.name}"
-            )
+            logger.error(f"Schema diff failed: {e}, project: {active_project.name}")
             return (
                 f"# Schema Diff Failed\n\n"
                 f"Error detecting drift for '{entity_type}': {e}\n\n"

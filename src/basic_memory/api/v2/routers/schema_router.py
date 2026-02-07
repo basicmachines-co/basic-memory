@@ -87,9 +87,7 @@ async def validate_schema(
         # Search for schema notes, then load full entity_metadata from the entity table.
         # The search index only stores minimal metadata (e.g., {"entity_type": "schema"}),
         # but parse_schema_note needs the full frontmatter with entity/schema/version keys.
-        results = await search_service.search(
-            SearchQuery(text=query, types=["schema"]), limit=5
-        )
+        results = await search_service.search(SearchQuery(text=query, types=["schema"]), limit=5)
         frontmatters = []
         for row in results:
             if row.permalink:
@@ -207,13 +205,12 @@ async def diff_schema_endpoint(
     of that type are actually structured. Identifies new fields, dropped
     fields, and cardinality changes.
     """
+
     async def search_fn(query: str) -> list:
         # Search for schema notes, then load full entity_metadata from the entity table.
         # The search index only stores minimal metadata (e.g., {"entity_type": "schema"}),
         # but parse_schema_note needs the full frontmatter with entity/schema/version keys.
-        results = await search_service.search(
-            SearchQuery(text=query, types=["schema"]), limit=5
-        )
+        results = await search_service.search(SearchQuery(text=query, types=["schema"]), limit=5)
         frontmatters = []
         for row in results:
             if row.permalink:

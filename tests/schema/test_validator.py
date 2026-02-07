@@ -21,8 +21,11 @@ def _entity_ref_field(
     is_array: bool = False,
 ) -> SchemaField:
     return SchemaField(
-        name=name, type="Organization", required=required,
-        is_entity_ref=True, is_array=is_array,
+        name=name,
+        type="Organization",
+        required=required,
+        is_entity_ref=True,
+        is_array=is_array,
     )
 
 
@@ -32,8 +35,11 @@ def _enum_field(
     required: bool = True,
 ) -> SchemaField:
     return SchemaField(
-        name=name, type="enum", required=required,
-        is_enum=True, enum_values=values,
+        name=name,
+        type="enum",
+        required=required,
+        is_enum=True,
+        enum_values=values,
     )
 
 
@@ -43,7 +49,10 @@ def _make_schema(
     entity: str = "TestEntity",
 ) -> SchemaDefinition:
     return SchemaDefinition(
-        entity=entity, version=1, fields=fields, validation_mode=validation_mode,
+        entity=entity,
+        version=1,
+        fields=fields,
+        validation_mode=validation_mode,
     )
 
 
@@ -104,7 +113,8 @@ class TestValidateOptionalFields:
     def test_optional_missing_silent_even_in_strict(self):
         """Strict mode only affects required fields."""
         schema = _make_schema(
-            [_scalar_field("bio", required=False)], validation_mode="strict",
+            [_scalar_field("bio", required=False)],
+            validation_mode="strict",
         )
         result = validate_note("test-note", schema, [], [])
 
@@ -142,7 +152,8 @@ class TestValidateEntityRefField:
 
     def test_entity_ref_missing_required_strict_fails(self):
         schema = _make_schema(
-            [_entity_ref_field("works_at")], validation_mode="strict",
+            [_entity_ref_field("works_at")],
+            validation_mode="strict",
         )
         result = validate_note("test-note", schema, [], [])
         assert result.passed is False

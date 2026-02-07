@@ -29,8 +29,11 @@ def _entity_ref_field(
     is_array: bool = False,
 ) -> SchemaField:
     return SchemaField(
-        name=name, type="Organization", required=required,
-        is_entity_ref=True, is_array=is_array,
+        name=name,
+        type="Organization",
+        required=required,
+        is_entity_ref=True,
+        is_array=is_array,
     )
 
 
@@ -84,8 +87,7 @@ class TestDiffNewFields:
         """Field common in notes but not in schema -> new field."""
         schema = _make_schema([_scalar_field("name")])
         notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}"), ("role", f"R{i}")])
-            for i in range(4)
+            _note(f"n{i}", observations=[("name", f"P{i}"), ("role", f"R{i}")]) for i in range(4)
         ]
         drift = diff_schema(schema, notes)
 
@@ -96,10 +98,7 @@ class TestDiffNewFields:
         """Field in notes but below new_field_threshold -> not reported."""
         schema = _make_schema([_scalar_field("name")])
         # 'rare' in only 1 of 10 notes (10%) < default 25% threshold
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(10)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(10)]
         notes[0] = _note("n0", observations=[("name", "P0"), ("rare", "x")])
         drift = diff_schema(schema, notes)
         new_names = [f.name for f in drift.new_fields]
@@ -109,8 +108,7 @@ class TestDiffNewFields:
         """Relation common in notes but not in schema -> new field."""
         schema = _make_schema([_scalar_field("name")])
         notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")],
-                  relations=[("works_at", f"Org{i}")])
+            _note(f"n{i}", observations=[("name", f"P{i}")], relations=[("works_at", f"Org{i}")])
             for i in range(4)
         ]
         drift = diff_schema(schema, notes)
@@ -125,10 +123,7 @@ class TestDiffDroppedFields:
     def test_dropped_field_not_in_any_note(self):
         """Schema field that never appears in notes -> dropped."""
         schema = _make_schema([_scalar_field("name"), _scalar_field("legacy_id")])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(5)]
         drift = diff_schema(schema, notes)
 
         dropped_names = [f.name for f in drift.dropped_fields]
@@ -137,10 +132,7 @@ class TestDiffDroppedFields:
     def test_dropped_field_below_threshold(self):
         """Schema field appearing rarely -> dropped."""
         schema = _make_schema([_scalar_field("name"), _scalar_field("fax")])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(20)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(20)]
         notes[0] = _note("n0", observations=[("name", "P0"), ("fax", "555-1234")])
         drift = diff_schema(schema, notes)
         dropped_names = [f.name for f in drift.dropped_fields]
@@ -148,20 +140,14 @@ class TestDiffDroppedFields:
 
     def test_field_above_threshold_not_dropped(self):
         schema = _make_schema([_scalar_field("name")])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(5)]
         drift = diff_schema(schema, notes)
         assert drift.dropped_fields == []
 
     def test_dropped_entity_ref_field(self):
         """Entity ref field not appearing in relations -> dropped."""
         schema = _make_schema([_scalar_field("name"), _entity_ref_field("works_at")])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(5)]
         drift = diff_schema(schema, notes)
         dropped_names = [f.name for f in drift.dropped_fields]
         assert "works_at" in dropped_names
@@ -189,10 +175,7 @@ class TestDiffCardinalityChanges:
     def test_schema_array_usage_single(self):
         """Schema says array but usage is typically single-value."""
         schema = _make_schema([_scalar_field("name", is_array=True)])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"Person {i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"Person {i}")]) for i in range(5)]
         drift = diff_schema(schema, notes)
         assert len(drift.cardinality_changes) == 1
         assert "name" in drift.cardinality_changes[0]
@@ -200,20 +183,14 @@ class TestDiffCardinalityChanges:
 
     def test_no_cardinality_change_when_matching(self):
         schema = _make_schema([_scalar_field("name", is_array=False)])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(5)]
         drift = diff_schema(schema, notes)
         assert drift.cardinality_changes == []
 
     def test_cardinality_not_reported_for_absent_field(self):
         """If a schema field doesn't appear in notes, no cardinality check."""
         schema = _make_schema([_scalar_field("ghost", is_array=True)])
-        notes = [
-            _note(f"n{i}", observations=[("name", f"P{i}")])
-            for i in range(5)
-        ]
+        notes = [_note(f"n{i}", observations=[("name", f"P{i}")]) for i in range(5)]
         drift = diff_schema(schema, notes)
         assert drift.cardinality_changes == []
         dropped_names = [f.name for f in drift.dropped_fields]

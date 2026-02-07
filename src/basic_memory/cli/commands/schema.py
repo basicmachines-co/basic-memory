@@ -170,8 +170,7 @@ async def _run_infer(
 
         # --- Display frequency analysis ---
         console.print(
-            f"\n[bold]Analyzing {report.notes_analyzed} notes "
-            f"with type: {entity_type}...[/bold]\n"
+            f"\n[bold]Analyzing {report.notes_analyzed} notes with type: {entity_type}...[/bold]\n"
         )
 
         table = Table(title="Field Frequencies")
@@ -273,16 +272,10 @@ async def _run_diff(
 
         report = await schema_client.diff(entity_type)
 
-        has_drift = (
-            report.new_fields
-            or report.dropped_fields
-            or report.cardinality_changes
-        )
+        has_drift = report.new_fields or report.dropped_fields or report.cardinality_changes
 
         if not has_drift:
-            console.print(
-                f"[green]No drift detected for {entity_type} schema.[/green]"
-            )
+            console.print(f"[green]No drift detected for {entity_type} schema.[/green]")
             return
 
         console.print(f"\n[bold]Schema drift detected for {entity_type}:[/bold]\n")
@@ -301,7 +294,6 @@ async def _run_diff(
             console.print("[yellow]~ Cardinality changes:[/yellow]")
             for change in report.cardinality_changes:
                 console.print(f"  ~ {change}")
-
 
 
 @schema_app.command()
