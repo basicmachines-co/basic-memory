@@ -27,6 +27,9 @@ from basic_memory.mcp.tools.project_management import (
 # ChatGPT-compatible tools
 from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 
+# Schema tools
+from basic_memory.mcp.tools.schema import schema_validate, schema_infer
+
 __all__ = [
     "build_context",
     "canvas",
@@ -41,6 +44,8 @@ __all__ = [
     "read_content",
     "read_note",
     "recent_activity",
+    "schema_infer",
+    "schema_validate",
     "search",
     "search_by_metadata",
     "search_notes",
