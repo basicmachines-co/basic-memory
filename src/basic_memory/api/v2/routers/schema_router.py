@@ -24,6 +24,7 @@ from basic_memory.schemas.schema import (
     FieldFrequencyResponse,
     DriftFieldResponse,
 )
+from basic_memory.schemas.search import SearchQuery
 from basic_memory.schema.resolver import resolve_schema
 from basic_memory.schema.validator import validate_note
 from basic_memory.schema.inference import infer_schema, NoteData
@@ -83,7 +84,19 @@ async def validate_schema(
     results: list[NoteValidationResponse] = []
 
     async def search_fn(query: str) -> list:
-        return await search_service.search_by_text(query, limit=5)
+        # Search for schema notes, then load full entity_metadata from the entity table.
+        # The search index only stores minimal metadata (e.g., {"entity_type": "schema"}),
+        # but parse_schema_note needs the full frontmatter with entity/schema/version keys.
+        results = await search_service.search(
+            SearchQuery(text=query, types=["schema"]), limit=5
+        )
+        frontmatters = []
+        for row in results:
+            if row.permalink:
+                entity = await entity_repository.get_by_permalink(row.permalink)
+                if entity:
+                    frontmatters.append(_entity_frontmatter(entity))
+        return frontmatters
 
     # --- Single note validation ---
     if identifier:
@@ -195,7 +208,19 @@ async def diff_schema_endpoint(
     fields, and cardinality changes.
     """
     async def search_fn(query: str) -> list:
-        return await search_service.search_by_text(query, limit=5)
+        # Search for schema notes, then load full entity_metadata from the entity table.
+        # The search index only stores minimal metadata (e.g., {"entity_type": "schema"}),
+        # but parse_schema_note needs the full frontmatter with entity/schema/version keys.
+        results = await search_service.search(
+            SearchQuery(text=query, types=["schema"]), limit=5
+        )
+        frontmatters = []
+        for row in results:
+            if row.permalink:
+                entity = await entity_repository.get_by_permalink(row.permalink)
+                if entity:
+                    frontmatters.append(_entity_frontmatter(entity))
+        return frontmatters
 
     # Resolve schema by entity type
     schema_frontmatter = {"type": entity_type}

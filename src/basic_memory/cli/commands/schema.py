@@ -277,7 +277,6 @@ async def _run_diff(
             report.new_fields
             or report.dropped_fields
             or report.cardinality_changes
-            or report.type_mismatches
         )
 
         if not has_drift:
@@ -303,10 +302,6 @@ async def _run_diff(
             for change in report.cardinality_changes:
                 console.print(f"  ~ {change}")
 
-        if report.type_mismatches:
-            console.print("[red]! Type mismatches:[/red]")
-            for mismatch in report.type_mismatches:
-                console.print(f"  ! {mismatch}")
 
 
 @schema_app.command()
