@@ -238,9 +238,7 @@ async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
 
 
 @pytest.mark.asyncio
-async def test_postgres_semantic_vector_search_returns_ranked_entities(
-    session_maker, test_project
-):
+async def test_postgres_semantic_vector_search_returns_ranked_entities(session_maker, test_project):
     """Vector mode ranks entities via pgvector distance."""
     await _skip_if_pgvector_unavailable(session_maker)
     app_config = BasicMemoryConfig(
@@ -307,9 +305,7 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(
 
 
 @pytest.mark.asyncio
-async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(
-    session_maker, test_project
-):
+async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_maker, test_project):
     """Hybrid mode fuses FTS and vector ranks using RRF."""
     await _skip_if_pgvector_unavailable(session_maker)
     app_config = BasicMemoryConfig(

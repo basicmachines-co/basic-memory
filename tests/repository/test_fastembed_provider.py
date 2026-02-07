@@ -42,7 +42,7 @@ async def test_fastembed_provider_lazy_loads_and_reuses_model(monkeypatch):
     monkeypatch.setitem(sys.modules, "fastembed", module)
     _StubTextEmbedding.init_count = 0
 
-    provider = FastEmbedEmbeddingProvider(model_name="stub-model")
+    provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
     assert provider._model is None
 
     first = await provider.embed_query("auth query")
@@ -56,17 +56,15 @@ async def test_fastembed_provider_lazy_loads_and_reuses_model(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fastembed_provider_updates_dimensions_from_model_output(monkeypatch):
-    """Provider dimensions should align with model output shape."""
+async def test_fastembed_provider_dimension_mismatch_raises_error(monkeypatch):
+    """Provider should fail fast when model output dimensions differ from configured dimensions."""
     module = type(sys)("fastembed")
     module.TextEmbedding = _StubTextEmbedding
     monkeypatch.setitem(sys.modules, "fastembed", module)
 
     provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
-    vectors = await provider.embed_documents(["wide vector"])
-
-    assert len(vectors[0]) == 5
-    assert provider.dimensions == 5
+    with pytest.raises(RuntimeError, match="5-dimensional vectors"):
+        await provider.embed_documents(["wide vector"])
 
 
 @pytest.mark.asyncio

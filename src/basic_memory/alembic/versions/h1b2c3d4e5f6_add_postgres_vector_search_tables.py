@@ -1,7 +1,7 @@
 """Add Postgres semantic vector search tables (pgvector-aware, optional)
 
 Revision ID: h1b2c3d4e5f6
-Revises: g9a0b3c4d5e6
+Revises: d7e8f9a0b1c2
 Create Date: 2026-02-07 00:00:00.000000
 
 """
@@ -11,10 +11,13 @@ from typing import Sequence, Union
 from alembic import op
 from sqlalchemy import text
 
+# Default embedding dimensions (fastembed bge-small-en-v1.5).
+# pgvector HNSW indexes require fixed dimensions on the column.
+DEFAULT_VECTOR_DIMS = 384
 
 # revision identifiers, used by Alembic.
 revision: str = "h1b2c3d4e5f6"
-down_revision: Union[str, None] = "g9a0b3c4d5e6"
+down_revision: Union[str, None] = "d7e8f9a0b1c2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -22,9 +25,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def _pg_extension_is_available(connection, extension_name: str) -> bool:
     result = connection.execute(
         text(
-            "SELECT EXISTS ("
-            "  SELECT 1 FROM pg_available_extensions WHERE name = :extension_name"
-            ")"
+            "SELECT EXISTS (  SELECT 1 FROM pg_available_extensions WHERE name = :extension_name)"
         ),
         {"extension_name": extension_name},
     )
@@ -70,12 +71,12 @@ def upgrade() -> None:
     )
 
     op.execute(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS search_vector_embeddings (
             chunk_id BIGINT PRIMARY KEY
                 REFERENCES search_vector_chunks(id) ON DELETE CASCADE,
             project_id INTEGER NOT NULL,
-            embedding vector NOT NULL,
+            embedding vector({DEFAULT_VECTOR_DIMS}) NOT NULL,
             embedding_dims INTEGER NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
@@ -85,6 +86,17 @@ def upgrade() -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_project_dims
         ON search_vector_embeddings (project_id, embedding_dims)
+        """
+    )
+
+    # HNSW index for approximate nearest-neighbour search.
+    # Without this every vector query is a sequential scan.
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_hnsw
+        ON search_vector_embeddings
+        USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64)
         """
     )
 

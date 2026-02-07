@@ -1,39 +1,27 @@
 """PostgreSQL tsvector-based search repository implementation."""
 
 import asyncio
-import hashlib
 import json
 import re
-from dataclasses import replace
 from datetime import datetime
 from typing import List, Optional
 
-
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.repository.embedding_provider import EmbeddingProvider
-from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
+from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.metadata_filters import (
     parse_metadata_filters,
     build_postgres_json_path,
 )
-from basic_memory.repository.semantic_errors import (
-    SemanticDependenciesMissingError,
-    SemanticSearchDisabledError,
-)
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
-
-
-VECTOR_FILTER_SCAN_LIMIT = 50000
-RRF_K = 60
-MAX_VECTOR_CHUNK_CHARS = 900
-VECTOR_CHUNK_OVERLAP_CHARS = 120
-HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
 
 
 class PostgresSearchRepository(SearchRepositoryBase):
@@ -69,13 +57,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._vector_tables_lock = asyncio.Lock()
 
         if self._semantic_enabled and self._embedding_provider is None:
-            provider_name = self._app_config.semantic_embedding_provider.strip().lower()
-            if provider_name != "fastembed":
-                raise ValueError(f"Unsupported semantic embedding provider: {provider_name}")
-            self._embedding_provider = FastEmbedEmbeddingProvider(
-                model_name=self._app_config.semantic_embedding_model,
-                batch_size=self._app_config.semantic_embedding_batch_size,
-            )
+            self._embedding_provider = create_embedding_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
 
@@ -150,6 +132,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             logger.debug(f"indexed row {search_index_row}")
             await session.commit()
+
+    # ------------------------------------------------------------------
+    # tsquery preparation (backend-specific)
+    # ------------------------------------------------------------------
 
     def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a search term for tsquery format.
@@ -254,16 +240,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         else:
             return cleaned_term
 
-    def _assert_semantic_available(self) -> None:
-        if not self._semantic_enabled:
-            raise SemanticSearchDisabledError(
-                "Semantic search is disabled. Set BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true."
-            )
-        if self._embedding_provider is None:
-            raise SemanticDependenciesMissingError(
-                "Semantic search dependencies are missing. "
-                "Install with: pip install -e '.[semantic]'"
-            )
+    # ------------------------------------------------------------------
+    # pgvector utility
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _format_pgvector_literal(vector: list[float]) -> str:
@@ -271,6 +250,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
             return "[]"
         values = ",".join(f"{float(value):.12g}" for value in vector)
         return f"[{values}]"
+
+    # ------------------------------------------------------------------
+    # Abstract hook implementations (vector/semantic, Postgres-specific)
+    # ------------------------------------------------------------------
 
     async def _ensure_vector_tables(self) -> None:
         self._assert_semantic_available()
@@ -315,12 +298,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 await session.execute(
                     text(
-                        """
+                        f"""
                         CREATE TABLE IF NOT EXISTS search_vector_embeddings (
                             chunk_id BIGINT PRIMARY KEY
                                 REFERENCES search_vector_chunks(id) ON DELETE CASCADE,
                             project_id INTEGER NOT NULL,
-                            embedding vector NOT NULL,
+                            embedding vector({self._vector_dimensions}) NOT NULL,
                             embedding_dims INTEGER NOT NULL,
                             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                         )
@@ -335,384 +318,212 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         """
                     )
                 )
+                # HNSW index for approximate nearest-neighbour search.
+                # Without this every vector query is a sequential scan.
+                await session.execute(
+                    text(
+                        """
+                        CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_hnsw
+                        ON search_vector_embeddings
+                        USING hnsw (embedding vector_cosine_ops)
+                        WITH (m = 16, ef_construction = 64)
+                        """
+                    )
+                )
                 await session.commit()
 
             self._vector_tables_initialized = True
 
-    def _split_text_into_chunks(self, text_value: str) -> list[str]:
-        normalized = (text_value or "").strip()
-        if not normalized:
-            return []
-
-        lines = normalized.splitlines()
-        sections: list[str] = []
-        current_section: list[str] = []
-        for line in lines:
-            # Trigger: markdown header encountered and we already accumulated content.
-            # Why: preserve semantic structure of notes for chunk coherence.
-            # Outcome: starts a new chunk section at header boundaries.
-            if HEADER_LINE_PATTERN.match(line) and current_section:
-                sections.append("\n".join(current_section).strip())
-                current_section = [line]
-            else:
-                current_section.append(line)
-        if current_section:
-            sections.append("\n".join(current_section).strip())
-
-        chunked_sections: list[str] = []
-        current_chunk = ""
-
-        for section in sections:
-            if len(section) > MAX_VECTOR_CHUNK_CHARS:
-                if current_chunk:
-                    chunked_sections.append(current_chunk)
-                    current_chunk = ""
-                long_chunks = self._split_long_section(section)
-                if long_chunks:
-                    chunked_sections.extend(long_chunks[:-1])
-                    current_chunk = long_chunks[-1]
-                continue
-
-            candidate = section if not current_chunk else f"{current_chunk}\n\n{section}"
-            if len(candidate) <= MAX_VECTOR_CHUNK_CHARS:
-                current_chunk = candidate
-                continue
-
-            chunked_sections.append(current_chunk)
-            current_chunk = section
-
-        if current_chunk:
-            chunked_sections.append(current_chunk)
-
-        return [chunk for chunk in chunked_sections if chunk.strip()]
-
-    def _split_long_section(self, section_text: str) -> list[str]:
-        paragraphs = [paragraph.strip() for paragraph in section_text.split("\n\n") if paragraph.strip()]
-        if not paragraphs:
-            return []
-
-        chunks: list[str] = []
-        current = ""
-        for paragraph in paragraphs:
-            if len(paragraph) > MAX_VECTOR_CHUNK_CHARS:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                chunks.extend(self._split_by_char_window(paragraph))
-                continue
-
-            candidate = paragraph if not current else f"{current}\n\n{paragraph}"
-            if len(candidate) <= MAX_VECTOR_CHUNK_CHARS:
-                current = candidate
-            else:
-                if current:
-                    chunks.append(current)
-                current = paragraph
-
-        if current:
-            chunks.append(current)
-        return chunks
-
-    def _split_by_char_window(self, paragraph: str) -> list[str]:
-        text_value = paragraph.strip()
-        if not text_value:
-            return []
-
-        chunks: list[str] = []
-        start = 0
-        while start < len(text_value):
-            end = min(len(text_value), start + MAX_VECTOR_CHUNK_CHARS)
-            chunk = text_value[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-            if end >= len(text_value):
-                break
-            start = max(0, end - VECTOR_CHUNK_OVERLAP_CHARS)
-        return chunks
-
-    def _compose_row_source_text(self, row) -> str:
-        if row.type == SearchItemType.ENTITY.value:
-            row_parts = [
-                row.title or "",
-                row.permalink or "",
-                row.content_stems or "",
-            ]
-            return "\n\n".join(part for part in row_parts if part)
-
-        if row.type == SearchItemType.OBSERVATION.value:
-            row_parts = [
-                row.title or "",
-                row.permalink or "",
-                row.category or "",
-                row.content_snippet or "",
-            ]
-            return "\n\n".join(part for part in row_parts if part)
-
-        row_parts = [
-            row.title or "",
-            row.permalink or "",
-            row.relation_type or "",
-            row.content_snippet or "",
-        ]
-        return "\n\n".join(part for part in row_parts if part)
-
-    def _build_chunk_records(self, rows) -> list[dict[str, str]]:
-        records: list[dict[str, str]] = []
-        for row in rows:
-            source_text = self._compose_row_source_text(row)
-            chunks = self._split_text_into_chunks(source_text)
-            for chunk_index, chunk_text in enumerate(chunks):
-                chunk_key = f"{row.type}:{row.id}:{chunk_index}"
-                source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-                records.append(
-                    {
-                        "chunk_key": chunk_key,
-                        "chunk_text": chunk_text,
-                        "source_hash": source_hash,
-                    }
-                )
-        return records
-
-    async def _search_vector_only(
+    async def _run_vector_query(
         self,
-        *,
-        search_text: str,
-        permalink: Optional[str],
-        permalink_match: Optional[str],
-        title: Optional[str],
-        types: Optional[List[str]],
-        after_date: Optional[datetime],
-        search_item_types: Optional[List[SearchItemType]],
-        metadata_filters: Optional[dict],
-        limit: int,
-        offset: int,
-    ) -> List[SearchIndexRow]:
-        self._assert_semantic_available()
-        await self._ensure_vector_tables()
-        assert self._embedding_provider is not None
-
-        query_embedding = await self._embedding_provider.embed_query(search_text.strip())
+        session: AsyncSession,
+        query_embedding: list[float],
+        candidate_limit: int,
+    ) -> list[dict]:
         if not query_embedding:
             return []
 
         embedding_dims = len(query_embedding)
         query_embedding_literal = self._format_pgvector_literal(query_embedding)
-        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 5)
 
-        async with db.scoped_session(self.session_maker) as session:
-            vector_result = await session.execute(
-                text(
-                    """
-                    WITH vector_matches AS (
-                        SELECT
-                            e.chunk_id,
-                            (e.embedding <=> CAST(:query_embedding AS vector)) AS distance
-                        FROM search_vector_embeddings e
-                        WHERE e.project_id = :project_id
-                          AND e.embedding_dims = :embedding_dims
-                        ORDER BY e.embedding <=> CAST(:query_embedding AS vector)
-                        LIMIT :vector_k
-                    )
-                    SELECT c.entity_id, MIN(vector_matches.distance) AS best_distance
-                    FROM vector_matches
-                    JOIN search_vector_chunks c ON c.id = vector_matches.chunk_id
-                    WHERE c.project_id = :project_id
-                    GROUP BY c.entity_id
-                    ORDER BY best_distance ASC
+        vector_result = await session.execute(
+            text(
+                """
+                WITH vector_matches AS (
+                    SELECT
+                        e.chunk_id,
+                        (e.embedding <=> CAST(:query_embedding AS vector)) AS distance
+                    FROM search_vector_embeddings e
+                    WHERE e.project_id = :project_id
+                      AND e.embedding_dims = :embedding_dims
+                    ORDER BY e.embedding <=> CAST(:query_embedding AS vector)
                     LIMIT :vector_k
-                    """
+                )
+                SELECT c.entity_id, MIN(vector_matches.distance) AS best_distance
+                FROM vector_matches
+                JOIN search_vector_chunks c ON c.id = vector_matches.chunk_id
+                WHERE c.project_id = :project_id
+                GROUP BY c.entity_id
+                ORDER BY best_distance ASC
+                LIMIT :vector_k
+                """
+            ),
+            {
+                "query_embedding": query_embedding_literal,
+                "project_id": self.project_id,
+                "embedding_dims": embedding_dims,
+                "vector_k": candidate_limit,
+            },
+        )
+        return [dict(row) for row in vector_result.mappings().all()]
+
+    async def _write_embeddings(
+        self,
+        session: AsyncSession,
+        jobs: list[tuple[int, str]],
+        embeddings: list[list[float]],
+    ) -> None:
+        for (row_id, _), vector in zip(jobs, embeddings, strict=True):
+            vector_literal = self._format_pgvector_literal(vector)
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_embeddings ("
+                    "chunk_id, project_id, embedding, embedding_dims, updated_at"
+                    ") VALUES ("
+                    ":chunk_id, :project_id, CAST(:embedding AS vector), :embedding_dims, NOW()"
+                    ") "
+                    "ON CONFLICT (chunk_id) DO UPDATE SET "
+                    "project_id = EXCLUDED.project_id, "
+                    "embedding = EXCLUDED.embedding, "
+                    "embedding_dims = EXCLUDED.embedding_dims, "
+                    "updated_at = NOW()"
                 ),
                 {
-                    "query_embedding": query_embedding_literal,
+                    "chunk_id": row_id,
                     "project_id": self.project_id,
-                    "embedding_dims": embedding_dims,
-                    "vector_k": candidate_limit,
+                    "embedding": vector_literal,
+                    "embedding_dims": len(vector),
                 },
             )
-            vector_rows = vector_result.mappings().all()
 
-        if not vector_rows:
-            return []
-
-        similarity_by_entity_id: dict[int, float] = {}
-        for row in vector_rows:
-            entity_id = int(row["entity_id"])
-            distance = float(row["best_distance"])
-            similarity = 1.0 / (1.0 + max(distance, 0.0))
-            current = similarity_by_entity_id.get(entity_id)
-            if current is None or similarity > current:
-                similarity_by_entity_id[entity_id] = similarity
-
-        filter_requested = any(
-            [
-                permalink,
-                permalink_match,
-                title,
-                types,
-                after_date,
-                search_item_types,
-                metadata_filters,
-            ]
-        )
-
-        entity_rows_by_id: dict[int, SearchIndexRow] = {}
-
-        # Trigger: query includes non-text filters.
-        # Why: keep filter semantics consistent between vector and FTS paths.
-        # Outcome: vector similarity ranks only already-filtered entity candidates.
-        if filter_requested:
-            filtered_rows = await self.search(
-                search_text=None,
-                permalink=permalink,
-                permalink_match=permalink_match,
-                title=title,
-                types=types,
-                after_date=after_date,
-                search_item_types=search_item_types,
-                metadata_filters=metadata_filters,
-                retrieval_mode=SearchRetrievalMode.FTS,
-                limit=VECTOR_FILTER_SCAN_LIMIT,
-                offset=0,
-            )
-            entity_rows_by_id = {
-                row.entity_id: row
-                for row in filtered_rows
-                if row.type == SearchItemType.ENTITY.value and row.entity_id is not None
-            }
-        else:
-            entity_ids = list(similarity_by_entity_id.keys())
-            if entity_ids:
-                placeholders = ", ".join(f":id_{idx}" for idx in range(len(entity_ids)))
-                params = {
-                    **{f"id_{idx}": entity_id for idx, entity_id in enumerate(entity_ids)},
-                    "project_id": self.project_id,
-                    "item_type": SearchItemType.ENTITY.value,
-                }
-                sql = f"""
-                    SELECT
-                        project_id,
-                        id,
-                        title,
-                        permalink,
-                        file_path,
-                        type,
-                        metadata,
-                        from_id,
-                        to_id,
-                        relation_type,
-                        entity_id,
-                        content_snippet,
-                        category,
-                        created_at,
-                        updated_at,
-                        0 as score
-                    FROM search_index
-                    WHERE project_id = :project_id
-                      AND type = :item_type
-                      AND entity_id IN ({placeholders})
-                """
-                async with db.scoped_session(self.session_maker) as session:
-                    row_result = await session.execute(text(sql), params)
-                    for row in row_result.fetchall():
-                        entity_rows_by_id[row.entity_id] = SearchIndexRow(
-                            project_id=self.project_id,
-                            id=row.id,
-                            title=row.title,
-                            permalink=row.permalink,
-                            file_path=row.file_path,
-                            type=row.type,
-                            score=0.0,
-                            metadata=(
-                                row.metadata
-                                if isinstance(row.metadata, dict)
-                                else (json.loads(row.metadata) if row.metadata else {})
-                            ),
-                            from_id=row.from_id,
-                            to_id=row.to_id,
-                            relation_type=row.relation_type,
-                            entity_id=row.entity_id,
-                            content_snippet=row.content_snippet,
-                            category=row.category,
-                            created_at=row.created_at,
-                            updated_at=row.updated_at,
-                        )
-
-        ranked_rows: list[SearchIndexRow] = []
-        for entity_id, similarity in similarity_by_entity_id.items():
-            row = entity_rows_by_id.get(entity_id)
-            if row is None:
-                continue
-            ranked_rows.append(replace(row, score=similarity))
-
-        ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
-        return ranked_rows[offset : offset + limit]
-
-    async def _search_hybrid(
+    async def _delete_entity_chunks(
         self,
-        *,
-        search_text: str,
-        permalink: Optional[str],
-        permalink_match: Optional[str],
-        title: Optional[str],
-        types: Optional[List[str]],
-        after_date: Optional[datetime],
-        search_item_types: Optional[List[SearchItemType]],
-        metadata_filters: Optional[dict],
-        limit: int,
-        offset: int,
-    ) -> List[SearchIndexRow]:
-        self._assert_semantic_available()
-        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
-        fts_results = await self.search(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            types=types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            metadata_filters=metadata_filters,
-            retrieval_mode=SearchRetrievalMode.FTS,
-            limit=candidate_limit,
-            offset=0,
-        )
-        vector_results = await self._search_vector_only(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            types=types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            metadata_filters=metadata_filters,
-            limit=candidate_limit,
-            offset=0,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        # Postgres has ON DELETE CASCADE from embeddings → chunks
+        await session.execute(
+            text(
+                "DELETE FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": self.project_id, "entity_id": entity_id},
         )
 
-        fused_scores: dict[str, float] = {}
-        rows_by_permalink: dict[str, SearchIndexRow] = {}
+    async def _delete_stale_chunks(
+        self,
+        session: AsyncSession,
+        stale_ids: list[int],
+        entity_id: int,
+    ) -> None:
+        stale_placeholders = ", ".join(f":stale_id_{idx}" for idx in range(len(stale_ids)))
+        stale_params = {
+            "project_id": self.project_id,
+            "entity_id": entity_id,
+            **{f"stale_id_{idx}": row_id for idx, row_id in enumerate(stale_ids)},
+        }
+        # CASCADE handles embedding deletion
+        await session.execute(
+            text(
+                "DELETE FROM search_vector_chunks "
+                f"WHERE id IN ({stale_placeholders}) "
+                "AND project_id = :project_id AND entity_id = :entity_id"
+            ),
+            stale_params,
+        )
 
-        for rank, row in enumerate(fts_results, start=1):
-            if not row.permalink:
-                continue
-            fused_scores[row.permalink] = fused_scores.get(row.permalink, 0.0) + (
-                1.0 / (RRF_K + rank)
+    async def _update_timestamp_sql(self) -> str:
+        return "NOW()"  # pragma: no cover
+
+    def _timestamp_now_expr(self) -> str:
+        return "NOW()"
+
+    # ------------------------------------------------------------------
+    # Index / bulk index overrides (Postgres UPSERT)
+    # ------------------------------------------------------------------
+
+    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
+        """Index multiple items in a single batch operation using UPSERT.
+
+        Uses INSERT ... ON CONFLICT to handle race conditions during parallel
+        entity indexing. The partial unique index uix_search_index_permalink_project
+        on (permalink, project_id) WHERE permalink IS NOT NULL prevents duplicate
+        permalinks.
+
+        For rows with non-null permalinks (entities), conflicts are resolved by
+        updating the existing row. For rows with null permalinks (observations,
+        relations), the partial index doesn't apply and they are inserted directly.
+
+        Args:
+            search_index_rows: List of SearchIndexRow objects to index
+        """
+
+        if not search_index_rows:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            # When using text() raw SQL, always serialize JSON to string
+            # Both SQLite (TEXT) and Postgres (JSONB) accept JSON strings in raw SQL
+            # The database driver/column type will handle conversion
+            insert_data_list = []
+            for row in search_index_rows:
+                insert_data = row.to_insert(serialize_json=True)
+                insert_data["project_id"] = self.project_id
+                insert_data_list.append(insert_data)
+
+            # Use upsert to handle race conditions during parallel indexing
+            # ON CONFLICT (permalink, project_id) matches the partial unique index
+            # uix_search_index_permalink_project WHERE permalink IS NOT NULL
+            # For rows with NULL permalinks (observations, relations), no conflict occurs
+            await session.execute(
+                text("""
+                    INSERT INTO search_index (
+                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        from_id, to_id, relation_type,
+                        entity_id, category,
+                        created_at, updated_at,
+                        project_id
+                    ) VALUES (
+                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :from_id, :to_id, :relation_type,
+                        :entity_id, :category,
+                        :created_at, :updated_at,
+                        :project_id
+                    )
+                    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+                        id = EXCLUDED.id,
+                        title = EXCLUDED.title,
+                        content_stems = EXCLUDED.content_stems,
+                        content_snippet = EXCLUDED.content_snippet,
+                        file_path = EXCLUDED.file_path,
+                        type = EXCLUDED.type,
+                        metadata = EXCLUDED.metadata,
+                        from_id = EXCLUDED.from_id,
+                        to_id = EXCLUDED.to_id,
+                        relation_type = EXCLUDED.relation_type,
+                        entity_id = EXCLUDED.entity_id,
+                        category = EXCLUDED.category,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at
+                """),
+                insert_data_list,
             )
-            rows_by_permalink[row.permalink] = row
+            logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
+            await session.commit()
 
-        for rank, row in enumerate(vector_results, start=1):
-            if not row.permalink:
-                continue
-            fused_scores[row.permalink] = fused_scores.get(row.permalink, 0.0) + (
-                1.0 / (RRF_K + rank)
-            )
-            rows_by_permalink[row.permalink] = row
-
-        ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
-        output: list[SearchIndexRow] = []
-        for permalink_value, fused_score in ranked[offset : offset + limit]:
-            output.append(replace(rows_by_permalink[permalink_value], score=fused_score))
-        return output
+    # ------------------------------------------------------------------
+    # FTS search (Postgres-specific)
+    # ------------------------------------------------------------------
 
     async def search(
         self,
@@ -729,58 +540,24 @@ class PostgresSearchRepository(SearchRepositoryBase):
         offset: int = 0,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using PostgreSQL tsvector."""
-        mode = (
-            retrieval_mode.value
-            if isinstance(retrieval_mode, SearchRetrievalMode)
-            else str(retrieval_mode)
+        # --- Dispatch vector / hybrid modes (shared logic) ---
+        dispatched = await self._dispatch_retrieval_mode(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            types=types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+            retrieval_mode=retrieval_mode,
+            limit=limit,
+            offset=offset,
         )
-        can_use_vector = (
-            bool(search_text)
-            and bool(search_text.strip())
-            and search_text.strip() != "*"
-            and not permalink
-            and not permalink_match
-            and not title
-        )
-        search_text_value = search_text or ""
+        if dispatched is not None:
+            return dispatched
 
-        if mode == SearchRetrievalMode.VECTOR.value:
-            if not can_use_vector:
-                raise ValueError(
-                    "Vector retrieval requires a non-empty text query and does not support "
-                    "title/permalink-only searches."
-                )
-            return await self._search_vector_only(
-                search_text=search_text_value,
-                permalink=permalink,
-                permalink_match=permalink_match,
-                title=title,
-                types=types,
-                after_date=after_date,
-                search_item_types=search_item_types,
-                metadata_filters=metadata_filters,
-                limit=limit,
-                offset=offset,
-            )
-        if mode == SearchRetrievalMode.HYBRID.value:
-            if not can_use_vector:
-                raise ValueError(
-                    "Hybrid retrieval requires a non-empty text query and does not support "
-                    "title/permalink-only searches."
-                )
-            return await self._search_hybrid(
-                search_text=search_text_value,
-                permalink=permalink,
-                permalink_match=permalink_match,
-                title=title,
-                types=types,
-                after_date=after_date,
-                search_item_types=search_item_types,
-                metadata_filters=metadata_filters,
-                limit=limit,
-                offset=offset,
-            )
-
+        # --- FTS mode (Postgres-specific) ---
         conditions = []
         params = {}
         order_by_clause = ""
@@ -1018,241 +795,3 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
 
         return results
-
-    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
-        """Index multiple items in a single batch operation using UPSERT.
-
-        Uses INSERT ... ON CONFLICT to handle race conditions during parallel
-        entity indexing. The partial unique index uix_search_index_permalink_project
-        on (permalink, project_id) WHERE permalink IS NOT NULL prevents duplicate
-        permalinks.
-
-        For rows with non-null permalinks (entities), conflicts are resolved by
-        updating the existing row. For rows with null permalinks (observations,
-        relations), the partial index doesn't apply and they are inserted directly.
-
-        Args:
-            search_index_rows: List of SearchIndexRow objects to index
-        """
-
-        if not search_index_rows:
-            return
-
-        async with db.scoped_session(self.session_maker) as session:
-            # When using text() raw SQL, always serialize JSON to string
-            # Both SQLite (TEXT) and Postgres (JSONB) accept JSON strings in raw SQL
-            # The database driver/column type will handle conversion
-            insert_data_list = []
-            for row in search_index_rows:
-                insert_data = row.to_insert(serialize_json=True)
-                insert_data["project_id"] = self.project_id
-                insert_data_list.append(insert_data)
-
-            # Use upsert to handle race conditions during parallel indexing
-            # ON CONFLICT (permalink, project_id) matches the partial unique index
-            # uix_search_index_permalink_project WHERE permalink IS NOT NULL
-            # For rows with NULL permalinks (observations, relations), no conflict occurs
-            await session.execute(
-                text("""
-                    INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
-                        from_id, to_id, relation_type,
-                        entity_id, category,
-                        created_at, updated_at,
-                        project_id
-                    ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
-                        :from_id, :to_id, :relation_type,
-                        :entity_id, :category,
-                        :created_at, :updated_at,
-                        :project_id
-                    )
-                    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
-                        id = EXCLUDED.id,
-                        title = EXCLUDED.title,
-                        content_stems = EXCLUDED.content_stems,
-                        content_snippet = EXCLUDED.content_snippet,
-                        file_path = EXCLUDED.file_path,
-                        type = EXCLUDED.type,
-                        metadata = EXCLUDED.metadata,
-                        from_id = EXCLUDED.from_id,
-                        to_id = EXCLUDED.to_id,
-                        relation_type = EXCLUDED.relation_type,
-                        entity_id = EXCLUDED.entity_id,
-                        category = EXCLUDED.category,
-                        created_at = EXCLUDED.created_at,
-                        updated_at = EXCLUDED.updated_at
-                """),
-                insert_data_list,
-            )
-            logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
-            await session.commit()
-
-    async def sync_entity_vectors(self, entity_id: int) -> None:
-        """Sync semantic chunk rows + pgvector embeddings for a single entity."""
-        self._assert_semantic_available()
-        await self._ensure_vector_tables()
-        assert self._embedding_provider is not None
-
-        async with db.scoped_session(self.session_maker) as session:
-            row_result = await session.execute(
-                text(
-                    "SELECT id, type, title, permalink, content_stems, content_snippet, "
-                    "category, relation_type "
-                    "FROM search_index "
-                    "WHERE entity_id = :entity_id AND project_id = :project_id "
-                    "ORDER BY "
-                    "CASE type "
-                    "WHEN :entity_type THEN 0 "
-                    "WHEN :observation_type THEN 1 "
-                    "WHEN :relation_type_type THEN 2 "
-                    "ELSE 3 END, id ASC"
-                ),
-                {
-                    "entity_id": entity_id,
-                    "project_id": self.project_id,
-                    "entity_type": SearchItemType.ENTITY.value,
-                    "observation_type": SearchItemType.OBSERVATION.value,
-                    "relation_type_type": SearchItemType.RELATION.value,
-                },
-            )
-            rows = row_result.fetchall()
-
-            if not rows:
-                await session.execute(
-                    text(
-                        "DELETE FROM search_vector_chunks "
-                        "WHERE project_id = :project_id AND entity_id = :entity_id"
-                    ),
-                    {"project_id": self.project_id, "entity_id": entity_id},
-                )
-                await session.commit()
-                return
-
-            chunk_records = self._build_chunk_records(rows)
-            if not chunk_records:
-                await session.execute(
-                    text(
-                        "DELETE FROM search_vector_chunks "
-                        "WHERE project_id = :project_id AND entity_id = :entity_id"
-                    ),
-                    {"project_id": self.project_id, "entity_id": entity_id},
-                )
-                await session.commit()
-                return
-
-            existing_rows_result = await session.execute(
-                text(
-                    "SELECT id, chunk_key, source_hash "
-                    "FROM search_vector_chunks "
-                    "WHERE project_id = :project_id AND entity_id = :entity_id"
-                ),
-                {"project_id": self.project_id, "entity_id": entity_id},
-            )
-            existing_by_key = {row.chunk_key: row for row in existing_rows_result.fetchall()}
-            incoming_hashes = {
-                record["chunk_key"]: record["source_hash"] for record in chunk_records
-            }
-            stale_row_ids = [
-                int(row.id)
-                for chunk_key, row in existing_by_key.items()
-                if chunk_key not in incoming_hashes
-            ]
-
-            if stale_row_ids:
-                stale_placeholders = ", ".join(
-                    f":stale_id_{idx}" for idx in range(len(stale_row_ids))
-                )
-                stale_params = {
-                    "project_id": self.project_id,
-                    "entity_id": entity_id,
-                    **{f"stale_id_{idx}": row_id for idx, row_id in enumerate(stale_row_ids)},
-                }
-                await session.execute(
-                    text(
-                        "DELETE FROM search_vector_chunks "
-                        f"WHERE id IN ({stale_placeholders}) "
-                        "AND project_id = :project_id AND entity_id = :entity_id"
-                    ),
-                    stale_params,
-                )
-
-            embedding_jobs: list[tuple[int, str]] = []
-            for record in chunk_records:
-                current = existing_by_key.get(record["chunk_key"])
-                if current and current.source_hash == record["source_hash"]:
-                    continue
-
-                if current:
-                    row_id = int(current.id)
-                    await session.execute(
-                        text(
-                            "UPDATE search_vector_chunks "
-                            "SET chunk_text = :chunk_text, source_hash = :source_hash, "
-                            "updated_at = NOW() "
-                            "WHERE id = :id"
-                        ),
-                        {
-                            "id": row_id,
-                            "chunk_text": record["chunk_text"],
-                            "source_hash": record["source_hash"],
-                        },
-                    )
-                    embedding_jobs.append((row_id, record["chunk_text"]))
-                    continue
-
-                inserted = await session.execute(
-                    text(
-                        "INSERT INTO search_vector_chunks ("
-                        "entity_id, project_id, chunk_key, chunk_text, source_hash, updated_at"
-                        ") VALUES ("
-                        ":entity_id, :project_id, :chunk_key, :chunk_text, :source_hash, NOW()"
-                        ") RETURNING id"
-                    ),
-                    {
-                        "entity_id": entity_id,
-                        "project_id": self.project_id,
-                        "chunk_key": record["chunk_key"],
-                        "chunk_text": record["chunk_text"],
-                        "source_hash": record["source_hash"],
-                    },
-                )
-                row_id = int(inserted.scalar_one())
-                embedding_jobs.append((row_id, record["chunk_text"]))
-
-            await session.commit()
-
-        if not embedding_jobs:
-            return
-
-        texts = [item[1] for item in embedding_jobs]
-        embeddings = await self._embedding_provider.embed_documents(texts)
-        if len(embeddings) != len(embedding_jobs):
-            raise RuntimeError("Embedding provider returned an unexpected number of vectors.")
-        if embeddings:
-            self._vector_dimensions = len(embeddings[0])
-
-        async with db.scoped_session(self.session_maker) as session:
-            for (row_id, _), vector in zip(embedding_jobs, embeddings, strict=False):
-                vector_literal = self._format_pgvector_literal(vector)
-                await session.execute(
-                    text(
-                        "INSERT INTO search_vector_embeddings ("
-                        "chunk_id, project_id, embedding, embedding_dims, updated_at"
-                        ") VALUES ("
-                        ":chunk_id, :project_id, CAST(:embedding AS vector), :embedding_dims, NOW()"
-                        ") "
-                        "ON CONFLICT (chunk_id) DO UPDATE SET "
-                        "project_id = EXCLUDED.project_id, "
-                        "embedding = EXCLUDED.embedding, "
-                        "embedding_dims = EXCLUDED.embedding_dims, "
-                        "updated_at = NOW()"
-                    ),
-                    {
-                        "chunk_id": row_id,
-                        "project_id": self.project_id,
-                        "embedding": vector_literal,
-                        "embedding_dims": len(vector),
-                    },
-                )
-            await session.commit()

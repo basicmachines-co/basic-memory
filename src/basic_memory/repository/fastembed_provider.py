@@ -72,7 +72,10 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
 
         vectors = await asyncio.to_thread(_embed_batch)
         if vectors and len(vectors[0]) != self.dimensions:
-            self.dimensions = len(vectors[0])
+            raise RuntimeError(
+                f"Embedding model returned {len(vectors[0])}-dimensional vectors "
+                f"but provider was configured for {self.dimensions} dimensions."
+            )
         return vectors
 
     async def embed_query(self, text: str) -> list[float]:
