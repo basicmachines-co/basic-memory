@@ -39,6 +39,23 @@ from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteRe
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
 
+
+def _schedule_vector_sync_if_enabled(
+    *,
+    task_scheduler,
+    app_config,
+    entity_id: int,
+    project_id: int,
+) -> None:
+    """Schedule out-of-band vector sync only when semantic search is enabled."""
+    if app_config.semantic_search_enabled:
+        task_scheduler.schedule(
+            "sync_entity_vectors",
+            entity_id=entity_id,
+            project_id=project_id,
+        )
+
+
 ## Resolution endpoint
 
 
@@ -169,6 +186,7 @@ async def create_entity(
     search_service: SearchServiceV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
     file_service: FileServiceV2ExternalDep,
+    app_config: AppConfigDep,
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
     ),
@@ -195,7 +213,13 @@ async def create_entity(
         )
     else:
         entity = await entity_service.create_entity(data)
-        await search_service.index_entity(entity, background_tasks=background_tasks)
+        await search_service.index_entity(entity)
+        _schedule_vector_sync_if_enabled(
+            task_scheduler=task_scheduler,
+            app_config=app_config,
+            entity_id=entity.id,
+            project_id=project_id,
+        )
 
     result = EntityResponseV2.model_validate(entity)
     if fast:
@@ -225,6 +249,7 @@ async def update_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
     file_service: FileServiceV2ExternalDep,
+    app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
@@ -277,7 +302,13 @@ async def update_entity_by_id(
                     )
             response.status_code = 201
 
-        await search_service.index_entity(entity, background_tasks=background_tasks)
+        await search_service.index_entity(entity)
+        _schedule_vector_sync_if_enabled(
+            task_scheduler=task_scheduler,
+            app_config=app_config,
+            entity_id=entity.id,
+            project_id=project_id,
+        )
 
     result = EntityResponseV2.model_validate(entity)
     if fast:
@@ -303,6 +334,7 @@ async def edit_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     task_scheduler: TaskSchedulerDep,
     file_service: FileServiceV2ExternalDep,
+    app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     fast: bool = Query(
         True, description="If true, write quickly and defer indexing to background tasks."
@@ -359,7 +391,13 @@ async def edit_entity_by_id(
                 expected_replacements=data.expected_replacements,
             )
 
-            await search_service.index_entity(updated_entity, background_tasks=background_tasks)
+            await search_service.index_entity(updated_entity)
+            _schedule_vector_sync_if_enabled(
+                task_scheduler=task_scheduler,
+                app_config=app_config,
+                entity_id=updated_entity.id,
+                project_id=project_id,
+            )
 
         result = EntityResponseV2.model_validate(updated_entity)
         if fast:
@@ -434,6 +472,7 @@ async def move_entity(
     project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
+    task_scheduler: TaskSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Move an entity to a new file location.
@@ -472,7 +511,13 @@ async def move_entity(
         # Reindex at new location
         reindexed_entity = await entity_service.link_resolver.resolve_link(data.destination_path)
         if reindexed_entity:
-            await search_service.index_entity(reindexed_entity, background_tasks=background_tasks)
+            await search_service.index_entity(reindexed_entity)
+            _schedule_vector_sync_if_enabled(
+                task_scheduler=task_scheduler,
+                app_config=app_config,
+                entity_id=reindexed_entity.id,
+                project_id=project_id,
+            )
 
         result = EntityResponseV2.model_validate(moved_entity)
 
@@ -499,6 +544,7 @@ async def move_directory(
     project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
+    task_scheduler: TaskSchedulerDep,
 ) -> DirectoryMoveResult:
     """Move all entities in a directory to a new location.
 
@@ -530,7 +576,13 @@ async def move_directory(
         for file_path in result.moved_files:
             entity = await entity_service.link_resolver.resolve_link(file_path)
             if entity:
-                await search_service.index_entity(entity, background_tasks=background_tasks)
+                await search_service.index_entity(entity)
+                _schedule_vector_sync_if_enabled(
+                    task_scheduler=task_scheduler,
+                    app_config=app_config,
+                    entity_id=entity.id,
+                    project_id=project_id,
+                )
 
         logger.info(
             f"API v2 response: move_directory "

@@ -4,7 +4,12 @@ import pytest
 from httpx import AsyncClient
 from pathlib import Path
 
+from basic_memory.deps.services import get_search_service_v2_external
 from basic_memory.models import Project
+from basic_memory.repository.semantic_errors import (
+    SemanticDependenciesMissingError,
+    SemanticSearchDisabledError,
+)
 
 
 async def create_test_entity(
@@ -287,3 +292,72 @@ async def test_v2_search_endpoints_use_project_id_not_name(
 
     # FastAPI path validation should reject non-integer project_id
     assert response.status_code in [404, 422]
+
+
+@pytest.mark.asyncio
+async def test_search_router_returns_400_for_semantic_disabled(
+    client: AsyncClient, app, v2_project_url
+):
+    """SemanticSearchDisabledError should map to HTTP 400 with detail."""
+
+    class RaisingSearchService:
+        async def search(self, *args, **kwargs):
+            raise SemanticSearchDisabledError("Semantic search is disabled for this project.")
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"search_text": "semantic query", "retrieval_mode": "vector"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 400
+    assert "Semantic search is disabled" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_search_router_returns_400_for_semantic_missing_deps(
+    client: AsyncClient, app, v2_project_url
+):
+    """SemanticDependenciesMissingError should map to HTTP 400 with detail."""
+
+    class RaisingSearchService:
+        async def search(self, *args, **kwargs):
+            raise SemanticDependenciesMissingError("Semantic dependencies are missing.")
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"search_text": "semantic query", "retrieval_mode": "hybrid"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 400
+    assert "Semantic dependencies are missing" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_search_router_returns_400_for_invalid_vector_query(
+    client: AsyncClient, app, v2_project_url
+):
+    """ValueError from repository validation should map to HTTP 400 with detail."""
+
+    class RaisingSearchService:
+        async def search(self, *args, **kwargs):
+            raise ValueError("Vector retrieval requires a text query.")
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"title": "Root", "retrieval_mode": "vector"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 400
+    assert "Vector retrieval requires a text query" in response.json()["detail"]

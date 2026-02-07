@@ -5,6 +5,7 @@ from datetime import datetime
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
+    SearchRetrievalMode,
     SearchResult,
     SearchResponse,
 )
@@ -39,6 +40,15 @@ def test_search_filters():
     assert query.entity_types == [SearchItemType.ENTITY]
     assert query.types == ["component"]
     assert query.after_date == "2024-01-01T00:00:00"
+
+
+def test_search_retrieval_mode_defaults_to_fts():
+    """Search retrieval mode defaults to FTS and accepts vector modes."""
+    query = SearchQuery(text="search implementation")
+    assert query.retrieval_mode == SearchRetrievalMode.FTS
+
+    vector_query = SearchQuery(text="search implementation", retrieval_mode="vector")
+    assert vector_query.retrieval_mode == SearchRetrievalMode.VECTOR
 
 
 def test_search_result():

@@ -57,3 +57,4 @@ claude-output
 .mcp.json
 .mcpregistry_*
 /.testmondata
+.benchmarks/

@@ -92,3 +92,37 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     prefix='1,2,3,4'                    -- Support longer prefixes for paths
 );
 """)
+
+# Local semantic chunk metadata table for SQLite.
+# Embedding vectors live in sqlite-vec virtual table keyed by this table rowid.
+CREATE_SQLITE_SEARCH_VECTOR_CHUNKS = DDL("""
+CREATE TABLE IF NOT EXISTS search_vector_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id INTEGER NOT NULL,
+    project_id INTEGER NOT NULL,
+    chunk_key TEXT NOT NULL,
+    chunk_text TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_project_entity
+ON search_vector_chunks (project_id, entity_id)
+""")
+
+CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE = DDL("""
+CREATE UNIQUE INDEX IF NOT EXISTS uix_search_vector_chunks_entity_key
+ON search_vector_chunks (project_id, entity_id, chunk_key)
+""")
+
+
+def create_sqlite_search_vector_embeddings(dimensions: int) -> DDL:
+    """Build sqlite-vec virtual table DDL for the configured embedding dimension."""
+    return DDL(
+        f"""
+CREATE VIRTUAL TABLE IF NOT EXISTS search_vector_embeddings
+USING vec0(embedding float[{dimensions}])
+"""
+    )

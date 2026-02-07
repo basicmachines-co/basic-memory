@@ -107,6 +107,13 @@ test-windows:
 test-benchmark:
     uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
 
+# Compare two search benchmark JSONL outputs
+# Usage:
+#   just benchmark-compare .benchmarks/search-baseline.jsonl .benchmarks/search-candidate.jsonl
+#   just benchmark-compare .benchmarks/search-baseline.jsonl .benchmarks/search-candidate.jsonl markdown --show-missing
+benchmark-compare baseline candidate format="table" *args:
+    uv run python test-int/compare_search_benchmarks.py "{{baseline}}" "{{candidate}}" --format "{{format}}" {{args}}
+
 # Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
 # Use this before releasing to ensure everything works across all backends and platforms
 test-all:

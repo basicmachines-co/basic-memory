@@ -4,9 +4,13 @@ This router uses external_id UUIDs for stable, API-friendly routing.
 V1 uses string-based project names which are less efficient and less stable.
 """
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, HTTPException, Path
 
 from basic_memory.api.v2.utils import to_search_results
+from basic_memory.repository.semantic_errors import (
+    SemanticDependenciesMissingError,
+    SemanticSearchDisabledError,
+)
 from basic_memory.schemas.search import SearchQuery, SearchResponse
 from basic_memory.deps import (
     SearchServiceV2ExternalDep,
@@ -45,7 +49,14 @@ async def search(
     """
     limit = page_size
     offset = (page - 1) * page_size
-    results = await search_service.search(query, limit=limit, offset=offset)
+    try:
+        results = await search_service.search(query, limit=limit, offset=offset)
+    except SemanticSearchDisabledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SemanticDependenciesMissingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     search_results = await to_search_results(entity_service, results)
     return SearchResponse(
         results=search_results,
