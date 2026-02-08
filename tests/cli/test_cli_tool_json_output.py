@@ -214,6 +214,105 @@ def test_recent_activity_text_output(mock_mcp_recent):
     mock_mcp_recent.fn.assert_called_once()
 
 
+# --- read-note title fallback ---
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch(
+    "basic_memory.cli.commands.tool._read_note_json",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_json_with_plain_title(mock_read_json, mock_config_cls):
+    """read-note --format json works with plain titles (not just permalinks)."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "My Note Title", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["title"] == "Test Note"
+    # Verify the identifier was passed through
+    call_args = mock_read_json.call_args
+    assert call_args[0][0] == "My Note Title" or call_args[1].get("identifier") == "My Note Title"
+
+
+# --- recent-activity pagination ---
+
+
+@patch(
+    "basic_memory.cli.commands.tool._recent_activity_json",
+    new_callable=AsyncMock,
+    return_value=RECENT_ACTIVITY_RESULT,
+)
+def test_recent_activity_json_pagination(mock_recent_json):
+    """recent-activity --format json passes --page and --page-size to helper."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "recent-activity", "--format", "json", "--page", "2", "--page-size", "10"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    # Verify pagination params were passed through
+    mock_recent_json.assert_called_once()
+    call_kwargs = mock_recent_json.call_args
+    # positional args: type, depth, timeframe, project_name, page, page_size
+    assert call_kwargs[0][4] == 2  # page
+    assert call_kwargs[0][5] == 10  # page_size
+
+
+# --- build-context --format json ---
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch("basic_memory.cli.commands.tool.mcp_build_context")
+def test_build_context_format_json(mock_build_ctx, mock_config_cls):
+    """build-context --format json outputs valid JSON."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    mock_context = MagicMock()
+    mock_context.model_dump.return_value = {
+        "primary_results": [],
+        "related_results": [],
+    }
+    mock_build_ctx.fn = AsyncMock(return_value=mock_context)
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "build-context", "memory://test/topic", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert "primary_results" in data
+    mock_build_ctx.fn.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch("basic_memory.cli.commands.tool.mcp_build_context")
+def test_build_context_default_format_is_json(mock_build_ctx, mock_config_cls):
+    """build-context defaults to JSON output (backward compatible)."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    mock_context = MagicMock()
+    mock_context.model_dump.return_value = {"results": []}
+    mock_build_ctx.fn = AsyncMock(return_value=mock_context)
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "build-context", "memory://test/topic"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert isinstance(data, dict)
+
+
 # --- Edge cases ---
 
 

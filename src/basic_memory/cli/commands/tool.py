@@ -77,8 +77,29 @@ async def _read_note_json(
         knowledge_client = KnowledgeClient(client, active_project.external_id)
         resource_client = ResourceClient(client, active_project.external_id)
 
+        # Try direct resolution first (works for permalinks and memory URLs)
         entity_path = memory_url_path(identifier)
-        entity_id = await knowledge_client.resolve_entity(entity_path)
+        entity_id = None
+        try:
+            entity_id = await knowledge_client.resolve_entity(entity_path)
+        except Exception:
+            logger.info(f"Direct lookup failed for '{entity_path}', trying title search")
+
+        # Fallback: title search (handles plain titles like "My Note")
+        if entity_id is None:
+            from basic_memory.mcp.tools.search import search_notes as mcp_search_tool
+
+            title_results = await mcp_search_tool.fn(
+                query=identifier, search_type="title", project=project_name
+            )
+            if title_results and hasattr(title_results, "results") and title_results.results:
+                result = title_results.results[0]
+                if result.permalink:
+                    entity_id = await knowledge_client.resolve_entity(result.permalink)
+
+        if entity_id is None:
+            raise ValueError(f"Could not find note matching: {identifier}")
+
         entity = await knowledge_client.get_entity(entity_id)
         response = await resource_client.read(entity_id, page=page, page_size=page_size)
 
@@ -95,11 +116,13 @@ async def _recent_activity_json(
     depth: Optional[int],
     timeframe: Optional[TimeFrame],
     project_name: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
 ) -> list:
     """Get recent activity and return structured JSON list."""
     async with get_client() as client:
         # Build query params matching the MCP tool's logic
-        params: dict = {"page": 1, "page_size": 50, "max_related": 10}
+        params: dict = {"page": page, "page_size": page_size, "max_related": 10}
         if depth:
             params["depth"] = depth
         if timeframe:
@@ -314,6 +337,7 @@ def build_context(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
+    format: str = typer.Option("json", "--format", help="Output format: text or json"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -372,6 +396,10 @@ def recent_activity(
     ] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
+    page: int = typer.Option(1, "--page", help="Page number for pagination (JSON format)"),
+    page_size: int = typer.Option(
+        50, "--page-size", help="Number of results per page (JSON format)"
+    ),
     format: str = typer.Option("text", "--format", help="Output format: text or json"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -399,7 +427,7 @@ def recent_activity(
         with force_routing(local=local, cloud=cloud):
             if format == "json":
                 result = run_with_cleanup(
-                    _recent_activity_json(type, depth, timeframe, project_name)
+                    _recent_activity_json(type, depth, timeframe, project_name, page, page_size)
                 )
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
