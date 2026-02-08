@@ -13,6 +13,7 @@ from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
     import_memory_json,
     mcp,
     project,
+    schema,
     status,
     tool,
 )
