@@ -56,7 +56,9 @@ def import_projects(
         markdown_processor, file_service = run_with_cleanup(get_importer_dependencies())
 
         # Create the importer
-        importer = ClaudeProjectsImporter(config.home, markdown_processor, file_service)
+        importer = ClaudeProjectsImporter(
+            config.home, markdown_processor, file_service, project_name=config.name
+        )
 
         # Process the file
         base_path = config.home / base_folder if base_folder else config.home

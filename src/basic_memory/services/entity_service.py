@@ -24,6 +24,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.models import Observation, Relation
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository import ObservationRepository, RelationRepository
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
@@ -41,7 +42,7 @@ from basic_memory.services.exceptions import (
 )
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import build_canonical_permalink, generate_permalink
 
 
 class EntityService(BaseService[EntityModel]):
@@ -66,6 +67,7 @@ class EntityService(BaseService[EntityModel]):
         self.link_resolver = link_resolver
         self.search_service = search_service
         self.app_config = app_config
+        self._project_permalink: Optional[str] = None
 
     async def detect_file_path_conflicts(
         self, file_path: str, skip_check: bool = False
@@ -159,7 +161,23 @@ class EntityService(BaseService[EntityModel]):
         if markdown and markdown.frontmatter.permalink:
             desired_permalink = markdown.frontmatter.permalink
         else:
-            desired_permalink = generate_permalink(file_path_str)
+            # Trigger: generating a permalink for a new file
+            # Why: canonical permalinks may require project prefix for global addressing
+            # Outcome: include project slug when enabled in config
+            include_project = True
+            if self.app_config:
+                include_project = self.app_config.permalinks_include_project
+
+            project_permalink = None
+            # Trigger: project-prefixed permalinks are enabled
+            # Why: we need the project slug to build the canonical permalink
+            # Outcome: fetch and cache the project's permalink
+            if include_project:
+                project_permalink = await self._get_project_permalink()
+
+            desired_permalink = build_canonical_permalink(
+                project_permalink, file_path_str, include_project=include_project
+            )
 
         # Make unique if needed - enhanced to handle character conflicts
         # Use lightweight existence check instead of loading full entity
@@ -171,6 +189,21 @@ class EntityService(BaseService[EntityModel]):
             logger.debug(f"creating unique permalink: {permalink}")
 
         return permalink
+
+    async def _get_project_permalink(self) -> Optional[str]:
+        """Get and cache the current project's permalink."""
+        if self._project_permalink is not None:
+            return self._project_permalink
+
+        project_id = self.repository.project_id
+        if project_id is None:  # pragma: no cover
+            return None  # pragma: no cover
+
+        project_repository = ProjectRepository(self.repository.session_maker)
+        project = await project_repository.get_by_id(project_id)
+        if project:
+            self._project_permalink = project.permalink
+        return self._project_permalink
 
     def _build_frontmatter_markdown(
         self, title: str, entity_type: str, permalink: str

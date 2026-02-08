@@ -18,11 +18,11 @@ async def test_get_basic_discussion_context(client, test_graph, test_project):
 
     assert isinstance(context, GraphContext)
     assert len(context.results) == 1
-    assert context.results[0].primary_result.permalink == "test/root"
+    assert context.results[0].primary_result.permalink == f"{test_project.name}/test/root"
     assert len(context.results[0].related_results) > 0
 
     # Verify metadata
-    assert context.metadata.uri == "test/root"
+    assert context.metadata.uri == f"{test_project.name}/test/root"
     assert context.metadata.depth == 1  # default depth
     assert context.metadata.timeframe is not None
     assert isinstance(context.metadata.generated_at, datetime)
@@ -38,7 +38,10 @@ async def test_get_discussion_context_pattern(client, test_graph, test_project):
 
     assert isinstance(context, GraphContext)
     assert len(context.results) > 1  # Should match multiple test/* paths
-    assert all("test/" in item.primary_result.permalink for item in context.results)  # pyright: ignore [reportOperatorIssue]
+    assert all(
+        f"{test_project.name}/test/" in item.primary_result.permalink
+        for item in context.results
+    )  # pyright: ignore [reportOperatorIssue]
     assert context.metadata.depth == 1
 
 

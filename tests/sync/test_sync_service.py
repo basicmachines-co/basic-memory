@@ -14,6 +14,7 @@ from basic_memory.schemas.search import SearchQuery
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync.sync_service import SyncService
+from basic_memory.utils import generate_permalink
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -642,6 +643,7 @@ async def test_permalink_formatting(
     sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test that permalinks are properly formatted during sync."""
+    project_prefix = generate_permalink(project_config.name)
 
     # Test cases with different filename formats
     test_files = {
@@ -675,8 +677,9 @@ Testing permalink generation.
     for filename, expected_permalink in test_files.items():
         # Find entity for this file
         entity = next(e for e in entities if e.file_path == filename)
-        assert entity.permalink == expected_permalink, (
-            f"File {filename} should have permalink {expected_permalink}"
+        expected_full_permalink = f"{project_prefix}/{expected_permalink}"
+        assert entity.permalink == expected_full_permalink, (
+            f"File {filename} should have permalink {expected_full_permalink}"
         )
 
 
@@ -938,6 +941,7 @@ async def test_sync_permalink_resolved(
 ):
     """Test that we resolve duplicate permalinks on sync ."""
     project_dir = project_config.home
+    project_prefix = generate_permalink(project_config.name)
 
     # Create initial file
     content = """
@@ -967,13 +971,13 @@ Content for move test
     await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
-    assert "permalink: new/moved-file" in file_content
+    assert f"permalink: {project_prefix}/new/moved-file" in file_content
 
     # Create another that has the same permalink
-    content = """
+    content = f"""
 ---
 type: knowledge
-permalink: new/moved-file
+permalink: {project_prefix}/new/moved-file
 ---
 # Test Move
 Content for move test
@@ -991,7 +995,7 @@ Content for move test
 
     # assert permalink is unique
     file_content, _ = await file_service.read_file(old_path)
-    assert "permalink: new/moved-file-1" in file_content
+    assert f"permalink: {project_prefix}/new/moved-file-1" in file_content
 
 
 @pytest.mark.asyncio
@@ -1124,6 +1128,7 @@ async def test_sync_permalink_updated_on_move(
 ):
     """Test that we update a permalink on a file move if set in config ."""
     project_dir = project_config.home
+    project_prefix = generate_permalink(project_config.name)
 
     # Create initial file
     content = dedent(
@@ -1145,7 +1150,7 @@ async def test_sync_permalink_updated_on_move(
 
     # verify permalink
     old_content, _ = await file_service.read_file(old_path)
-    assert "permalink: old/test-move" in old_content
+    assert f"permalink: {project_prefix}/old/test-move" in old_content
 
     # Move the file
     new_path = project_dir / "new" / "moved_file.md"
@@ -1160,7 +1165,7 @@ async def test_sync_permalink_updated_on_move(
     await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
-    assert "permalink: new/moved-file" in file_content
+    assert f"permalink: {project_prefix}/new/moved-file" in file_content
 
 
 @pytest.mark.asyncio
@@ -1297,6 +1302,7 @@ async def test_sync_relation_to_non_markdown_file(
 ):
     """Test that sync resolves permalink conflicts on update."""
     project_dir = project_config.home
+    project_prefix = generate_permalink(project_config.name)
 
     content = f"""
 ---
@@ -1321,7 +1327,7 @@ tags: []
 title: a note
 type: note
 tags: []
-permalink: note
+permalink: {project_prefix}/note
 ---
 
 - relates_to [[{test_files["pdf"].name}]]

@@ -63,17 +63,27 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
                 await self.file_service.ensure_directory(docs_dir)
 
                 # Import prompt template if it exists
-                if prompt_entity := self._format_prompt_markdown(project, destination_folder):
-                    # Write file using relative path - FileService handles base_path
-                    file_path = f"{prompt_entity.frontmatter.metadata['permalink']}.md"
+                if project.get("prompt_template"):
+                    prompt_path = (
+                        f"{destination_folder}/{project_dir}/prompt-template"
+                        if destination_folder
+                        else f"{project_dir}/prompt-template"
+                    )
+                    permalink, file_path = self.build_import_paths(prompt_path)
+                    prompt_entity = self._format_prompt_markdown(project, permalink)
                     await self.write_entity(prompt_entity, file_path)
                     prompts_imported += 1
 
                 # Import project documents
                 for doc in project.get("docs", []):
-                    entity = self._format_project_markdown(project, doc, destination_folder)
-                    # Write file using relative path - FileService handles base_path
-                    file_path = f"{entity.frontmatter.metadata['permalink']}.md"
+                    doc_file = clean_filename(doc["filename"])
+                    doc_path = (
+                        f"{destination_folder}/{project_dir}/docs/{doc_file}"
+                        if destination_folder
+                        else f"{project_dir}/docs/{doc_file}"
+                    )
+                    permalink, file_path = self.build_import_paths(doc_path)
+                    entity = self._format_project_markdown(project, doc, permalink)
                     await self.write_entity(entity, file_path)
                     docs_imported += 1
 
@@ -89,7 +99,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
             return self.handle_error("Failed to import Claude projects", e)
 
     def _format_project_markdown(
-        self, project: Dict[str, Any], doc: Dict[str, Any], destination_folder: str = ""
+        self, project: Dict[str, Any], doc: Dict[str, Any], permalink: str
     ) -> EntityMarkdown:
         """Format a project document as a Basic Memory entity.
 
@@ -104,17 +114,6 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
         # Extract timestamps
         created_at = doc.get("created_at") or project["created_at"]
         modified_at = project["updated_at"]
-
-        # Generate clean names for organization
-        project_dir = clean_filename(project["name"])
-        doc_file = clean_filename(doc["filename"])
-
-        # Build permalink with optional destination folder prefix
-        permalink = (
-            f"{destination_folder}/{project_dir}/docs/{doc_file}"
-            if destination_folder
-            else f"{project_dir}/docs/{doc_file}"
-        )
 
         # Create entity
         entity = EntityMarkdown(
@@ -136,7 +135,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
         return entity
 
     def _format_prompt_markdown(
-        self, project: Dict[str, Any], destination_folder: str = ""
+        self, project: Dict[str, Any], permalink: str
     ) -> Optional[EntityMarkdown]:
         """Format project prompt template as a Basic Memory entity.
 
@@ -154,16 +153,6 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
         # Extract timestamps
         created_at = project["created_at"]
         modified_at = project["updated_at"]
-
-        # Generate clean project directory name
-        project_dir = clean_filename(project["name"])
-
-        # Build permalink with optional destination folder prefix
-        permalink = (
-            f"{destination_folder}/{project_dir}/prompt-template"
-            if destination_folder
-            else f"{project_dir}/prompt-template"
-        )
 
         # Create entity
         entity = EntityMarkdown(

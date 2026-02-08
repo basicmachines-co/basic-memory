@@ -20,7 +20,9 @@ from basic_memory.utils import generate_permalink
 
 
 @pytest.mark.asyncio
-async def test_create_entity(entity_service: EntityService, file_service: FileService):
+async def test_create_entity(
+    entity_service: EntityService, file_service: FileService, project_config: ProjectConfig
+):
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
@@ -33,14 +35,14 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
 
     # Assert Entity
     assert isinstance(entity, EntityModel)
-    assert entity.permalink == entity_data.permalink
+    assert entity.permalink == f"{generate_permalink(project_config.name)}/{entity_data.permalink}"
     assert entity.file_path == entity_data.file_path
     assert entity.entity_type == "test"
     assert entity.created_at is not None
     assert len(entity.relations) == 0
 
     # Verify we can retrieve it using permalink
-    retrieved = await entity_service.get_by_permalink(entity_data.permalink)
+    retrieved = await entity_service.get_by_permalink(entity.permalink)
     assert retrieved.title == "Test Entity"
     assert retrieved.entity_type == "test"
     assert retrieved.created_at is not None
@@ -59,7 +61,9 @@ async def test_create_entity(entity_service: EntityService, file_service: FileSe
 
 
 @pytest.mark.asyncio
-async def test_create_entity_file_exists(entity_service: EntityService, file_service: FileService):
+async def test_create_entity_file_exists(
+    entity_service: EntityService, file_service: FileService, project_config: ProjectConfig
+):
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
@@ -77,7 +81,8 @@ async def test_create_entity_file_exists(entity_service: EntityService, file_ser
 
     file_content, _ = await file_service.read_file(file_path)
     assert (
-        "---\ntitle: Test Entity\ntype: test\npermalink: test-entity\n---\n\nfirst" == file_content
+        f"---\ntitle: Test Entity\ntype: test\npermalink: {generate_permalink(project_config.name)}/test-entity\n---\n\nfirst"
+        == file_content
     )
 
     entity_data = EntitySchema(
@@ -108,7 +113,9 @@ async def test_create_entity_unique_permalink(
     entity = await entity_service.create_entity(entity_data)
 
     # default permalink
-    assert entity.permalink == generate_permalink(entity.file_path)
+    assert entity.permalink == (
+        f"{generate_permalink(project_config.name)}/{generate_permalink(entity.file_path)}"
+    )
 
     # move file
     file_path = file_service.get_entity_path(entity)
@@ -536,7 +543,11 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
 
 
 @pytest.mark.asyncio
-async def test_update_with_content(entity_service: EntityService, file_service: FileService):
+async def test_update_with_content(
+    entity_service: EntityService,
+    file_service: FileService,
+    project_config: ProjectConfig,
+):
     content = """# Git Workflow Guide"""
 
     # Create test entity
@@ -560,13 +571,14 @@ async def test_update_with_content(entity_service: EntityService, file_service: 
     file_content, _ = await file_service.read_file(file_path)
 
     # assert content is in file
+    project_prefix = generate_permalink(project_config.name)
     assert (
         dedent(
-            """
+            f"""
             ---
             title: Git Workflow Guide
             type: test
-            permalink: test/git-workflow-guide
+            permalink: {project_prefix}/test/git-workflow-guide
             ---
             
             # Git Workflow Guide
@@ -1414,7 +1426,7 @@ async def test_move_entity_success(
     app_config = BasicMemoryConfig(update_permalinks_on_move=False)
 
     # Move entity
-    assert entity.permalink == "original/test-note"
+    assert entity.permalink == f"{generate_permalink(project_config.name)}/original/test-note"
     await entity_service.move_entity(
         identifier=entity.permalink,
         destination_path="moved/test-note.md",

@@ -37,7 +37,7 @@ async def test_write_note_spaces_to_hyphens(app, test_project, app_config):
     )
 
     assert "file_path: test/my-awesome-note.md" in result
-    assert "permalink: test/my-awesome-note" in result
+    assert f"permalink: {test_project.name}/test/my-awesome-note" in result
 
 
 @pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def test_write_note_underscores_to_hyphens(app, test_project, app_config):
     )
 
     assert "file_path: test/my-note-with-underscores.md" in result
-    assert "permalink: test/my-note-with-underscores" in result
+    assert f"permalink: {test_project.name}/test/my-note-with-underscores" in result
 
 
 @pytest.mark.asyncio
@@ -69,7 +69,7 @@ async def test_write_note_camelcase_to_kebab(app, test_project, app_config):
     )
 
     assert "file_path: test/my-awesome-feature.md" in result
-    assert "permalink: test/my-awesome-feature" in result
+    assert f"permalink: {test_project.name}/test/my-awesome-feature" in result
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_write_note_mixed_case_to_lowercase(app, test_project, app_config)
     )
 
     assert "file_path: test/mixed-case-example.md" in result
-    assert "permalink: test/mixed-case-example" in result
+    assert f"permalink: {test_project.name}/test/mixed-case-example" in result
 
 
 # =============================================================================
@@ -110,7 +110,7 @@ async def test_write_note_single_period_preserved(app, test_project, app_config)
     )
 
     assert "file_path: test/test-3.0-version.md" in result
-    assert "permalink: test/test-3.0-version" in result
+    assert f"permalink: {test_project.name}/test/test-3.0-version" in result
 
 
 @pytest.mark.asyncio
@@ -126,7 +126,7 @@ async def test_write_note_multiple_periods_preserved(app, test_project, app_conf
     )
 
     assert "file_path: test/version-1.2.3-release.md" in result
-    assert "permalink: test/version-1.2.3-release" in result
+    assert f"permalink: {test_project.name}/test/version-1.2.3-release" in result
 
 
 # =============================================================================
@@ -147,7 +147,7 @@ async def test_write_note_special_chars_to_hyphens(app, test_project, app_config
     )
 
     assert "file_path: test/test-2.0-new-feature.md" in result
-    assert "permalink: test/test-2.0-new-feature" in result
+    assert f"permalink: {test_project.name}/test/test-2.0-new-feature" in result
 
 
 @pytest.mark.asyncio
@@ -163,7 +163,7 @@ async def test_write_note_parentheses_removed(app, test_project, app_config):
     )
 
     assert "file_path: test/feature-v2.0-update.md" in result
-    assert "permalink: test/feature-v2.0-update" in result
+    assert f"permalink: {test_project.name}/test/feature-v2.0-update" in result
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_write_note_apostrophes_removed(app, test_project, app_config):
     )
 
     assert "file_path: test/users-guide.md" in result
-    assert "permalink: test/users-guide" in result
+    assert f"permalink: {test_project.name}/test/users-guide" in result
 
 
 # =============================================================================
@@ -200,7 +200,10 @@ async def test_write_note_all_transformations_combined(app, test_project, app_co
     )
 
     assert "file_path: test/my-project-v3.0-feature-update-draft.md" in result
-    assert "permalink: test/my-project-v3.0-feature-update-draft" in result
+    assert (
+        f"permalink: {test_project.name}/test/my-project-v3.0-feature-update-draft"
+        in result
+    )
 
 
 @pytest.mark.asyncio
@@ -217,7 +220,7 @@ async def test_write_note_consecutive_special_chars_collapsed(app, test_project,
 
     # Multiple underscores/hyphens should collapse to single hyphen
     assert "file_path: test/test-multiple-separators.md" in result
-    assert "permalink: test/test-multiple-separators" in result
+    assert f"permalink: {test_project.name}/test/test-multiple-separators" in result
 
 
 # =============================================================================
@@ -238,7 +241,7 @@ async def test_write_note_leading_trailing_hyphens_trimmed(app, test_project, ap
     )
 
     assert "file_path: test/test-note.md" in result
-    assert "permalink: test/test-note" in result
+    assert f"permalink: {test_project.name}/test/test-note" in result
 
 
 @pytest.mark.asyncio
@@ -254,7 +257,7 @@ async def test_write_note_all_special_chars_becomes_valid_filename(app, test_pro
     )
 
     assert "file_path: test/test.md" in result
-    assert "permalink: test/test" in result
+    assert f"permalink: {test_project.name}/test/test" in result
 
 
 # =============================================================================
@@ -276,7 +279,7 @@ async def test_write_note_folder_path_unaffected(app, test_project, app_config):
 
     # Folder paths should be preserved (sanitized but not kebab-cased)
     assert "file_path: My_Folder/Sub Folder/test-note.md" in result
-    assert "permalink: my-folder/sub-folder/test-note" in result
+    assert f"permalink: {test_project.name}/my-folder/sub-folder/test-note" in result
 
 
 @pytest.mark.asyncio
@@ -292,7 +295,7 @@ async def test_write_note_root_folder_with_kebab(app, test_project, app_config):
     )
 
     assert "file_path: test-3.0-note.md" in result
-    assert "permalink: test-3.0-note" in result
+    assert f"permalink: {test_project.name}/test-3.0-note" in result
 
 
 # =============================================================================
@@ -315,7 +318,7 @@ async def test_write_note_kebab_disabled_preserves_original(app, test_project, a
     # Periods and spaces should be preserved
     assert "file_path: test/Test 3.0 Version.md" in result
     # Permalinks are ALWAYS kebab-case regardless of setting, and preserve periods
-    assert "permalink: test/test-3.0-version" in result
+    assert f"permalink: {test_project.name}/test/test-3.0-version" in result
 
 
 @pytest.mark.asyncio
@@ -331,7 +334,7 @@ async def test_write_note_kebab_disabled_preserves_underscores(app, test_project
     )
 
     assert "file_path: test/my_note_example.md" in result
-    assert "permalink: test/my-note-example" in result
+    assert f"permalink: {test_project.name}/test/my-note-example" in result
 
 
 @pytest.mark.asyncio
@@ -347,7 +350,7 @@ async def test_write_note_kebab_disabled_preserves_case(app, test_project, app_c
     )
 
     assert "file_path: test/MyAwesomeNote.md" in result
-    assert "permalink: test/my-awesome-note" in result
+    assert f"permalink: {test_project.name}/test/my-awesome-note" in result
 
 
 # =============================================================================
@@ -375,7 +378,7 @@ async def test_permalinks_always_kebab_case(app, test_project, app_config):
 
     # Filename preserves original, permalink is kebab-case
     assert "file_path: test/Test Note 1.md" in result1
-    assert "permalink: test/test-note-1" in result1
+    assert f"permalink: {test_project.name}/test/test-note-1" in result1
 
     # Test with kebab enabled
     ConfigManager().config.kebab_filenames = True
@@ -389,4 +392,4 @@ async def test_permalinks_always_kebab_case(app, test_project, app_config):
 
     # Both filename and permalink are kebab-case
     assert "file_path: test/test-note-2.md" in result2
-    assert "permalink: test/test-note-2" in result2
+    assert f"permalink: {test_project.name}/test/test-note-2" in result2

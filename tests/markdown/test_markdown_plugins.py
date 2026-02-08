@@ -176,6 +176,14 @@ def test_relation_plugin():
     assert rel["target"] == "Component"
     assert rel["context"] == "with context"
 
+    # Test project namespace normalization
+    content = dedent("""
+        - relates_to [[other-project::Component]]
+        """)
+    token = [t for t in md.parse(content) if t.type == "inline"][0]
+    rel = token.meta["relations"][0]
+    assert rel["target"] == "other-project/Component"
+
     # Test implicit relations in text
     content = "Some text with a [[Link]] and [[Another Link]]"
     token = [t for t in md.parse(content) if t.type == "inline"][0]

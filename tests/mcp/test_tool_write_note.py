@@ -29,31 +29,29 @@ async def test_write_note(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Test Note.md" in result
-    assert "permalink: test/test-note" in result
+    assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Try reading it back via permalink
     content = await read_note.fn("test/test-note", project=test_project.name)
-    assert (
-        normalize_newlines(
-            dedent("""
+    expected = normalize_newlines(
+        dedent("""
         ---
         title: Test Note
         type: note
-        permalink: test/test-note
+        permalink: {permalink}
         tags:
         - test
         - documentation
         ---
-        
+
         # Test
         This is a test note
-        """).strip()
-        )
-        in content
+        """).format(permalink=f"{test_project.name}/test/test-note").strip()
     )
+    assert expected in content
 
 
 @pytest.mark.asyncio
@@ -67,24 +65,22 @@ async def test_write_note_no_tags(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Simple Note.md" in result
-    assert "permalink: test/simple-note" in result
+    assert f"permalink: {test_project.name}/test/simple-note" in result
     assert f"[Session: Using project '{test_project.name}']" in result
     # Should be able to read it back
     content = await read_note.fn("test/simple-note", project=test_project.name)
-    assert (
-        normalize_newlines(
-            dedent("""
+    expected = normalize_newlines(
+        dedent("""
         ---
         title: Simple Note
         type: note
-        permalink: test/simple-note
+        permalink: {permalink}
         ---
-        
+
         Just some text
-        """).strip()
-        )
-        in content
+        """).format(permalink=f"{test_project.name}/test/simple-note").strip()
     )
+    assert expected in content
 
 
 @pytest.mark.asyncio
@@ -109,7 +105,7 @@ async def test_write_note_update_existing(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Test Note.md" in result
-    assert "permalink: test/test-note" in result
+    assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
     assert f"[Session: Using project '{test_project.name}']" in result
@@ -124,7 +120,7 @@ async def test_write_note_update_existing(app, test_project):
     assert "# Updated note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Test Note.md" in result
-    assert "permalink: test/test-note" in result
+    assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Tags" in result
     assert "- test, documentation" in result
     assert f"[Session: Using project '{test_project.name}']" in result
@@ -138,16 +134,16 @@ async def test_write_note_update_existing(app, test_project):
         ---
         title: Test Note
         type: note
-        permalink: test/test-note
+        permalink: {permalink}
         tags:
         - test
         - documentation
         ---
-        
+
         # Test
         This is an updated note
         """
-            ).strip()
+            ).format(permalink=f"{test_project.name}/test/test-note").strip()
         )
         == content
     )
@@ -294,7 +290,7 @@ async def test_write_note_with_tag_array_from_bug_report(app, test_project):
 
     assert result
     assert f"project: {test_project.name}" in result
-    assert "permalink: folder/title" in result
+    assert f"permalink: {test_project.name}/folder/title" in result
     assert "Tags" in result
     assert "hipporag" in result
     assert f"[Session: Using project '{test_project.name}']" in result
@@ -327,7 +323,7 @@ async def test_write_note_verbose(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Test Note.md" in result
-    assert "permalink: test/test-note" in result
+    assert f"permalink: {test_project.name}/test/test-note" in result
     assert "## Observations" in result
     assert "- note: 1" in result
     assert "## Relations" in result
@@ -441,7 +437,7 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
             ---
             title: Test Note
             type: note
-            permalink: test/test-note
+            permalink: {permalink}
             version: 1.0
             author: name
             tags:
@@ -453,7 +449,7 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
 
             This is a test note
             """
-            ).strip()
+            ).format(permalink=f"{test_project.name}/test/test-note").strip()
         )
         in content
     )
@@ -480,7 +476,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     )
     assert "# Created note" in result1
     assert f"project: {test_project.name}" in result1
-    assert "permalink: test/note-1" in result1
+    assert f"permalink: {test_project.name}/test/note-1" in result1
 
     # Step 2: Create second note with different title
     result2 = await write_note.fn(
@@ -488,7 +484,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     )
     assert "# Created note" in result2
     assert f"project: {test_project.name}" in result2
-    assert "permalink: test/note-2" in result2
+    assert f"permalink: {test_project.name}/test/note-2" in result2
 
     # Step 3: Try to create/replace first note again
     # This scenario would trigger the UNIQUE constraint failure before the fix
@@ -509,10 +505,13 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
     assert "Updated note" in result3 or "Created note" in result3
 
     # The result should contain either the original permalink or a unique one
-    assert "permalink: test/note-1" in result3 or "permalink: test/note-1-1" in result3
+    assert (
+        f"permalink: {test_project.name}/test/note-1" in result3
+        or f"permalink: {test_project.name}/test/note-1-1" in result3
+    )
 
     # Verify we can read back the content
-    if "permalink: test/note-1" in result3:
+    if f"permalink: {test_project.name}/test/note-1" in result3:
         # Updated existing note case
         content = await read_note.fn("test/note-1", project=test_project.name)
         assert "Replacement content for note 1" in content
@@ -552,13 +551,12 @@ async def test_write_note_with_custom_entity_type(app, test_project):
 
     # Verify the entity type is correctly set in the frontmatter
     content = await read_note.fn("guides/test-guide", project=test_project.name)
-    assert (
-        normalize_newlines(
-            dedent("""
+    expected = normalize_newlines(
+        dedent("""
         ---
         title: Test Guide
         type: guide
-        permalink: guides/test-guide
+        permalink: {permalink}
         tags:
         - guide
         - documentation
@@ -566,10 +564,9 @@ async def test_write_note_with_custom_entity_type(app, test_project):
 
         # Guide Content
         This is a guide
-        """).strip()
-        )
-        in content
+        """).format(permalink=f"{test_project.name}/guides/test-guide").strip()
     )
+    assert expected in content
 
 
 @pytest.mark.asyncio
@@ -588,7 +585,7 @@ async def test_write_note_with_report_entity_type(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: reports/Monthly Report.md" in result
-    assert "permalink: reports/monthly-report" in result
+    assert f"permalink: {test_project.name}/reports/monthly-report" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
@@ -612,7 +609,7 @@ async def test_write_note_with_config_entity_type(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: config/System Config.md" in result
-    assert "permalink: config/system-config" in result
+    assert f"permalink: {test_project.name}/config/system-config" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type is correctly set in the frontmatter
@@ -640,7 +637,7 @@ async def test_write_note_entity_type_default_behavior(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Default Type Test.md" in result
-    assert "permalink: test/default-type-test" in result
+    assert f"permalink: {test_project.name}/test/default-type-test" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
     # Verify the entity type defaults to "note"
@@ -1035,7 +1032,9 @@ class TestWriteNoteSecurityValidation:
         assert "paths must stay within project boundaries" not in result
         assert "# Created note" in result
         assert "file_path: security-tests/Full Feature Security Test.md" in result
-        assert "permalink: security-tests/full-feature-security-test" in result
+        assert (
+            f"permalink: {test_project.name}/security-tests/full-feature-security-test" in result
+        )
 
         # Should process observations and relations
         assert "## Observations" in result
