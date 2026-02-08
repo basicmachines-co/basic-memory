@@ -33,6 +33,147 @@ tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 
 
+# --- JSON Format Helpers ---
+# These helpers provide JSON output for OpenClaw plugin integration
+# They call the API directly to avoid double round-trips (see issue #553)
+
+
+async def _write_note_json(
+    title: str,
+    content: str | None,
+    directory: str,
+    project_name: str | None,
+    tags: list[str] | None,
+) -> dict:
+    """Write a note and return JSON response with entity metadata.
+
+    Calls the API directly to avoid the double round-trip issue where
+    the MCP tool writes via one API call, then we'd need another to
+    get the structured data back.
+    """
+    from basic_memory.mcp.async_client import get_client
+    from basic_memory.mcp.clients import KnowledgeClient
+    from basic_memory.mcp.project_context import get_active_project
+    from basic_memory.schemas.base import Entity
+    from basic_memory.utils import parse_tags
+
+    async with get_client() as client:
+        # Get active project
+        active_project = await get_active_project(client, project_name, None)
+
+        # Normalize directory
+        if directory == "/":
+            directory = ""
+
+        # Process tags
+        tag_list = parse_tags(tags)
+        metadata = {"tags": tag_list} if tag_list else None
+
+        # Create entity
+        entity = Entity(
+            title=title,
+            directory=directory,
+            entity_type="note",
+            content_type="text/markdown",
+            content=content or "",
+            entity_metadata=metadata,
+        )
+
+        # Use typed client
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+        # Try create first (optimistic)
+        try:
+            result = await knowledge_client.create_entity(entity.model_dump(), fast=False)
+        except Exception as e:
+            # If conflict, try update
+            if "409" in str(e) or "conflict" in str(e).lower() or "already exists" in str(e).lower():
+                if not entity.permalink:
+                    raise ValueError("Entity permalink required for updates")
+                entity_id = await knowledge_client.resolve_entity(entity.permalink)
+                result = await knowledge_client.update_entity(
+                    entity_id, entity.model_dump(), fast=False
+                )
+            else:
+                raise
+
+        # Return the entity data as dict
+        return result
+
+
+async def _read_note_json(identifier: str, project_name: str | None, page: int, page_size: int) -> dict:
+    """Read a note and return JSON response.
+
+    Handles plain titles, permalinks, and memory:// URLs via memory_url_path().
+    """
+    from basic_memory.mcp.async_client import get_client
+    from basic_memory.mcp.clients import KnowledgeClient
+    from basic_memory.mcp.project_context import get_active_project
+    from basic_memory.schemas.memory import memory_url_path
+
+    async with get_client() as client:
+        # Get active project
+        active_project = await get_active_project(client, project_name, None)
+
+        # Process identifier (handles memory://, permalinks, plain titles)
+        entity_path = memory_url_path(identifier)
+
+        # Use typed client
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+        # Resolve and fetch
+        entity_id = await knowledge_client.resolve_entity(entity_path)
+        entity_data = await knowledge_client.get_entity(entity_id)
+
+        return entity_data
+
+
+async def _recent_activity_json(
+    type: list[SearchItemType] | None,
+    depth: int,
+    timeframe: TimeFrame,
+    project: str | None,
+    page: int,
+    page_size: int,
+) -> dict:
+    """Get recent activity and return JSON response.
+
+    Now supports pagination via page and page_size parameters (issue #553).
+    """
+    from basic_memory.mcp.async_client import get_client
+    from basic_memory.mcp.project_context import get_active_project
+    from basic_memory.mcp.tools.utils import call_get
+    from basic_memory.schemas.memory import GraphContext
+
+    async with get_client() as client:
+        # Get active project
+        active_project = await get_active_project(client, project, None)
+
+        # Build params
+        params = {
+            "page": page,
+            "page_size": page_size,
+            "max_related": 10,
+        }
+        if depth:
+            params["depth"] = depth
+        if timeframe:
+            params["timeframe"] = timeframe  # type: ignore
+        if type:
+            params["type"] = [t.value for t in type]  # type: ignore
+
+        # Call API
+        response = await call_get(
+            client,
+            f"/v2/projects/{active_project.external_id}/memory/recent",
+            params=params,
+        )
+
+        # Return as dict
+        activity_data = GraphContext.model_validate(response.json())
+        return activity_data.model_dump(exclude_none=True)
+
+
 @tool_app.command()
 def write_note(
     title: Annotated[str, typer.Option(help="The title of the note")],
@@ -51,6 +192,10 @@ def write_note(
     ] = None,
     tags: Annotated[
         Optional[List[str]], typer.Option(help="A list of tags to apply to the note")
+    ] = None,
+    format: Annotated[
+        Optional[str],
+        typer.Option(help="Output format: 'text' (default) or 'json'"),
     ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -124,8 +269,14 @@ def write_note(
         project_name = project_name or config_manager.default_project
 
         with force_routing(local=local, cloud=cloud):
-            note = run_with_cleanup(mcp_write_note.fn(title, content, folder, project_name, tags))
-        rprint(note)
+            if format == "json":
+                # For JSON output, bypass the MCP tool and call the API directly
+                # to avoid the double round-trip mentioned in issue #553
+                result = run_with_cleanup(_write_note_json(title, content, folder, project_name, tags))
+                print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+            else:
+                result = run_with_cleanup(mcp_write_note.fn(title, content, folder, project_name, tags))
+                rprint(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -147,6 +298,10 @@ def read_note(
     ] = None,
     page: int = 1,
     page_size: int = 10,
+    format: Annotated[
+        Optional[str],
+        typer.Option(help="Output format: 'text' (default) or 'json'"),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -173,8 +328,13 @@ def read_note(
         project_name = project_name or config_manager.default_project
 
         with force_routing(local=local, cloud=cloud):
-            note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
-        rprint(note)
+            if format == "json":
+                # For JSON output, use helper that returns structured data
+                result = run_with_cleanup(_read_note_json(identifier, project_name, page, page_size))
+                print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+            else:
+                result = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
+                rprint(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -197,6 +357,10 @@ def build_context(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
+    format: Annotated[
+        Optional[str],
+        typer.Option(help="Output format: 'json' (always outputs JSON, flag added for consistency)"),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -254,6 +418,18 @@ def recent_activity(
     type: Annotated[Optional[List[SearchItemType]], typer.Option()] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The project to use. If not provided, the default project will be used."
+        ),
+    ] = None,
+    page: int = 1,
+    page_size: int = 50,
+    format: Annotated[
+        Optional[str],
+        typer.Option(help="Output format: 'text' (default) or 'json'"),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -267,16 +443,43 @@ def recent_activity(
     try:
         validate_routing_flags(local, cloud)
 
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
         with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_recent_activity.fn(
-                    type=type,  # pyright: ignore [reportArgumentType]
-                    depth=depth,
-                    timeframe=timeframe,
+            if format == "json":
+                # For JSON output, use helper with pagination support
+                result = run_with_cleanup(
+                    _recent_activity_json(
+                        type=type,  # pyright: ignore [reportArgumentType]
+                        depth=depth or 1,
+                        timeframe=timeframe or "7d",
+                        project=project_name,
+                        page=page,
+                        page_size=page_size,
+                    )
                 )
-            )
-        # The tool now returns a formatted string directly
-        print(result)
+                print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+            else:
+                result = run_with_cleanup(
+                    mcp_recent_activity.fn(
+                        type=type,  # pyright: ignore [reportArgumentType]
+                        depth=depth,
+                        timeframe=timeframe,
+                        project=project_name,
+                    )
+                )
+                # The tool returns a formatted string directly
+                print(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
