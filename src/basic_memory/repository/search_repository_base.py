@@ -861,9 +861,15 @@ class SearchRepositoryBase(ABC):
                 limit=VECTOR_FILTER_SCAN_LIMIT,
                 offset=0,
             )
-            allowed_ids = {row.id for row in filtered_rows if row.id is not None}
+            # Use (id, type) tuples to avoid collisions between different
+            # search_index row types that share the same auto-increment id.
+            allowed_keys = {
+                (row.id, row.type) for row in filtered_rows if row.id is not None
+            }
             search_index_rows = {
-                k: v for k, v in search_index_rows.items() if k in allowed_ids
+                k: v
+                for k, v in search_index_rows.items()
+                if (v.id, v.type) in allowed_keys
             }
 
         ranked_rows: list[SearchIndexRow] = []

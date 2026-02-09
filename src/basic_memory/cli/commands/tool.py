@@ -319,6 +319,13 @@ def search_notes(
         Optional[List[str]],
         typer.Option("--type", help="Filter by frontmatter type (repeatable)"),
     ] = None,
+    entity_types: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--entity-type",
+            help="Filter by search item type: entity, observation, relation (repeatable)",
+        ),
+    ] = None,
     meta: Annotated[
         Optional[List[str]],
         typer.Option("--meta", help="Filter by frontmatter key=value (repeatable)"),
@@ -414,6 +421,7 @@ def search_notes(
                     after_date=after_date,
                     page_size=page_size,
                     types=note_types,
+                    entity_types=entity_types,
                     metadata_filters=metadata_filters,
                     tags=tags,
                     status=status,
