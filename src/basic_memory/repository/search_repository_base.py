@@ -771,6 +771,12 @@ class SearchRepositoryBase(ABC):
     # Shared semantic search: vector-only retrieval
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_chunk_key(chunk_key: str) -> tuple[str, int]:
+        """Parse a chunk_key like 'observation:5:0' into (type, search_index_id)."""
+        parts = chunk_key.split(":")
+        return parts[0], int(parts[1])
+
     async def _search_vector_only(
         self,
         *,
@@ -785,7 +791,12 @@ class SearchRepositoryBase(ABC):
         limit: int,
         offset: int,
     ) -> List[SearchIndexRow]:
-        """Run vector-only search over entity vectors with optional filters."""
+        """Run vector-only search returning chunk-level results.
+
+        Returns individual search_index rows (entities, observations, relations)
+        ranked by vector similarity. Each observation or relation is a first-class
+        result, not collapsed into its parent entity.
+        """
         self._assert_semantic_available()
         await self._ensure_vector_tables()
         assert self._embedding_provider is not None
@@ -799,15 +810,31 @@ class SearchRepositoryBase(ABC):
         if not vector_rows:
             return []
 
-        similarity_by_entity_id: dict[int, float] = {}
+        # Build per-search_index_row similarity scores from chunk-level results.
+        # Each chunk_key encodes the search_index row type and id.
+        # Keep the best similarity per search_index row id.
+        similarity_by_si_id: dict[int, float] = {}
         for row in vector_rows:
-            entity_id = int(row["entity_id"])
+            chunk_key = row.get("chunk_key", "")
             distance = float(row["best_distance"])
             similarity = 1.0 / (1.0 + max(distance, 0.0))
-            current = similarity_by_entity_id.get(entity_id)
+            try:
+                _, si_id = self._parse_chunk_key(chunk_key)
+            except (ValueError, IndexError):
+                # Fallback: group by entity_id for chunks without parseable keys
+                continue
+            current = similarity_by_si_id.get(si_id)
             if current is None or similarity > current:
-                similarity_by_entity_id[entity_id] = similarity
+                similarity_by_si_id[si_id] = similarity
 
+        if not similarity_by_si_id:
+            return []
+
+        # Fetch the actual search_index rows
+        si_ids = list(similarity_by_si_id.keys())
+        search_index_rows = await self._fetch_search_index_rows_by_ids(si_ids)
+
+        # Apply optional filters if requested
         filter_requested = any(
             [
                 permalink,
@@ -820,11 +847,6 @@ class SearchRepositoryBase(ABC):
             ]
         )
 
-        entity_rows_by_id: dict[int, SearchIndexRow] = {}
-
-        # Trigger: user supplied non-text filters.
-        # Why: reuse existing SQL filter semantics (metadata/date/type) for correctness.
-        # Outcome: vector scoring only applies to entities that already pass filters.
         if filter_requested:
             filtered_rows = await self.search(
                 search_text=None,
@@ -839,19 +861,14 @@ class SearchRepositoryBase(ABC):
                 limit=VECTOR_FILTER_SCAN_LIMIT,
                 offset=0,
             )
-            entity_rows_by_id = {
-                row.entity_id: row
-                for row in filtered_rows
-                if row.type == SearchItemType.ENTITY.value and row.entity_id is not None
+            allowed_ids = {row.id for row in filtered_rows if row.id is not None}
+            search_index_rows = {
+                k: v for k, v in search_index_rows.items() if k in allowed_ids
             }
-        else:
-            entity_ids = list(similarity_by_entity_id.keys())
-            if entity_ids:
-                entity_rows_by_id = await self._fetch_entity_rows_by_ids(entity_ids)
 
         ranked_rows: list[SearchIndexRow] = []
-        for entity_id, similarity in similarity_by_entity_id.items():
-            row = entity_rows_by_id.get(entity_id)
+        for si_id, similarity in similarity_by_si_id.items():
+            row = search_index_rows.get(si_id)
             if row is None:
                 continue
             ranked_rows.append(replace(row, score=similarity))
@@ -882,6 +899,54 @@ class SearchRepositoryBase(ABC):
             row_result = await session.execute(text(sql), params)
             for row in row_result.fetchall():
                 result[row.entity_id] = SearchIndexRow(
+                    project_id=self.project_id,
+                    id=row.id,
+                    title=row.title,
+                    permalink=row.permalink,
+                    file_path=row.file_path,
+                    type=row.type,
+                    score=0.0,
+                    metadata=(
+                        row.metadata
+                        if isinstance(row.metadata, dict)
+                        else (json.loads(row.metadata) if row.metadata else {})
+                    ),
+                    from_id=row.from_id,
+                    to_id=row.to_id,
+                    relation_type=row.relation_type,
+                    entity_id=row.entity_id,
+                    content_snippet=row.content_snippet,
+                    category=row.category,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+        return result
+
+    async def _fetch_search_index_rows_by_ids(
+        self, row_ids: list[int]
+    ) -> dict[int, SearchIndexRow]:
+        """Fetch search_index rows by their primary key (id), any type."""
+        if not row_ids:
+            return {}
+        placeholders = ",".join(f":id_{idx}" for idx in range(len(row_ids)))
+        params: dict[str, Any] = {
+            **{f"id_{idx}": rid for idx, rid in enumerate(row_ids)},
+            "project_id": self.project_id,
+        }
+        sql = f"""
+            SELECT
+                project_id, id, title, permalink, file_path, type, metadata,
+                from_id, to_id, relation_type, entity_id, content_snippet,
+                category, created_at, updated_at, 0 as score
+            FROM search_index
+            WHERE project_id = :project_id
+              AND id IN ({placeholders})
+        """
+        result: dict[int, SearchIndexRow] = {}
+        async with db.scoped_session(self.session_maker) as session:
+            row_result = await session.execute(text(sql), params)
+            for row in row_result.fetchall():
+                result[row.id] = SearchIndexRow(
                     project_id=self.project_id,
                     id=row.id,
                     title=row.title,
@@ -956,28 +1021,30 @@ class SearchRepositoryBase(ABC):
             offset=0,
         )
 
-        # RRF fusion keyed on entity_id (always unique, never NULL)
+        # RRF fusion keyed on search_index row id for granular results.
+        # This allows observations and relations to surface as individual results,
+        # not collapsed into their parent entity.
         fused_scores: dict[int, float] = {}
-        rows_by_entity_id: dict[int, SearchIndexRow] = {}
+        rows_by_id: dict[int, SearchIndexRow] = {}
 
         for rank, row in enumerate(fts_results, start=1):
-            if row.entity_id is None:
+            if row.id is None:
                 continue
-            fused_scores[row.entity_id] = fused_scores.get(row.entity_id, 0.0) + (
+            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (
                 1.0 / (RRF_K + rank)
             )
-            rows_by_entity_id[row.entity_id] = row
+            rows_by_id[row.id] = row
 
         for rank, row in enumerate(vector_results, start=1):
-            if row.entity_id is None:
+            if row.id is None:
                 continue
-            fused_scores[row.entity_id] = fused_scores.get(row.entity_id, 0.0) + (
+            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (
                 1.0 / (RRF_K + rank)
             )
-            rows_by_entity_id[row.entity_id] = row
+            rows_by_id[row.id] = row
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
         output: list[SearchIndexRow] = []
-        for eid, fused_score in ranked[offset : offset + limit]:
-            output.append(replace(rows_by_entity_id[eid], score=fused_score))
+        for row_id, fused_score in ranked[offset : offset + limit]:
+            output.append(replace(rows_by_id[row_id], score=fused_score))
         return output

@@ -434,11 +434,10 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 "  WHERE embedding MATCH :query_embedding "
                 "    AND k = :vector_k"
                 ") "
-                "SELECT c.entity_id, MIN(vector_matches.distance) AS best_distance "
+                "SELECT c.entity_id, c.chunk_key, vector_matches.distance AS best_distance "
                 "FROM vector_matches "
                 "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
                 "WHERE c.project_id = :project_id "
-                "GROUP BY c.entity_id "
                 "ORDER BY best_distance ASC "
                 "LIMIT :vector_k"
             ),
