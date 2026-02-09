@@ -407,21 +407,21 @@ class SearchRepositoryBase(ABC):
     # --- Text splitting ---
 
     def _split_text_into_chunks(self, text_value: str) -> list[str]:
+        BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
         normalized = (text_value or "").strip()
         if not normalized:
             return []
-        if len(normalized) <= MAX_VECTOR_CHUNK_CHARS:
-            return [normalized]
 
-        # Split on markdown headers to preserve semantic structure
+        # Split on markdown headers AND bullet boundaries to ensure each
+        # discrete fact gets its own embedding vector for granular retrieval.
         lines = normalized.splitlines()
         sections: list[str] = []
         current_section: list[str] = []
         for line in lines:
-            # Trigger: markdown header encountered and we already accumulated content.
-            # Why: preserve semantic structure of notes for chunk coherence.
-            # Outcome: starts a new chunk section at header boundaries.
             if HEADER_LINE_PATTERN.match(line) and current_section:
+                sections.append("\n".join(current_section).strip())
+                current_section = [line]
+            elif BULLET_PATTERN.match(line) and current_section:
                 sections.append("\n".join(current_section).strip())
                 current_section = [line]
             else:
@@ -433,6 +433,8 @@ class SearchRepositoryBase(ABC):
         current_chunk = ""
 
         for section in sections:
+            is_bullet = bool(BULLET_PATTERN.match(section))
+
             if len(section) > MAX_VECTOR_CHUNK_CHARS:
                 if current_chunk:
                     chunked_sections.append(current_chunk)
@@ -441,6 +443,15 @@ class SearchRepositoryBase(ABC):
                 if long_chunks:
                     chunked_sections.extend(long_chunks[:-1])
                     current_chunk = long_chunks[-1]
+                continue
+
+            # Keep bullets as individual chunks for granular fact retrieval.
+            # Non-bullet sections (headers, prose) merge up to MAX_VECTOR_CHUNK_CHARS.
+            if is_bullet:
+                if current_chunk:
+                    chunked_sections.append(current_chunk)
+                    current_chunk = ""
+                chunked_sections.append(section)
                 continue
 
             candidate = section if not current_chunk else f"{current_chunk}\n\n{section}"
@@ -456,8 +467,39 @@ class SearchRepositoryBase(ABC):
 
         return [chunk for chunk in chunked_sections if chunk.strip()]
 
+    @staticmethod
+    def _split_into_paragraphs(section_text: str) -> list[str]:
+        """Split section into paragraphs, treating bullet lists as separate items.
+
+        Double newlines always split. Within a single-newline block, bullet
+        boundaries (lines starting with - or *) also create splits so that
+        individual facts in a list become separate embeddable chunks.
+        """
+        BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
+        raw_paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
+        result: list[str] = []
+        for para in raw_paragraphs:
+            lines = para.split("\n")
+            # Check if this paragraph contains bullet items
+            has_bullets = any(BULLET_PATTERN.match(line) for line in lines)
+            if not has_bullets:
+                result.append(para)
+                continue
+            # Split on bullet boundaries: group consecutive non-bullet lines
+            # with their preceding bullet
+            current_item: list[str] = []
+            for line in lines:
+                if BULLET_PATTERN.match(line) and current_item:
+                    result.append("\n".join(current_item).strip())
+                    current_item = [line]
+                else:
+                    current_item.append(line)
+            if current_item:
+                result.append("\n".join(current_item).strip())
+        return [p for p in result if p]
+
     def _split_long_section(self, section_text: str) -> list[str]:
-        paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
+        paragraphs = self._split_into_paragraphs(section_text)
         if not paragraphs:
             return []
 
