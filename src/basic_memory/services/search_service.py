@@ -335,7 +335,10 @@ class SearchService:
             content = await self.file_service.read_entity_content(entity)
         if content:
             content_stems.append(content)
-            content_snippet = f"{content[:250]}"
+            # Store full content for vector embedding quality.
+            # The chunker in the vector pipeline splits this into
+            # appropriately-sized pieces for embedding.
+            content_snippet = content
 
         if entity.permalink:
             content_stems.extend(self._generate_variants(entity.permalink))
