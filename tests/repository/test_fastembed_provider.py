@@ -84,4 +84,4 @@ async def test_fastembed_provider_missing_dependency_raises_actionable_error(mon
     with pytest.raises(SemanticDependenciesMissingError) as error:
         await provider.embed_query("test")
 
-    assert "pip install -e '.[semantic]'" in str(error.value)
+    assert "pip install basic-memory" in str(error.value)

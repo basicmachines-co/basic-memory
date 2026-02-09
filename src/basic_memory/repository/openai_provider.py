@@ -41,11 +41,11 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
                 return self._client
 
             try:
-                from openai import AsyncOpenAI  # pyright: ignore[reportMissingImports]
+                from openai import AsyncOpenAI
             except ImportError as exc:  # pragma: no cover - covered via monkeypatch tests
                 raise SemanticDependenciesMissingError(
-                    "OpenAI dependency is missing. Install with: pip install openai "
-                    "(or pip install -e '.[semantic]')."
+                    "OpenAI dependency is missing. "
+                    "Reinstall basic-memory: pip install basic-memory"
                 ) from exc
 
             api_key = self._api_key or os.getenv("OPENAI_API_KEY")

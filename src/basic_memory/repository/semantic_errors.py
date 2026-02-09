@@ -6,4 +6,4 @@ class SemanticSearchDisabledError(RuntimeError):
 
 
 class SemanticDependenciesMissingError(RuntimeError):
-    """Raised when semantic extras are not installed."""
+    """Raised when a semantic search dependency is unavailable or misconfigured."""

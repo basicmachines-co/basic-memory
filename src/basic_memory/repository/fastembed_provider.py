@@ -47,8 +47,8 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                     ImportError
                 ) as exc:  # pragma: no cover - exercised via tests with monkeypatch
                     raise SemanticDependenciesMissingError(
-                        "Semantic search dependencies are missing. "
-                        "Install with: pip install -e '.[semantic]'"
+                        "fastembed package is missing. "
+                        "Reinstall basic-memory: pip install basic-memory"
                     ) from exc
                 resolved_model_name = self._MODEL_ALIASES.get(self.model_name, self.model_name)
                 return TextEmbedding(model_name=resolved_model_name)

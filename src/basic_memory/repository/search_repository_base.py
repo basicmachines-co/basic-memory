@@ -352,8 +352,8 @@ class SearchRepositoryBase(ABC):
             )
         if self._embedding_provider is None:
             raise SemanticDependenciesMissingError(
-                "Semantic search dependencies are missing. "
-                "Install with: pip install -e '.[semantic]'"
+                "No embedding provider configured. "
+                "Ensure semantic_search_enabled is true in your config."
             )
 
     def _compose_row_source_text(self, row) -> str:
