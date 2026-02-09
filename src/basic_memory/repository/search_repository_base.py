@@ -29,6 +29,7 @@ RRF_K = 60
 MAX_VECTOR_CHUNK_CHARS = 900
 VECTOR_CHUNK_OVERLAP_CHARS = 120
 HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
+BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 
 
 class SearchRepositoryBase(ABC):
@@ -407,7 +408,6 @@ class SearchRepositoryBase(ABC):
     # --- Text splitting ---
 
     def _split_text_into_chunks(self, text_value: str) -> list[str]:
-        BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
         normalized = (text_value or "").strip()
         if not normalized:
             return []
@@ -475,7 +475,6 @@ class SearchRepositoryBase(ABC):
         boundaries (lines starting with - or *) also create splits so that
         individual facts in a list become separate embeddable chunks.
         """
-        BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
         raw_paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
         result: list[str] = []
         for para in raw_paragraphs:
