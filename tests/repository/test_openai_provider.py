@@ -92,7 +92,7 @@ async def test_openai_provider_missing_dependency_raises_actionable_error(monkey
     with pytest.raises(SemanticDependenciesMissingError) as error:
         await provider.embed_query("test")
 
-    assert "pip install openai" in str(error.value)
+    assert "pip install basic-memory" in str(error.value)
 
 
 @pytest.mark.asyncio
@@ -149,3 +149,58 @@ def test_embedding_provider_factory_rejects_unknown_provider():
     )
     with pytest.raises(ValueError):
         create_embedding_provider(config)
+
+
+def test_embedding_provider_factory_passes_custom_dimensions_to_fastembed():
+    """Factory should forward semantic_embedding_dimensions to FastEmbed provider."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_dimensions=768,
+    )
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.dimensions == 768
+
+
+def test_embedding_provider_factory_passes_custom_dimensions_to_openai():
+    """Factory should forward semantic_embedding_dimensions to OpenAI provider."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="openai",
+        semantic_embedding_dimensions=3072,
+    )
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, OpenAIEmbeddingProvider)
+    assert provider.dimensions == 3072
+
+
+def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_set():
+    """Factory should use provider defaults (384/1536) when dimensions is None."""
+    fastembed_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+    )
+    fastembed_provider = create_embedding_provider(fastembed_config)
+    assert isinstance(fastembed_provider, FastEmbedEmbeddingProvider)
+    assert fastembed_provider.dimensions == 384
+
+    openai_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="openai",
+    )
+    openai_provider = create_embedding_provider(openai_config)
+    assert isinstance(openai_provider, OpenAIEmbeddingProvider)
+    assert openai_provider.dimensions == 1536

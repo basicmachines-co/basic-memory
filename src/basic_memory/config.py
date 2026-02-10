@@ -99,10 +99,10 @@ class BasicMemoryConfig(BaseSettings):
         description="Database connection URL. For Postgres, use postgresql+asyncpg://user:pass@host:port/db. If not set, SQLite will use default path.",
     )
 
-    # Local semantic search configuration (SQLite only in this phase)
+    # Semantic search configuration
     semantic_search_enabled: bool = Field(
         default=False,
-        description="Enable local semantic search (vector/hybrid retrieval). Requires semantic extras.",
+        description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic extras.",
     )
     semantic_embedding_provider: str = Field(
         default="fastembed",
@@ -112,9 +112,13 @@ class BasicMemoryConfig(BaseSettings):
         default="bge-small-en-v1.5",
         description="Embedding model identifier used by the local provider.",
     )
+    semantic_embedding_dimensions: int | None = Field(
+        default=None,
+        description="Embedding vector dimensions. Auto-detected from provider if not set (384 for FastEmbed, 1536 for OpenAI).",
+    )
     semantic_embedding_batch_size: int = Field(
         default=64,
-        description="Batch size for local embedding generation.",
+        description="Batch size for embedding generation.",
         gt=0,
     )
     semantic_vector_k: int = Field(

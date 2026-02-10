@@ -272,6 +272,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         "pgvector extension is unavailable for this Postgres database."
                     ) from exc
 
+                # --- Chunks table (dimension-independent, may already exist via migration) ---
                 await session.execute(
                     text(
                         """
@@ -296,6 +297,24 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         """
                     )
                 )
+
+                # --- Embeddings table (dimension-dependent, created at runtime) ---
+                # Trigger: provider dimensions may differ from what was previously deployed.
+                # Why: the column type `vector(N)` is fixed at table creation; switching
+                # from FastEmbed (384) to OpenAI (1536) requires recreation.
+                # Outcome: mismatched table is dropped and recreated with correct dims.
+                # Embeddings are derived data — re-indexing will repopulate them.
+                existing_dims = await self._get_existing_embedding_dims(session)
+                if existing_dims is not None and existing_dims != self._vector_dimensions:
+                    logger.warning(
+                        f"Embedding dimension mismatch: table has {existing_dims}, "
+                        f"provider expects {self._vector_dimensions}. "
+                        "Dropping and recreating search_vector_embeddings."
+                    )
+                    await session.execute(
+                        text("DROP TABLE IF EXISTS search_vector_embeddings")
+                    )
+
                 await session.execute(
                     text(
                         f"""
@@ -333,6 +352,41 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 await session.commit()
 
             self._vector_tables_initialized = True
+
+    async def _get_existing_embedding_dims(self, session: AsyncSession) -> int | None:
+        """Query the vector column dimension from an existing search_vector_embeddings table.
+
+        Returns None when the table does not exist.
+        Uses information_schema to avoid regclass cast errors on missing tables,
+        then reads atttypmod from pg_attribute for the actual dimension value.
+        """
+        # Check table existence via information_schema (no exception on missing)
+        exists_result = await session.execute(
+            text(
+                """
+                SELECT 1 FROM information_schema.tables
+                WHERE table_name = 'search_vector_embeddings'
+                """
+            )
+        )
+        if exists_result.fetchone() is None:
+            return None
+
+        result = await session.execute(
+            text(
+                """
+                SELECT atttypmod
+                FROM pg_attribute
+                WHERE attrelid = 'search_vector_embeddings'::regclass
+                  AND attname = 'embedding'
+                """
+            )
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        # pgvector stores dimensions in atttypmod directly
+        return int(row[0])
 
     async def _run_vector_query(
         self,

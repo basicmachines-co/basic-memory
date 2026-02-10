@@ -416,3 +416,88 @@ async def test_postgres_vector_mode_fails_when_semantic_disabled(session_maker, 
             search_text="auth session",
             retrieval_mode=SearchRetrievalMode.VECTOR,
         )
+
+
+class StubEmbeddingProvider8d:
+    """Embedding provider with 8 dimensions to test dimension mismatch detection."""
+
+    model_name = "stub-8d"
+    dimensions = 8
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.0] * 8
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0] * 8 for _ in texts]
+
+
+@pytest.mark.asyncio
+async def test_postgres_dimension_mismatch_triggers_table_recreation(
+    session_maker, test_project
+):
+    """Changing embedding dimensions should drop and recreate the embeddings table."""
+    await _skip_if_pgvector_unavailable(session_maker)
+
+    # --- First, create tables with 4 dimensions ---
+    app_config_4d = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo_4d = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config_4d,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    await repo_4d._ensure_vector_tables()
+
+    # Verify table exists with 4 dimensions
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT atttypmod
+                FROM pg_attribute
+                WHERE attrelid = 'search_vector_embeddings'::regclass
+                  AND attname = 'embedding'
+                """
+            )
+        )
+        row = result.fetchone()
+        assert row is not None
+        assert int(row[0]) == 4
+
+    # --- Now create a repo with 8 dimensions; should detect mismatch and recreate ---
+    app_config_8d = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo_8d = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config_8d,
+        embedding_provider=StubEmbeddingProvider8d(),
+    )
+    await repo_8d._ensure_vector_tables()
+
+    # Verify table was recreated with 8 dimensions
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT atttypmod
+                FROM pg_attribute
+                WHERE attrelid = 'search_vector_embeddings'::regclass
+                  AND attname = 'embedding'
+                """
+            )
+        )
+        row = result.fetchone()
+        assert row is not None
+        assert int(row[0]) == 8
