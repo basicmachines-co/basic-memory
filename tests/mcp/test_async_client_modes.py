@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.config import ProjectMode
 from basic_memory.mcp import async_client as async_client_module
 from basic_memory.mcp.async_client import get_client, set_client_factory
 
@@ -78,3 +79,87 @@ async def test_get_client_local_mode_uses_asgi_transport(config_manager):
     async with get_client() as client:
         # httpx stores ASGITransport privately, but we can still sanity-check type
         assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+# --- Per-project cloud routing tests ---
+
+
+@pytest.mark.asyncio
+async def test_get_client_per_project_cloud_mode_uses_api_key(config_manager, config_home):
+    """Test that a cloud-mode project routes through cloud with API key auth."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False  # Global cloud mode off
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
+
+
+@pytest.mark.asyncio
+async def test_get_client_per_project_cloud_mode_raises_without_api_key(
+    config_manager, config_home
+):
+    """Test that a cloud-mode project raises error when no API key is configured."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_api_key = None  # No API key
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Project 'research' is set to cloud mode but no API key configured",
+    ):
+        async with get_client(project_name="research"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_get_client_local_project_uses_asgi_transport(config_manager, config_home):
+    """Test that a local-mode project uses ASGI transport even when API key exists."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_api_key = "bmc_test_key_123"
+    # "main" defaults to LOCAL since we didn't set_project_mode
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="main") as client:
+        assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_get_client_no_project_name_uses_default_routing(config_manager, config_home):
+    """Test that get_client without project_name falls through to default routing."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    # No project_name → should use local ASGI transport (cloud_mode is False)
+    async with get_client() as client:
+        assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_get_client_factory_overrides_per_project_routing(config_manager, config_home):
+    """Test that injected factory takes priority over per-project routing."""
+    cfg = config_manager.load_config()
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    @asynccontextmanager
+    async def factory():
+        async with httpx.AsyncClient(base_url="https://factory.test") as client:
+            yield client
+
+    set_client_factory(factory)
+
+    # Even though project is CLOUD, factory should take priority
+    async with get_client(project_name="research") as client:
+        assert str(client.base_url) == "https://factory.test"

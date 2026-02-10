@@ -6,8 +6,7 @@ from typing import List, Optional, Dict, Any
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -430,9 +429,7 @@ async def search_notes(
     if status:
         search_query.status = status
 
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, context) as (client, active_project):
         logger.info(f"Searching for {search_query} in project {active_project.name}")
 
         try:
@@ -498,8 +495,7 @@ async def search_by_metadata(
     page = (offset // limit) + 1
     offset_within_page = offset % limit
 
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
+    async with get_project_client(project, context) as (client, active_project):
         logger.info(
             f"Structured search in project {active_project.name} filters={filters} limit={limit} offset={offset}"
         )

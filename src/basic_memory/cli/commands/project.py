@@ -13,7 +13,7 @@ from rich.table import Table
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, ProjectMode
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_delete, call_get, call_patch, call_post, call_put
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
@@ -77,6 +77,7 @@ def list_projects(
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
         table.add_column("Path", style="green")
+        table.add_column("Mode", style="blue")
 
         # Add Local Path column if in cloud mode and not forcing local
         if config.cloud_mode_enabled and not local:
@@ -90,9 +91,10 @@ def list_projects(
         for project in result.projects:
             is_default = "[X]" if project.is_default else ""
             normalized_path = normalize_project_path(project.path)
+            project_mode = config.get_project_mode(project.name).value
 
             # Build row based on mode
-            row = [project.name, format_path(normalized_path)]
+            row = [project.name, format_path(normalized_path), project_mode]
 
             # Add local path if in cloud mode and not forcing local
             if config.cloud_mode_enabled and not local:
@@ -509,6 +511,65 @@ def move_project(
     except Exception as e:
         console.print(f"[red]Error moving project: {str(e)}[/red]")
         raise typer.Exit(1)
+
+
+@project_app.command("set-cloud")
+def set_cloud(
+    name: str = typer.Argument(..., help="Name of the project to route through cloud"),
+) -> None:
+    """Set a project to cloud mode (route through cloud API).
+
+    Requires an API key to be configured first.
+
+    Example:
+      bm cloud set-key bmc_abc123...   # save API key first
+      bm project set-cloud research    # route "research" through cloud
+    """
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    # Validate project exists in config
+    if name not in config.projects:
+        console.print(f"[red]Error: Project '{name}' not found in config[/red]")
+        raise typer.Exit(1)
+
+    # Validate API key is configured
+    if not config.cloud_api_key:
+        console.print("[red]Error: No cloud API key configured[/red]")
+        console.print(
+            "[dim]Run 'bm cloud set-key <key>' or 'bm cloud create-key <name>' first[/dim]"
+        )
+        raise typer.Exit(1)
+
+    config.set_project_mode(name, ProjectMode.CLOUD)
+    config_manager.save_config(config)
+
+    console.print(f"[green]Project '{name}' set to cloud mode[/green]")
+    console.print("[dim]MCP tools and CLI commands for this project will route through cloud[/dim]")
+
+
+@project_app.command("set-local")
+def set_local(
+    name: str = typer.Argument(..., help="Name of the project to revert to local mode"),
+) -> None:
+    """Revert a project to local mode (use in-process ASGI transport).
+
+    Example:
+      bm project set-local research
+    """
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    # Validate project exists in config
+    if name not in config.projects:
+        console.print(f"[red]Error: Project '{name}' not found in config[/red]")
+        raise typer.Exit(1)
+
+    config.set_project_mode(name, ProjectMode.LOCAL)
+    config_manager.save_config(config)
+
+    console.print(f"[green]Project '{name}' set to local mode[/green]")
+    console.print("[dim]MCP tools and CLI commands for this project will use local transport[/dim]")
 
 
 @project_app.command("sync")

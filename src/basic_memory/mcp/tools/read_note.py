@@ -6,8 +6,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
@@ -77,10 +76,7 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
-    async with get_client() as client:
-        # Get and validate the project
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, context) as (client, active_project):
         # Validate identifier to prevent path traversal attacks
         # We need to check both the raw identifier and the processed path
         processed_path = memory_url_path(identifier)

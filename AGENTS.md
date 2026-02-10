@@ -189,27 +189,46 @@ Flow: MCP Tool → Typed Client → HTTP API → Router → Service → Reposito
 
 ### Async Client Pattern (Important!)
 
-**All MCP tools and CLI commands use the context manager pattern for HTTP clients:**
+**MCP tools use `get_project_client()` for per-project routing:**
+
+```python
+from basic_memory.mcp.project_context import get_project_client
+
+@mcp.tool()
+async def my_tool(project: str | None = None, context: Context | None = None):
+    async with get_project_client(project, context) as (client, active_project):
+        # client is routed based on project's mode (local ASGI or cloud HTTP)
+        response = await call_get(client, "/path")
+        return response
+```
+
+**CLI commands and non-project-scoped code use `get_client()` directly:**
 
 ```python
 from basic_memory.mcp.async_client import get_client
 
-async def my_mcp_tool():
+async def my_cli_command():
     async with get_client() as client:
-        # Use client for API calls
         response = await call_get(client, "/path")
         return response
+
+# Per-project routing (when project name is known):
+async with get_client(project_name="research") as client:
+    ...
 ```
 
 **Do NOT use:**
 - ❌ `from basic_memory.mcp.async_client import client` (deprecated module-level client)
 - ❌ Manual auth header management
 - ❌ `inject_auth_header()` (deleted)
+- ❌ Separate `get_client()` + `get_active_project()` in MCP tools (use `get_project_client()` instead)
 
 **Key principles:**
 - Auth happens at client creation, not per-request
 - Proper resource management via context managers
-- Supports three modes: Local (ASGI), CLI cloud (HTTP + auth), Cloud app (factory injection)
+- Per-project routing: each project can be LOCAL or CLOUD independently
+- Cloud projects use API key (`cloud_api_key` in config) as Bearer token
+- Routing priority: factory injection > force-local > per-project cloud > global cloud > local ASGI
 - Factory pattern enables dependency injection for cloud consolidation
 
 **For cloud app integration:**
@@ -250,15 +269,19 @@ See SPEC-16 for full context manager refactor details.
 - List projects: `basic-memory project list`
 - Add project: `basic-memory project add "name" ~/path`
 - Project info: `basic-memory project info`
+- Set cloud mode: `basic-memory project set-cloud "name"`
+- Set local mode: `basic-memory project set-local "name"`
 - One-way sync (local -> cloud): `basic-memory project sync`
 - Bidirectional sync: `basic-memory project bisync`
 - Integrity check: `basic-memory project check`
 
 **Cloud Commands (requires subscription):**
-- Authenticate: `basic-memory cloud login`
-- Logout: `basic-memory cloud logout`
+- Authenticate (global): `basic-memory cloud login`
+- Logout (global): `basic-memory cloud logout`
 - Check cloud status: `basic-memory cloud status`
 - Setup cloud sync: `basic-memory cloud setup`
+- Save API key: `basic-memory cloud set-key bmc_...`
+- Create API key: `basic-memory cloud create-key "name"`
 - Manage snapshots: `basic-memory cloud snapshot [create|list|delete|show|browse]`
 - Restore from snapshot: `basic-memory cloud restore <path> --snapshot <id>`
 
@@ -329,9 +352,22 @@ Basic Memory now supports cloud synchronization and storage (requires active sub
 - Background relation resolution (non-blocking startup)
 - API performance optimizations (SPEC-11)
 
-**CLI Routing Flags:**
+**Per-Project Cloud Routing:**
 
-When cloud mode is enabled, CLI commands route to the cloud API by default. Use `--local` and `--cloud` flags to override:
+Individual projects can be routed through the cloud while others stay local, using an API key:
+
+```bash
+# Save API key and set project to cloud mode
+basic-memory cloud set-key bmc_abc123...
+basic-memory project set-cloud research    # route through cloud
+basic-memory project set-local research    # revert to local
+```
+
+MCP tools use `get_project_client()` which automatically routes based on the project's mode. Cloud projects use the `cloud_api_key` from config as Bearer token.
+
+**CLI Routing Flags (Global Cloud Mode):**
+
+When global cloud mode is enabled, CLI commands route to the cloud API by default. Use `--local` and `--cloud` flags to override:
 
 ```bash
 # Force local routing (ignore cloud mode)
@@ -348,6 +384,7 @@ Key behaviors:
 - This allows simultaneous use of local Claude Desktop and cloud-based clients
 - Some commands (like `project default`, `project sync-config`, `project move`) require `--local` in cloud mode since they modify local configuration
 - Environment variable `BASIC_MEMORY_FORCE_LOCAL=true` forces local routing globally
+- Per-project cloud routing via API key works independently of global cloud mode
 
 ## AI-Human Collaborative Development
 

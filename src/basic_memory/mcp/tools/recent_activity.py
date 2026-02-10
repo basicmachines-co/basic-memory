@@ -7,7 +7,10 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project, resolve_project_parameter
+from basic_memory.mcp.project_context import (
+    get_project_client,
+    resolve_project_parameter,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import TimeFrame
@@ -99,50 +102,51 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
-    async with get_client() as client:
-        # Build common parameters for API calls
-        params = {
-            "page": 1,
-            "page_size": 10,
-            "max_related": 10,
-        }
-        if depth:
-            params["depth"] = depth
-        if timeframe:
-            params["timeframe"] = timeframe  # pyright: ignore
+    # Build common parameters for API calls
+    params: dict = {
+        "page": 1,
+        "page_size": 10,
+        "max_related": 10,
+    }
+    if depth:
+        params["depth"] = depth
+    if timeframe:
+        params["timeframe"] = timeframe  # pyright: ignore
 
-        # Validate and convert type parameter
-        if type:
-            # Convert single string to list
-            if isinstance(type, str):
-                type_list = [type]
-            else:
-                type_list = type
+    # Validate and convert type parameter
+    if type:
+        # Convert single string to list
+        if isinstance(type, str):
+            type_list = [type]
+        else:
+            type_list = type
 
-            # Validate each type against SearchItemType enum
-            validated_types = []
-            for t in type_list:
-                try:
-                    # Try to convert string to enum
-                    if isinstance(t, str):
-                        validated_types.append(SearchItemType(t.lower()))
-                except ValueError:
-                    valid_types = [t.value for t in SearchItemType]
-                    raise ValueError(f"Invalid type: {t}. Valid types are: {valid_types}")
+        # Validate each type against SearchItemType enum
+        validated_types = []
+        for t in type_list:
+            try:
+                # Try to convert string to enum
+                if isinstance(t, str):
+                    validated_types.append(SearchItemType(t.lower()))
+            except ValueError:
+                valid_types = [t.value for t in SearchItemType]
+                raise ValueError(f"Invalid type: {t}. Valid types are: {valid_types}")
 
-            # Add validated types to params
-            params["type"] = [t.value for t in validated_types]  # pyright: ignore
+        # Add validated types to params
+        params["type"] = [t.value for t in validated_types]  # pyright: ignore
 
-        # Resolve project parameter using the three-tier hierarchy
-        # allow_discovery=True enables Discovery Mode, so a project is not required
-        resolved_project = await resolve_project_parameter(project, allow_discovery=True)
+    # Resolve project parameter using the three-tier hierarchy
+    # allow_discovery=True enables Discovery Mode, so a project is not required
+    resolved_project = await resolve_project_parameter(project, allow_discovery=True)
 
-        if resolved_project is None:
-            # Discovery Mode: Get activity across all projects
-            logger.info(
-                f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
-            )
+    if resolved_project is None:
+        # Discovery Mode: Get activity across all projects
+        # Uses plain get_client() since we iterate across all projects (no single project routing)
+        logger.info(
+            f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
+        )
 
+        async with get_client() as client:
             # Get list of all projects
             response = await call_get(client, "/v2/projects/")
             project_list = ProjectList.model_validate(response.json())
@@ -181,76 +185,68 @@ async def recent_activity(
                         most_active_count = item_count
                         most_active_project = project_info.name
 
-            # Build summary stats
-            summary = ActivityStats(
-                total_projects=len(project_list.projects),
-                active_projects=active_projects,
-                most_active_project=most_active_project,
-                total_items=total_items,
-                total_entities=total_entities,
-                total_relations=total_relations,
-                total_observations=total_observations,
-            )
+        # Build summary stats
+        summary = ActivityStats(
+            total_projects=len(project_list.projects),
+            active_projects=active_projects,
+            most_active_project=most_active_project,
+            total_items=total_items,
+            total_entities=total_entities,
+            total_relations=total_relations,
+            total_observations=total_observations,
+        )
 
-            # Generate guidance for the assistant
-            guidance_lines = ["\n" + "─" * 40]
+        # Generate guidance for the assistant
+        guidance_lines = ["\n" + "─" * 40]
 
-            if active_projects == 0:
-                # No recent activity
-                guidance_lines.extend(
-                    [
-                        "No recent activity found in any project.",
-                        "Consider: Ask which project to use or if they want to create a new one.",
-                    ]
-                )
-            else:
-                # At least one project has activity: suggest the most active project.
-                suggested_project = most_active_project or next(
-                    (
-                        name
-                        for name, activity in projects_activity.items()
-                        if activity.item_count > 0
-                    ),
-                    None,
-                )
-                if suggested_project:
-                    suffix = (
-                        f"(most active with {most_active_count} items)"
-                        if most_active_count > 0
-                        else ""
-                    )
-                    guidance_lines.append(
-                        f"Suggested project: '{suggested_project}' {suffix}".strip()
-                    )
-                    if active_projects == 1:
-                        guidance_lines.append(
-                            f"Ask user: 'Should I use {suggested_project} for this task?'"
-                        )
-                    else:
-                        guidance_lines.append(
-                            f"Ask user: 'Should I use {suggested_project} for this task, or would you prefer a different project?'"
-                        )
-
+        if active_projects == 0:
+            # No recent activity
             guidance_lines.extend(
                 [
-                    "",
-                    "Session reminder: Remember their project choice throughout this conversation.",
+                    "No recent activity found in any project.",
+                    "Consider: Ask which project to use or if they want to create a new one.",
                 ]
             )
-
-            guidance = "\n".join(guidance_lines)
-
-            # Format discovery mode output
-            return _format_discovery_output(projects_activity, summary, timeframe, guidance)
-
         else:
-            # Project-Specific Mode: Get activity for specific project
-            logger.info(
-                f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
+            # At least one project has activity: suggest the most active project.
+            suggested_project = most_active_project or next(
+                (name for name, activity in projects_activity.items() if activity.item_count > 0),
+                None,
             )
+            if suggested_project:
+                suffix = (
+                    f"(most active with {most_active_count} items)" if most_active_count > 0 else ""
+                )
+                guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
+                if active_projects == 1:
+                    guidance_lines.append(
+                        f"Ask user: 'Should I use {suggested_project} for this task?'"
+                    )
+                else:
+                    guidance_lines.append(
+                        f"Ask user: 'Should I use {suggested_project} for this task, or would you prefer a different project?'"
+                    )
 
-            active_project = await get_active_project(client, resolved_project, context)
+        guidance_lines.extend(
+            [
+                "",
+                "Session reminder: Remember their project choice throughout this conversation.",
+            ]
+        )
 
+        guidance = "\n".join(guidance_lines)
+
+        # Format discovery mode output
+        return _format_discovery_output(projects_activity, summary, timeframe, guidance)
+
+    else:
+        # Project-Specific Mode: Get activity for specific project
+        # Uses get_project_client() for per-project routing (local vs cloud)
+        logger.info(
+            f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
+        )
+
+        async with get_project_client(resolved_project, context) as (client, active_project):
             response = await call_get(
                 client,
                 f"/v2/projects/{active_project.external_id}/memory/recent",

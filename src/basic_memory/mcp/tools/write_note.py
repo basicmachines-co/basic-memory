@@ -4,8 +4,7 @@ from typing import List, Union, Optional
 
 from loguru import logger
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project, add_project_metadata
+from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
@@ -110,13 +109,10 @@ async def write_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If directory path attempts path traversal
     """
-    async with get_client() as client:
+    async with get_project_client(project, context) as (client, active_project):
         logger.info(
-            f"MCP tool call tool=write_note project={project} directory={directory}, title={title}, tags={tags}"
+            f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
         )
-
-        # Get and validate the project (supports optional project parameter)
-        active_project = await get_active_project(client, project, context)
 
         # Normalize "/" to empty string for root directory (must happen before validation)
         if directory == "/":

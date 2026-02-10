@@ -110,6 +110,8 @@ def resolve_runtime_mode(cloud_mode_enabled: bool, is_test_env: bool) -> Runtime
     return RuntimeMode.LOCAL
 ```
 
+**Note**: `RuntimeMode` determines global behavior (e.g., whether to start file sync). Per-project routing is orthogonal — individual projects can be set to `cloud` mode via `ProjectMode` in config, which affects client routing in `get_client(project_name=...)` without changing the global runtime mode.
+
 ## Dependencies Package
 
 ### Structure
@@ -221,9 +223,7 @@ async def search_notes(
     tags: list[str] | None = None,
     status: str | None = None,
 ) -> SearchResponse:
-    async with get_client() as client:
-        active_project = await get_active_project(client, project)
-
+    async with get_project_client(project, context) as (client, active_project):
         # Import client inside function to avoid circular imports
         from basic_memory.mcp.clients import SearchClient
         from basic_memory.schemas.search import SearchQuery
@@ -236,6 +236,25 @@ async def search_notes(
         )
         search_client = SearchClient(client, active_project.external_id)
         return await search_client.search(search_query.model_dump())
+```
+
+### Per-Project Client Routing
+
+`get_project_client()` from `mcp/project_context.py` is an async context manager that:
+1. Resolves the project name from config (no network call)
+2. Creates the correctly-routed client based on the project's mode (local ASGI or cloud HTTP with API key)
+3. Validates the project via the API
+4. Yields `(client, active_project)` tuple
+
+This solves the bootstrap problem: you need the project name to choose the right client (local vs cloud), but you need the client to validate the project exists.
+
+```python
+from basic_memory.mcp.project_context import get_project_client
+
+async with get_project_client(project, context) as (client, active_project):
+    # client is routed based on project's mode (local or cloud)
+    # active_project is validated via the API
+    ...
 ```
 
 ## Sync Coordination

@@ -5,8 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project, add_project_metadata
+from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 
 
@@ -212,9 +211,7 @@ async def edit_note(
         search_notes() first to find the correct identifier. The tool provides detailed
         error messages with suggestions if operations fail.
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, context) as (client, active_project):
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
         # Validate operation

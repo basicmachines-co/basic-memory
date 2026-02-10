@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
 from basic_memory.api.app import app as fastapi_app
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, ProjectMode
 
 
 def _force_local_mode() -> bool:
@@ -45,31 +45,48 @@ def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncCl
 
 
 @asynccontextmanager
-async def get_client() -> AsyncIterator[AsyncClient]:
+async def get_client(
+    project_name: Optional[str] = None,
+) -> AsyncIterator[AsyncClient]:
     """Get an AsyncClient as a context manager.
 
     This function provides proper resource management for HTTP clients,
-    ensuring connections are closed after use. It supports three modes:
+    ensuring connections are closed after use. Routing priority:
 
     1. **Factory injection** (cloud app, tests):
        If a custom factory is set via set_client_factory(), use that.
 
-    2. **CLI cloud mode**:
-       When cloud_mode_enabled is True, create HTTP client with auth
-       token from CLIAuth for requests to cloud proxy endpoint.
+    2. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
+       Always routes to local ASGI transport, ignoring all cloud settings.
 
-    3. **Local mode** (default):
+    3. **Per-project cloud mode** (project_name provided):
+       If the project's mode is CLOUD, uses HTTP client with cloud_api_key
+       as Bearer token hitting cloud_host/proxy.
+
+    4. **Global cloud mode** (deprecated fallback):
+       When cloud_mode_enabled is True, uses OAuth JWT token.
+
+    5. **Local mode** (default):
        Use ASGI transport for in-process requests to local FastAPI app.
+
+    Args:
+        project_name: Optional project name for per-project routing.
+            If provided and the project's mode is CLOUD, routes to cloud
+            using the account-level API key.
 
     Usage:
         async with get_client() as client:
+            response = await client.get("/path")
+
+        # Per-project routing
+        async with get_client(project_name="research") as client:
             response = await client.get("/path")
 
     Yields:
         AsyncClient: Configured HTTP client for the current mode
 
     Raises:
-        RuntimeError: If cloud mode is enabled but user is not authenticated
+        RuntimeError: If cloud routing needed but no API key / not authenticated
     """
     if _client_factory:
         # Use injected factory (cloud app, tests)
@@ -95,8 +112,31 @@ async def get_client() -> AsyncIterator[AsyncClient]:
                 transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
             ) as client:
                 yield client
+
+        # Trigger: project has per-project cloud mode set
+        # Why: enables routing specific projects through cloud while others stay local
+        # Outcome: HTTP client with API key auth to cloud proxy
+        elif project_name and config.get_project_mode(project_name) == ProjectMode.CLOUD:
+            api_key = config.cloud_api_key
+            if not api_key:
+                raise RuntimeError(
+                    f"Project '{project_name}' is set to cloud mode but no API key configured. "
+                    "Run 'bm cloud set-key <key>' or 'bm cloud create-key <name>' first."
+                )
+
+            proxy_base_url = f"{config.cloud_host}/proxy"
+            logger.info(
+                f"Creating HTTP client for cloud project '{project_name}' at: {proxy_base_url}"
+            )
+            async with AsyncClient(
+                base_url=proxy_base_url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=timeout,
+            ) as client:
+                yield client
+
         elif config.cloud_mode_enabled:
-            # CLI cloud mode: inject auth when creating client
+            # Global cloud mode (deprecated fallback): inject OAuth auth when creating client
             from basic_memory.cli.auth import CLIAuth
 
             auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)

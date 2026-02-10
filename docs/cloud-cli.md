@@ -436,20 +436,97 @@ bm project bisync --name work
 
 **Result:** Fine-grained control over what syncs.
 
+## Per-Project Cloud Routing (API Key)
+
+Instead of toggling global cloud mode, you can route individual projects through the cloud using an API key. This lets you keep some projects local while others route through the cloud.
+
+### Setting Up API Key Auth
+
+**Option A: Create a key in the web app, then save it locally:**
+
+```bash
+bm cloud set-key bmc_abc123...
+```
+
+**Option B: Create a key via CLI (requires OAuth login first):**
+
+```bash
+bm cloud login                     # One-time OAuth login
+bm cloud create-key "my-laptop"    # Creates key and saves it locally
+```
+
+The API key is account-level — it grants access to all your cloud projects. It's stored in `~/.basic-memory/config.json` as `cloud_api_key`.
+
+### Setting Project Modes
+
+```bash
+# Route a project through cloud
+bm project set-cloud research
+
+# Revert to local mode
+bm project set-local research
+
+# View project modes
+bm project list
+```
+
+**What happens:**
+- `set-cloud`: validates the API key exists, then sets the project mode to `cloud` in config
+- `set-local`: reverts the project to local mode (removes the mode entry from config)
+- MCP tools and CLI commands for that project will route to `cloud_host/proxy` with the API key as Bearer token
+
+### How It Works
+
+When an MCP tool or CLI command runs for a cloud-mode project:
+
+1. `get_client(project_name="research")` checks the project's mode in config
+2. If mode is `cloud`, creates an HTTP client pointed at `cloud_host/proxy` with `Authorization: Bearer bmc_...`
+3. If mode is `local` (default), uses the in-process ASGI transport as usual
+
+**Routing priority** (highest to lowest):
+1. Factory injection (cloud app, tests)
+2. `BASIC_MEMORY_FORCE_LOCAL` env var
+3. Per-project cloud mode (API key)
+4. Global cloud mode (OAuth — deprecated fallback)
+5. Local ASGI transport (default)
+
+### Configuration Example
+
+```json
+{
+  "projects": {
+    "personal": "/Users/me/notes",
+    "research": "/Users/me/research"
+  },
+  "project_modes": {
+    "research": "cloud"
+  },
+  "cloud_api_key": "bmc_abc123...",
+  "cloud_host": "https://cloud.basicmemory.com",
+  "default_project": "personal"
+}
+```
+
+In this example, `personal` stays local and `research` routes through cloud. Projects not listed in `project_modes` default to local.
+
+### Sync Behavior
+
+Cloud-mode projects are automatically skipped during local file sync (background sync and file watching). Their files live on the cloud instance, not locally.
+
 ## Disable Cloud Mode
 
-Return to local mode:
+Return to local mode (global):
 
 ```bash
 bm cloud logout
 ```
 
 **What this does:**
-1. Disables cloud mode in config
-2. All commands now work locally
+1. Disables global cloud mode in config
+2. All commands now work locally (unless individual projects are set to cloud via `set-cloud`)
 3. Auth token remains (can re-enable with login)
 
-**Result:** All `bm` commands work with local projects again.
+**Result:** All `bm` commands work with local projects again. Per-project cloud routing via API key continues to work independently of global cloud mode.
 
 ## Filter Configuration
 
@@ -659,10 +736,17 @@ If instance is down, wait a few minutes and retry.
 ### Cloud Mode Management
 
 ```bash
-bm cloud login              # Authenticate and enable cloud mode
-bm cloud logout             # Disable cloud mode
+bm cloud login              # Authenticate and enable global cloud mode (OAuth)
+bm cloud logout             # Disable global cloud mode
 bm cloud status             # Check cloud mode and instance health
 bm cloud promo --off        # Disable CLI cloud promo notices
+```
+
+### API Key Management
+
+```bash
+bm cloud set-key <key>      # Save a cloud API key (bmc_ prefixed)
+bm cloud create-key <name>  # Create API key via cloud API (requires OAuth login)
 ```
 
 ### Setup
@@ -676,11 +760,18 @@ bm cloud setup              # Install rclone and configure credentials
 When cloud mode is enabled:
 
 ```bash
-bm project list                           # List cloud projects
+bm project list                           # List projects with mode column
 bm project add <name>                     # Create cloud project (no sync)
 bm project add <name> --local-path <path> # Create with local sync
 bm project sync-setup <name> <path>       # Add sync to existing project
 bm project rm <name>                      # Delete project
+```
+
+### Per-Project Routing
+
+```bash
+bm project set-cloud <name>  # Route project through cloud (requires API key)
+bm project set-local <name>  # Revert project to local mode
 ```
 
 ### File Synchronization
