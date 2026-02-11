@@ -8,6 +8,7 @@ import pytest
 
 from basic_memory.cli.commands.cloud.rclone_commands import (
     MIN_RCLONE_VERSION_EMPTY_DIRS,
+    TIGRIS_CONSISTENCY_HEADERS,
     RcloneError,
     SyncProject,
     bisync_initialized,
@@ -38,6 +39,18 @@ class _Runner:
     def __call__(self, cmd: list[str], **kwargs):
         self.calls.append((cmd, kwargs))
         return _RunResult(returncode=self._returncode, stdout=self._stdout)
+
+
+def _assert_has_consistency_headers(cmd: list[str]) -> None:
+    """Assert the rclone command includes Tigris consistency headers."""
+    assert "--header-download" in cmd
+    assert "X-Tigris-Consistent: true" in cmd
+    assert "--header-upload" in cmd
+    # Verify upload header value follows --header-upload
+    upload_idx = cmd.index("--header-upload")
+    assert cmd[upload_idx + 1] == "X-Tigris-Consistent: true"
+    download_idx = cmd.index("--header-download")
+    assert cmd[download_idx + 1] == "X-Tigris-Consistent: true"
 
 
 def _write_filter_file(tmp_path: Path) -> Path:
@@ -127,6 +140,7 @@ def test_project_sync_success(tmp_path):
     assert cmd[:2] == ["rclone", "sync"]
     assert Path(cmd[2]) == Path("/tmp/research")
     assert cmd[3] == "basic-memory-cloud:my-bucket/research"
+    _assert_has_consistency_headers(cmd)
     assert "--filter-from" in cmd
     assert str(filter_path) in cmd
     assert "--dry-run" in cmd
@@ -208,6 +222,7 @@ def test_project_bisync_success(tmp_path):
     assert result is True
     cmd, _ = runner.calls[0]
     assert cmd[:2] == ["rclone", "bisync"]
+    _assert_has_consistency_headers(cmd)
     assert "--resilient" in cmd
     assert "--conflict-resolve=newer" in cmd
     assert "--max-delete=25" in cmd
@@ -369,6 +384,7 @@ def test_project_check_success(tmp_path):
     assert result is True
     cmd, kwargs = runner.calls[0]
     assert cmd[:2] == ["rclone", "check"]
+    _assert_has_consistency_headers(cmd)
     assert kwargs["capture_output"] is True
     assert kwargs["text"] is True
 
@@ -407,6 +423,8 @@ def test_project_ls_success():
     project = SyncProject(name="research", path="app/data/research")
     files = project_ls(project, "my-bucket", run=runner, is_installed=lambda: True)
     assert files == ["file1.md", "file2.md", "subdir/file3.md"]
+    cmd, _ = runner.calls[0]
+    _assert_has_consistency_headers(cmd)
 
 
 def test_project_ls_with_subpath():
