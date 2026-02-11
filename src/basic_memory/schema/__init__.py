@@ -19,6 +19,8 @@ from basic_memory.schema.validator import (
 from basic_memory.schema.inference import (
     FieldFrequency,
     InferenceResult,
+    ObservationData,
+    RelationData,
     NoteData,
     infer_schema,
     analyze_observations,
@@ -44,6 +46,8 @@ __all__ = [
     # Inference
     "FieldFrequency",
     "InferenceResult",
+    "ObservationData",
+    "RelationData",
     "NoteData",
     "infer_schema",
     "analyze_observations",

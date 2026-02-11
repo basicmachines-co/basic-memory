@@ -52,6 +52,23 @@ class InferenceResult:
 
 
 @dataclass
+class ObservationData:
+    """Lightweight observation for schema analysis. Decoupled from ORM."""
+
+    category: str
+    content: str
+
+
+@dataclass
+class RelationData:
+    """Lightweight relation for schema analysis. Decoupled from ORM."""
+
+    relation_type: str
+    target_name: str
+    target_entity_type: str | None = None
+
+
+@dataclass
 class NoteData:
     """Minimal note representation for inference analysis.
 
@@ -60,9 +77,8 @@ class NoteData:
     """
 
     identifier: str
-    observations: list[tuple[str, str]]  # (category, content)
-    relations: list[tuple[str, str]]  # (relation_type, target_name)
-    entity_type: str | None = None  # target entity type for relations
+    observations: list[ObservationData]
+    relations: list[RelationData]
 
 
 # --- Inference Logic ---
@@ -163,8 +179,8 @@ def analyze_observations(
     for note in notes:
         # Group observations by category within this note
         note_categories: dict[str, list[str]] = {}
-        for category, content in note.observations:
-            note_categories.setdefault(category, []).append(content)
+        for obs in note.observations:
+            note_categories.setdefault(obs.category, []).append(obs.content)
 
         for category, values in note_categories.items():
             category_note_count[category] += 1
@@ -221,8 +237,10 @@ def analyze_relations(
 
     for note in notes:
         note_rels: dict[str, list[str]] = {}
-        for rel_type, target in note.relations:
-            note_rels.setdefault(rel_type, []).append(target)
+        note_rel_objects: dict[str, list[RelationData]] = {}
+        for rel in note.relations:
+            note_rels.setdefault(rel.relation_type, []).append(rel.target_name)
+            note_rel_objects.setdefault(rel.relation_type, []).append(rel)
 
         for rel_type, targets in note_rels.items():
             rel_note_count[rel_type] += 1
@@ -234,10 +252,11 @@ def analyze_relations(
                 if t not in samples and len(samples) < max_sample_values:
                     samples.append(t)
 
-            # Track target entity types if available from note data
+            # Track target entity types from individual relations (not the source note)
             target_counter = rel_target_types.setdefault(rel_type, Counter())
-            if note.entity_type:
-                target_counter[note.entity_type] += 1
+            for rel in note_rel_objects[rel_type]:
+                if rel.target_entity_type:
+                    target_counter[rel.target_entity_type] += 1
 
     frequencies: list[FieldFrequency] = []
     for rel_type, count in rel_note_count.most_common():

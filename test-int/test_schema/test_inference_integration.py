@@ -9,12 +9,14 @@ from test_schema.helpers import parse_observations, parse_relations, INFERENCE_D
 
 def load_inference_notes() -> list[NoteData]:
     """Load all person fixture files as NoteData objects."""
-    notes = []
-    for filepath in sorted(INFERENCE_DIR.glob("*.md")):
-        obs = parse_observations(filepath)
-        rels = parse_relations(filepath)
-        notes.append(NoteData(identifier=filepath.stem, observations=obs, relations=rels))
-    return notes
+    return [
+        NoteData(
+            identifier=filepath.stem,
+            observations=parse_observations(filepath),
+            relations=parse_relations(filepath),
+        )
+        for filepath in sorted(INFERENCE_DIR.glob("*.md"))
+    ]
 
 
 @pytest.fixture

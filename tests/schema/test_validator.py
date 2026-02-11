@@ -1,7 +1,12 @@
 """Tests for basic_memory.schema.validator -- note validation against schemas."""
 
+from basic_memory.schema.inference import ObservationData, RelationData
 from basic_memory.schema.parser import SchemaField, SchemaDefinition
 from basic_memory.schema.validator import validate_note
+
+# Short aliases for test readability
+Obs = ObservationData
+Rel = RelationData
 
 
 # --- Test Helpers ---
@@ -62,7 +67,7 @@ def _make_schema(
 class TestValidateRequiredFields:
     def test_required_field_present(self):
         schema = _make_schema([_scalar_field("name")])
-        result = validate_note("test-note", schema, [("name", "Alice")], [])
+        result = validate_note("test-note", schema, [Obs("name", "Alice")], [])
 
         assert result.passed is True
         assert result.field_results[0].status == "present"
@@ -94,7 +99,7 @@ class TestValidateRequiredFields:
 class TestValidateOptionalFields:
     def test_optional_field_present(self):
         schema = _make_schema([_scalar_field("bio", required=False)])
-        result = validate_note("test-note", schema, [("bio", "A bio")], [])
+        result = validate_note("test-note", schema, [Obs("bio", "A bio")], [])
 
         assert result.passed is True
         assert result.field_results[0].status == "present"
@@ -129,7 +134,7 @@ class TestValidateOptionalFields:
 class TestValidateEntityRefField:
     def test_entity_ref_checks_relations(self):
         schema = _make_schema([_entity_ref_field("works_at")])
-        result = validate_note("test-note", schema, [], [("works_at", "Acme Corp")])
+        result = validate_note("test-note", schema, [], [Rel("works_at", "Acme Corp")])
 
         assert result.passed is True
         assert result.field_results[0].status == "present"
@@ -166,13 +171,13 @@ class TestValidateEntityRefField:
 class TestValidateEnumField:
     def test_enum_valid_value(self):
         schema = _make_schema([_enum_field("status", ["active", "inactive"])])
-        result = validate_note("test-note", schema, [("status", "active")], [])
+        result = validate_note("test-note", schema, [Obs("status", "active")], [])
         assert result.passed is True
         assert result.field_results[0].status == "present"
 
     def test_enum_invalid_value_warn_mode(self):
         schema = _make_schema([_enum_field("status", ["active", "inactive"])])
-        result = validate_note("test-note", schema, [("status", "archived")], [])
+        result = validate_note("test-note", schema, [Obs("status", "archived")], [])
 
         assert result.passed is True  # warn mode
         fr = result.field_results[0]
@@ -185,7 +190,7 @@ class TestValidateEnumField:
             [_enum_field("status", ["active", "inactive"])],
             validation_mode="strict",
         )
-        result = validate_note("test-note", schema, [("status", "archived")], [])
+        result = validate_note("test-note", schema, [Obs("status", "archived")], [])
         assert result.passed is False
         assert len(result.errors) == 1
 
@@ -202,7 +207,7 @@ class TestValidateEnumField:
 class TestValidateArrayField:
     def test_array_collects_all_values(self):
         schema = _make_schema([_scalar_field("tag", is_array=True)])
-        observations = [("tag", "python"), ("tag", "mcp"), ("tag", "schema")]
+        observations = [Obs("tag", "python"), Obs("tag", "mcp"), Obs("tag", "schema")]
         result = validate_note("test-note", schema, observations, [])
 
         assert result.passed is True
@@ -217,7 +222,7 @@ class TestValidateArrayField:
 class TestValidateUnmatched:
     def test_unmatched_observations_reported(self):
         schema = _make_schema([_scalar_field("name")])
-        observations = [("name", "Alice"), ("hobby", "reading"), ("hobby", "coding")]
+        observations = [Obs("name", "Alice"), Obs("hobby", "reading"), Obs("hobby", "coding")]
         result = validate_note("test-note", schema, observations, [])
 
         assert result.passed is True
@@ -226,14 +231,14 @@ class TestValidateUnmatched:
 
     def test_unmatched_relations_reported(self):
         schema = _make_schema([_entity_ref_field("works_at")])
-        relations = [("works_at", "Acme Corp"), ("friends_with", "Bob")]
+        relations = [Rel("works_at", "Acme Corp"), Rel("friends_with", "Bob")]
         result = validate_note("test-note", schema, [], relations)
 
         assert "friends_with" in result.unmatched_relations
 
     def test_all_unmatched_when_empty_schema(self):
         schema = _make_schema([])
-        result = validate_note("test-note", schema, [("extra", "value")], [])
+        result = validate_note("test-note", schema, [Obs("extra", "value")], [])
         assert "extra" in result.unmatched_observations
 
 

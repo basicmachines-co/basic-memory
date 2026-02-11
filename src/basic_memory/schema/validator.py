@@ -17,6 +17,7 @@ are informational, not errors -- schemas are a subset, not a straitjacket.
 
 from dataclasses import dataclass, field as dataclass_field
 
+from basic_memory.schema.inference import ObservationData, RelationData
 from basic_memory.schema.parser import SchemaDefinition, SchemaField
 
 
@@ -53,16 +54,16 @@ class ValidationResult:
 def validate_note(
     note_identifier: str,
     schema: SchemaDefinition,
-    observations: list[tuple[str, str]],
-    relations: list[tuple[str, str]],
+    observations: list[ObservationData],
+    relations: list[RelationData],
 ) -> ValidationResult:
     """Validate a note against a schema definition.
 
     Args:
         note_identifier: The note's title, permalink, or file path for reporting.
         schema: The resolved SchemaDefinition to validate against.
-        observations: List of (category, content) tuples from the note's observations.
-        relations: List of (relation_type, target_name) tuples from the note's relations.
+        observations: List of ObservationData from the note's observations.
+        relations: List of RelationData from the note's relations.
 
     Returns:
         A ValidationResult with per-field results, unmatched items, and warnings/errors.
@@ -229,19 +230,19 @@ def _validate_enum_field(
 # --- Helper Functions ---
 
 
-def _group_observations(observations: list[tuple[str, str]]) -> dict[str, list[str]]:
-    """Group observation tuples by category."""
+def _group_observations(observations: list[ObservationData]) -> dict[str, list[str]]:
+    """Group observations by category."""
     result: dict[str, list[str]] = {}
-    for category, content in observations:
-        result.setdefault(category, []).append(content)
+    for obs in observations:
+        result.setdefault(obs.category, []).append(obs.content)
     return result
 
 
-def _group_relations(relations: list[tuple[str, str]]) -> dict[str, list[str]]:
-    """Group relation tuples by relation type."""
+def _group_relations(relations: list[RelationData]) -> dict[str, list[str]]:
+    """Group relations by relation type."""
     result: dict[str, list[str]] = {}
-    for rel_type, target in relations:
-        result.setdefault(rel_type, []).append(target)
+    for rel in relations:
+        result.setdefault(rel.relation_type, []).append(rel.target_name)
     return result
 
 

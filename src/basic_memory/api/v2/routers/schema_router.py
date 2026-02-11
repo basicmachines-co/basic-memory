@@ -27,7 +27,7 @@ from basic_memory.schemas.schema import (
 from basic_memory.schemas.search import SearchQuery
 from basic_memory.schema.resolver import resolve_schema
 from basic_memory.schema.validator import validate_note
-from basic_memory.schema.inference import infer_schema, NoteData
+from basic_memory.schema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.schema.diff import diff_schema
 
 # Note: No prefix here -- it's added during registration as /v2/{project_id}/schema
@@ -37,14 +37,25 @@ router = APIRouter(tags=["schema"])
 # --- ORM to core data conversion ---
 
 
-def _entity_observations(entity: Entity) -> list[tuple[str, str]]:
-    """Extract (category, content) tuples from an entity's observations."""
-    return [(obs.category, obs.content) for obs in entity.observations]
+def _entity_observations(entity: Entity) -> list[ObservationData]:
+    """Extract ObservationData from an entity's observations."""
+    return [ObservationData(obs.category, obs.content) for obs in entity.observations]
 
 
-def _entity_relations(entity: Entity) -> list[tuple[str, str]]:
-    """Extract (relation_type, target_name) tuples from an entity's outgoing relations."""
-    return [(rel.relation_type, rel.to_name) for rel in entity.outgoing_relations]
+def _entity_relations(entity: Entity) -> list[RelationData]:
+    """Extract RelationData from an entity's outgoing relations.
+
+    Carries the target entity's type on each relation so the inference engine
+    can suggest correct types (e.g. works_at -> Organization, not the source type).
+    """
+    return [
+        RelationData(
+            relation_type=rel.relation_type,
+            target_name=rel.to_name,
+            target_entity_type=rel.to_entity.entity_type if rel.to_entity else None,
+        )
+        for rel in entity.outgoing_relations
+    ]
 
 
 def _entity_to_note_data(entity: Entity) -> NoteData:
@@ -53,7 +64,6 @@ def _entity_to_note_data(entity: Entity) -> NoteData:
         identifier=entity.permalink or entity.file_path,
         observations=_entity_observations(entity),
         relations=_entity_relations(entity),
-        entity_type=entity.entity_type,
     )
 
 

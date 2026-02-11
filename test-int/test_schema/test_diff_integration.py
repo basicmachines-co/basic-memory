@@ -17,12 +17,14 @@ from test_schema.helpers import (
 
 def load_drift_notes() -> list[NoteData]:
     """Load all drift person fixture files as NoteData objects."""
-    notes = []
-    for filepath in sorted(DRIFT_PEOPLE_DIR.glob("*.md")):
-        obs = parse_observations(filepath)
-        rels = parse_relations(filepath)
-        notes.append(NoteData(identifier=filepath.stem, observations=obs, relations=rels))
-    return notes
+    return [
+        NoteData(
+            identifier=filepath.stem,
+            observations=parse_observations(filepath),
+            relations=parse_relations(filepath),
+        )
+        for filepath in sorted(DRIFT_PEOPLE_DIR.glob("*.md"))
+    ]
 
 
 @pytest.fixture
