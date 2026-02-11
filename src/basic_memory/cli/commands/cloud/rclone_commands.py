@@ -212,6 +212,10 @@ def project_sync(
         remote_path,
         "--filter-from",
         str(filter_path),
+        "--header-download",
+        "X-Tigris-Consistent: true",
+        "--header-upload",
+        "X-Tigris-Consistent: true",
     ]
 
     if verbose:
@@ -287,6 +291,10 @@ def project_bisync(
         str(filter_path),
         "--workdir",
         str(state_path),
+        "--header-download",
+        "X-Tigris-Consistent: true",
+        "--header-upload",
+        "X-Tigris-Consistent: true",
     ]
 
     # Add --create-empty-src-dirs if rclone version supports it (v1.64+)
@@ -356,6 +364,10 @@ def project_check(
         remote_path,
         "--filter-from",
         str(filter_path),
+        "--header-download",
+        "X-Tigris-Consistent: true",
+        "--header-upload",
+        "X-Tigris-Consistent: true",
     ]
 
     if one_way:
@@ -393,6 +405,14 @@ def project_ls(
     if path:
         remote_path = f"{remote_path}/{path}"
 
-    cmd = ["rclone", "ls", remote_path]
+    cmd = [
+        "rclone",
+        "ls",
+        remote_path,
+        "--header-download",
+        "X-Tigris-Consistent: true",
+        "--header-upload",
+        "X-Tigris-Consistent: true",
+    ]
     result = run(cmd, capture_output=True, text=True, check=True)
     return result.stdout.splitlines()

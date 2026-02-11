@@ -130,6 +130,9 @@ def test_project_sync_success(tmp_path):
     assert "--filter-from" in cmd
     assert str(filter_path) in cmd
     assert "--dry-run" in cmd
+    assert "--header-download" in cmd
+    assert "X-Tigris-Consistent: true" in cmd
+    assert "--header-upload" in cmd
     assert kwargs["text"] is True
 
 
@@ -214,6 +217,9 @@ def test_project_bisync_success(tmp_path):
     assert "--compare=modtime" in cmd
     assert "--workdir" in cmd
     assert str(state_path) in cmd
+    assert "--header-download" in cmd
+    assert "X-Tigris-Consistent: true" in cmd
+    assert "--header-upload" in cmd
 
 
 def test_project_bisync_requires_resync_first_time(tmp_path):
@@ -369,6 +375,9 @@ def test_project_check_success(tmp_path):
     assert result is True
     cmd, kwargs = runner.calls[0]
     assert cmd[:2] == ["rclone", "check"]
+    assert "--header-download" in cmd
+    assert "X-Tigris-Consistent: true" in cmd
+    assert "--header-upload" in cmd
     assert kwargs["capture_output"] is True
     assert kwargs["text"] is True
 
@@ -407,6 +416,10 @@ def test_project_ls_success():
     project = SyncProject(name="research", path="app/data/research")
     files = project_ls(project, "my-bucket", run=runner, is_installed=lambda: True)
     assert files == ["file1.md", "file2.md", "subdir/file3.md"]
+    cmd, _ = runner.calls[0]
+    assert "--header-download" in cmd
+    assert "X-Tigris-Consistent: true" in cmd
+    assert "--header-upload" in cmd
 
 
 def test_project_ls_with_subpath():
