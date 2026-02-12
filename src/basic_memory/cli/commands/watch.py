@@ -30,41 +30,52 @@ async def run_watch(project: Optional[str] = None) -> None:
     config = container.config
 
     # --- Initialization ---
+    # Wrapped in try/finally so DB resources are cleaned up on all exit paths,
+    # including early exits from invalid --project names.
     await initialize_app(config)
+    sync_coordinator = None
 
-    # --- Project constraint ---
-    if project:
-        config_manager = ConfigManager()
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            typer.echo(f"No project found named: {project}", err=True)
-            raise typer.Exit(1)
-
-        os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
-        logger.info(f"Watch constrained to project: {project_name}")
-
-    # --- Sync coordinator ---
-    # quiet=False so file change events are printed to the terminal
-    sync_coordinator = SyncCoordinator(config=config, should_sync=True, quiet=False)
-
-    # --- Signal handling ---
-    shutdown_event = asyncio.Event()
-
-    def _signal_handler() -> None:
-        logger.info("Shutdown signal received")
-        shutdown_event.set()
-
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _signal_handler)
-
-    # --- Run ---
     try:
+        # --- Project constraint ---
+        if project:
+            config_manager = ConfigManager()
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+            os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
+            logger.info(f"Watch constrained to project: {project_name}")
+
+        # --- Sync coordinator ---
+        # quiet=False so file change events are printed to the terminal
+        sync_coordinator = SyncCoordinator(config=config, should_sync=True, quiet=False)
+
+        # --- Signal handling ---
+        shutdown_event = asyncio.Event()
+
+        def _signal_handler() -> None:
+            logger.info("Shutdown signal received")
+            shutdown_event.set()
+
+        loop = asyncio.get_running_loop()
+
+        # Windows ProactorEventLoop does not support add_signal_handler;
+        # fall back to the stdlib signal module which works cross-platform.
+        try:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, _signal_handler)
+        except NotImplementedError:
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                signal.signal(sig, lambda _signum, _frame: _signal_handler())
+
+        # --- Run ---
         await sync_coordinator.start()
         logger.info("Watch service running, press Ctrl+C to stop")
         await shutdown_event.wait()
     finally:
-        await sync_coordinator.stop()
+        if sync_coordinator is not None:
+            await sync_coordinator.stop()
         await db.shutdown_db()
         logger.info("Watch service stopped")
 

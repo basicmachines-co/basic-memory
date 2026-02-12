@@ -968,3 +968,75 @@ async def test_index_entity_multiple_categories_same_content(
     # Search for the shared content - should find both observations
     results = await search_service.search(SearchQuery(text="Shared content"))
     assert len(results) >= 2
+
+
+@pytest.mark.asyncio
+async def test_reindex_vectors(search_service, session_maker, test_project):
+    """Test that reindex_vectors processes all entities and reports stats."""
+    from basic_memory.repository import EntityRepository
+    from datetime import datetime
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    # Create some entities
+    for i in range(3):
+        entity = await entity_repo.create(
+            {
+                "title": f"Vector Test Entity {i}",
+                "entity_type": "note",
+                "entity_metadata": {},
+                "content_type": "text/markdown",
+                "file_path": f"test/vector-test-{i}.md",
+                "permalink": f"test/vector-test-{i}",
+                "project_id": test_project.id,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            }
+        )
+        await search_service.index_entity(entity, content=f"Content for entity {i}")
+
+    # Track progress calls
+    progress_calls = []
+
+    def on_progress(entity_id, index, total):
+        progress_calls.append((entity_id, index, total))
+
+    stats = await search_service.reindex_vectors(progress_callback=on_progress)
+
+    # Should have processed at least 3 entities
+    assert stats["total_entities"] >= 3
+    # embedded + errors should equal total
+    assert stats["embedded"] + stats["errors"] == stats["total_entities"]
+    # Should have gotten progress callbacks
+    assert len(progress_calls) == stats["total_entities"]
+    # Progress indices should be sequential
+    for i, (_, index, total) in enumerate(progress_calls):
+        assert index == i
+        assert total == stats["total_entities"]
+
+
+@pytest.mark.asyncio
+async def test_reindex_vectors_no_callback(search_service, session_maker, test_project):
+    """Test reindex_vectors works without a progress callback."""
+    from basic_memory.repository import EntityRepository
+    from datetime import datetime
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+    entity = await entity_repo.create(
+        {
+            "title": "No Callback Entity",
+            "entity_type": "note",
+            "entity_metadata": {},
+            "content_type": "text/markdown",
+            "file_path": "test/no-callback.md",
+            "permalink": "test/no-callback",
+            "project_id": test_project.id,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+        }
+    )
+    await search_service.index_entity(entity, content="Test content")
+
+    stats = await search_service.reindex_vectors()
+    assert stats["total_entities"] >= 1
+    assert stats["embedded"] + stats["errors"] == stats["total_entities"]

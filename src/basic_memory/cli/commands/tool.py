@@ -459,6 +459,8 @@ def search_notes(
     ] = "",
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
+    vector: Annotated[bool, typer.Option("--vector", help="Use vector retrieval")] = False,
+    hybrid: Annotated[bool, typer.Option("--hybrid", help="Use hybrid retrieval")] = False,
     project: Annotated[
         Optional[str],
         typer.Option(
@@ -480,6 +482,13 @@ def search_notes(
     note_types: Annotated[
         Optional[List[str]],
         typer.Option("--type", help="Filter by frontmatter type (repeatable)"),
+    ] = None,
+    entity_types: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--entity-type",
+            help="Filter by search item type: entity, observation, relation (repeatable)",
+        ),
     ] = None,
     meta: Annotated[
         Optional[List[str]],
@@ -516,9 +525,10 @@ def search_notes(
         # use the project name, or the default from the config
         project_name = project_name or config_manager.default_project
 
-        if permalink and title:  # pragma: no cover
+        mode_flags = [permalink, title, vector, hybrid]
+        if sum(1 for enabled in mode_flags if enabled) > 1:  # pragma: no cover
             typer.echo(
-                "Use either --permalink or --title, not both. Exiting.",
+                "Use only one mode flag: --permalink, --title, --vector, or --hybrid. Exiting.",
                 err=True,
             )
             raise typer.Exit(1)
@@ -560,6 +570,10 @@ def search_notes(
                 search_type = "permalink"
         if title:
             search_type = "title"
+        if vector:
+            search_type = "vector"
+        if hybrid:
+            search_type = "hybrid"
 
         with force_routing(local=local, cloud=cloud):
             results = run_with_cleanup(
@@ -571,11 +585,16 @@ def search_notes(
                     after_date=after_date,
                     page_size=page_size,
                     types=note_types,
+                    entity_types=entity_types,
                     metadata_filters=metadata_filters,
                     tags=tags,
                     status=status,
                 )
             )
+        if isinstance(results, str):
+            print(results)
+            raise typer.Exit(1)
+
         results_dict = results.model_dump(exclude_none=True)
         print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:

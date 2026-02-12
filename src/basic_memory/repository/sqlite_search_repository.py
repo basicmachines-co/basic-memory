@@ -5,16 +5,28 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-
+import asyncio
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
-from basic_memory.models.search import CREATE_SEARCH_INDEX
+from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.models.search import (
+    CREATE_SEARCH_INDEX,
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
+    create_sqlite_search_vector_embeddings,
+)
+from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
-from basic_memory.schemas.search import SearchItemType
+from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 class SQLiteSearchRepository(SearchRepositoryBase):
@@ -27,9 +39,27 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     - Prefix wildcard matching with *
     """
 
-    def __init__(self, session_maker, project_id: int):
+    def __init__(
+        self,
+        session_maker,
+        project_id: int,
+        app_config: BasicMemoryConfig | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+    ):
         super().__init__(session_maker, project_id)
         self._entity_columns: set[str] | None = None
+        self._app_config = app_config or ConfigManager().config
+        self._semantic_enabled = self._app_config.semantic_search_enabled
+        self._semantic_vector_k = self._app_config.semantic_vector_k
+        self._embedding_provider = embedding_provider
+        self._sqlite_vec_lock = asyncio.Lock()
+        self._vector_tables_initialized = False
+        self._vector_dimensions = 384
+
+        if self._semantic_enabled and self._embedding_provider is None:
+            self._embedding_provider = create_embedding_provider(self._app_config)
+        if self._embedding_provider is not None:
+            self._vector_dimensions = self._embedding_provider.dimensions
 
     async def _get_entity_columns(self) -> set[str]:
         if self._entity_columns is None:
@@ -53,6 +83,10 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         except Exception as e:  # pragma: no cover
             logger.error(f"Error initializing search index: {e}")
             raise e
+
+    # ------------------------------------------------------------------
+    # FTS5 query preparation (backend-specific)
+    # ------------------------------------------------------------------
 
     def _prepare_boolean_query(self, query: str) -> str:
         """Prepare a Boolean query by quoting individual terms while preserving operators.
@@ -290,6 +324,236 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         # For non-Boolean queries, use the single term preparation logic
         return self._prepare_single_term(term, is_prefix)
 
+    # ------------------------------------------------------------------
+    # sqlite-vec extension loading (SQLite-specific)
+    # ------------------------------------------------------------------
+
+    async def _ensure_sqlite_vec_loaded(self, session) -> None:
+        try:
+            await session.execute(text("SELECT vec_version()"))
+            return
+        except SAOperationalError:
+            pass
+
+        try:
+            import sqlite_vec
+        except ImportError as exc:
+            raise SemanticDependenciesMissingError(
+                "sqlite-vec package is missing. Reinstall basic-memory: pip install basic-memory"
+            ) from exc
+
+        async with self._sqlite_vec_lock:
+            try:
+                await session.execute(text("SELECT vec_version()"))
+                return
+            except SAOperationalError:
+                pass
+
+            async_connection = await session.connection()
+            raw_connection = await async_connection.get_raw_connection()
+            driver_connection = raw_connection.driver_connection
+            await driver_connection.enable_load_extension(True)
+            await driver_connection.load_extension(sqlite_vec.loadable_path())
+            await driver_connection.enable_load_extension(False)
+            await session.execute(text("SELECT vec_version()"))
+
+    # ------------------------------------------------------------------
+    # Abstract hook implementations (vector/semantic, SQLite-specific)
+    # ------------------------------------------------------------------
+
+    async def _ensure_vector_tables(self) -> None:
+        self._assert_semantic_available()
+        if self._vector_tables_initialized:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._ensure_sqlite_vec_loaded(session)
+
+            chunks_columns_result = await session.execute(
+                text("PRAGMA table_info(search_vector_chunks)")
+            )
+            chunks_columns = [row[1] for row in chunks_columns_result.fetchall()]
+
+            expected_columns = {
+                "id",
+                "entity_id",
+                "project_id",
+                "chunk_key",
+                "chunk_text",
+                "source_hash",
+                "updated_at",
+            }
+            schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns
+            if schema_mismatch:
+                await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+                await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
+
+            await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS)
+            await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY)
+            await session.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE)
+
+            # Trigger: legacy table from previous semantic implementation exists.
+            # Why: old schema stores JSON vectors in a normal table and conflicts with sqlite-vec.
+            # Outcome: remove disposable derived data so chunk/vector schema is deterministic.
+            await session.execute(text("DROP TABLE IF EXISTS search_vector_index"))
+
+            vector_sql_result = await session.execute(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'search_vector_embeddings'"
+                )
+            )
+            vector_sql = vector_sql_result.scalar()
+            expected_dimension_sql = f"float[{self._vector_dimensions}]"
+
+            if vector_sql and expected_dimension_sql not in vector_sql:
+                await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+
+            await session.execute(create_sqlite_search_vector_embeddings(self._vector_dimensions))
+            await session.commit()
+
+        self._vector_tables_initialized = True
+
+    async def _prepare_vector_session(self, session: AsyncSession) -> None:
+        """Load sqlite-vec extension for the session."""
+        await self._ensure_sqlite_vec_loaded(session)
+
+    async def _run_vector_query(
+        self,
+        session: AsyncSession,
+        query_embedding: list[float],
+        candidate_limit: int,
+    ) -> list[dict]:
+        query_embedding_json = json.dumps(query_embedding)
+        vector_result = await session.execute(
+            text(
+                "WITH vector_matches AS ("
+                "  SELECT rowid, distance "
+                "  FROM search_vector_embeddings "
+                "  WHERE embedding MATCH :query_embedding "
+                "    AND k = :vector_k"
+                ") "
+                "SELECT c.entity_id, c.chunk_key, vector_matches.distance AS best_distance "
+                "FROM vector_matches "
+                "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
+                "WHERE c.project_id = :project_id "
+                "ORDER BY best_distance ASC "
+                "LIMIT :vector_k"
+            ),
+            {
+                "query_embedding": query_embedding_json,
+                "project_id": self.project_id,
+                "vector_k": candidate_limit,
+            },
+        )
+        return [dict(row) for row in vector_result.mappings().all()]
+
+    async def _write_embeddings(
+        self,
+        session: AsyncSession,
+        jobs: list[tuple[int, str]],
+        embeddings: list[list[float]],
+    ) -> None:
+        rowids = [row_id for row_id, _ in jobs]
+        delete_params = {f"rowid_{idx}": rowid for idx, rowid in enumerate(rowids)}
+        delete_placeholders = ", ".join(f":rowid_{idx}" for idx in range(len(rowids)))
+        await session.execute(
+            text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({delete_placeholders})"),
+            delete_params,
+        )
+
+        insert_rows = [
+            {"rowid": row_id, "embedding": json.dumps(embedding)}
+            for (row_id, _), embedding in zip(jobs, embeddings, strict=True)
+        ]
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, embedding) "
+                "VALUES (:rowid, :embedding)"
+            ),
+            insert_rows,
+        )
+
+    async def _delete_entity_chunks(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+    ) -> None:
+        # sqlite-vec has no CASCADE — must delete embeddings before chunks
+        await session.execute(
+            text(
+                "DELETE FROM search_vector_embeddings "
+                "WHERE rowid IN ("
+                "SELECT id FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+                ")"
+            ),
+            {"project_id": self.project_id, "entity_id": entity_id},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": self.project_id, "entity_id": entity_id},
+        )
+
+    async def _delete_stale_chunks(
+        self,
+        session: AsyncSession,
+        stale_ids: list[int],
+        entity_id: int,
+    ) -> None:
+        stale_params = {
+            "project_id": self.project_id,
+            "entity_id": entity_id,
+            **{f"row_{idx}": row_id for idx, row_id in enumerate(stale_ids)},
+        }
+        stale_placeholders = ", ".join(f":row_{idx}" for idx in range(len(stale_ids)))
+        await session.execute(
+            text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({stale_placeholders})"),
+            stale_params,
+        )
+        await session.execute(
+            text(
+                "DELETE FROM search_vector_chunks "
+                f"WHERE id IN ({stale_placeholders}) "
+                "AND project_id = :project_id AND entity_id = :entity_id"
+            ),
+            stale_params,
+        )
+
+    async def _update_timestamp_sql(self) -> str:
+        return "CURRENT_TIMESTAMP"  # pragma: no cover
+
+    def _orphan_detection_sql(self) -> str:
+        """SQLite sqlite-vec uses rowid-based embedding table."""
+        return (
+            "SELECT c.id FROM search_vector_chunks c "
+            "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
+            "WHERE c.project_id = :project_id AND c.entity_id = :entity_id "
+            "AND e.rowid IS NULL"
+        )
+
+    # ------------------------------------------------------------------
+    # Index / bulk index overrides (FTS-only, no vector side-effects)
+    # ------------------------------------------------------------------
+
+    async def index_item(self, search_index_row: SearchIndexRow) -> None:
+        """Index a single row in FTS only.
+
+        Vector chunks are derived asynchronously via sync_entity_vectors().
+        """
+        await super().index_item(search_index_row)
+
+    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
+        """Index multiple rows in FTS only."""
+        await super().bulk_index_items(search_index_rows)
+
+    # ------------------------------------------------------------------
+    # FTS search (backend-specific)
+    # ------------------------------------------------------------------
+
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -300,10 +564,29 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
+        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using SQLite FTS5."""
+        # --- Dispatch vector / hybrid modes (shared logic) ---
+        dispatched = await self._dispatch_retrieval_mode(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            types=types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            metadata_filters=metadata_filters,
+            retrieval_mode=retrieval_mode,
+            limit=limit,
+            offset=offset,
+        )
+        if dispatched is not None:
+            return dispatched
+
+        # --- FTS mode (SQLite-specific) ---
         conditions = []
         params = {}
         order_by_clause = ""

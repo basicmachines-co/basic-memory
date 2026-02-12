@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -171,7 +172,7 @@ class TestRunWatch:
 
     @pytest.mark.asyncio
     async def test_invalid_project_exits_with_error(self, mock_container):
-        """--project with unknown name exits with error."""
+        """--project with unknown name exits with error and still cleans up DB."""
         mock_config_manager = MagicMock()
         mock_config_manager.get_project.return_value = (None, None)
 
@@ -182,11 +183,16 @@ class TestRunWatch:
                 "basic_memory.cli.commands.watch.ConfigManager",
                 return_value=mock_config_manager,
             ),
+            patch("basic_memory.cli.commands.watch.db") as mock_db,
         ):
+            mock_db.shutdown_db = AsyncMock()
+
             with pytest.raises(typer.Exit) as exc_info:
                 await run_watch(project="nonexistent")
 
             assert exc_info.value.exit_code == 1
+            # DB should still be cleaned up even on early exit
+            mock_db.shutdown_db.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_shutdown_stops_coordinator_and_db(self, mock_container):
@@ -225,3 +231,48 @@ class TestRunWatch:
 
             mock_coordinator.stop.assert_called_once()
             mock_db.shutdown_db.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_signal_module_on_windows(self, mock_container):
+        """When add_signal_handler raises NotImplementedError, falls back to signal.signal()."""
+        with (
+            patch("basic_memory.cli.commands.watch.get_container", return_value=mock_container),
+            patch("basic_memory.cli.commands.watch.initialize_app", AsyncMock()),
+            patch("basic_memory.cli.commands.watch.SyncCoordinator") as mock_coordinator_cls,
+            patch("basic_memory.cli.commands.watch.db") as mock_db,
+        ):
+            mock_coordinator = AsyncMock()
+            mock_coordinator_cls.return_value = mock_coordinator
+            mock_db.shutdown_db = AsyncMock()
+
+            with patch("asyncio.get_running_loop") as mock_loop:
+                mock_loop_instance = MagicMock()
+                mock_loop.return_value = mock_loop_instance
+
+                # Simulate Windows: add_signal_handler raises NotImplementedError
+                mock_loop_instance.add_signal_handler.side_effect = NotImplementedError
+
+                with patch("basic_memory.cli.commands.watch.signal.signal") as mock_signal:
+                    # Track calls to signal.signal for the fallback path
+                    registered_handlers = {}
+
+                    def capture_signal(sig, handler):
+                        registered_handlers[sig] = handler
+
+                    mock_signal.side_effect = capture_signal
+
+                    async def run_and_shutdown():
+                        task = asyncio.create_task(run_watch())
+                        await asyncio.sleep(0.01)
+                        # Trigger shutdown via the fallback handler
+                        if signal.SIGINT in registered_handlers:
+                            registered_handlers[signal.SIGINT](signal.SIGINT, None)
+                        await task
+
+                    await run_and_shutdown()
+
+                # Verify fallback signal.signal was called for both signals
+                assert mock_signal.call_count == 2
+                called_signals = {call.args[0] for call in mock_signal.call_args_list}
+                assert signal.SIGINT in called_signals
+                assert signal.SIGTERM in called_signals
