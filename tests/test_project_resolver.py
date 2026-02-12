@@ -100,7 +100,7 @@ class TestProjectResolver:
 
         assert result.project is None
         assert result.mode == ResolutionMode.NONE
-        assert "default_project_mode is disabled" in result.reason
+        assert "no default project configured" in result.reason
 
     def test_require_project_success(self):
         """require_project returns result when project resolved."""

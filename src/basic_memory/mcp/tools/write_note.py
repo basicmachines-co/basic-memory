@@ -33,7 +33,7 @@ async def write_note(
 
     Project Resolution:
     Server resolves projects in this order: Single Project Mode → project parameter → default project.
-    If project unknown, use list_memory_projects() or recent_activity() first.
+    Uses default project automatically. Specify `project` parameter to target a different project.
 
     The content can include semantic observations and relations using markdown syntax:
 
@@ -79,12 +79,7 @@ async def write_note(
         - Session tracking metadata for project awareness
 
     Examples:
-        # Assistant flow when project is unknown
-        # 1. list_memory_projects() -> Ask user which project
-        # 2. User: "Use my-research"
-        # 3. write_note(...) and remember "my-research" for session
-
-        # Create a simple note
+        # Create a simple note (uses default project automatically)
         write_note(
             project="my-research",
             title="Meeting Notes",

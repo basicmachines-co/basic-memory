@@ -51,7 +51,7 @@ async def build_context(
 
     Project Resolution:
     Server resolves projects in this order: Single Project Mode → project parameter → default project.
-    If project unknown, use list_memory_projects() or recent_activity() first.
+    Uses default project automatically. Specify `project` parameter to target a different project.
 
     Args:
         project: Project name to build context from. Optional - server will resolve using hierarchy.

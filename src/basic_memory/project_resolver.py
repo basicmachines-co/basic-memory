@@ -183,7 +183,7 @@ class ProjectResolver:
         return ResolvedProject(
             project=None,
             mode=ResolutionMode.NONE,
-            reason="No project specified and default_project_mode is disabled",
+            reason="No project specified and no default project configured",
         )
 
     def require_project(

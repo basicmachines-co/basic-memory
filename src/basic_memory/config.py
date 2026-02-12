@@ -81,7 +81,7 @@ class BasicMemoryConfig(BaseSettings):
         description="Name of the default project to use",
     )
     default_project_mode: bool = Field(
-        default=False,
+        default=True,
         description="When True, MCP tools automatically use default_project when no project parameter is specified. Enables simplified UX for single-project workflows.",
     )
 

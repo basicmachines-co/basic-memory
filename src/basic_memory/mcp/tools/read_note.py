@@ -31,7 +31,7 @@ async def read_note(
 
     Project Resolution:
     Server resolves projects in this order: Single Project Mode → project parameter → default project.
-    If project unknown, use list_memory_projects() or recent_activity() first.
+    Uses default project automatically. Specify `project` parameter to target a different project.
 
     This tool will try multiple lookup strategies to find the most relevant note:
     1. Direct permalink lookup
