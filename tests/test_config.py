@@ -485,6 +485,25 @@ class TestPlatformNativePathSeparators:
             assert "/" in main_path
 
 
+class TestSemanticSearchConfig:
+    """Test semantic search configuration options."""
+
+    def test_semantic_embedding_dimensions_defaults_to_none(self):
+        """Dimensions should default to None, letting the provider choose."""
+        config = BasicMemoryConfig()
+        assert config.semantic_embedding_dimensions is None
+
+    def test_semantic_embedding_dimensions_can_be_set(self):
+        """Explicit dimensions should be stored on the config object."""
+        config = BasicMemoryConfig(semantic_embedding_dimensions=1536)
+        assert config.semantic_embedding_dimensions == 1536
+
+    def test_semantic_search_enabled_description_mentions_both_backends(self):
+        """Description should not say 'SQLite only' anymore."""
+        field_info = BasicMemoryConfig.model_fields["semantic_search_enabled"]
+        assert "SQLite only" not in (field_info.description or "")
+
+
 class TestFormattingConfig:
     """Test file formatting configuration options."""
 

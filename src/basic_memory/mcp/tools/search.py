@@ -9,13 +9,47 @@ from fastmcp import Context
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.project_context import get_active_project
 from basic_memory.mcp.server import mcp
-from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchResponse
+from basic_memory.schemas.search import (
+    SearchItemType,
+    SearchQuery,
+    SearchResponse,
+    SearchRetrievalMode,
+)
 
 
 def _format_search_error_response(
     project: str, error_message: str, query: str, search_type: str = "text"
 ) -> str:
     """Format helpful error responses for search failures that guide users to successful searches."""
+
+    # Semantic config/dependency errors
+    if "semantic search is disabled" in error_message.lower():
+        return dedent(f"""
+            # Search Failed - Semantic Search Disabled
+
+            You requested `{search_type}` search for query '{query}', but semantic search is disabled.
+
+            ## How to enable
+            1. Set `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true`
+            2. Restart the Basic Memory server/process
+
+            ## Alternative now
+            - Run FTS search instead:
+              `search_notes("{project}", "{query}", search_type="text")`
+            """).strip()
+
+    if "pip install basic-memory" in error_message.lower():
+        return dedent(f"""
+            # Search Failed - Semantic Dependencies Missing
+
+            Semantic retrieval is enabled but required packages are not installed.
+
+            ## Fix
+            1. Reinstall basic-memory: `pip install basic-memory`
+            2. Restart Basic Memory
+            3. Retry your query:
+               `search_notes("{project}", "{query}", search_type="{search_type}")`
+            """).strip()
 
     # FTS5 syntax errors
     if "syntax error" in error_message.lower() or "fts5" in error_message.lower():
@@ -285,7 +319,8 @@ async def search_notes(
                 If unknown, use list_memory_projects() to discover available projects.
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
-        search_type: Type of search to perform, one of: "text", "title", "permalink" (default: "text")
+        search_type: Type of search to perform, one of:
+                    "text", "title", "permalink", "vector", "hybrid" (default: "text")
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
@@ -366,6 +401,12 @@ async def search_notes(
     # Set the appropriate search field based on search_type
     if search_type == "text":
         search_query.text = query
+    elif search_type == "vector":
+        search_query.text = query
+        search_query.retrieval_mode = SearchRetrievalMode.VECTOR
+    elif search_type == "hybrid":
+        search_query.text = query
+        search_query.retrieval_mode = SearchRetrievalMode.HYBRID
     elif search_type == "title":
         search_query.title = query
     elif search_type == "permalink" and "*" in query:
