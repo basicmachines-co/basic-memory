@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v0.18.2 (2026-02-11)
+
+### Bug Fixes
+
+- **#562**: Use VIRTUAL instead of STORED columns in SQLite migration
+  ([`344e651`](https://github.com/basicmachines-co/basic-memory/commit/344e651))
+  - Fixes compatibility issue with SQLite STORED generated columns
+
 ## v0.18.1 (2026-02-11)
 
 ### Features
