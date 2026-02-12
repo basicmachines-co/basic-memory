@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.18.3 (2026-02-12)
+
+### Bug Fixes
+
+- Use global `--header` flag for Tigris consistency on all rclone transactions
+  ([`7fcf587`](https://github.com/basicmachines-co/basic-memory/commit/7fcf587))
+  - `--header-download` / `--header-upload` only apply to GET/PUT requests, missing S3
+    ListObjectsV2 calls that bisync issues first. Non-US users saw stale edge-cached metadata.
+  - `--header` applies to ALL HTTP transactions (list, download, upload), fixing bisync for
+    users outside the Tigris origin region.
+
 ## v0.18.2 (2026-02-11)
 
 ### Bug Fixes
