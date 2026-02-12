@@ -31,8 +31,10 @@ MIN_RCLONE_VERSION_EMPTY_DIRS = (1, 64, 0)
 # These headers bypass edge cache and force reads/writes against the origin.
 # See: https://www.tigrisdata.com/docs/objects/consistency/
 TIGRIS_CONSISTENCY_HEADERS = [
-    "--header-download", "X-Tigris-Consistent: true",
-    "--header-upload", "X-Tigris-Consistent: true",
+    "--header-download",
+    "X-Tigris-Consistent: true",
+    "--header-upload",
+    "X-Tigris-Consistent: true",
 ]
 
 
