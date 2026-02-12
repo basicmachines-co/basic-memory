@@ -94,13 +94,15 @@ def upgrade() -> None:
         return
 
     # SQLite: add generated columns for common frontmatter fields
+    # Constraint: SQLite ALTER TABLE ADD COLUMN only supports VIRTUAL generated columns,
+    # not STORED. json_extract is deterministic so VIRTUAL columns can still be indexed.
     if not column_exists(connection, "entity", "tags_json"):
         op.add_column(
             "entity",
             sa.Column(
                 "tags_json",
                 sa.Text(),
-                sa.Computed("json_extract(entity_metadata, '$.tags')", persisted=True),
+                sa.Computed("json_extract(entity_metadata, '$.tags')", persisted=False),
             ),
         )
     if not column_exists(connection, "entity", "frontmatter_status"):
@@ -109,7 +111,7 @@ def upgrade() -> None:
             sa.Column(
                 "frontmatter_status",
                 sa.Text(),
-                sa.Computed("json_extract(entity_metadata, '$.status')", persisted=True),
+                sa.Computed("json_extract(entity_metadata, '$.status')", persisted=False),
             ),
         )
     if not column_exists(connection, "entity", "frontmatter_type"):
@@ -118,7 +120,7 @@ def upgrade() -> None:
             sa.Column(
                 "frontmatter_type",
                 sa.Text(),
-                sa.Computed("json_extract(entity_metadata, '$.type')", persisted=True),
+                sa.Computed("json_extract(entity_metadata, '$.type')", persisted=False),
             ),
         )
 
