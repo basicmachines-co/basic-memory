@@ -8,7 +8,6 @@ import pytest
 
 from basic_memory.cli.commands.cloud.rclone_commands import (
     MIN_RCLONE_VERSION_EMPTY_DIRS,
-    TIGRIS_CONSISTENCY_HEADERS,
     RcloneError,
     SyncProject,
     bisync_initialized,

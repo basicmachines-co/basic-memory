@@ -55,6 +55,7 @@ class SyncCoordinator:
     config: BasicMemoryConfig
     should_sync: bool = True
     skip_reason: Optional[str] = None
+    quiet: bool = True
 
     # Internal state (not constructor args)
     _status: SyncStatus = field(default=SyncStatus.NOT_STARTED, init=False)
@@ -96,7 +97,7 @@ class SyncCoordinator:
             async def _file_sync_runner() -> None:  # pragma: no cover
                 """Run the file sync service."""
                 try:
-                    await initialize_file_sync(self.config)
+                    await initialize_file_sync(self.config, quiet=self.quiet)
                 except asyncio.CancelledError:
                     logger.debug("File sync cancelled")
                     raise

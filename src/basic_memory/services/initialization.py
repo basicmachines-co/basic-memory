@@ -71,11 +71,13 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
 
 async def initialize_file_sync(
     app_config: BasicMemoryConfig,
+    quiet: bool = True,
 ) -> None:
     """Initialize file synchronization services. This function starts the watch service and does not return
 
     Args:
         app_config: The Basic Memory project configuration
+        quiet: Whether to suppress Rich console output (True for MCP, False for CLI watch)
 
     Returns:
         The watch service task that's monitoring file changes
@@ -101,7 +103,7 @@ async def initialize_file_sync(
     watch_service = WatchService(
         app_config=app_config,
         project_repository=project_repository,
-        quiet=True,
+        quiet=quiet,
     )
 
     # Get active projects
