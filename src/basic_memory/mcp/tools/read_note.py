@@ -6,7 +6,7 @@ from typing import Optional, Literal
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.formatting import format_note_preview_ascii
 from basic_memory.mcp.tools.search import search_notes
@@ -82,12 +82,19 @@ async def read_note(
         including related notes, search commands, and note creation templates.
     """
     async with get_project_client(project, context) as (client, active_project):
+        # Resolve identifier with project-prefix awareness for memory:// URLs
+        _, entity_path, _ = await resolve_project_and_path(
+            client, identifier, project, context
+        )
+
         # Validate identifier to prevent path traversal attacks
-        # We need to check both the raw identifier and the processed path
-        processed_path = memory_url_path(identifier)
+        # For memory:// URLs, validate the extracted path (not the raw URL which
+        # has a scheme prefix that confuses path validation)
+        raw_path = memory_url_path(identifier) if identifier.startswith("memory://") else identifier
+        processed_path = entity_path
         project_path = active_project.home
 
-        if not validate_project_path(identifier, project_path) or not validate_project_path(
+        if not validate_project_path(raw_path, project_path) or not validate_project_path(
             processed_path, project_path
         ):
             logger.warning(
@@ -99,7 +106,6 @@ async def read_note(
             return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
 
         # Get the file via REST API - first try direct identifier resolution
-        entity_path = memory_url_path(identifier)
         logger.info(
             f"Attempting to read note from Project: {active_project.name} identifier: {entity_path}"
         )
@@ -135,7 +141,10 @@ async def read_note(
         # Fallback 1: Try title search via API
         logger.info(f"Search title for: {identifier}")
         title_results = await search_notes.fn(
-            query=identifier, search_type="title", project=project, context=context
+            query=identifier,
+            search_type="title",
+            project=active_project.name,
+            context=context,
         )
 
         # Handle both SearchResponse object and error strings
@@ -170,7 +179,10 @@ async def read_note(
         # Fallback 2: Text search as a last resort
         logger.info(f"Title search failed, trying text search for: {identifier}")
         text_results = await search_notes.fn(
-            query=identifier, search_type="text", project=project, context=context
+            query=identifier,
+            search_type="text",
+            project=active_project.name,
+            context=context,
         )
 
         # We didn't find a direct match, construct a helpful error message

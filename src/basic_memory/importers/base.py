@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional, TypeVar
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.schemas.importer import ImportResult
+from basic_memory.utils import build_canonical_permalink, generate_permalink
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.services.file_service import FileService
@@ -29,6 +30,7 @@ class Importer[T: ImportResult]:
         base_path: Path,
         markdown_processor: MarkdownProcessor,
         file_service: "FileService",
+        project_name: Optional[str] = None,
     ):
         """Initialize the import service.
 
@@ -40,6 +42,8 @@ class Importer[T: ImportResult]:
         self.base_path = base_path.resolve()  # Get absolute path
         self.markdown_processor = markdown_processor
         self.file_service = file_service
+        self.project_name = project_name
+        self.project_permalink = generate_permalink(project_name) if project_name else None
 
     @abstractmethod
     async def import_data(self, source_data, destination_folder: str, **kwargs: Any) -> T:
@@ -72,6 +76,26 @@ class Importer[T: ImportResult]:
         content = self.markdown_processor.to_markdown_string(entity)
         # FileService.write_file handles directory creation and returns checksum
         return await self.file_service.write_file(file_path, content)
+
+    def canonical_permalink(self, path: str) -> str:
+        """Build a canonical permalink for imported content."""
+        include_project = True
+        # Trigger: importer has app config with permalink prefixing flag
+        # Why: imported notes should align with canonical permalink format
+        # Outcome: include project prefix when enabled
+        if self.file_service.app_config is not None:
+            include_project = self.file_service.app_config.permalinks_include_project
+
+        return build_canonical_permalink(
+            self.project_permalink,
+            path,
+            include_project=include_project,
+        )
+
+    def build_import_paths(self, path: str) -> tuple[str, str]:
+        """Return (permalink, file_path) for an imported entity."""
+        permalink = self.canonical_permalink(path)
+        return permalink, f"{path}.md"
 
     async def ensure_folder_exists(self, folder: str) -> None:
         """Ensure folder exists using FileService.

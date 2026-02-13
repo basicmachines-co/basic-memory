@@ -38,7 +38,7 @@ async def test_write_note_basic_creation(mcp_server, app, test_project):
         assert "# Created note" in response_text
         assert f"project: {test_project.name}" in response_text
         assert "file_path: basic/Simple Note.md" in response_text
-        assert "permalink: basic/simple-note" in response_text
+        assert f"permalink: {test_project.name}/basic/simple-note" in response_text
         assert "## Tags" in response_text
         assert "- simple, test" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
@@ -65,7 +65,7 @@ async def test_write_note_no_tags(mcp_server, app, test_project):
 
         assert "# Created note" in response_text
         assert "file_path: test/No Tags Note.md" in response_text
-        assert "permalink: test/no-tags-note" in response_text
+        assert f"permalink: {test_project.name}/test/no-tags-note" in response_text
         # Should not have tags section when no tags provided
 
 
@@ -107,7 +107,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
         assert "# Updated note" in response_text
         assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Update Test.md" in response_text
-        assert "permalink: test/update-test" in response_text
+        assert f"permalink: {test_project.name}/test/update-test" in response_text
         assert "- updated, modified" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
 
@@ -136,7 +136,7 @@ async def test_write_note_tag_array(mcp_server, app, test_project):
         assert "# Created note" in response_text
         assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Array Tags Test.md" in response_text
-        assert "permalink: test/array-tags-test" in response_text
+        assert f"permalink: {test_project.name}/test/array-tags-test" in response_text
         assert "## Tags" in response_text
         assert "python" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
@@ -206,7 +206,7 @@ async def test_write_note_unicode_content(mcp_server, app, test_project):
         assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Unicode Test 🌟.md" in response_text
         # Permalink should be sanitized
-        assert "permalink: test/unicode-test" in response_text
+        assert f"permalink: {test_project.name}/test/unicode-test" in response_text
         assert "## Tags" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
 
@@ -256,7 +256,7 @@ async def test_write_note_complex_content_with_observations_relations(
         assert "# Created note" in response_text
         assert f"project: {test_project.name}" in response_text
         assert "file_path: knowledge/Complex Knowledge Note.md" in response_text
-        assert "permalink: knowledge/complex-knowledge-note" in response_text
+        assert f"permalink: {test_project.name}/knowledge/complex-knowledge-note" in response_text
 
         # Should show observation and relation counts
         assert "## Observations" in response_text
@@ -309,7 +309,7 @@ async def test_write_note_preserve_frontmatter(mcp_server, app, test_project):
         assert "# Created note" in response_text
         assert f"project: {test_project.name}" in response_text
         assert "file_path: test/Frontmatter Note.md" in response_text
-        assert "permalink: test/frontmatter-note" in response_text
+        assert f"permalink: {test_project.name}/test/frontmatter-note" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
@@ -338,7 +338,7 @@ async def test_write_note_kebab_filenames_basic(mcp_server, app, test_project, a
         # File path and permalink should be kebab-case and sanitized
         assert f"project: {test_project.name}" in response_text
         assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
-        assert "permalink: my-folder/my-note-with-invalid-chars" in response_text
+        assert f"permalink: {test_project.name}/my-folder/my-note-with-invalid-chars" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
@@ -366,7 +366,7 @@ async def test_write_note_kebab_filenames_repeat_invalid(mcp_server, app, test_p
 
         assert f"project: {test_project.name}" in response_text
         assert "file_path: my-folder/crazy-note-name.md" in response_text
-        assert "permalink: my-folder/crazy-note-name" in response_text
+        assert f"permalink: {test_project.name}/my-folder/crazy-note-name" in response_text
         assert f"[Session: Using project '{test_project.name}']" in response_text
 
 
@@ -416,7 +416,7 @@ async def test_write_note_file_path_os_path_join(mcp_server, app, test_project, 
 
             assert f"project: {test_project.name}" in response_text
             assert f"file_path: {expected_path}" in response_text
-            assert f"permalink: {expected_permalink}" in response_text
+            assert f"permalink: {test_project.name}/{expected_permalink}" in response_text
             assert f"[Session: Using project '{test_project.name}']" in response_text
 
 

@@ -539,9 +539,7 @@ class ContextService:
                 {relation_date_filter}
                 {relation_project_filter}
             )
-            LEFT JOIN entity e_to ON (r.to_id = e_to.id)
             WHERE eg.depth < :max_depth
-            AND (r.to_id IS NULL OR e_to.project_id = :project_id)
 
             UNION ALL
 

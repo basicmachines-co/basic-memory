@@ -224,7 +224,7 @@ async def test_search_permalink_exact(mcp_server, app, test_project):
             "search_notes",
             {
                 "project": test_project.name,
-                "query": "api/api-documentation",
+                "query": f"{test_project.name}/api/api-documentation",
                 "search_type": "permalink",
             },
         )
@@ -278,7 +278,7 @@ async def test_search_permalink_pattern(mcp_server, app, test_project):
             "search_notes",
             {
                 "project": test_project.name,
-                "query": "meetings/*",
+                "query": f"{test_project.name}/meetings/*",
                 "search_type": "permalink",
             },
         )

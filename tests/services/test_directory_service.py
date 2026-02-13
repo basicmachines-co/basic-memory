@@ -53,7 +53,7 @@ async def test_directory_tree(directory_service: DirectoryService, test_graph):
     assert node_file.entity_id == 1
     assert node_file.entity_type == "deeper"
     assert node_file.title == "Deeper Entity"
-    assert node_file.permalink == "test/deeper-entity"
+    assert node_file.permalink == "test-project/test/deeper-entity"
     assert node_file.directory_path == "/test/Deeper Entity.md"
     assert node_file.file_path == "test/Deeper Entity.md"
     assert node_file.has_children is False

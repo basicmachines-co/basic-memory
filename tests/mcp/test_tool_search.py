@@ -1,6 +1,7 @@
 """Tests for search MCP tools."""
 
 import pytest
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 from basic_memory.mcp.tools import write_note
@@ -28,7 +29,10 @@ async def test_search_text(client, test_project):
     if isinstance(response, SearchResponse):
         # Success case - verify SearchResponse
         assert len(response.results) > 0
-        assert any(r.permalink == "test/test-search-note" for r in response.results)
+        assert any(
+            r.permalink == f"{test_project.name}/test/test-search-note"
+            for r in response.results
+        )
     else:
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
@@ -59,7 +63,10 @@ async def test_search_title(client, test_project):
     else:
         # Success case - verify SearchResponse
         assert len(response.results) > 0
-        assert any(r.permalink == "test/test-search-note" for r in response.results)
+        assert any(
+            r.permalink == f"{test_project.name}/test/test-search-note"
+            for r in response.results
+        )
 
 
 @pytest.mark.asyncio
@@ -77,14 +84,19 @@ async def test_search_permalink(client, test_project):
 
     # Search for it
     response = await search_notes.fn(
-        project=test_project.name, query="test/test-search-note", search_type="permalink"
+        project=test_project.name,
+        query=f"{test_project.name}/test/test-search-note",
+        search_type="permalink",
     )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
         # Success case - verify SearchResponse
         assert len(response.results) > 0
-        assert any(r.permalink == "test/test-search-note" for r in response.results)
+        assert any(
+            r.permalink == f"{test_project.name}/test/test-search-note"
+            for r in response.results
+        )
     else:
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
@@ -105,16 +117,46 @@ async def test_search_permalink_match(client, test_project):
 
     # Search for it
     response = await search_notes.fn(
-        project=test_project.name, query="test/test-search-*", search_type="permalink"
+        project=test_project.name,
+        query=f"{test_project.name}/test/test-search-*",
+        search_type="permalink",
     )
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
         # Success case - verify SearchResponse
         assert len(response.results) > 0
-        assert any(r.permalink == "test/test-search-note" for r in response.results)
+        assert any(
+            r.permalink == f"{test_project.name}/test/test-search-note"
+            for r in response.results
+        )
     else:
         # If search failed and returned error message, test should fail with informative message
+        pytest.fail(f"Search failed with error: {response}")
+
+
+@pytest.mark.asyncio
+async def test_search_memory_url_with_project_prefix(client, test_project):
+    """Test searching with a memory:// URL that includes the project prefix."""
+    result = await write_note.fn(
+        project=test_project.name,
+        title="Memory URL Search Note",
+        directory="test",
+        content="# Memory URL Search\nThis note should be found via memory URL search",
+    )
+    assert result
+
+    response = await search_notes.fn(
+        query=f"memory://{test_project.name}/test/memory-url-search-note"
+    )
+
+    if isinstance(response, SearchResponse):
+        assert len(response.results) > 0
+        assert any(
+            r.permalink == f"{test_project.name}/test/memory-url-search-note"
+            for r in response.results
+        )
+    else:
         pytest.fail(f"Search failed with error: {response}")
 
 
@@ -140,7 +182,10 @@ async def test_search_pagination(client, test_project):
     if isinstance(response, SearchResponse):
         # Success case - verify SearchResponse
         assert len(response.results) == 1
-        assert any(r.permalink == "test/test-search-note" for r in response.results)
+        assert any(
+            r.permalink == f"{test_project.name}/test/test-search-note"
+            for r in response.results
+        )
     else:
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
@@ -315,20 +360,22 @@ class TestSearchToolErrorHandling:
     async def test_search_notes_exception_handling(self, monkeypatch):
         """Test exception handling in search_notes."""
         import importlib
-        from contextlib import asynccontextmanager
 
         search_mod = importlib.import_module("basic_memory.mcp.tools.search")
         clients_mod = importlib.import_module("basic_memory.mcp.clients")
 
         class StubProject:
-            project_url = "http://test"
             name = "test-project"
-            id = 1
             external_id = "test-external-id"
 
         @asynccontextmanager
         async def fake_get_project_client(*args, **kwargs):
             yield (object(), StubProject())
+
+        async def fake_resolve_project_and_path(
+            client, identifier, project=None, context=None, headers=None
+        ):
+            return StubProject(), identifier, False
 
         # Mock SearchClient to raise an exception
         class MockSearchClient:
@@ -339,6 +386,7 @@ class TestSearchToolErrorHandling:
                 raise Exception("syntax error")
 
         monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+        monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
         # Patch at the clients module level where the import happens
         monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
@@ -350,20 +398,22 @@ class TestSearchToolErrorHandling:
     async def test_search_notes_permission_error(self, monkeypatch):
         """Test search_notes with permission error."""
         import importlib
-        from contextlib import asynccontextmanager
 
         search_mod = importlib.import_module("basic_memory.mcp.tools.search")
         clients_mod = importlib.import_module("basic_memory.mcp.clients")
 
         class StubProject:
-            project_url = "http://test"
             name = "test-project"
-            id = 1
             external_id = "test-external-id"
 
         @asynccontextmanager
         async def fake_get_project_client(*args, **kwargs):
             yield (object(), StubProject())
+
+        async def fake_resolve_project_and_path(
+            client, identifier, project=None, context=None, headers=None
+        ):
+            return StubProject(), identifier, False
 
         # Mock SearchClient to raise a permission error
         class MockSearchClient:
@@ -374,6 +424,7 @@ class TestSearchToolErrorHandling:
                 raise Exception("permission denied")
 
         monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+        monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
         # Patch at the clients module level where the import happens
         monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
@@ -387,7 +438,6 @@ class TestSearchToolErrorHandling:
 async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, search_type):
     """Vector/hybrid search types should populate retrieval_mode in API payload."""
     import importlib
-    from contextlib import asynccontextmanager
 
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
@@ -402,6 +452,11 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
+    async def fake_resolve_project_and_path(
+        client, identifier, project=None, context=None, headers=None
+    ):
+        return StubProject(), identifier, False
+
     captured_payload: dict = {}
 
     class MockSearchClient:
@@ -413,6 +468,7 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
             return SearchResponse(results=[], current_page=page, page_size=page_size)
 
     monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
     result = await search_mod.search_notes.fn(
