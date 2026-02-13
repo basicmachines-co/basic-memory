@@ -43,7 +43,7 @@ await write_note("Note", "Content", "folder")
 await write_note("Note", "Content", "folder", project="main")
 ```
 
-When `default_project_mode=false` (default):
+When `default_project_mode=false`:
 ```python
 # Project required:
 await write_note("Note", "Content", "folder", project="main")  # ✓
