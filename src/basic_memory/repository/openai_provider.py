@@ -45,7 +45,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             except ImportError as exc:  # pragma: no cover - covered via monkeypatch tests
                 raise SemanticDependenciesMissingError(
                     "OpenAI dependency is missing. "
-                    "Reinstall basic-memory: pip install basic-memory"
+                    "Install semantic extras: pip install 'basic-memory[semantic]'"
                 ) from exc
 
             api_key = self._api_key or os.getenv("OPENAI_API_KEY")

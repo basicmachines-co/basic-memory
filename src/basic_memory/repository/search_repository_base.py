@@ -904,13 +904,9 @@ class SearchRepositoryBase(ABC):
             )
             # Use (id, type) tuples to avoid collisions between different
             # search_index row types that share the same auto-increment id.
-            allowed_keys = {
-                (row.id, row.type) for row in filtered_rows if row.id is not None
-            }
+            allowed_keys = {(row.id, row.type) for row in filtered_rows if row.id is not None}
             search_index_rows = {
-                k: v
-                for k, v in search_index_rows.items()
-                if (v.id, v.type) in allowed_keys
+                k: v for k, v in search_index_rows.items() if (v.id, v.type) in allowed_keys
             }
 
         ranked_rows: list[SearchIndexRow] = []
@@ -1077,17 +1073,13 @@ class SearchRepositoryBase(ABC):
         for rank, row in enumerate(fts_results, start=1):
             if row.id is None:
                 continue
-            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (
-                1.0 / (RRF_K + rank)
-            )
+            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (1.0 / (RRF_K + rank))
             rows_by_id[row.id] = row
 
         for rank, row in enumerate(vector_results, start=1):
             if row.id is None:
                 continue
-            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (
-                1.0 / (RRF_K + rank)
-            )
+            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (1.0 / (RRF_K + rank))
             rows_by_id[row.id] = row
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)

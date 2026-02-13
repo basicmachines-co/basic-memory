@@ -980,17 +980,19 @@ async def test_reindex_vectors(search_service, session_maker, test_project):
 
     # Create some entities
     for i in range(3):
-        entity = await entity_repo.create({
-            "title": f"Vector Test Entity {i}",
-            "entity_type": "note",
-            "entity_metadata": {},
-            "content_type": "text/markdown",
-            "file_path": f"test/vector-test-{i}.md",
-            "permalink": f"test/vector-test-{i}",
-            "project_id": test_project.id,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now(),
-        })
+        entity = await entity_repo.create(
+            {
+                "title": f"Vector Test Entity {i}",
+                "entity_type": "note",
+                "entity_metadata": {},
+                "content_type": "text/markdown",
+                "file_path": f"test/vector-test-{i}.md",
+                "permalink": f"test/vector-test-{i}",
+                "project_id": test_project.id,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            }
+        )
         await search_service.index_entity(entity, content=f"Content for entity {i}")
 
     # Track progress calls
@@ -1020,17 +1022,19 @@ async def test_reindex_vectors_no_callback(search_service, session_maker, test_p
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    entity = await entity_repo.create({
-        "title": "No Callback Entity",
-        "entity_type": "note",
-        "entity_metadata": {},
-        "content_type": "text/markdown",
-        "file_path": "test/no-callback.md",
-        "permalink": "test/no-callback",
-        "project_id": test_project.id,
-        "created_at": datetime.now(),
-        "updated_at": datetime.now(),
-    })
+    entity = await entity_repo.create(
+        {
+            "title": "No Callback Entity",
+            "entity_type": "note",
+            "entity_metadata": {},
+            "content_type": "text/markdown",
+            "file_path": "test/no-callback.md",
+            "permalink": "test/no-callback",
+            "project_id": test_project.id,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+        }
+    )
     await search_service.index_entity(entity, content="Test content")
 
     stats = await search_service.reindex_vectors()

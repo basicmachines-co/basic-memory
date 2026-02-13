@@ -2,8 +2,6 @@
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.repository.embedding_provider import EmbeddingProvider
-from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
-from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
 
 
 def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvider:
@@ -18,6 +16,9 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         extra_kwargs["dimensions"] = app_config.semantic_embedding_dimensions
 
     if provider_name == "fastembed":
+        # Deferred import: fastembed (and its onnxruntime dep) may not be installed
+        from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
+
         return FastEmbedEmbeddingProvider(
             model_name=app_config.semantic_embedding_model,
             batch_size=app_config.semantic_embedding_batch_size,
@@ -25,6 +26,9 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         )
 
     if provider_name == "openai":
+        # Deferred import: openai may not be installed
+        from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
+
         model_name = app_config.semantic_embedding_model or "text-embedding-3-small"
         if model_name == "bge-small-en-v1.5":
             model_name = "text-embedding-3-small"

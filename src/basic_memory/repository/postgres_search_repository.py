@@ -311,9 +311,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         f"provider expects {self._vector_dimensions}. "
                         "Dropping and recreating search_vector_embeddings."
                     )
-                    await session.execute(
-                        text("DROP TABLE IF EXISTS search_vector_embeddings")
-                    )
+                    await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
 
                 await session.execute(
                     text(

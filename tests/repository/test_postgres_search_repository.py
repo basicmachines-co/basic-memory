@@ -432,9 +432,7 @@ class StubEmbeddingProvider8d:
 
 
 @pytest.mark.asyncio
-async def test_postgres_dimension_mismatch_triggers_table_recreation(
-    session_maker, test_project
-):
+async def test_postgres_dimension_mismatch_triggers_table_recreation(session_maker, test_project):
     """Changing embedding dimensions should drop and recreate the embeddings table."""
     await _skip_if_pgvector_unavailable(session_maker)
 

@@ -12,21 +12,70 @@ Basic Memory's default search uses full-text search (FTS) — keyword matching w
 
 Semantic search is **opt-in** — existing behavior is completely unchanged unless you enable it. It works on both SQLite (local) and Postgres (cloud) backends.
 
+## Installation
+
+Semantic search dependencies (fastembed, sqlite-vec, openai) are **optional extras** — they are not installed with the base `basic-memory` package. Install them with:
+
+```bash
+pip install 'basic-memory[semantic]'
+```
+
+This keeps the base install lightweight and avoids platform-specific issues with ONNX Runtime wheels.
+
+### Platform Compatibility
+
+| Platform | FastEmbed (local) | OpenAI (API) |
+|---|---|---|
+| macOS ARM64 (Apple Silicon) | Yes | Yes |
+| macOS x86_64 (Intel Mac) | No — see workaround below | Yes |
+| Linux x86_64 | Yes | Yes |
+| Linux ARM64 | Yes | Yes |
+| Windows x86_64 | Yes | Yes |
+
+#### Intel Mac Workaround
+
+The default FastEmbed provider uses ONNX Runtime, which dropped Intel Mac (x86_64) wheels starting in v1.24. Intel Mac users have two options:
+
+**Option 1: Use OpenAI embeddings (recommended)**
+
+Install only the OpenAI dependency manually — no ONNX Runtime or FastEmbed needed:
+
+```bash
+pip install openai sqlite-vec
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+```
+
+**Option 2: Pin an older ONNX Runtime**
+
+FastEmbed's ONNX Runtime dependency is unpinned, so you can constrain it to an older version that still ships Intel Mac wheels by passing both requirements in the same install command:
+
+```bash
+pip install 'basic-memory[semantic]' 'onnxruntime<1.24'
+```
+
 ## Quick Start
 
-1. Enable semantic search:
+1. Install semantic extras:
+
+```bash
+pip install 'basic-memory[semantic]'
+```
+
+2. Enable semantic search:
 
 ```bash
 export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 ```
 
-2. Build vector embeddings for your existing content:
+3. Build vector embeddings for your existing content:
 
 ```bash
 bm reindex --embeddings
 ```
 
-3. Search using semantic modes:
+4. Search using semantic modes:
 
 ```python
 # Pure vector similarity
@@ -63,7 +112,8 @@ FastEmbed runs entirely locally using ONNX models — no API key, no network cal
 - **Tradeoff**: Smaller model, fast inference, good quality for most use cases
 
 ```bash
-# FastEmbed is the default — just enable semantic search
+# Install semantic extras and enable
+pip install 'basic-memory[semantic]'
 export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 ```
 

@@ -38,14 +38,14 @@ def _format_search_error_response(
               `search_notes("{project}", "{query}", search_type="text")`
             """).strip()
 
-    if "pip install basic-memory" in error_message.lower():
+    if "pip install" in error_message.lower() and "semantic" in error_message.lower():
         return dedent(f"""
             # Search Failed - Semantic Dependencies Missing
 
             Semantic retrieval is enabled but required packages are not installed.
 
             ## Fix
-            1. Reinstall basic-memory: `pip install basic-memory`
+            1. Install semantic extras: `pip install 'basic-memory[semantic]'`
             2. Restart Basic Memory
             3. Retry your query:
                `search_notes("{project}", "{query}", search_type="{search_type}")`

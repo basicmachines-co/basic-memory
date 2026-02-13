@@ -291,13 +291,13 @@ class TestSearchErrorFormatting:
         """Test formatting for missing semantic dependencies."""
         result = _format_search_error_response(
             "test-project",
-            "fastembed package is missing. Reinstall basic-memory: pip install basic-memory",
+            "fastembed package is missing. Install semantic extras: pip install 'basic-memory[semantic]'",
             "semantic query",
             "hybrid",
         )
 
         assert "# Search Failed - Semantic Dependencies Missing" in result
-        assert "pip install basic-memory" in result
+        assert "pip install 'basic-memory[semantic]'" in result
 
     def test_format_search_error_generic(self):
         """Test formatting for generic errors."""
