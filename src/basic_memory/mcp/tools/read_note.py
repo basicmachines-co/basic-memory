@@ -30,7 +30,8 @@ async def read_note(
     returning the raw markdown content including observations, relations, and metadata.
 
     Project Resolution:
-    Server resolves projects in this order: Single Project Mode → project parameter → default project.
+    Server resolves projects using a unified priority chain (same in local and cloud modes):
+    Single Project Mode → project parameter → default project.
     Uses default project automatically. Specify `project` parameter to target a different project.
 
     This tool will try multiple lookup strategies to find the most relevant note:
