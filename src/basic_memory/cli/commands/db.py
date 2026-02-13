@@ -111,9 +111,7 @@ def reindex(
     embeddings: bool = typer.Option(
         False, "--embeddings", "-e", help="Rebuild vector embeddings (requires semantic search)"
     ),
-    search: bool = typer.Option(
-        False, "--search", "-s", help="Rebuild full-text search index"
-    ),
+    search: bool = typer.Option(False, "--search", "-s", help="Rebuild full-text search index"),
     project: str = typer.Option(
         None, "--project", "-p", help="Reindex a specific project (default: all)"
     ),
@@ -193,12 +191,8 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
                 project_path = Path(proj.path)
                 entity_parser = EntityParser(project_path)
                 markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
-                file_service = FileService(
-                    project_path, markdown_processor, app_config=app_config
-                )
-                search_service = SearchService(
-                    search_repository, entity_repository, file_service
-                )
+                file_service = FileService(project_path, markdown_processor, app_config=app_config)
+                search_service = SearchService(search_repository, entity_repository, file_service)
 
                 with Progress(
                     SpinnerColumn(),
@@ -212,9 +206,7 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
                     def on_progress(entity_id, index, total):
                         progress.update(task, total=total, completed=index)
 
-                    stats = await search_service.reindex_vectors(
-                        progress_callback=on_progress
-                    )
+                    stats = await search_service.reindex_vectors(progress_callback=on_progress)
                     progress.update(task, completed=stats["total_entities"])
 
                 console.print(
