@@ -339,7 +339,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             import sqlite_vec
         except ImportError as exc:
             raise SemanticDependenciesMissingError(
-                "sqlite-vec package is missing. Reinstall basic-memory: pip install basic-memory"
+                "sqlite-vec package is missing. "
+                "Install semantic extras: pip install 'basic-memory[semantic]'"
             ) from exc
 
         async with self._sqlite_vec_lock:
