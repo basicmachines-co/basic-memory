@@ -3,12 +3,13 @@
 This module provides a single canonical implementation of project resolution
 logic, eliminating duplicated decision trees across the codebase.
 
-The resolution follows a three-tier hierarchy:
-1. Constrained mode: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
-2. Explicit parameter: Project passed directly to operation
-3. Default project: Used when default_project_mode=true (lowest priority)
+The resolution follows a unified linear priority chain that works
+identically in both local and cloud modes:
 
-In cloud mode, project is required unless discovery mode is explicitly allowed.
+1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
+2. EXPLICIT: Project passed directly to operation
+3. DEFAULT: Default project when default_project_mode=true
+4. Fallback: cloud → CLOUD_DISCOVERY or ValueError; local → NONE
 """
 
 import os
@@ -68,7 +69,7 @@ class ProjectResolver:
     used by MCP tools, API routes, and CLI commands.
 
     Args:
-        cloud_mode: Whether running in cloud mode (project required)
+        cloud_mode: Whether running in cloud mode
         default_project_mode: Whether to use default project when not specified
         default_project: The default project name
         constrained_project: Optional env-constrained project override
@@ -110,13 +111,13 @@ class ProjectResolver:
         project: Optional[str] = None,
         allow_discovery: bool = False,
     ) -> ResolvedProject:
-        """Resolve project using the three-tier hierarchy.
+        """Resolve project using a unified linear priority chain.
 
-        Resolution order:
-        1. Cloud mode check (project required unless discovery allowed)
-        2. Constrained project from env var (highest priority in local mode)
-        3. Explicit project parameter
-        4. Default project if default_project_mode=true
+        The same resolution order applies in both local and cloud modes:
+        1. ENV_CONSTRAINT — BASIC_MEMORY_MCP_PROJECT env var (highest priority)
+        2. EXPLICIT — project parameter passed directly
+        3. DEFAULT — default project when default_project_mode=true
+        4. Fallback — cloud: CLOUD_DISCOVERY or ValueError; local: NONE
 
         Args:
             project: Optional explicit project parameter
@@ -127,31 +128,10 @@ class ProjectResolver:
             ResolvedProject with project name, resolution mode, and reason
 
         Raises:
-            ValueError: If in cloud mode and no project specified (unless discovery allowed)
+            ValueError: If in cloud mode and no project could be resolved
+                (unless allow_discovery=True)
         """
-        # --- Cloud Mode Handling ---
-        # In cloud mode, project is required unless discovery is explicitly allowed
-        if self.cloud_mode:
-            if project:
-                logger.debug(f"Cloud mode: using explicit project '{project}'")
-                return ResolvedProject(
-                    project=project,
-                    mode=ResolutionMode.CLOUD_EXPLICIT,
-                    reason=f"Explicit project in cloud mode: {project}",
-                )
-            elif allow_discovery:
-                logger.debug("Cloud mode: discovery mode allowed, no project required")
-                return ResolvedProject(
-                    project=None,
-                    mode=ResolutionMode.CLOUD_DISCOVERY,
-                    reason="Discovery mode enabled in cloud",
-                )
-            else:
-                raise ValueError("No project specified. Project is required for cloud mode.")
-
-        # --- Local Mode: Three-Tier Hierarchy ---
-
-        # Priority 1: CLI constraint overrides everything
+        # --- Priority 1: ENV constraint overrides everything ---
         if self.constrained_project:
             logger.debug(f"Using CLI constrained project: {self.constrained_project}")
             return ResolvedProject(
@@ -160,16 +140,17 @@ class ProjectResolver:
                 reason=f"Environment constraint: BASIC_MEMORY_MCP_PROJECT={self.constrained_project}",
             )
 
-        # Priority 2: Explicit project parameter
+        # --- Priority 2: Explicit project parameter ---
         if project:
+            mode = ResolutionMode.CLOUD_EXPLICIT if self.cloud_mode else ResolutionMode.EXPLICIT
             logger.debug(f"Using explicit project parameter: {project}")
             return ResolvedProject(
                 project=project,
-                mode=ResolutionMode.EXPLICIT,
+                mode=mode,
                 reason=f"Explicit parameter: {project}",
             )
 
-        # Priority 3: Default project mode
+        # --- Priority 3: Default project mode ---
         if self.default_project_mode and self.default_project:
             logger.debug(f"Using default project from config: {self.default_project}")
             return ResolvedProject(
@@ -178,12 +159,23 @@ class ProjectResolver:
                 reason=f"Default project mode: {self.default_project}",
             )
 
-        # No resolution possible
+        # --- Fallback: mode-dependent behavior ---
+        if self.cloud_mode:
+            if allow_discovery:
+                logger.debug("Cloud mode: discovery mode allowed, no project required")
+                return ResolvedProject(
+                    project=None,
+                    mode=ResolutionMode.CLOUD_DISCOVERY,
+                    reason="Discovery mode enabled in cloud",
+                )
+            raise ValueError("No project specified. Project is required for cloud mode.")
+
+        # Local mode: no resolution possible
         logger.debug("No project resolution possible")
         return ResolvedProject(
             project=None,
             mode=ResolutionMode.NONE,
-            reason="No project specified and default_project_mode is disabled",
+            reason="No project specified and no default project configured",
         )
 
     def require_project(

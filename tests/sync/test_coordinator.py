@@ -1,5 +1,7 @@
 """Tests for SyncCoordinator - centralized sync/watch lifecycle."""
 
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -20,6 +22,16 @@ class TestSyncCoordinator:
         coordinator = SyncCoordinator(config=mock_config)
         assert coordinator.status == SyncStatus.NOT_STARTED
         assert coordinator.is_running is False
+
+    def test_quiet_defaults_to_true(self, mock_config):
+        """quiet field defaults to True (for MCP/background use)."""
+        coordinator = SyncCoordinator(config=mock_config)
+        assert coordinator.quiet is True
+
+    def test_quiet_can_be_set_false(self, mock_config):
+        """quiet field can be set to False (for CLI watch command)."""
+        coordinator = SyncCoordinator(config=mock_config, quiet=False)
+        assert coordinator.quiet is False
 
     @pytest.mark.asyncio
     async def test_start_when_sync_disabled(self, mock_config):
@@ -112,6 +124,27 @@ class TestSyncCoordinator:
 
             assert coordinator.status == SyncStatus.STOPPED
             assert coordinator._sync_task is None
+
+    @pytest.mark.asyncio
+    async def test_start_passes_quiet_to_file_sync(self, mock_config):
+        """quiet value is threaded through to initialize_file_sync."""
+        coordinator = SyncCoordinator(
+            config=mock_config,
+            should_sync=True,
+            quiet=False,
+        )
+
+        with patch(
+            "basic_memory.services.initialization.initialize_file_sync",
+            new_callable=AsyncMock,
+        ) as mock_init:
+            await coordinator.start()
+            # Let the task run so initialize_file_sync gets called
+            await asyncio.sleep(0.01)
+
+            mock_init.assert_called_once_with(mock_config, quiet=False)
+
+            await coordinator.stop()
 
     @pytest.mark.asyncio
     async def test_start_already_running(self, mock_config):
