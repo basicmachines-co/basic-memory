@@ -397,8 +397,11 @@ class BasicMemoryConfig(BaseSettings):
 
         This is the single database that will store all knowledge data
         across all projects.
+
+        Uses BASIC_MEMORY_CONFIG_DIR when set so each process/worktree can
+        isolate both config and database state.
         """
-        database_path = Path.home() / DATA_DIR_NAME / APP_DATABASE_NAME
+        database_path = self.data_dir_path / APP_DATABASE_NAME
         if not database_path.exists():  # pragma: no cover
             database_path.parent.mkdir(parents=True, exist_ok=True)
             database_path.touch()
@@ -447,8 +450,13 @@ class BasicMemoryConfig(BaseSettings):
         return self
 
     @property
-    def data_dir_path(self):
-        return Path.home() / DATA_DIR_NAME
+    def data_dir_path(self) -> Path:
+        """Get app state directory for config and default SQLite database."""
+        if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+            return Path(config_dir)
+
+        home = os.getenv("HOME", Path.home())
+        return Path(home) / DATA_DIR_NAME
 
 
 # Module-level cache for configuration

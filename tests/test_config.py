@@ -97,6 +97,25 @@ class TestBasicMemoryConfig:
         # Note: This tests the current behavior where default_factory takes precedence
         assert config.projects["main"] == original_path
 
+    def test_app_database_path_uses_custom_config_dir(self, tmp_path, monkeypatch):
+        """Default SQLite DB should live under BASIC_MEMORY_CONFIG_DIR when set."""
+        custom_config_dir = tmp_path / "instance-a" / "state"
+        monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_config_dir))
+
+        config = BasicMemoryConfig(projects={"main": str(tmp_path / "project")})
+
+        assert config.data_dir_path == custom_config_dir
+        assert config.app_database_path == custom_config_dir / "memory.db"
+        assert config.app_database_path.exists()
+
+    def test_app_database_path_defaults_to_home_data_dir(self, config_home, monkeypatch):
+        """Without BASIC_MEMORY_CONFIG_DIR, default DB stays at ~/.basic-memory/memory.db."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        config = BasicMemoryConfig()
+
+        assert config.data_dir_path == config_home / ".basic-memory"
+        assert config.app_database_path == config_home / ".basic-memory" / "memory.db"
+
 
 class TestConfigManager:
     """Test ConfigManager functionality."""
