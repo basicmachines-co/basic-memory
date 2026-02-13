@@ -75,7 +75,8 @@ type: knowledge
     await sync_service.sync(project_config.home)
 
     # Verify forward reference
-    source = await entity_service.get_by_permalink("source")
+    project_prefix = generate_permalink(project_config.name)
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
     assert len(source.relations) == 1
     assert source.relations[0].to_id is None
     assert source.relations[0].to_name == "target-doc"
@@ -99,8 +100,8 @@ Target content
     await sync_service.sync(project_config.home)
 
     # Verify reference is now resolved
-    source = await entity_service.get_by_permalink("source")
-    target = await entity_service.get_by_permalink("target-doc")
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
+    target = await entity_service.get_by_permalink(f"{project_prefix}/target-doc")
     assert len(source.relations) == 1
     assert source.relations[0].to_id == target.id
     assert source.relations[0].to_name == target.title
@@ -145,8 +146,9 @@ Content
     # Sync to create both entities
     await sync_service.sync(project_config.home)
 
-    source = await entity_service.get_by_permalink("source")
-    target = await entity_service.get_by_permalink("target")
+    project_prefix = generate_permalink(project_config.name)
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
+    target = await entity_service.get_by_permalink(f"{project_prefix}/target")
 
     # Create a resolved relation (already exists) that the unresolved one would become.
     resolved_relation = Relation(
@@ -168,7 +170,7 @@ Content
     unresolved_id = unresolved_relation.id
 
     # Verify we have the unresolved relation
-    source = await entity_service.get_by_permalink("source")
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
     unresolved_outgoing = [r for r in source.outgoing_relations if r.to_id is None]
     assert len(unresolved_outgoing) == 1
     assert unresolved_outgoing[0].id == unresolved_id
@@ -187,7 +189,7 @@ Content
     assert len(unresolved) == 0
 
     # Verify only the resolved relation remains
-    source = await entity_service.get_by_permalink("source")
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
     assert len(source.outgoing_relations) == 1
     assert source.outgoing_relations[0].to_id == target.id
 
@@ -746,12 +748,13 @@ Testing file timestamps
     await sync_service.sync(project_config.home)
 
     # Check explicit frontmatter dates
-    explicit_entity = await entity_service.get_by_permalink("explicit-dates")
+    project_prefix = generate_permalink(project_config.name)
+    explicit_entity = await entity_service.get_by_permalink(f"{project_prefix}/explicit-dates")
     assert explicit_entity.created_at is not None
     assert explicit_entity.updated_at is not None
 
     # Check file timestamps
-    file_entity = await entity_service.get_by_permalink("file-dates3")
+    file_entity = await entity_service.get_by_permalink(f"{project_prefix}/file-dates3")
     file_stats = file_path.stat()
 
     # Compare using epoch timestamps to handle timezone differences correctly
@@ -796,7 +799,8 @@ Initial content for timestamp test
     await sync_service.sync(project_config.home)
 
     # Get initial entity and timestamps
-    entity_before = await entity_service.get_by_permalink("timestamp-test")
+    project_prefix = generate_permalink(project_config.name)
+    entity_before = await entity_service.get_by_permalink(f"{project_prefix}/timestamp-test")
     initial_updated_at = entity_before.updated_at
 
     # Modify the file content and update mtime to be newer than watermark
@@ -827,7 +831,7 @@ Modified content for timestamp test
     await sync_service.sync(project_config.home)
 
     # Get entity after re-sync
-    entity_after = await entity_service.get_by_permalink("timestamp-test")
+    entity_after = await entity_service.get_by_permalink(f"{project_prefix}/timestamp-test")
 
     # Verify that updated_at changed
     assert entity_after.updated_at != initial_updated_at, (

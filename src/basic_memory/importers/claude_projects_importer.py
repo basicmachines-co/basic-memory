@@ -71,7 +71,8 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
                     )
                     permalink, file_path = self.build_import_paths(prompt_path)
                     prompt_entity = self._format_prompt_markdown(project, permalink)
-                    await self.write_entity(prompt_entity, file_path)
+                    if prompt_entity:
+                        await self.write_entity(prompt_entity, file_path)
                     prompts_imported += 1
 
                 # Import project documents

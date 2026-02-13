@@ -29,13 +29,15 @@ async def test_create_entity(
         directory="",
         entity_type="test",
     )
+    # Save expected permalink before create_entity mutates entity_data._permalink
+    expected_permalink = f"{generate_permalink(project_config.name)}/{entity_data.permalink}"
 
     # Act
     entity = await entity_service.create_entity(entity_data)
 
     # Assert Entity
     assert isinstance(entity, EntityModel)
-    assert entity.permalink == f"{generate_permalink(project_config.name)}/{entity_data.permalink}"
+    assert entity.permalink == expected_permalink
     assert entity.file_path == entity_data.file_path
     assert entity.entity_type == "test"
     assert entity.created_at is not None

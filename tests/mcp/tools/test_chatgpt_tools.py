@@ -38,8 +38,8 @@ async def test_search_successful_results(client, test_project):
     assert content["query"] == "test content"
 
     # Verify individual result format
-    assert any(r["id"] == "docs/test-document-1" for r in content["results"])
-    assert any(r["id"] == "docs/test-document-2" for r in content["results"])
+    assert any(r["id"] == f"{test_project.name}/docs/test-document-1" for r in content["results"])
+    assert any(r["id"] == f"{test_project.name}/docs/test-document-2" for r in content["results"])
 
 
 @pytest.mark.asyncio

@@ -137,7 +137,7 @@ async def test_find_connected_timeframe(
 @pytest.mark.asyncio
 async def test_build_context(context_service, test_graph):
     """Test exact permalink lookup."""
-    url = memory_url.validate_strings("memory://test/root")
+    url = memory_url.validate_strings("memory://test-project/test/root")
     context_result = await context_service.build_context(url)
 
     # Check metadata
@@ -156,7 +156,7 @@ async def test_build_context(context_service, test_graph):
     assert primary_result.id == test_graph["root"].id
     assert primary_result.type == "entity"
     assert primary_result.title == "Root"
-    assert primary_result.permalink == "test/root"
+    assert primary_result.permalink == "test-project/test/root"
     assert primary_result.file_path == "test/Root.md"
     assert primary_result.created_at is not None
 
@@ -185,7 +185,7 @@ async def test_build_context_with_observations(context_service, test_graph):
     # Let's use those existing observations
 
     # Build context
-    url = memory_url.validate_strings("memory://test/root")
+    url = memory_url.validate_strings("memory://test-project/test/root")
     context_result = await context_service.build_context(url, include_observations=True)
 
     # Check the metadata
@@ -220,9 +220,9 @@ async def test_build_context_not_found(context_service):
 @pytest.mark.asyncio
 async def test_context_metadata(context_service, test_graph):
     """Test metadata is correctly populated."""
-    context = await context_service.build_context("memory://test/root", depth=2)
+    context = await context_service.build_context("memory://test-project/test/root", depth=2)
     metadata = context.metadata
-    assert metadata.uri == "test/root"
+    assert metadata.uri == "test-project/test/root"
     assert metadata.depth == 2
     assert metadata.generated_at is not None
     assert metadata.primary_count > 0

@@ -171,7 +171,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
     assert isinstance(entity.id, int)
     assert entity.api_version == "v2"
 
-    assert entity.permalink == "test/test-v2-entity"
+    assert entity.permalink == "test-project/test/test-v2-entity"
     assert entity.file_path == "test/TestV2Entity.md"
     assert entity.entity_type == data["entity_type"]
 

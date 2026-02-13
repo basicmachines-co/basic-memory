@@ -544,7 +544,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: guides/Test Guide.md" in result
-    assert "permalink: guides/test-guide" in result
+    assert f"permalink: {test_project.name}/guides/test-guide" in result
     assert "## Tags" in result
     assert "- guide, documentation" in result
     assert f"[Session: Using project '{test_project.name}']" in result

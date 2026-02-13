@@ -42,7 +42,7 @@ from basic_memory.services.exceptions import (
 )
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
-from basic_memory.utils import build_canonical_permalink, generate_permalink
+from basic_memory.utils import build_canonical_permalink
 
 
 class EntityService(BaseService[EntityModel]):
@@ -346,9 +346,12 @@ class EntityService(BaseService[EntityModel]):
         # Merge new metadata with existing metadata
         existing_markdown.frontmatter.metadata.update(post.metadata)
 
-        # Ensure the permalink in the metadata is the resolved one
-        if new_permalink != entity.permalink:
-            existing_markdown.frontmatter.metadata["permalink"] = new_permalink
+        # Always ensure the permalink in the metadata is the canonical one from the database.
+        # The schema_to_markdown call above uses EntitySchema.permalink which computes a
+        # non-prefixed permalink (e.g., "test/note"). The metadata merge on the previous line
+        # would overwrite the project-prefixed permalink (e.g., "project/test/note") stored
+        # in the existing file. Setting it unconditionally preserves the correct value.
+        existing_markdown.frontmatter.metadata["permalink"] = new_permalink
 
         # Create a new post with merged metadata
         merged_post = frontmatter.Post(post.content, **existing_markdown.frontmatter.metadata)
