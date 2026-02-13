@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Basic Memory Search Results</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f4ef;
+        --panel: #ffffff;
+        --ink: #1f1f1f;
+        --muted: #5b5b5b;
+        --accent: #0f766e;
+        --accent-2: #0a4f4b;
+        --border: #e3dbd2;
+        --row: #fbf9f5;
+        --row-hover: #f2ece3;
+        --tag: #f3efe7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+        background: radial-gradient(circle at top, #faf6ef 0%, #f2ece2 45%, #efe7da 100%);
+        color: var(--ink);
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+
+      #subtitle {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+
+      th,
+      td {
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      tr:nth-child(even) {
+        background: var(--row);
+      }
+
+      tr:hover {
+        background: var(--row-hover);
+      }
+
+      .title {
+        font-weight: 600;
+        color: var(--accent-2);
+      }
+
+      .meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .tag {
+        font-size: 11px;
+        padding: 2px 8px;
+        background: var(--tag);
+        border-radius: 999px;
+        border: 1px solid var(--border);
+      }
+
+      .empty {
+        padding: 24px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .footer {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Search Results</h1>
+      <div id="subtitle">Waiting for results...</div>
+    </header>
+
+    <div class="panel">
+      <div id="table"></div>
+      <div id="empty" class="empty" style="display: none;">No results to show.</div>
+    </div>
+
+    <div class="footer" id="footer"></div>
+
+    <script>
+      (function () {
+        const subtitle = document.getElementById("subtitle");
+        const tableContainer = document.getElementById("table");
+        const emptyState = document.getElementById("empty");
+        const footer = document.getElementById("footer");
+        let hasData = false;
+
+        function safeJsonParse(text) {
+          try {
+            return JSON.parse(text);
+          } catch (error) {
+            return null;
+          }
+        }
+
+        function extractStructured(toolOutput) {
+          if (!toolOutput) return null;
+
+          const structured =
+            toolOutput.structuredContent ||
+            toolOutput.structured_content ||
+            toolOutput.structured ||
+            null;
+          if (structured) return structured;
+
+          const content = toolOutput.content;
+          if (Array.isArray(content)) {
+            const textBlock = content.find(
+              (block) => block && block.type === "text" && typeof block.text === "string"
+            );
+            if (textBlock) {
+              const parsed = safeJsonParse(textBlock.text);
+              return parsed || { text: textBlock.text };
+            }
+          }
+
+          if (typeof toolOutput === "string") {
+            return safeJsonParse(toolOutput) || { text: toolOutput };
+          }
+
+          return toolOutput;
+        }
+
+        function getResults(structured) {
+          if (!structured) return [];
+          if (Array.isArray(structured.results)) return structured.results;
+          if (structured.result && Array.isArray(structured.result.results)) {
+            return structured.result.results;
+          }
+          return [];
+        }
+
+        function renderTable(results) {
+          if (!results.length) {
+            tableContainer.innerHTML = "";
+            emptyState.style.display = "block";
+            return;
+          }
+
+          emptyState.style.display = "none";
+
+          const rows = results
+            .map((result) => {
+              const tags =
+                (result.metadata && result.metadata.tags) ||
+                result.tags ||
+                result.metadata?.tag ||
+                [];
+              const tagsMarkup = Array.isArray(tags)
+                ? tags.map((tag) => `<span class=\"tag\">${tag}</span>`).join("")
+                : "";
+
+              return `
+                <tr>
+                  <td>
+                    <div class=\"title\">${result.title || "Untitled"}</div>
+                    <div class=\"meta\">${result.permalink || result.file_path || ""}</div>
+                  </td>
+                  <td>${result.type || ""}</td>
+                  <td>${Number(result.score || 0).toFixed(2)}</td>
+                  <td>
+                    <div class=\"tags\">${tagsMarkup}</div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("");
+
+          tableContainer.innerHTML = `
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th>Score</th>
+                  <th>Tags</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          `;
+        }
+
+        function updateFromRenderData(renderData) {
+          if (!renderData) return;
+
+          const query = renderData.toolInput && renderData.toolInput.query;
+          const structured = extractStructured(renderData.toolOutput);
+          const results = getResults(structured);
+
+          subtitle.textContent = query ? `Query: ${query}` : "Search results";
+          footer.textContent = `Results: ${results.length}`;
+
+          renderTable(results);
+        }
+
+        function handleMessage(event) {
+          const message = event.data || {};
+          if (message.type === "ui-lifecycle-iframe-render-data") {
+            hasData = true;
+            updateFromRenderData(message.payload && message.payload.renderData);
+          }
+        }
+
+        window.addEventListener("message", handleMessage);
+        window.parent?.postMessage({ type: "ui-lifecycle-iframe-ready" }, "*");
+
+        setTimeout(() => {
+          if (!hasData) {
+            window.parent?.postMessage({ type: "ui-request-render-data" }, "*");
+          }
+        }, 200);
+      })();
+    </script>
+  </body>
+</html>

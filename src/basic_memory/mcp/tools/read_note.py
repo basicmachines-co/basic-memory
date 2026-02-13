@@ -1,13 +1,14 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Optional
+from typing import Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
+from basic_memory.mcp.formatting import format_note_preview_ascii
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
@@ -15,12 +16,14 @@ from basic_memory.utils import validate_project_path
 
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
+    meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
 )
 async def read_note(
     identifier: str,
     project: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
+    output_format: Literal["default", "ascii", "ansi"] = "default",
     context: Context | None = None,
 ) -> str:
     """Return the raw markdown for a note, or guidance text if no match is found.
@@ -46,6 +49,8 @@ async def read_note(
                    Can be a full memory:// URL, a permalink, a title, or search text
         page: Page number for paginated results (default: 1)
         page_size: Number of items per page (default: 10)
+        output_format: "default" returns markdown, "ascii" returns a plain text preview,
+            "ansi" returns a colorized preview for TUI clients.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -116,6 +121,12 @@ async def read_note(
             # If successful, return the content
             if response.status_code == 200:
                 logger.info("Returning read_note result from resource: {path}", path=entity_path)
+                if output_format in ("ascii", "ansi"):
+                    return format_note_preview_ascii(
+                        response.text,
+                        identifier=identifier,
+                        color=output_format == "ansi",
+                    )
                 return response.text
         except Exception as e:  # pragma: no cover
             logger.info(f"Direct lookup failed for '{entity_path}': {e}")
@@ -140,6 +151,12 @@ async def read_note(
 
                     if response.status_code == 200:
                         logger.info(f"Found note by title search: {result.permalink}")
+                        if output_format in ("ascii", "ansi"):
+                            return format_note_preview_ascii(
+                                response.text,
+                                identifier=identifier,
+                                color=output_format == "ansi",
+                            )
                         return response.text
                 except Exception as e:  # pragma: no cover
                     logger.info(

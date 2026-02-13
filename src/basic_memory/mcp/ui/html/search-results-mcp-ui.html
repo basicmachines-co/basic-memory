@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Basic Memory MCP UI Search</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f0f2;
+        --panel: #ffffff;
+        --ink: #1a1a1d;
+        --muted: #6b6770;
+        --accent: #b91c1c;
+        --accent-soft: #fee2e2;
+        --border: #ead7dc;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 24px;
+        font-family: "IBM Plex Sans", "Space Grotesk", system-ui, sans-serif;
+        background: radial-gradient(circle at top, #fdf7f8 0%, #f7eef1 60%, #f2e7ea 100%);
+        color: var(--ink);
+      }
+
+      .top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .badge {
+        font-size: 11px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--accent-soft);
+        color: var(--accent);
+        padding: 4px 10px;
+      }
+
+      #subtitle {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.1);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      tr:hover {
+        background: #fff5f5;
+      }
+
+      .title {
+        font-weight: 600;
+      }
+
+      .path {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      .empty {
+        text-align: center;
+        padding: 18px;
+        color: var(--muted);
+      }
+
+      .footer {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <h1>Search Results</h1>
+      <div class="badge">mcp-ui style</div>
+    </div>
+
+    <div id="subtitle">Waiting for results...</div>
+
+    <div class="panel">
+      <div id="table"></div>
+      <div id="empty" class="empty" style="display: none;">No results to show.</div>
+    </div>
+
+    <div id="footer" class="footer"></div>
+
+    <script>
+      (function () {
+        const subtitle = document.getElementById("subtitle");
+        const tableContainer = document.getElementById("table");
+        const emptyState = document.getElementById("empty");
+        const footer = document.getElementById("footer");
+        let hasData = false;
+
+        function safeJsonParse(text) {
+          try {
+            return JSON.parse(text);
+          } catch (error) {
+            return null;
+          }
+        }
+
+        function extractStructured(toolOutput) {
+          if (!toolOutput) return null;
+          const structured =
+            toolOutput.structuredContent ||
+            toolOutput.structured_content ||
+            toolOutput.structured ||
+            null;
+          if (structured) return structured;
+
+          const content = toolOutput.content;
+          if (Array.isArray(content)) {
+            const textBlock = content.find(
+              (block) => block && block.type === "text" && typeof block.text === "string"
+            );
+            if (textBlock) {
+              const parsed = safeJsonParse(textBlock.text);
+              return parsed || { text: textBlock.text };
+            }
+          }
+
+          if (typeof toolOutput === "string") {
+            return safeJsonParse(toolOutput) || { text: toolOutput };
+          }
+
+          return toolOutput;
+        }
+
+        function getResults(structured) {
+          if (!structured) return [];
+          if (Array.isArray(structured.results)) return structured.results;
+          if (structured.result && Array.isArray(structured.result.results)) {
+            return structured.result.results;
+          }
+          return [];
+        }
+
+        function renderTable(results) {
+          if (!results.length) {
+            tableContainer.innerHTML = "";
+            emptyState.style.display = "block";
+            return;
+          }
+
+          emptyState.style.display = "none";
+
+          const rows = results
+            .map((result) => {
+              return `
+                <tr>
+                  <td>
+                    <div class=\"title\">${result.title || "Untitled"}</div>
+                    <div class=\"path\">${result.permalink || result.file_path || ""}</div>
+                  </td>
+                  <td>${result.type || ""}</td>
+                  <td>${Number(result.score || 0).toFixed(2)}</td>
+                </tr>
+              `;
+            })
+            .join("");
+
+          tableContainer.innerHTML = `
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Type</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          `;
+        }
+
+        function updateFromRenderData(renderData) {
+          if (!renderData) return;
+
+          const query = renderData.toolInput && renderData.toolInput.query;
+          const structured = extractStructured(renderData.toolOutput);
+          const results = getResults(structured);
+
+          subtitle.textContent = query ? `Query: ${query}` : "Search results";
+          footer.textContent = `Results: ${results.length}`;
+
+          renderTable(results);
+        }
+
+        function handleMessage(event) {
+          const message = event.data || {};
+          if (message.type === "ui-lifecycle-iframe-render-data") {
+            hasData = true;
+            updateFromRenderData(message.payload && message.payload.renderData);
+          }
+        }
+
+        window.addEventListener("message", handleMessage);
+        window.parent?.postMessage({ type: "ui-lifecycle-iframe-ready" }, "*");
+
+        setTimeout(() => {
+          if (!hasData) {
+            window.parent?.postMessage({ type: "ui-request-render-data" }, "*");
+          }
+        }, 200);
+      })();
+    </script>
+  </body>
+</html>
