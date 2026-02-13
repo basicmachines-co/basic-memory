@@ -29,19 +29,17 @@ async def resolve_project_parameter(
     default_project_mode: Optional[bool] = None,
     default_project: Optional[str] = None,
 ) -> Optional[str]:
-    """Resolve project parameter using three-tier hierarchy.
+    """Resolve project parameter using unified linear priority chain.
 
     This is a thin wrapper around ProjectResolver for backwards compatibility.
     New code should consider using ProjectResolver directly for more detailed
     resolution information.
 
-    if cloud_mode:
-        project is required (unless allow_discovery=True for tools that support discovery mode)
-    else:
-        Resolution order:
-        1. Single Project Mode  (--project cli arg, or BASIC_MEMORY_MCP_PROJECT env var) - highest priority
-        2. Explicit project parameter - medium priority
-        3. Default project if default_project_mode=true - lowest priority
+    Resolution order (same for local and cloud modes):
+    1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
+    2. EXPLICIT: project parameter passed directly
+    3. DEFAULT: default project when default_project_mode=true
+    4. Fallback: cloud → CLOUD_DISCOVERY or ValueError; local → NONE
 
     Args:
         project: Optional explicit project parameter

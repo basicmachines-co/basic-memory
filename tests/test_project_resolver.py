@@ -149,6 +149,75 @@ class TestProjectResolver:
 
         assert resolver.constrained_project == "env-project"
 
+    def test_cloud_mode_uses_default_project(self):
+        """In cloud mode, default project is used when default_project_mode=True."""
+        resolver = ProjectResolver(
+            cloud_mode=True,
+            default_project_mode=True,
+            default_project="my-default",
+        )
+        result = resolver.resolve(project=None)
+
+        assert result.project == "my-default"
+        assert result.mode == ResolutionMode.DEFAULT
+        assert result.is_resolved is True
+
+    def test_cloud_mode_no_default_still_requires_project(self):
+        """In cloud mode with default_project_mode=False, project is still required."""
+        resolver = ProjectResolver(
+            cloud_mode=True,
+            default_project_mode=False,
+        )
+        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+            resolver.resolve(project=None)
+
+    def test_cloud_mode_explicit_overrides_default(self):
+        """In cloud mode, explicit project wins over default project."""
+        resolver = ProjectResolver(
+            cloud_mode=True,
+            default_project_mode=True,
+            default_project="my-default",
+        )
+        result = resolver.resolve(project="explicit-project")
+
+        assert result.project == "explicit-project"
+        assert result.mode == ResolutionMode.CLOUD_EXPLICIT
+
+    def test_cloud_mode_default_mode_true_but_no_default_project(self):
+        """In cloud mode with default_project_mode=True but no default_project, still raises."""
+        resolver = ProjectResolver(
+            cloud_mode=True,
+            default_project_mode=True,
+            default_project=None,
+        )
+        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+            resolver.resolve(project=None)
+
+    def test_cloud_mode_discovery_fallback_after_no_default(self):
+        """In cloud mode, discovery still works as last resort when no default is configured."""
+        resolver = ProjectResolver(
+            cloud_mode=True,
+            default_project_mode=False,
+        )
+        result = resolver.resolve(project=None, allow_discovery=True)
+
+        assert result.project is None
+        assert result.mode == ResolutionMode.CLOUD_DISCOVERY
+        assert result.is_discovery_mode is True
+
+    def test_cloud_mode_env_constraint_overrides_everything(self, monkeypatch):
+        """In cloud mode, env constraint has highest priority."""
+        monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "constrained-project")
+        resolver = ProjectResolver.from_env(
+            cloud_mode=True,
+            default_project_mode=True,
+            default_project="default-project",
+        )
+        result = resolver.resolve(project="explicit-project")
+
+        assert result.project == "constrained-project"
+        assert result.mode == ResolutionMode.ENV_CONSTRAINT
+
 
 class TestResolvedProject:
     """Test ResolvedProject dataclass."""
