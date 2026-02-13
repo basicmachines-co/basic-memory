@@ -55,7 +55,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e .[dev]
+          uv pip install -e ".[dev,semantic]"
 
       - name: Run type checks
         run: |
@@ -105,7 +105,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e .[dev]
+          uv pip install -e ".[dev,semantic]"
 
       - name: Run tests (Postgres via testcontainers)
         run: |
@@ -141,7 +141,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e .[dev]
+          uv pip install -e ".[dev,semantic]"
 
       - name: Run combined coverage (SQLite + Postgres)
         run: |
