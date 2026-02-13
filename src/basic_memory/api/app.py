@@ -2,8 +2,9 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.routing import APIRouter
 from loguru import logger
 
 from basic_memory import __version__ as version
@@ -17,8 +18,15 @@ from basic_memory.api.v2.routers import (
     directory_router as v2_directory,
     prompt_router as v2_prompt,
     importer_router as v2_importer,
+    schema_router as v2_schema,
+)
+from basic_memory.api.v2.routers.project_router import (
+    add_project,
+    list_projects,
+    synchronize_projects,
 )
 from basic_memory.config import init_api_logging
+from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.initialization import initialize_app
 
 
@@ -77,15 +85,44 @@ app.include_router(v2_resource, prefix="/v2/projects/{project_id}")
 app.include_router(v2_directory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
+app.include_router(v2_schema, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
 
 # Legacy web app proxy paths (compat with /proxy/projects/projects)
 app.include_router(v2_project, prefix="/proxy/projects")
 
-# Legacy v1 compat: older CLI versions call GET /projects/projects
-app.include_router(v2_project, prefix="/projects")
+# Legacy v1 compat: older CLI versions (v0.18.0 and earlier) call /projects/...
+# Using router mount causes 307 redirect which proxy doesn't follow, so add explicit routes
+legacy_router = APIRouter(tags=["legacy"])
+legacy_router.add_api_route("/projects/projects", list_projects, methods=["GET"])
+legacy_router.add_api_route("/projects/projects", add_project, methods=["POST"])
+legacy_router.add_api_route("/projects/config/sync", synchronize_projects, methods=["POST"])
+app.include_router(legacy_router)
 
 # V2 routers are the only public API surface
+
+
+@app.exception_handler(EntityAlreadyExistsError)
+async def entity_already_exists_error_handler(request: Request, exc: EntityAlreadyExistsError):
+    """Handle entity creation conflicts (e.g., file already exists).
+
+    This is expected behavior when users try to create notes that exist,
+    so log at INFO level instead of ERROR.
+    """
+    logger.info(
+        "Entity already exists",
+        url=str(request.url),
+        method=request.method,
+        path=request.url.path,
+        error=str(exc),
+    )
+    return await http_exception_handler(
+        request,
+        HTTPException(
+            status_code=409,
+            detail="Note already exists. Use edit_note to modify it, or delete it first.",
+        ),
+    )
 
 
 @app.exception_handler(Exception)

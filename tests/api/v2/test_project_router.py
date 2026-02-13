@@ -351,9 +351,12 @@ async def test_legacy_v1_list_projects_endpoint(client: AsyncClient, test_projec
 
     This endpoint was removed when we migrated to v2 but older versions of
     basic-memory-cloud CLI still call it for `bm project list`.
+
+    Note: The route must be without trailing slash to avoid 307 redirects
+    that the cloud proxy doesn't follow.
     """
-    # The legacy v1 endpoint was at /projects/projects
-    response = await client.get("/projects/projects/")
+    # The legacy v1 endpoint was at /projects/projects (no trailing slash)
+    response = await client.get("/projects/projects")
 
     assert response.status_code == 200
     data = response.json()

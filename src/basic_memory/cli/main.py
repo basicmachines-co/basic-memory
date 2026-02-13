@@ -1,15 +1,18 @@
 """Main CLI entry point for basic-memory."""  # pragma: no cover
 
 import sys
+import warnings
 
 from basic_memory.cli.app import app  # pragma: no cover
 
+def _version_only_invocation(argv: list[str]) -> bool:
+    # Trigger: invocation is exactly `bm --version` or `bm -v`
+    # Why: avoid importing command modules on the hot version path
+    # Outcome: eager version callback exits quickly with minimal startup work
+    return len(argv) == 1 and argv[0] in {"--version", "-v"}
 
-def _version_flag_present(argv: list[str]) -> bool:
-    return any(flag in argv for flag in ("--version", "-v"))
 
-
-if not _version_flag_present(sys.argv[1:]):
+if not _version_only_invocation(sys.argv[1:]):
     # Register commands only when not short-circuiting for --version
     from basic_memory.cli.commands import (  # noqa: F401  # pragma: no cover
         cloud,
@@ -21,12 +24,10 @@ if not _version_flag_present(sys.argv[1:]):
         import_memory_json,
         mcp,
         project,
+        schema,
         status,
         tool,
     )
-# Re-apply warning filter AFTER all imports
-# (authlib adds a DeprecationWarning filter that overrides ours)
-import warnings  # pragma: no cover
 
 warnings.filterwarnings("ignore")  # pragma: no cover
 

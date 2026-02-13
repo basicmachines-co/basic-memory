@@ -81,7 +81,7 @@ class BasicMemoryConfig(BaseSettings):
         description="Name of the default project to use",
     )
     default_project_mode: bool = Field(
-        default=False,
+        default=True,
         description="When True, MCP tools automatically use default_project when no project parameter is specified. Enables simplified UX for single-project workflows.",
     )
 
@@ -97,6 +97,34 @@ class BasicMemoryConfig(BaseSettings):
     database_url: Optional[str] = Field(
         default=None,
         description="Database connection URL. For Postgres, use postgresql+asyncpg://user:pass@host:port/db. If not set, SQLite will use default path.",
+    )
+
+    # Semantic search configuration
+    semantic_search_enabled: bool = Field(
+        default=False,
+        description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic extras.",
+    )
+    semantic_embedding_provider: str = Field(
+        default="fastembed",
+        description="Embedding provider for local semantic indexing/search.",
+    )
+    semantic_embedding_model: str = Field(
+        default="bge-small-en-v1.5",
+        description="Embedding model identifier used by the local provider.",
+    )
+    semantic_embedding_dimensions: int | None = Field(
+        default=None,
+        description="Embedding vector dimensions. Auto-detected from provider if not set (384 for FastEmbed, 1536 for OpenAI).",
+    )
+    semantic_embedding_batch_size: int = Field(
+        default=64,
+        description="Batch size for embedding generation.",
+        gt=0,
+    )
+    semantic_vector_k: int = Field(
+        default=100,
+        description="Vector candidate count for vector and hybrid retrieval.",
+        gt=0,
     )
 
     # Database connection pool configuration (Postgres only)
@@ -219,6 +247,21 @@ class BasicMemoryConfig(BaseSettings):
     cloud_projects: Dict[str, CloudProjectConfig] = Field(
         default_factory=dict,
         description="Cloud project sync configuration mapping project names to their local paths and sync state",
+    )
+
+    cloud_promo_opt_out: bool = Field(
+        default=False,
+        description="Disable CLI cloud promo messages when true.",
+    )
+
+    cloud_promo_first_run_shown: bool = Field(
+        default=False,
+        description="Tracks whether the first-run cloud promo message has been shown.",
+    )
+
+    cloud_promo_last_version_shown: Optional[str] = Field(
+        default=None,
+        description="Most recent cloud promo version shown in CLI.",
     )
 
     @property

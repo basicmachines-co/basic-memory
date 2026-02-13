@@ -22,6 +22,14 @@ class SearchItemType(str, Enum):
     RELATION = "relation"
 
 
+class SearchRetrievalMode(str, Enum):
+    """Retrieval strategy for text queries."""
+
+    FTS = "fts"
+    VECTOR = "vector"
+    HYBRID = "hybrid"
+
+
 class SearchQuery(BaseModel):
     """Search query parameters.
 
@@ -59,6 +67,7 @@ class SearchQuery(BaseModel):
     metadata_filters: Optional[dict[str, Any]] = None  # Structured frontmatter filters
     tags: Optional[List[str]] = None  # Convenience tag filter
     status: Optional[str] = None  # Convenience status filter
+    retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
 
     @field_validator("after_date")
     @classmethod

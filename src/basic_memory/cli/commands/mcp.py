@@ -10,6 +10,17 @@ from basic_memory.cli.app import app
 from basic_memory.config import ConfigManager, init_mcp_logging
 
 
+class _DeferredMcpServer:
+    def run(self, *args: object, **kwargs: object) -> None:  # pragma: no cover
+        from basic_memory.mcp.server import mcp as live_mcp_server
+
+        live_mcp_server.run(*args, **kwargs)
+
+
+# Keep module-level attribute for tests/monkeypatching while deferring heavy import.
+mcp_server = _DeferredMcpServer()
+
+
 @app.command()
 def mcp(
     transport: str = typer.Option("stdio", help="Transport type: stdio, streamable-http, or sse"),
@@ -38,9 +49,6 @@ def mcp(
     # Why: The local MCP server should always talk to the local API, not the cloud proxy.
     # Even when cloud_mode_enabled is True, stdio MCP runs locally and needs local API access.
     os.environ["BASIC_MEMORY_FORCE_LOCAL"] = "true"
-
-    # Deferred imports to avoid heavy startup cost for unrelated CLI commands
-    from basic_memory.mcp.server import mcp as mcp_server  # pragma: no cover
 
     # Import mcp tools/prompts to register them with the server
     import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover

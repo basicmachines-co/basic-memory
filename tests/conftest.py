@@ -421,9 +421,17 @@ async def search_repository(session_maker, test_project: Project, app_config: Ba
     from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 
     if app_config.database_backend == DatabaseBackend.POSTGRES:
-        return PostgresSearchRepository(session_maker, project_id=test_project.id)
+        return PostgresSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+        )
     else:
-        return SQLiteSearchRepository(session_maker, project_id=test_project.id)
+        return SQLiteSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+        )
 
 
 @pytest_asyncio.fixture

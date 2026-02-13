@@ -27,6 +27,16 @@ console = Console()
 # Minimum rclone version for --create-empty-src-dirs support
 MIN_RCLONE_VERSION_EMPTY_DIRS = (1, 64, 0)
 
+# Tigris edge caching returns stale data for users outside the origin region (iad).
+# --header is rclone's global flag that applies to ALL HTTP transactions (list, download,
+# upload). This is critical because bisync starts with S3 ListObjectsV2, which is neither
+# a download nor upload — so --header-download/--header-upload would miss list requests.
+# See: https://www.tigrisdata.com/docs/objects/consistency/
+TIGRIS_CONSISTENCY_HEADERS = [
+    "--header",
+    "X-Tigris-Consistent: true",
+]
+
 
 class RunResult(Protocol):
     returncode: int
@@ -210,6 +220,7 @@ def project_sync(
         "sync",
         str(local_path),
         remote_path,
+        *TIGRIS_CONSISTENCY_HEADERS,
         "--filter-from",
         str(filter_path),
     ]
@@ -279,6 +290,7 @@ def project_bisync(
         "bisync",
         str(local_path),
         remote_path,
+        *TIGRIS_CONSISTENCY_HEADERS,
         "--resilient",
         "--conflict-resolve=newer",
         "--max-delete=25",
@@ -354,6 +366,7 @@ def project_check(
         "check",
         str(local_path),
         remote_path,
+        *TIGRIS_CONSISTENCY_HEADERS,
         "--filter-from",
         str(filter_path),
     ]
@@ -393,6 +406,6 @@ def project_ls(
     if path:
         remote_path = f"{remote_path}/{path}"
 
-    cmd = ["rclone", "ls", remote_path]
+    cmd = ["rclone", "ls", *TIGRIS_CONSISTENCY_HEADERS, remote_path]
     result = run(cmd, capture_output=True, text=True, check=True)
     return result.stdout.splitlines()

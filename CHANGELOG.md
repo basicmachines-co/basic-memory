@@ -1,5 +1,69 @@
 # CHANGELOG
 
+## v0.18.3 (2026-02-12)
+
+### Bug Fixes
+
+- Use global `--header` flag for Tigris consistency on all rclone transactions
+  ([`7fcf587`](https://github.com/basicmachines-co/basic-memory/commit/7fcf587))
+  - `--header-download` / `--header-upload` only apply to GET/PUT requests, missing S3
+    ListObjectsV2 calls that bisync issues first. Non-US users saw stale edge-cached metadata.
+  - `--header` applies to ALL HTTP transactions (list, download, upload), fixing bisync for
+    users outside the Tigris origin region.
+
+## v0.18.2 (2026-02-11)
+
+### Bug Fixes
+
+- **#562**: Use VIRTUAL instead of STORED columns in SQLite migration
+  ([`344e651`](https://github.com/basicmachines-co/basic-memory/commit/344e651))
+  - Fixes compatibility issue with SQLite STORED generated columns
+
+## v0.18.1 (2026-02-11)
+
+### Features
+
+- **#552**: Add `--format json` to CLI tool commands
+  ([`a47c9c0`](https://github.com/basicmachines-co/basic-memory/commit/a47c9c0))
+  - CLI tool commands now support `--format json` for machine-readable output
+
+- **#535**: Support `tag:` query shorthand in search
+  ([`f1d50c2`](https://github.com/basicmachines-co/basic-memory/commit/f1d50c2))
+  - Use `tag:mytag` as a convenient shorthand in search queries
+
+- **#532**: Fast edit entities, refactors for webui, enhanced search
+  ([`530cbac`](https://github.com/basicmachines-co/basic-memory/commit/530cbac))
+  - Performance improvements for entity editing and search operations
+
+### Bug Fixes
+
+- **#558**: Add X-Tigris-Consistent headers to all rclone commands
+  ([`8489a3d`](https://github.com/basicmachines-co/basic-memory/commit/8489a3d))
+  - Ensures consistent reads from Tigris object storage during sync
+
+- **#541**: Handle EntityCreationError as conflict
+  ([`343a6e1`](https://github.com/basicmachines-co/basic-memory/commit/343a6e1))
+
+- **#536**: Stabilize metadata filters on Postgres
+  ([`009e849`](https://github.com/basicmachines-co/basic-memory/commit/009e849))
+
+- **#533**: Fix recent_activity prompt defaults
+  ([`24ca5f6`](https://github.com/basicmachines-co/basic-memory/commit/24ca5f6))
+
+- **#530**: Prevent spurious `metadata: {}` in frontmatter output
+  ([`e3ced49`](https://github.com/basicmachines-co/basic-memory/commit/e3ced49))
+
+- Add POST legacy compat routes for v0.18.0 CLI
+  ([`c46d7a6`](https://github.com/basicmachines-co/basic-memory/commit/c46d7a6))
+
+- Restore legacy `/projects/projects` endpoint for older CLI versions
+  ([`a0e754b`](https://github.com/basicmachines-co/basic-memory/commit/a0e754b))
+
+### Internal
+
+- **#538**: Add fast feedback loop tooling (`just fast-check`, `just doctor`, `just testmon`)
+  ([`8072449`](https://github.com/basicmachines-co/basic-memory/commit/8072449))
+
 ## v0.18.0 (2026-01-28)
 
 ### Features

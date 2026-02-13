@@ -16,6 +16,12 @@ class EntityCreationError(Exception):
     pass
 
 
+class EntityAlreadyExistsError(EntityCreationError):
+    """Raised when an entity file already exists"""
+
+    pass
+
+
 class DirectoryOperationError(Exception):
     """Raised when directory operations fail"""
 

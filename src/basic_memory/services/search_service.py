@@ -14,7 +14,7 @@ from sqlalchemy import text
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchRepository, SearchIndexRow
-from basic_memory.schemas.search import SearchQuery, SearchItemType
+from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.services import FileService
 
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
@@ -62,6 +62,15 @@ class SearchService:
         logger.info("Starting full reindex")
         # Clear and recreate search index
         await self.repository.execute_query(text("DROP TABLE IF EXISTS search_index"), params={})
+        await self.repository.execute_query(
+            text("DROP TABLE IF EXISTS search_vector_embeddings"), params={}
+        )
+        await self.repository.execute_query(
+            text("DROP TABLE IF EXISTS search_vector_chunks"), params={}
+        )
+        await self.repository.execute_query(
+            text("DROP TABLE IF EXISTS search_vector_index"), params={}
+        )
         await self.init_search_index()
 
         # Reindex all entities
@@ -125,6 +134,7 @@ class SearchService:
             search_item_types=query.entity_types,
             after_date=after_date,
             metadata_filters=metadata_filters,
+            retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
             limit=limit,
             offset=offset,
         )
@@ -231,6 +241,34 @@ class SearchService:
             )
             raise  # pragma: no cover
 
+    async def sync_entity_vectors(self, entity_id: int) -> None:
+        """Refresh vector chunks for one entity in repositories that support semantic indexing."""
+        await self.repository.sync_entity_vectors(entity_id)
+
+    async def reindex_vectors(self, progress_callback=None) -> dict:
+        """Rebuild vector embeddings for all entities.
+
+        Args:
+            progress_callback: Optional callable(entity_id, index, total) for progress reporting.
+
+        Returns:
+            dict with stats: total_entities, embedded, skipped, errors
+        """
+        entities = await self.entity_repository.find_all()
+        stats = {"total_entities": len(entities), "embedded": 0, "skipped": 0, "errors": 0}
+
+        for i, entity in enumerate(entities):
+            if progress_callback:
+                progress_callback(entity.id, i, len(entities))
+            try:
+                await self.repository.sync_entity_vectors(entity.id)
+                stats["embedded"] += 1
+            except Exception as e:
+                logger.warning(f"Failed to embed entity {entity.id} ({entity.permalink}): {e}")
+                stats["errors"] += 1
+
+        return stats
+
     async def index_entity_file(
         self,
         entity: Entity,
@@ -297,7 +335,10 @@ class SearchService:
             content = await self.file_service.read_entity_content(entity)
         if content:
             content_stems.append(content)
-            content_snippet = f"{content[:250]}"
+            # Store full content for vector embedding quality.
+            # The chunker in the vector pipeline splits this into
+            # appropriately-sized pieces for embedding.
+            content_snippet = content
 
         if entity.permalink:
             content_stems.extend(self._generate_variants(entity.permalink))
