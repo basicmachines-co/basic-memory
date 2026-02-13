@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from basic_memory.mcp.ui import load_html
 
 try:  # Optional dependency for MCP-UI embedded resources
-    from mcp_ui_server import UIMetadataKey, create_ui_resource
+    mcp_ui_server = importlib.import_module("mcp_ui_server")
+    UIMetadataKey = mcp_ui_server.UIMetadataKey
+    create_ui_resource = mcp_ui_server.create_ui_resource
 except ImportError:  # pragma: no cover - handled by callers
     UIMetadataKey = None
     create_ui_resource = None
