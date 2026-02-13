@@ -1,7 +1,7 @@
 """MCP server command with streamable HTTP transport."""
 
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from loguru import logger
@@ -11,7 +11,7 @@ from basic_memory.config import ConfigManager, init_mcp_logging
 
 
 class _DeferredMcpServer:
-    def run(self, *args: object, **kwargs: object) -> None:  # pragma: no cover
+    def run(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover
         from basic_memory.mcp.server import mcp as live_mcp_server
 
         live_mcp_server.run(*args, **kwargs)
