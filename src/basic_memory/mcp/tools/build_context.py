@@ -5,8 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
@@ -100,10 +99,7 @@ async def build_context(
 
     # URL is already validated and normalized by MemoryUrl type annotation
 
-    async with get_client() as client:
-        # Get the active project using the new stateless approach
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, context) as (client, active_project):
         # Import here to avoid circular import
         from basic_memory.mcp.clients import MemoryClient
 

@@ -315,6 +315,7 @@ class TestSearchToolErrorHandling:
     async def test_search_notes_exception_handling(self, monkeypatch):
         """Test exception handling in search_notes."""
         import importlib
+        from contextlib import asynccontextmanager
 
         search_mod = importlib.import_module("basic_memory.mcp.tools.search")
         clients_mod = importlib.import_module("basic_memory.mcp.clients")
@@ -325,8 +326,9 @@ class TestSearchToolErrorHandling:
             id = 1
             external_id = "test-external-id"
 
-        async def fake_get_active_project(*args, **kwargs):
-            return StubProject()
+        @asynccontextmanager
+        async def fake_get_project_client(*args, **kwargs):
+            yield (object(), StubProject())
 
         # Mock SearchClient to raise an exception
         class MockSearchClient:
@@ -336,7 +338,7 @@ class TestSearchToolErrorHandling:
             async def search(self, *args, **kwargs):
                 raise Exception("syntax error")
 
-        monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+        monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
         # Patch at the clients module level where the import happens
         monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
@@ -348,6 +350,7 @@ class TestSearchToolErrorHandling:
     async def test_search_notes_permission_error(self, monkeypatch):
         """Test search_notes with permission error."""
         import importlib
+        from contextlib import asynccontextmanager
 
         search_mod = importlib.import_module("basic_memory.mcp.tools.search")
         clients_mod = importlib.import_module("basic_memory.mcp.clients")
@@ -358,8 +361,9 @@ class TestSearchToolErrorHandling:
             id = 1
             external_id = "test-external-id"
 
-        async def fake_get_active_project(*args, **kwargs):
-            return StubProject()
+        @asynccontextmanager
+        async def fake_get_project_client(*args, **kwargs):
+            yield (object(), StubProject())
 
         # Mock SearchClient to raise a permission error
         class MockSearchClient:
@@ -369,7 +373,7 @@ class TestSearchToolErrorHandling:
             async def search(self, *args, **kwargs):
                 raise Exception("permission denied")
 
-        monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+        monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
         # Patch at the clients module level where the import happens
         monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
@@ -383,6 +387,7 @@ class TestSearchToolErrorHandling:
 async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, search_type):
     """Vector/hybrid search types should populate retrieval_mode in API payload."""
     import importlib
+    from contextlib import asynccontextmanager
 
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
@@ -393,8 +398,9 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
         id = 1
         external_id = "test-external-id"
 
-    async def fake_get_active_project(*args, **kwargs):
-        return StubProject()
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
 
     captured_payload: dict = {}
 
@@ -406,7 +412,7 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
             captured_payload.update(payload)
             return SearchResponse(results=[], current_page=page, page_size=page_size)
 
-    monkeypatch.setattr(search_mod, "get_active_project", fake_get_active_project)
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
     result = await search_mod.search_notes.fn(

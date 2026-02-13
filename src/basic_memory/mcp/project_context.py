@@ -8,7 +8,9 @@ The resolve_project_parameter function is a thin wrapper for backwards
 compatibility with existing MCP tools.
 """
 
-from typing import Optional, List
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Optional, List, Tuple
+
 from httpx import AsyncClient
 from httpx._types import (
     HeaderTypes,
@@ -162,3 +164,48 @@ def add_project_metadata(result: str, project_name: str) -> str:
         Result with project session tracking metadata
     """
     return f"{result}\n\n[Session: Using project '{project_name}']"
+
+
+@asynccontextmanager
+async def get_project_client(
+    project: Optional[str] = None,
+    context: Optional[Context] = None,
+) -> AsyncIterator[Tuple[AsyncClient, ProjectItem]]:
+    """Resolve project, create correctly-routed client, and validate project.
+
+    Solves the bootstrap problem: we need to know the project name to choose
+    the right client (local vs cloud), but we need the client to validate
+    the project. This helper resolves the project from config first (no
+    network), creates the correctly-routed client, then validates via API.
+
+    Args:
+        project: Optional explicit project parameter
+        context: Optional FastMCP context for caching
+
+    Yields:
+        Tuple of (client, active_project)
+
+    Raises:
+        ValueError: If no project can be resolved
+        RuntimeError: If cloud project but no API key configured
+    """
+    # Deferred import to avoid circular dependency
+    from basic_memory.mcp.async_client import get_client
+
+    # Step 1: Resolve project name from config (no network call)
+    resolved_project = await resolve_project_parameter(project)
+    if not resolved_project:
+        # Fall back to local client to discover projects and raise helpful error
+        async with get_client() as client:
+            project_names = await get_project_names(client)
+            raise ValueError(
+                "No project specified. "
+                "Either set 'default_project_mode=true' in config, or use 'project' argument.\n"
+                f"Available projects: {project_names}"
+            )
+
+    # Step 2: Create client routed based on project's mode
+    async with get_client(project_name=resolved_project) as client:
+        # Step 3: Validate project exists via API
+        active_project = await get_active_project(client, resolved_project, context)
+        yield client, active_project

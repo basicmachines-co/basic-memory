@@ -344,7 +344,7 @@ basic-memory sync --watch
 3. Cloud features (optional, requires subscription):
 
 ```bash
-# Authenticate with cloud
+# Authenticate with cloud (global cloud mode via OAuth)
 basic-memory cloud login
 
 # Bidirectional sync with cloud
@@ -357,9 +357,29 @@ basic-memory cloud check
 basic-memory cloud mount
 ```
 
-**Routing Flags** (for users with cloud subscriptions):
+**Per-Project Cloud Routing** (API key based):
 
-When cloud mode is enabled, CLI commands communicate with the cloud API by default. Use routing flags to override this:
+Individual projects can be routed through the cloud while others stay local. This uses an API key instead of OAuth:
+
+```bash
+# Save an API key (create one in the web app or via CLI)
+basic-memory cloud set-key bmc_abc123...
+# Or create one via CLI (requires OAuth login first)
+basic-memory cloud create-key "my-laptop"
+
+# Set a project to route through cloud
+basic-memory project set-cloud research
+
+# Revert a project to local mode
+basic-memory project set-local research
+
+# List projects with mode column (local/cloud)
+basic-memory project list
+```
+
+**Routing Flags** (for users with global cloud mode):
+
+When global cloud mode is enabled, CLI commands communicate with the cloud API by default. Use routing flags to override this:
 
 ```bash
 # Force local routing (useful for local MCP server while cloud mode is enabled)

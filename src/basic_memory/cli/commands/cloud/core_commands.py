@@ -210,3 +210,79 @@ def promo(enabled: bool = typer.Option(True, "--on/--off", help="Enable or disab
         console.print("[green]Cloud promo messages enabled[/green]")
     else:
         console.print("[yellow]Cloud promo messages disabled[/yellow]")
+
+
+@cloud_app.command("set-key")
+def set_key(
+    api_key: str = typer.Argument(..., help="API key (bmc_ prefixed) for cloud access"),
+) -> None:
+    """Save a cloud API key for per-project cloud routing.
+
+    The API key is account-level and used by projects set to cloud mode.
+    Create a key in the web app or use 'bm cloud create-key'.
+
+    Example:
+      bm cloud set-key bmc_abc123...
+    """
+    if not api_key.startswith("bmc_"):
+        console.print("[red]Error: API key must start with 'bmc_'[/red]")
+        raise typer.Exit(1)
+
+    config_manager = ConfigManager()
+    config = config_manager.load_config()
+    config.cloud_api_key = api_key
+    config_manager.save_config(config)
+
+    console.print("[green]API key saved[/green]")
+    console.print("[dim]Projects set to cloud mode will use this key for authentication[/dim]")
+    console.print("[dim]Set a project to cloud mode: bm project set-cloud <name>[/dim]")
+
+
+@cloud_app.command("create-key")
+def create_key(
+    name: str = typer.Argument(..., help="Human-readable name for the API key"),
+) -> None:
+    """Create a new cloud API key and save it locally.
+
+    Requires active OAuth session (run 'bm cloud login' first).
+    The key is created via the cloud API and saved to local config.
+
+    Example:
+      bm cloud create-key "my-laptop"
+    """
+
+    async def _create_key():
+        _, _, host_url = get_cloud_config()
+        host_url = host_url.rstrip("/")
+
+        console.print(f"[dim]Creating API key '{name}'...[/dim]")
+        response = await make_api_request(
+            method="POST",
+            url=f"{host_url}/api/keys",
+            json_data={"name": name},
+        )
+
+        key_data = response.json()
+        api_key = key_data.get("key")
+        if not api_key:
+            console.print("[red]Error: No key returned from API[/red]")
+            raise typer.Exit(1)
+
+        # Save to config
+        config_manager = ConfigManager()
+        config = config_manager.load_config()
+        config.cloud_api_key = api_key
+        config_manager.save_config(config)
+
+        console.print(f"[green]API key '{name}' created and saved[/green]")
+        console.print("[dim]Projects set to cloud mode will use this key for authentication[/dim]")
+        console.print("[dim]Set a project to cloud mode: bm project set-cloud <name>[/dim]")
+
+    try:
+        run_with_cleanup(_create_key())
+    except CloudAPIError as e:
+        console.print(f"[red]Error creating API key: {e}[/red]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected error: {e}[/red]")
+        raise typer.Exit(1)

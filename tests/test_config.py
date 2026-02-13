@@ -4,7 +4,7 @@ import tempfile
 import pytest
 from datetime import datetime
 
-from basic_memory.config import BasicMemoryConfig, CloudProjectConfig, ConfigManager
+from basic_memory.config import BasicMemoryConfig, CloudProjectConfig, ConfigManager, ProjectMode
 from pathlib import Path
 
 
@@ -615,3 +615,117 @@ class TestFormattingConfig:
                 "json": "prettier --write {file}",
             }
             assert loaded_config.formatter_timeout == 10.0
+
+
+class TestProjectMode:
+    """Test per-project routing mode configuration."""
+
+    def test_project_mode_defaults(self):
+        """Test that ProjectMode enum has expected values."""
+        assert ProjectMode.LOCAL.value == "local"
+        assert ProjectMode.CLOUD.value == "cloud"
+
+    def test_get_project_mode_defaults_to_local(self):
+        """Test that unknown projects default to LOCAL mode."""
+        config = BasicMemoryConfig()
+        assert config.get_project_mode("nonexistent") == ProjectMode.LOCAL
+
+    def test_set_project_mode_cloud(self):
+        """Test setting a project to cloud mode."""
+        config = BasicMemoryConfig()
+        config.set_project_mode("research", ProjectMode.CLOUD)
+        assert config.get_project_mode("research") == ProjectMode.CLOUD
+
+    def test_set_project_mode_local_removes_entry(self):
+        """Test that setting a project back to LOCAL removes it from project_modes dict."""
+        config = BasicMemoryConfig()
+        config.set_project_mode("research", ProjectMode.CLOUD)
+        assert "research" in config.project_modes
+
+        config.set_project_mode("research", ProjectMode.LOCAL)
+        # LOCAL is the default, so the entry is removed to keep config clean
+        assert "research" not in config.project_modes
+        assert config.get_project_mode("research") == ProjectMode.LOCAL
+
+    def test_cloud_api_key_defaults_to_none(self):
+        """Test that cloud_api_key defaults to None."""
+        config = BasicMemoryConfig()
+        assert config.cloud_api_key is None
+
+    def test_cloud_api_key_can_be_set(self):
+        """Test that cloud_api_key can be configured."""
+        config = BasicMemoryConfig(cloud_api_key="bmc_test123")
+        assert config.cloud_api_key == "bmc_test123"
+
+    def test_project_modes_defaults_to_empty(self):
+        """Test that project_modes defaults to empty dict."""
+        config = BasicMemoryConfig()
+        assert config.project_modes == {}
+
+    def test_project_modes_round_trip(self):
+        """Test that project_modes survives save/load cycle."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create config with project_modes and cloud_api_key
+            test_config = BasicMemoryConfig(
+                projects={"main": str(temp_path / "main"), "research": str(temp_path / "research")},
+                cloud_api_key="bmc_test123",
+                project_modes={"research": ProjectMode.CLOUD},
+            )
+            config_manager.save_config(test_config)
+
+            # Load and verify
+            loaded = config_manager.load_config()
+            assert loaded.cloud_api_key == "bmc_test123"
+            assert loaded.get_project_mode("research") == ProjectMode.CLOUD
+            assert loaded.get_project_mode("main") == ProjectMode.LOCAL
+
+    def test_backward_compat_loading_without_project_modes(self):
+        """Test that old config files without project_modes field can be loaded."""
+        import json
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            # Write old-style config without project_modes or cloud_api_key
+            old_config_data = {
+                "env": "dev",
+                "projects": {"main": str(temp_path / "main")},
+                "default_project": "main",
+                "log_level": "INFO",
+            }
+            config_manager.config_file.write_text(json.dumps(old_config_data, indent=2))
+
+            # Clear config cache
+            import basic_memory.config
+
+            basic_memory.config._CONFIG_CACHE = None
+
+            # Should load successfully with defaults
+            config = config_manager.load_config()
+            assert config.project_modes == {}
+            assert config.cloud_api_key is None
+            assert config.get_project_mode("main") == ProjectMode.LOCAL
+
+    def test_project_list_includes_mode(self, config_home):
+        """Test that project_list property includes mode information."""
+        config = BasicMemoryConfig(
+            projects={"main": str(config_home / "main"), "research": str(config_home / "research")},
+            project_modes={"research": ProjectMode.CLOUD},
+        )
+
+        project_list = config.project_list
+        modes_by_name = {p.name: p.mode for p in project_list}
+        assert modes_by_name["main"] == ProjectMode.LOCAL
+        assert modes_by_name["research"] == ProjectMode.CLOUD

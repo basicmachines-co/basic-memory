@@ -5,9 +5,8 @@ from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.async_client import get_client
 
 
 def _format_delete_error_response(project: str, error_message: str, identifier: str) -> str:
@@ -216,12 +215,10 @@ async def delete_note(
         with suggestions for finding the correct identifier, including search
         commands and alternative formats to try.
     """
-    async with get_client() as client:
+    async with get_project_client(project, context) as (client, active_project):
         logger.debug(
-            f"Deleting {'directory' if is_directory else 'note'}: {identifier} in project: {project}"
+            f"Deleting {'directory' if is_directory else 'note'}: {identifier} in project: {active_project.name}"
         )
-
-        active_project = await get_active_project(client, project, context)
 
         # Import here to avoid circular import
         from basic_memory.mcp.clients import KnowledgeClient

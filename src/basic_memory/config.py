@@ -24,6 +24,13 @@ WATCH_STATUS_JSON = "watch-status.json"
 Environment = Literal["test", "dev", "user"]
 
 
+class ProjectMode(str, Enum):
+    """Per-project routing mode."""
+
+    LOCAL = "local"
+    CLOUD = "cloud"
+
+
 class DatabaseBackend(str, Enum):
     """Supported database backends."""
 
@@ -37,6 +44,7 @@ class ProjectConfig:
 
     name: str
     home: Path
+    mode: ProjectMode = ProjectMode.LOCAL
 
     @property
     def project(self):
@@ -264,6 +272,16 @@ class BasicMemoryConfig(BaseSettings):
         description="Most recent cloud promo version shown in CLI.",
     )
 
+    cloud_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for cloud access (bmc_ prefixed). Account-level, not per-project.",
+    )
+
+    project_modes: Dict[str, ProjectMode] = Field(
+        default_factory=dict,
+        description="Per-project routing mode. Projects not listed default to LOCAL.",
+    )
+
     @property
     def is_test_env(self) -> bool:
         """Check if running in a test environment.
@@ -296,6 +314,21 @@ class BasicMemoryConfig(BaseSettings):
             return False
         # Fall back to config file value
         return self.cloud_mode
+
+    def get_project_mode(self, project_name: str) -> ProjectMode:
+        """Get the routing mode for a project.
+
+        Returns the per-project mode if set, otherwise LOCAL.
+        """
+        return self.project_modes.get(project_name, ProjectMode.LOCAL)
+
+    def set_project_mode(self, project_name: str, mode: ProjectMode) -> None:
+        """Set the routing mode for a project."""
+        if mode == ProjectMode.LOCAL:
+            # Remove from dict to keep config clean — LOCAL is the default
+            self.project_modes.pop(project_name, None)
+        else:
+            self.project_modes[project_name] = mode
 
     @classmethod
     def for_cloud_tenant(
@@ -387,7 +420,10 @@ class BasicMemoryConfig(BaseSettings):
     @property
     def project_list(self) -> List[ProjectConfig]:  # pragma: no cover
         """Get all configured projects as ProjectConfig objects."""
-        return [ProjectConfig(name=name, home=Path(path)) for name, path in self.projects.items()]
+        return [
+            ProjectConfig(name=name, home=Path(path), mode=self.get_project_mode(name))
+            for name, path in self.projects.items()
+        ]
 
     @model_validator(mode="after")
     def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
