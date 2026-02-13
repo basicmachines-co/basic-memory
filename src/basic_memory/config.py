@@ -249,6 +249,21 @@ class BasicMemoryConfig(BaseSettings):
         description="Cloud project sync configuration mapping project names to their local paths and sync state",
     )
 
+    cloud_promo_opt_out: bool = Field(
+        default=False,
+        description="Disable CLI cloud promo messages when true.",
+    )
+
+    cloud_promo_first_run_shown: bool = Field(
+        default=False,
+        description="Tracks whether the first-run cloud promo message has been shown.",
+    )
+
+    cloud_promo_last_version_shown: Optional[str] = Field(
+        default=None,
+        description="Most recent cloud promo version shown in CLI.",
+    )
+
     @property
     def is_test_env(self) -> bool:
         """Check if running in a test environment.
