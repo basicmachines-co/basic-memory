@@ -51,20 +51,11 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             chats_imported = 0
 
             for chat in conversations:
-                created_at = chat["create_time"]
-                date_prefix = datetime.fromtimestamp(created_at).astimezone().strftime("%Y%m%d")
-                clean_title = clean_filename(chat["title"])
-                relative_path = (
-                    f"{destination_folder}/{date_prefix}-{clean_title}"
-                    if destination_folder
-                    else f"{date_prefix}-{clean_title}"
-                )
-                permalink, file_path = self.build_import_paths(relative_path)
-
                 # Convert to entity
-                entity = self._format_chat_content(chat, permalink)
+                entity = self._format_chat_content(destination_folder, chat)
 
                 # Write file using relative path - FileService handles base_path
+                file_path = f"{entity.frontmatter.metadata['permalink']}.md"
                 await self.write_entity(entity, file_path)
 
                 # Count messages
@@ -92,7 +83,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             return self.handle_error("Failed to import ChatGPT conversations", e)
 
     def _format_chat_content(
-        self, conversation: Dict[str, Any], permalink: str
+        self, folder: str, conversation: Dict[str, Any]
     ) -> EntityMarkdown:  # pragma: no cover
         """Convert chat conversation to Basic Memory entity.
 
@@ -114,6 +105,10 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 root_id = node_id
                 break
 
+        # Generate permalink
+        date_prefix = datetime.fromtimestamp(created_at).astimezone().strftime("%Y%m%d")
+        clean_title = clean_filename(conversation["title"])
+
         # Format content
         content = self._format_chat_markdown(
             title=conversation["title"],
@@ -131,7 +126,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                     "title": conversation["title"],
                     "created": format_timestamp(created_at),
                     "modified": format_timestamp(modified_at),
-                    "permalink": permalink,
+                    "permalink": f"{folder}/{date_prefix}-{clean_title}",
                 }
             ),
             content=content,

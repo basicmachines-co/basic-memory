@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any, Literal
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.formatting import format_search_results_ascii
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.search import (
@@ -399,50 +399,42 @@ async def search_notes(
     types = types or []
     entity_types = entity_types or []
 
+    # Create a SearchQuery object based on the parameters
+    search_query = SearchQuery()
+
+    # Set the appropriate search field based on search_type
+    if search_type == "text":
+        search_query.text = query
+    elif search_type == "vector":
+        search_query.text = query
+        search_query.retrieval_mode = SearchRetrievalMode.VECTOR
+    elif search_type == "hybrid":
+        search_query.text = query
+        search_query.retrieval_mode = SearchRetrievalMode.HYBRID
+    elif search_type == "title":
+        search_query.title = query
+    elif search_type == "permalink" and "*" in query:
+        search_query.permalink_match = query
+    elif search_type == "permalink":
+        search_query.permalink = query
+    else:  # pragma: no cover
+        search_query.text = query  # Default to text search
+
+    # Add optional filters if provided (empty lists are treated as no filter)
+    if entity_types:
+        search_query.entity_types = [SearchItemType(t) for t in entity_types]
+    if types:
+        search_query.types = types
+    if after_date:
+        search_query.after_date = after_date
+    if metadata_filters:
+        search_query.metadata_filters = metadata_filters
+    if tags:
+        search_query.tags = tags
+    if status:
+        search_query.status = status
+
     async with get_project_client(project, context) as (client, active_project):
-        # Handle memory:// URLs by resolving to permalink search
-        _, resolved_query, is_memory_url = await resolve_project_and_path(
-            client, query, project, context
-        )
-        if is_memory_url:
-            query = resolved_query
-            search_type = "permalink"
-
-        # Create a SearchQuery object based on the parameters
-        search_query = SearchQuery()
-
-        # Set the appropriate search field based on search_type
-        if search_type == "text":
-            search_query.text = query
-        elif search_type == "vector":
-            search_query.text = query
-            search_query.retrieval_mode = SearchRetrievalMode.VECTOR
-        elif search_type == "hybrid":
-            search_query.text = query
-            search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-        elif search_type == "title":
-            search_query.title = query
-        elif search_type == "permalink" and "*" in query:
-            search_query.permalink_match = query
-        elif search_type == "permalink":
-            search_query.permalink = query
-        else:  # pragma: no cover
-            search_query.text = query  # Default to text search
-
-        # Add optional filters if provided (empty lists are treated as no filter)
-        if entity_types:
-            search_query.entity_types = [SearchItemType(t) for t in entity_types]
-        if types:
-            search_query.types = types
-        if after_date:
-            search_query.after_date = after_date
-        if metadata_filters:
-            search_query.metadata_filters = metadata_filters
-        if tags:
-            search_query.tags = tags
-        if status:
-            search_query.status = status
-
         logger.info(f"Searching for {search_query} in project {active_project.name}")
 
         try:

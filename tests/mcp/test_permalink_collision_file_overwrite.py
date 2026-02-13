@@ -22,7 +22,6 @@ from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.sync.sync_service import SyncService
 from basic_memory.config import ProjectConfig
 from basic_memory.services import EntityService
-from basic_memory.utils import generate_permalink
 
 
 async def force_full_scan(sync_service: SyncService) -> None:
@@ -71,7 +70,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
 
     assert "# Created note" in result_a
     assert "file_path: edge-cases/Node A.md" in result_a
-    assert f"permalink: {test_project.name}/edge-cases/node-a" in result_a
+    assert "permalink: edge-cases/node-a" in result_a
 
     # Verify Node A content via read
     content_a = await read_note.fn("edge-cases/node-a", project=test_project.name)
@@ -88,7 +87,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
 
     assert "# Created note" in result_b
     assert "file_path: edge-cases/Node B.md" in result_b
-    assert f"permalink: {test_project.name}/edge-cases/node-b" in result_b
+    assert "permalink: edge-cases/node-b" in result_b
 
     # Step 3: Create third note "Node C" (this is where the bug occurs)
     result_c = await write_note.fn(
@@ -100,7 +99,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
 
     assert "# Created note" in result_c
     assert "file_path: edge-cases/Node C.md" in result_c
-    assert f"permalink: {test_project.name}/edge-cases/node-c" in result_c
+    assert "permalink: edge-cases/node-c" in result_c
 
     # CRITICAL CHECK: Verify Node A still has its original content
     # This is where the bug manifests - Node A.md gets overwritten with Node C content
@@ -259,7 +258,6 @@ async def test_sync_permalink_collision_file_overwrite_bug(
     project_dir = project_config.home
     edge_cases_dir = project_dir / "edge-cases"
     edge_cases_dir.mkdir(parents=True, exist_ok=True)
-    project_prefix = generate_permalink(project_config.name)
 
     # Step 1: Create Node A file
     node_a_content = dedent("""
@@ -286,7 +284,7 @@ async def test_sync_permalink_collision_file_overwrite_bug(
     await sync_service.sync(project_dir)
 
     # Verify Node A is in database
-    node_a = await entity_service.get_by_permalink(f"{project_prefix}/edge-cases/node-a")
+    node_a = await entity_service.get_by_permalink("edge-cases/node-a")
     assert node_a is not None
     assert node_a.title == "Node A"
 
@@ -377,8 +375,8 @@ async def test_sync_permalink_collision_file_overwrite_bug(
     assert "Content for Node C" in node_c_after_sync
 
     # Verify database has both entities correctly
-    node_a_db = await entity_service.get_by_permalink(f"{project_prefix}/edge-cases/node-a")
-    node_c_db = await entity_service.get_by_permalink(f"{project_prefix}/edge-cases/node-c")
+    node_a_db = await entity_service.get_by_permalink("edge-cases/node-a")
+    node_c_db = await entity_service.get_by_permalink("edge-cases/node-c")
 
     assert node_a_db is not None, "Node A should exist in database"
     assert node_a_db.title == "Node A", "Node A database entry should have correct title"

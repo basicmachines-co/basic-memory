@@ -41,12 +41,7 @@ async def get_chatgpt_importer(
     file_service: FileServiceDep,
 ) -> ChatGPTImporter:
     """Create ChatGPTImporter with dependencies."""
-    return ChatGPTImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ChatGPTImporter(project_config.home, markdown_processor, file_service)
 
 
 ChatGPTImporterDep = Annotated[ChatGPTImporter, Depends(get_chatgpt_importer)]
@@ -58,12 +53,7 @@ async def get_chatgpt_importer_v2(  # pragma: no cover
     file_service: FileServiceV2Dep,
 ) -> ChatGPTImporter:
     """Create ChatGPTImporter with v2 dependencies."""
-    return ChatGPTImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ChatGPTImporter(project_config.home, markdown_processor, file_service)
 
 
 ChatGPTImporterV2Dep = Annotated[ChatGPTImporter, Depends(get_chatgpt_importer_v2)]
@@ -75,12 +65,7 @@ async def get_chatgpt_importer_v2_external(
     file_service: FileServiceV2ExternalDep,
 ) -> ChatGPTImporter:
     """Create ChatGPTImporter with v2 external_id dependencies."""
-    return ChatGPTImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ChatGPTImporter(project_config.home, markdown_processor, file_service)
 
 
 ChatGPTImporterV2ExternalDep = Annotated[ChatGPTImporter, Depends(get_chatgpt_importer_v2_external)]
@@ -95,12 +80,7 @@ async def get_claude_conversations_importer(
     file_service: FileServiceDep,
 ) -> ClaudeConversationsImporter:
     """Create ClaudeConversationsImporter with dependencies."""
-    return ClaudeConversationsImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ClaudeConversationsImporter(project_config.home, markdown_processor, file_service)
 
 
 ClaudeConversationsImporterDep = Annotated[
@@ -114,12 +94,7 @@ async def get_claude_conversations_importer_v2(  # pragma: no cover
     file_service: FileServiceV2Dep,
 ) -> ClaudeConversationsImporter:
     """Create ClaudeConversationsImporter with v2 dependencies."""
-    return ClaudeConversationsImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ClaudeConversationsImporter(project_config.home, markdown_processor, file_service)
 
 
 ClaudeConversationsImporterV2Dep = Annotated[
@@ -133,12 +108,7 @@ async def get_claude_conversations_importer_v2_external(
     file_service: FileServiceV2ExternalDep,
 ) -> ClaudeConversationsImporter:
     """Create ClaudeConversationsImporter with v2 external_id dependencies."""
-    return ClaudeConversationsImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ClaudeConversationsImporter(project_config.home, markdown_processor, file_service)
 
 
 ClaudeConversationsImporterV2ExternalDep = Annotated[
@@ -155,12 +125,7 @@ async def get_claude_projects_importer(
     file_service: FileServiceDep,
 ) -> ClaudeProjectsImporter:
     """Create ClaudeProjectsImporter with dependencies."""
-    return ClaudeProjectsImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ClaudeProjectsImporter(project_config.home, markdown_processor, file_service)
 
 
 ClaudeProjectsImporterDep = Annotated[ClaudeProjectsImporter, Depends(get_claude_projects_importer)]
@@ -172,12 +137,7 @@ async def get_claude_projects_importer_v2(  # pragma: no cover
     file_service: FileServiceV2Dep,
 ) -> ClaudeProjectsImporter:
     """Create ClaudeProjectsImporter with v2 dependencies."""
-    return ClaudeProjectsImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ClaudeProjectsImporter(project_config.home, markdown_processor, file_service)
 
 
 ClaudeProjectsImporterV2Dep = Annotated[
@@ -191,12 +151,7 @@ async def get_claude_projects_importer_v2_external(
     file_service: FileServiceV2ExternalDep,
 ) -> ClaudeProjectsImporter:
     """Create ClaudeProjectsImporter with v2 external_id dependencies."""
-    return ClaudeProjectsImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return ClaudeProjectsImporter(project_config.home, markdown_processor, file_service)
 
 
 ClaudeProjectsImporterV2ExternalDep = Annotated[
@@ -213,12 +168,7 @@ async def get_memory_json_importer(
     file_service: FileServiceDep,
 ) -> MemoryJsonImporter:
     """Create MemoryJsonImporter with dependencies."""
-    return MemoryJsonImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return MemoryJsonImporter(project_config.home, markdown_processor, file_service)
 
 
 MemoryJsonImporterDep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer)]
@@ -230,12 +180,7 @@ async def get_memory_json_importer_v2(  # pragma: no cover
     file_service: FileServiceV2Dep,
 ) -> MemoryJsonImporter:
     """Create MemoryJsonImporter with v2 dependencies."""
-    return MemoryJsonImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return MemoryJsonImporter(project_config.home, markdown_processor, file_service)
 
 
 MemoryJsonImporterV2Dep = Annotated[MemoryJsonImporter, Depends(get_memory_json_importer_v2)]
@@ -247,12 +192,7 @@ async def get_memory_json_importer_v2_external(
     file_service: FileServiceV2ExternalDep,
 ) -> MemoryJsonImporter:
     """Create MemoryJsonImporter with v2 external_id dependencies."""
-    return MemoryJsonImporter(
-        project_config.home,
-        markdown_processor,
-        file_service,
-        project_name=project_config.name,
-    )
+    return MemoryJsonImporter(project_config.home, markdown_processor, file_service)
 
 
 MemoryJsonImporterV2ExternalDep = Annotated[

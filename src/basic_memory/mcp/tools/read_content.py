@@ -15,7 +15,7 @@ from PIL import Image as PILImage
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
@@ -202,17 +202,11 @@ async def read_content(
     logger.info("Reading file", path=path, project=project)
 
     async with get_project_client(project, context) as (client, active_project):
-        # Resolve path with project-prefix awareness for memory:// URLs
-        _, url, _ = await resolve_project_and_path(client, path, project, context)
+        url = memory_url_path(path)
 
         # Validate path to prevent path traversal attacks
-        # For memory:// URLs, validate the extracted path (not the raw URL which
-        # has a scheme prefix that confuses path validation)
-        raw_path = memory_url_path(path) if path.startswith("memory://") else path
         project_path = active_project.home
-        if not validate_project_path(raw_path, project_path) or not validate_project_path(
-            url, project_path
-        ):
+        if not validate_project_path(url, project_path):
             logger.warning(
                 "Attempted path traversal attack blocked",
                 path=path,

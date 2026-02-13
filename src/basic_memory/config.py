@@ -196,11 +196,6 @@ class BasicMemoryConfig(BaseSettings):
         description="Disable automatic permalink generation in frontmatter. When enabled, new notes won't have permalinks added and sync won't update permalinks. Existing permalinks will still work for reading.",
     )
 
-    permalinks_include_project: bool = Field(
-        default=True,
-        description="When True, generated permalinks are prefixed with the project slug (e.g., 'specs/search'). Existing permalinks remain unchanged unless explicitly updated.",
-    )
-
     skip_initialization_sync: bool = Field(
         default=False,
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",

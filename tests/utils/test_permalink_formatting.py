@@ -61,14 +61,11 @@ Testing permalink generation.
     # Run sync
     await sync_service.sync(project_config.home)
 
-    # Verify permalinks - with project-prefixed permalinks enabled,
-    # auto-generated permalinks include the project slug prefix
-    project_prefix = generate_permalink(project_config.name)
+    # Verify permalinks
     for filename, expected_permalink in test_cases:
         entity = await entity_service.repository.get_by_file_path(filename)
-        expected_full = f"{project_prefix}/{expected_permalink}"
-        assert entity.permalink == expected_full, (
-            f"File {filename} should have permalink {expected_full}"
+        assert entity.permalink == expected_permalink, (
+            f"File {filename} should have permalink {expected_permalink}"
         )
 
 

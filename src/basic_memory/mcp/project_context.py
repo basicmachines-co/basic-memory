@@ -17,14 +17,11 @@ from httpx._types import (
 )
 from loguru import logger
 from fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
 from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
-from basic_memory.schemas.memory import memory_url_path
-from basic_memory.utils import generate_permalink, normalize_project_reference
 
 
 async def resolve_project_parameter(
@@ -151,98 +148,6 @@ async def get_active_project(
 
     logger.debug(f"Validated project: {active_project.name}")
     return active_project
-
-
-def _split_project_prefix(path: str) -> tuple[Optional[str], str]:
-    """Split a possible project prefix from a memory URL path."""
-    if "/" not in path:
-        return None, path
-
-    project_prefix, remainder = path.split("/", 1)
-    if not project_prefix or not remainder:
-        return None, path
-
-    if "*" in project_prefix:
-        return None, path
-
-    return project_prefix, remainder
-
-
-async def resolve_project_and_path(
-    client: AsyncClient,
-    identifier: str,
-    project: Optional[str] = None,
-    context: Optional[Context] = None,
-    headers: HeaderTypes | None = None,
-) -> tuple[ProjectItem, str, bool]:
-    """Resolve project and normalized path for memory:// identifiers.
-
-    Returns:
-        Tuple of (active_project, normalized_path, is_memory_url)
-    """
-    is_memory_url = identifier.strip().startswith("memory://")
-    if not is_memory_url:
-        active_project = await get_active_project(client, project, context, headers)
-        return active_project, identifier, False
-
-    normalized_path = normalize_project_reference(memory_url_path(identifier))
-    project_prefix, remainder = _split_project_prefix(normalized_path)
-    include_project = ConfigManager().config.permalinks_include_project
-
-    # Trigger: memory URL begins with a potential project segment
-    # Why: allow project-scoped memory URLs without requiring a separate project parameter
-    # Outcome: attempt to resolve the prefix as a project and route to it
-    if project_prefix:
-        try:
-            from basic_memory.mcp.tools.utils import call_post
-
-            response = await call_post(
-                client,
-                "/v2/projects/resolve",
-                json={"identifier": project_prefix},
-                headers=headers,
-            )
-            resolved = ProjectResolveResponse.model_validate(response.json())
-        except ToolError as exc:
-            if "project not found" not in str(exc).lower():
-                raise
-        else:
-            resolved_project = await resolve_project_parameter(project_prefix)
-            if resolved_project and generate_permalink(resolved_project) != generate_permalink(
-                project_prefix
-            ):
-                raise ValueError(
-                    f"Project is constrained to '{resolved_project}', cannot use '{project_prefix}'."
-                )
-
-            active_project = ProjectItem(
-                id=resolved.project_id,
-                external_id=resolved.external_id,
-                name=resolved.name,
-                path=resolved.path,
-                is_default=resolved.is_default,
-            )
-            if context:
-                context.set_state("active_project", active_project)
-
-            resolved_path = (
-                f"{resolved.permalink}/{remainder}" if include_project else remainder
-            )
-            return active_project, resolved_path, True
-
-    # Trigger: no resolvable project prefix in the memory URL
-    # Why: preserve existing memory URL behavior within the active project
-    # Outcome: use the active project and normalize the path for lookup
-    active_project = await get_active_project(client, project, context, headers)
-    resolved_path = normalized_path
-    if include_project:
-        # Trigger: project-prefixed permalinks are enabled and the path lacks a prefix
-        # Why: ensure memory URL lookups align with canonical permalinks
-        # Outcome: prefix the path with the active project's permalink
-        project_prefix = active_project.permalink
-        if resolved_path != project_prefix and not resolved_path.startswith(f"{project_prefix}/"):
-            resolved_path = f"{project_prefix}/{resolved_path}"
-    return active_project, resolved_path, True
 
 
 def add_project_metadata(result: str, project_name: str) -> str:

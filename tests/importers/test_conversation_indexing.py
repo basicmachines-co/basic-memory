@@ -38,9 +38,7 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     file_service = FileService(base_path, processor)
 
     # Create importer
-    importer = ClaudeConversationsImporter(
-        base_path, processor, file_service, project_name=project_config.name
-    )
+    importer = ClaudeConversationsImporter(base_path, processor, file_service)
 
     # Sample conversation data
     conversations = [
@@ -82,10 +80,7 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     content = conv_path.read_text()
     assert "---" in content, "File should have frontmatter markers"
     assert "title: My Test Conversation Title" in content, "File should have title in frontmatter"
-    assert (
-        f"permalink: {project_config.name}/conversations/20250115-my-test-conversation-title"
-        in content
-    ), (
+    assert "permalink: conversations/20250115-My_Test_Conversation_Title" in content, (
         "File should have permalink in frontmatter"
     )
 
@@ -102,10 +97,7 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     assert entity.title == "My Test Conversation Title", (
         f"Title should be from frontmatter, got: {entity.title}"
     )
-    assert (
-        entity.permalink
-        == f"{project_config.name}/conversations/20250115-my-test-conversation-title"
-    ), (
+    assert entity.permalink == "conversations/20250115-My_Test_Conversation_Title", (
         f"Permalink should be from frontmatter, got: {entity.permalink}"
     )
 
@@ -119,9 +111,6 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     assert search_result.title == "My Test Conversation Title", (
         f"Search title should be from frontmatter, got: {search_result.title}"
     )
-    assert (
-        search_result.permalink
-        == f"{project_config.name}/conversations/20250115-my-test-conversation-title"
-    ), (
+    assert search_result.permalink == "conversations/20250115-My_Test_Conversation_Title", (
         f"Search permalink should not be null, got: {search_result.permalink}"
     )

@@ -45,7 +45,7 @@ async def test_read_note_after_write(mcp_server, app, test_project):
         # Should contain the note content and metadata
         assert "# Test Note" in result_text
         assert "This is test content." in result_text
-        assert f"{test_project.name}/test/test-note" in result_text  # permalink
+        assert "test/test-note" in result_text  # permalink
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,7 @@ async def test_read_note_underscored_folder_by_permalink(mcp_server, app, test_p
         assert "_archive/articles/Example Note.md" in write_text
 
         # Verify the permalink has underscores stripped (this is the expected behavior)
-        assert f"{test_project.name}/archive/articles/example-note" in write_text
+        assert "archive/articles/example-note" in write_text
 
         # Now try to read the note using the permalink (without underscores)
         # This is the exact scenario from the bug report - using the permalink
@@ -99,4 +99,4 @@ async def test_read_note_underscored_folder_by_permalink(mcp_server, app, test_p
         # Should contain the note content
         assert "# Example Note" in result_text
         assert "This is a test note in an underscored folder." in result_text
-        assert f"{test_project.name}/archive/articles/example-note" in result_text  # permalink
+        assert "archive/articles/example-note" in result_text  # permalink

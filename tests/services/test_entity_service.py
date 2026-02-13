@@ -20,31 +20,27 @@ from basic_memory.utils import generate_permalink
 
 
 @pytest.mark.asyncio
-async def test_create_entity(
-    entity_service: EntityService, file_service: FileService, project_config: ProjectConfig
-):
+async def test_create_entity(entity_service: EntityService, file_service: FileService):
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
         directory="",
         entity_type="test",
     )
-    # Save expected permalink before create_entity mutates entity_data._permalink
-    expected_permalink = f"{generate_permalink(project_config.name)}/{entity_data.permalink}"
 
     # Act
     entity = await entity_service.create_entity(entity_data)
 
     # Assert Entity
     assert isinstance(entity, EntityModel)
-    assert entity.permalink == expected_permalink
+    assert entity.permalink == entity_data.permalink
     assert entity.file_path == entity_data.file_path
     assert entity.entity_type == "test"
     assert entity.created_at is not None
     assert len(entity.relations) == 0
 
     # Verify we can retrieve it using permalink
-    retrieved = await entity_service.get_by_permalink(entity.permalink)
+    retrieved = await entity_service.get_by_permalink(entity_data.permalink)
     assert retrieved.title == "Test Entity"
     assert retrieved.entity_type == "test"
     assert retrieved.created_at is not None
@@ -63,9 +59,7 @@ async def test_create_entity(
 
 
 @pytest.mark.asyncio
-async def test_create_entity_file_exists(
-    entity_service: EntityService, file_service: FileService, project_config: ProjectConfig
-):
+async def test_create_entity_file_exists(entity_service: EntityService, file_service: FileService):
     """Test successful entity creation."""
     entity_data = EntitySchema(
         title="Test Entity",
@@ -83,8 +77,7 @@ async def test_create_entity_file_exists(
 
     file_content, _ = await file_service.read_file(file_path)
     assert (
-        f"---\ntitle: Test Entity\ntype: test\npermalink: {generate_permalink(project_config.name)}/test-entity\n---\n\nfirst"
-        == file_content
+        "---\ntitle: Test Entity\ntype: test\npermalink: test-entity\n---\n\nfirst" == file_content
     )
 
     entity_data = EntitySchema(
@@ -115,9 +108,7 @@ async def test_create_entity_unique_permalink(
     entity = await entity_service.create_entity(entity_data)
 
     # default permalink
-    assert entity.permalink == (
-        f"{generate_permalink(project_config.name)}/{generate_permalink(entity.file_path)}"
-    )
+    assert entity.permalink == generate_permalink(entity.file_path)
 
     # move file
     file_path = file_service.get_entity_path(entity)
@@ -545,11 +536,7 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
 
 
 @pytest.mark.asyncio
-async def test_update_with_content(
-    entity_service: EntityService,
-    file_service: FileService,
-    project_config: ProjectConfig,
-):
+async def test_update_with_content(entity_service: EntityService, file_service: FileService):
     content = """# Git Workflow Guide"""
 
     # Create test entity
@@ -573,14 +560,13 @@ async def test_update_with_content(
     file_content, _ = await file_service.read_file(file_path)
 
     # assert content is in file
-    project_prefix = generate_permalink(project_config.name)
     assert (
         dedent(
-            f"""
+            """
             ---
             title: Git Workflow Guide
             type: test
-            permalink: {project_prefix}/test/git-workflow-guide
+            permalink: test/git-workflow-guide
             ---
             
             # Git Workflow Guide
@@ -1428,7 +1414,7 @@ async def test_move_entity_success(
     app_config = BasicMemoryConfig(update_permalinks_on_move=False)
 
     # Move entity
-    assert entity.permalink == f"{generate_permalink(project_config.name)}/original/test-note"
+    assert entity.permalink == "original/test-note"
     await entity_service.move_entity(
         identifier=entity.permalink,
         destination_path="moved/test-note.md",

@@ -60,9 +60,7 @@ def import_chatgpt(
         console.print(f"\nImporting chats from {conversations_json}...writing to {base_path}")
 
         # Create importer and run import
-        importer = ChatGPTImporter(
-            config.home, markdown_processor, file_service, project_name=config.name
-        )
+        importer = ChatGPTImporter(config.home, markdown_processor, file_service)
         with conversations_json.open("r", encoding="utf-8") as file:
             json_data = json.load(file)
             result = run_with_cleanup(importer.import_data(json_data, folder))

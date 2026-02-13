@@ -37,7 +37,18 @@ jobs:
         run: |
           pip install uv
 
-      - uses: extractions/setup-just@v3
+      - name: Install just (Linux)
+        if: runner.os != 'Windows'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
+
+      - name: Install just (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          # Install just using Chocolatey (pre-installed on GitHub Actions Windows runners)
+          choco install just --yes
+        shell: pwsh
 
       - name: Create virtual env
         run: |
@@ -85,7 +96,10 @@ jobs:
         run: |
           pip install uv
 
-      - uses: extractions/setup-just@v3
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
 
       - name: Create virtual env
         run: |
@@ -119,7 +133,10 @@ jobs:
         run: |
           pip install uv
 
-      - uses: extractions/setup-just@v3
+      - name: Install just
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y just
 
       - name: Create virtual env
         run: |

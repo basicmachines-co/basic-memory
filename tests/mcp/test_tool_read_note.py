@@ -119,7 +119,7 @@ async def test_note_unicode_content(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Unicode Test.md" in result
-    assert f"permalink: {test_project.name}/test/unicode-test" in result
+    assert "permalink: test/unicode-test" in result
     assert "checksum:" in result  # Checksum exists but may be "unknown"
 
     # Read back should preserve unicode
@@ -199,21 +199,6 @@ async def test_read_note_memory_url(app, test_project):
     memory_url = "memory://test/memory-url-test"
     content = await read_note.fn(memory_url, project=test_project.name)
     assert "Testing memory:// URL handling" in content
-
-
-@pytest.mark.asyncio
-async def test_read_note_memory_url_with_project_prefix(app, test_project):
-    """Test reading a note using a memory:// URL with explicit project prefix."""
-    await write_note.fn(
-        project=test_project.name,
-        title="Project Prefixed Memory URL Test",
-        directory="test",
-        content="Testing memory:// URL handling with project prefix",
-    )
-
-    memory_url = f"memory://{test_project.name}/test/project-prefixed-memory-url-test"
-    content = await read_note.fn(memory_url)
-    assert "Testing memory:// URL handling with project prefix" in content
 
 
 class TestReadNoteSecurityValidation:

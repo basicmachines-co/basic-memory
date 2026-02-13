@@ -151,23 +151,6 @@ async def test_read_file_memory_url(app, synced_files, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_file_memory_url_with_project_prefix(app, synced_files, test_project):
-    """Test reading a resource using a memory:// URL with explicit project prefix."""
-    await write_note.fn(
-        project=test_project.name,
-        title="Project Prefixed Resource URL Test",
-        directory="test",
-        content="Testing memory:// URL handling for resources with project prefix",
-    )
-
-    memory_url = f"memory://{test_project.name}/test/project-prefixed-resource-url-test"
-    response = await read_content.fn(memory_url)
-
-    assert response["type"] == "text"
-    assert "Testing memory:// URL handling for resources with project prefix" in response["text"]
-
-
-@pytest.mark.asyncio
 async def test_image_optimization_functions(app):
     """Test the image optimization helper functions."""
     # Create a test image
