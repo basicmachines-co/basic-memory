@@ -100,19 +100,20 @@ async def test_get_client_per_project_cloud_mode_uses_api_key(config_manager, co
 
 
 @pytest.mark.asyncio
-async def test_get_client_per_project_cloud_mode_raises_without_api_key(
+async def test_get_client_per_project_cloud_mode_raises_without_credentials(
     config_manager, config_home
 ):
-    """Test that a cloud-mode project raises error when no API key is configured."""
+    """Test that a cloud-mode project raises error when no credentials are available."""
     cfg = config_manager.load_config()
     cfg.cloud_mode = False
     cfg.cloud_api_key = None  # No API key
     cfg.set_project_mode("research", ProjectMode.CLOUD)
     config_manager.save_config(cfg)
 
+    # No OAuth token file either → should raise
     with pytest.raises(
         RuntimeError,
-        match="Project 'research' is set to cloud mode but no API key configured",
+        match="no credentials found",
     ):
         async with get_client(project_name="research"):
             pass
@@ -163,3 +164,67 @@ async def test_get_client_factory_overrides_per_project_routing(config_manager, 
     # Even though project is CLOUD, factory should take priority
     async with get_client(project_name="research") as client:
         assert str(client.base_url) == "https://factory.test"
+
+
+# --- Per-project cloud routing with force-local ---
+
+
+@pytest.mark.asyncio
+async def test_get_client_per_project_cloud_bypasses_force_local(
+    config_manager, config_home, monkeypatch
+):
+    """CLOUD project routes to cloud even when BASIC_MEMORY_FORCE_LOCAL is set."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+
+    async with get_client(project_name="research") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
+
+
+@pytest.mark.asyncio
+async def test_get_client_local_project_respects_force_local(
+    config_manager, config_home, monkeypatch
+):
+    """LOCAL project still uses ASGI transport when BASIC_MEMORY_FORCE_LOCAL is set."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_api_key = "bmc_test_key_123"
+    # "main" defaults to LOCAL
+    config_manager.save_config(cfg)
+
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+
+    async with get_client(project_name="main") as client:
+        assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_get_client_per_project_cloud_oauth_fallback(config_manager, config_home):
+    """CLOUD project uses OAuth token when no API key is configured."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = None  # No API key
+    cfg.cloud_client_id = "cid"
+    cfg.cloud_domain = "https://auth.example.test"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    # Write OAuth token file so CLIAuth.get_valid_token() returns it
+    auth = CLIAuth(client_id=cfg.cloud_client_id, authkit_domain=cfg.cloud_domain)
+    auth.token_file.parent.mkdir(parents=True, exist_ok=True)
+    auth.token_file.write_text(
+        '{"access_token":"oauth-token-456","refresh_token":null,"expires_at":9999999999,"token_type":"Bearer"}',
+        encoding="utf-8",
+    )
+
+    async with get_client(project_name="research") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("Authorization") == "Bearer oauth-token-456"

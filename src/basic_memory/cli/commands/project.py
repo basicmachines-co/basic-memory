@@ -519,12 +519,17 @@ def set_cloud(
 ) -> None:
     """Set a project to cloud mode (route through cloud API).
 
-    Requires an API key to be configured first.
+    Requires either an API key or an active OAuth session.
 
-    Example:
-      bm cloud set-key bmc_abc123...   # save API key first
+    Examples:
+      bm cloud set-key bmc_abc123...   # save API key, then:
+      bm project set-cloud research    # route "research" through cloud
+
+      bm cloud login                   # OAuth login, then:
       bm project set-cloud research    # route "research" through cloud
     """
+    from basic_memory.cli.auth import CLIAuth
+
     config_manager = ConfigManager()
     config = config_manager.config
 
@@ -533,12 +538,16 @@ def set_cloud(
         console.print(f"[red]Error: Project '{name}' not found in config[/red]")
         raise typer.Exit(1)
 
-    # Validate API key is configured
-    if not config.cloud_api_key:
-        console.print("[red]Error: No cloud API key configured[/red]")
-        console.print(
-            "[dim]Run 'bm cloud set-key <key>' or 'bm cloud create-key <name>' first[/dim]"
-        )
+    # Validate credentials: API key or OAuth session
+    has_api_key = bool(config.cloud_api_key)
+    has_oauth = False
+    if not has_api_key:
+        auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+        has_oauth = auth.load_tokens() is not None
+
+    if not has_api_key and not has_oauth:
+        console.print("[red]Error: No cloud credentials found[/red]")
+        console.print("[dim]Run 'bm cloud set-key <key>' or 'bm cloud login' first[/dim]")
         raise typer.Exit(1)
 
     config.set_project_mode(name, ProjectMode.CLOUD)

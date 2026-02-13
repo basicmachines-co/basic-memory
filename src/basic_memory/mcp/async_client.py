@@ -56,12 +56,13 @@ async def get_client(
     1. **Factory injection** (cloud app, tests):
        If a custom factory is set via set_client_factory(), use that.
 
-    2. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
-       Always routes to local ASGI transport, ignoring all cloud settings.
+    2. **Per-project cloud mode** (project_name provided):
+       If the project's mode is CLOUD, routes to cloud using API key or
+       OAuth token. Honored even when FORCE_LOCAL is set, because the user
+       explicitly declared this project as cloud.
 
-    3. **Per-project cloud mode** (project_name provided):
-       If the project's mode is CLOUD, uses HTTP client with cloud_api_key
-       as Bearer token hitting cloud_host/proxy.
+    3. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
+       Routes to local ASGI transport, ignoring global cloud settings.
 
     4. **Global cloud mode** (deprecated fallback):
        When cloud_mode_enabled is True, uses OAuth JWT token.
@@ -72,7 +73,7 @@ async def get_client(
     Args:
         project_name: Optional project name for per-project routing.
             If provided and the project's mode is CLOUD, routes to cloud
-            using the account-level API key.
+            using the API key or OAuth token.
 
     Usage:
         async with get_client() as client:
@@ -102,26 +103,24 @@ async def get_client(
             pool=30.0,  # 30 seconds for connection pool
         )
 
-        # Trigger: BASIC_MEMORY_FORCE_LOCAL env var is set
-        # Why: allows local MCP server and CLI commands to route locally
-        #      even when cloud_mode_enabled is True
-        # Outcome: uses ASGI transport for in-process local API calls
-        if _force_local_mode():
-            logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-            ) as client:
-                yield client
-
         # Trigger: project has per-project cloud mode set
-        # Why: enables routing specific projects through cloud while others stay local
-        # Outcome: HTTP client with API key auth to cloud proxy
-        elif project_name and config.get_project_mode(project_name) == ProjectMode.CLOUD:
-            api_key = config.cloud_api_key
-            if not api_key:
+        # Why: per-project CLOUD is an explicit user declaration that should be
+        #      honored even from the MCP server (which sets FORCE_LOCAL)
+        # Outcome: HTTP client with API key or OAuth auth to cloud proxy
+        if project_name and config.get_project_mode(project_name) == ProjectMode.CLOUD:
+            # Try API key first (explicit, no network)
+            token = config.cloud_api_key
+            if not token:
+                # Fall back to OAuth session (may refresh token)
+                from basic_memory.cli.auth import CLIAuth
+
+                auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+                token = await auth.get_valid_token()
+
+            if not token:
                 raise RuntimeError(
-                    f"Project '{project_name}' is set to cloud mode but no API key configured. "
-                    "Run 'bm cloud set-key <key>' or 'bm cloud create-key <name>' first."
+                    f"Project '{project_name}' is set to cloud mode but no credentials found. "
+                    "Run 'bm cloud set-key <key>' or 'bm cloud login' first."
                 )
 
             proxy_base_url = f"{config.cloud_host}/proxy"
@@ -130,8 +129,19 @@ async def get_client(
             )
             async with AsyncClient(
                 base_url=proxy_base_url,
-                headers={"Authorization": f"Bearer {api_key}"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=timeout,
+            ) as client:
+                yield client
+
+        # Trigger: BASIC_MEMORY_FORCE_LOCAL env var is set
+        # Why: allows local MCP server and CLI commands to route locally
+        #      even when cloud_mode_enabled is True
+        # Outcome: uses ASGI transport for in-process local API calls
+        elif _force_local_mode():
+            logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
+            async with AsyncClient(
+                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
             ) as client:
                 yield client
 

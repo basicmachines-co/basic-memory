@@ -64,8 +64,8 @@ class TestSetCloud:
         assert result.exit_code == 1
         assert "not found" in result.stdout.lower()
 
-    def test_set_cloud_no_api_key(self, runner, tmp_path, monkeypatch):
-        """Test set-cloud when no API key is configured."""
+    def test_set_cloud_no_credentials(self, runner, tmp_path, monkeypatch):
+        """Test set-cloud when neither API key nor OAuth session is available."""
         from basic_memory import config as config_module
 
         config_module._CONFIG_CACHE = None
@@ -85,7 +85,44 @@ class TestSetCloud:
 
         result = runner.invoke(app, ["project", "set-cloud", "research"])
         assert result.exit_code == 1
-        assert "no cloud api key" in result.stdout.lower()
+        assert "no cloud credentials" in result.stdout.lower()
+
+    def test_set_cloud_with_oauth_session(self, runner, tmp_path, monkeypatch):
+        """Test set-cloud succeeds with OAuth token but no API key."""
+        from basic_memory import config as config_module
+
+        config_module._CONFIG_CACHE = None
+
+        config_dir = tmp_path / ".basic-memory"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_file = config_dir / "config.json"
+
+        # Config without cloud_api_key but with a project
+        config_data = {
+            "env": "dev",
+            "projects": {"research": str(tmp_path / "research")},
+            "default_project": "research",
+        }
+        config_file.write_text(json.dumps(config_data, indent=2))
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        # Write OAuth token file so CLIAuth.load_tokens() returns something
+        token_file = config_dir / "basic-memory-cloud.json"
+        token_data = {
+            "access_token": "oauth-token-789",
+            "refresh_token": None,
+            "expires_at": 9999999999,
+            "token_type": "Bearer",
+        }
+        token_file.write_text(json.dumps(token_data, indent=2))
+
+        result = runner.invoke(app, ["project", "set-cloud", "research"])
+        assert result.exit_code == 0
+        assert "cloud mode" in result.stdout.lower()
+
+        # Verify config was updated
+        config_data = json.loads(config_file.read_text())
+        assert config_data["project_modes"]["research"] == "cloud"
 
 
 class TestSetLocal:
