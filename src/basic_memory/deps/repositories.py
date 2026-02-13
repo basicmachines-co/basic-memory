@@ -13,6 +13,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from basic_memory.deps.config import AppConfigDep
 from basic_memory.deps.db import SessionMakerDep
 from basic_memory.deps.projects import (
     ProjectIdDep,
@@ -147,13 +148,14 @@ RelationRepositoryV2ExternalDep = Annotated[
 async def get_search_repository(
     session_maker: SessionMakerDep,
     project_id: ProjectIdDep,
+    app_config: AppConfigDep,
 ) -> SearchRepository:
     """Create a backend-specific SearchRepository instance for the current project.
 
     Uses factory function to return SQLiteSearchRepository or PostgresSearchRepository
     based on database backend configuration.
     """
-    return create_search_repository(session_maker, project_id=project_id)
+    return create_search_repository(session_maker, project_id=project_id, app_config=app_config)
 
 
 SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)]
@@ -162,9 +164,10 @@ SearchRepositoryDep = Annotated[SearchRepository, Depends(get_search_repository)
 async def get_search_repository_v2(  # pragma: no cover
     session_maker: SessionMakerDep,
     project_id: ProjectIdPathDep,
+    app_config: AppConfigDep,
 ) -> SearchRepository:
     """Create a SearchRepository instance for v2 API."""
-    return create_search_repository(session_maker, project_id=project_id)
+    return create_search_repository(session_maker, project_id=project_id, app_config=app_config)
 
 
 SearchRepositoryV2Dep = Annotated[SearchRepository, Depends(get_search_repository_v2)]
@@ -173,9 +176,10 @@ SearchRepositoryV2Dep = Annotated[SearchRepository, Depends(get_search_repositor
 async def get_search_repository_v2_external(
     session_maker: SessionMakerDep,
     project_id: ProjectExternalIdPathDep,
+    app_config: AppConfigDep,
 ) -> SearchRepository:
     """Create a SearchRepository instance for v2 API (uses external_id)."""
-    return create_search_repository(session_maker, project_id=project_id)
+    return create_search_repository(session_maker, project_id=project_id, app_config=app_config)
 
 
 SearchRepositoryV2ExternalDep = Annotated[

@@ -1,39 +1,72 @@
 # Performance Benchmarks
 
-This directory contains performance benchmark tests for Basic Memory's sync/indexing operations.
+This directory contains performance benchmark tests for Basic Memory search indexing and retrieval.
 
 ## Purpose
 
 These benchmarks measure baseline performance to track improvements from optimizations. They are particularly important for:
-- Cloud deployments with ephemeral databases that need fast re-indexing
+- Local semantic search throughput and query latency
 - Large repositories (100s to 1000s of files)
-- Validating optimization efforts
+- Validating optimization efforts before and after ranking/indexing changes
 
 ## Running Benchmarks
 
 ### Run all benchmarks (excluding slow ones)
 ```bash
-pytest test-int/test_sync_performance_benchmark.py -v -m "benchmark and not slow"
+pytest test-int/test_search_performance_benchmark.py -v -m "benchmark and not slow"
 ```
 
 ### Run specific benchmark
 ```bash
-# 100 files (fast, ~10-30 seconds)
-pytest test-int/test_sync_performance_benchmark.py::test_benchmark_sync_100_files -v
+# Cold indexing throughput (300 notes)
+pytest test-int/test_search_performance_benchmark.py::test_benchmark_search_index_cold_start_300_notes -v
 
-# 500 files (medium, ~1-3 minutes)
-pytest test-int/test_sync_performance_benchmark.py::test_benchmark_sync_500_files -v
+# Query latency for fts/vector/hybrid
+pytest test-int/test_search_performance_benchmark.py::test_benchmark_search_query_latency_by_mode -v
 
-# 1000 files (slow, ~3-10 minutes)
-pytest test-int/test_sync_performance_benchmark.py::test_benchmark_sync_1000_files -v
+# Retrieval quality (hit@1, recall@5, mrr@10) for lexical/paraphrase suites
+pytest test-int/test_search_performance_benchmark.py::test_benchmark_search_quality_recall_by_mode -v
 
-# Re-sync with no changes (tests scan performance)
-pytest test-int/test_sync_performance_benchmark.py::test_benchmark_resync_no_changes -v
+# Incremental re-index (80 changed notes out of 800)
+pytest test-int/test_search_performance_benchmark.py::test_benchmark_search_incremental_reindex_80_of_800_notes -v -m slow
 ```
 
 ### Run all benchmarks including slow ones
 ```bash
-pytest test-int/test_sync_performance_benchmark.py -v -m benchmark
+pytest test-int/test_search_performance_benchmark.py -v -m benchmark
+```
+
+### Write JSON benchmark artifacts
+```bash
+BASIC_MEMORY_BENCHMARK_OUTPUT=.benchmarks/search-benchmarks.jsonl \
+pytest test-int/test_search_performance_benchmark.py -v -m benchmark
+```
+
+### Compare two benchmark runs
+```bash
+uv run python test-int/compare_search_benchmarks.py \
+  .benchmarks/search-baseline.jsonl \
+  .benchmarks/search-candidate.jsonl \
+  --show-missing
+
+# via just
+just benchmark-compare .benchmarks/search-baseline.jsonl .benchmarks/search-candidate.jsonl table --show-missing
+```
+
+Optional filters:
+```bash
+uv run python test-int/compare_search_benchmarks.py \
+  .benchmarks/search-baseline.jsonl \
+  .benchmarks/search-candidate.jsonl \
+  --benchmarks "cold index (300 notes),query latency (hybrid)"
+```
+
+Markdown output for PR comments:
+```bash
+uv run python test-int/compare_search_benchmarks.py \
+  .benchmarks/search-baseline.jsonl \
+  .benchmarks/search-candidate.jsonl \
+  --format markdown
 ```
 
 ### Skip benchmarks in regular test runs
@@ -41,89 +74,112 @@ pytest test-int/test_sync_performance_benchmark.py -v -m benchmark
 pytest -m "not benchmark"
 ```
 
+### Optional guardrails (recommended for nightly runs only)
+```bash
+BASIC_MEMORY_BENCH_MIN_COLD_NOTES_PER_SEC=80 \
+BASIC_MEMORY_BENCH_MIN_INCREMENTAL_NOTES_PER_SEC=60 \
+BASIC_MEMORY_BENCH_MAX_FTS_P95_MS=30 \
+BASIC_MEMORY_BENCH_MAX_VECTOR_P95_MS=45 \
+BASIC_MEMORY_BENCH_MAX_HYBRID_P95_MS=60 \
+pytest test-int/test_search_performance_benchmark.py -v -m benchmark
+```
+
+Guardrails are opt-in. When threshold environment variables are not set, tests only report metrics.
+
 ## Benchmark Output
 
 Each benchmark provides detailed metrics including:
 
 - **Performance Metrics**:
-  - Total sync time
-  - Files processed per second
-  - Milliseconds per file
+  - Total indexing/re-index time
+  - Notes processed per second
+  - Query latency percentiles (p50/p95/p99)
+  - Retrieval quality metrics (hit@1, recall@5, mrr@10)
 
 - **Database Metrics**:
-  - Initial database size
-  - Final database size
-  - Database growth (total and per file)
+  - Final SQLite database size for the benchmark run
 
 - **Operation Counts**:
-  - New files indexed
-  - Modified files processed
-  - Deleted files handled
-  - Moved files tracked
+  - Notes indexed
+  - Notes re-indexed
+  - Queries executed per retrieval mode
+
+- **Optional JSON Artifacts**:
+  - One JSON object per benchmark test run when `BASIC_MEMORY_BENCHMARK_OUTPUT` is set
+  - Includes benchmark name, UTC timestamp, and metric values
 
 ## Example Output
 
 ```
-======================================================================
-BENCHMARK: Sync 100 files (small repository)
-======================================================================
+BENCHMARK: cold index (300 notes)
+notes indexed: 300
+elapsed (s): 11.4820
+notes/sec: 26.13
+sqlite size (MB): 4.83
 
-Generating 100 test files...
-  Created files 0-100 (100/100)
-  File generation completed in 0.15s (666.7 files/sec)
-
-Initial database size: 120.00 KB
-
-Starting sync of 100 files...
-
-----------------------------------------------------------------------
-RESULTS:
-----------------------------------------------------------------------
-Files processed:      100
-  New:                100
-  Modified:           0
-  Deleted:            0
-  Moved:              0
-
-Performance:
-  Total time:         12.34s
-  Files/sec:          8.1
-  ms/file:            123.4
-
-Database:
-  Initial size:       120.00 KB
-  Final size:         5.23 MB
-  Growth:             5.11 MB
-  Growth per file:    52.31 KB
-======================================================================
+BENCHMARK: query latency (hybrid)
+queries executed: 32
+avg latency (ms): 3.40
+p50 latency (ms): 2.94
+p95 latency (ms): 5.88
+p99 latency (ms): 6.21
 ```
 
 ## Interpreting Results
 
 ### Good Performance Indicators
-- **Files/sec > 10**: Good indexing speed for small-medium repos
-- **Files/sec > 5**: Acceptable for large repos with complex relations
-- **DB growth < 100KB per file**: Reasonable index size
+- **notes/sec stays stable across runs**: indexing path changes are not regressing
+- **p95 query latency stays stable**: retrieval changes are not regressing tail latency
+- **recall@5 and mrr@10 stay stable or improve**: relevance quality is not regressing
+- **sqlite size growth stays proportional to note volume**: vector/index growth remains predictable
 
 ### Areas for Improvement
-- **Files/sec < 5**: May benefit from batch operations
-- **ms/file > 200**: High latency per file, check for N+1 queries
-- **DB growth > 200KB per file**: Search index may be bloated (trigrams?)
+- **indexing throughput drops significantly**: inspect per-note indexing and vector chunking
+- **p95/p99 latency spikes**: inspect fusion and vector candidate scans
+- **quality metrics drop**: inspect ranking fusion and chunking strategy
+- **db size growth is disproportionate**: inspect chunk sizing and duplicated indexed text
 
 ## Tracking Improvements
 
 Before making optimizations:
 1. Run benchmarks to establish baseline
-2. Save output for comparison
-3. Note any particular pain points (e.g., slow search indexing)
+2. Optionally set `BASIC_MEMORY_BENCHMARK_OUTPUT` to capture machine-readable metrics
+3. Save output for comparison
+4. Note any particular pain points (e.g., slow search indexing)
 
 After optimizations:
 1. Run the same benchmarks
 2. Compare metrics:
-   - Files/sec should increase
-   - ms/file should decrease
-   - DB growth per file may decrease (with search optimizations)
-3. Document improvements in PR
+   - Notes/sec should increase for indexing and incremental re-index
+   - p95/p99 query latency should decrease or remain stable
+   - SQLite size should remain proportional to note volume
+3. Optionally run with guardrail env vars in nightly CI to catch regressions
+4. Document improvements in PR
+
+## Guardrail Environment Variables
+
+- `BASIC_MEMORY_BENCH_MIN_COLD_NOTES_PER_SEC`
+- `BASIC_MEMORY_BENCH_MAX_COLD_SQLITE_SIZE_MB`
+- `BASIC_MEMORY_BENCH_MIN_INCREMENTAL_NOTES_PER_SEC`
+- `BASIC_MEMORY_BENCH_MAX_INCREMENTAL_SQLITE_SIZE_MB`
+- `BASIC_MEMORY_BENCH_MAX_FTS_P95_MS`
+- `BASIC_MEMORY_BENCH_MAX_FTS_P99_MS`
+- `BASIC_MEMORY_BENCH_MAX_VECTOR_P95_MS`
+- `BASIC_MEMORY_BENCH_MAX_VECTOR_P99_MS`
+- `BASIC_MEMORY_BENCH_MAX_HYBRID_P95_MS`
+- `BASIC_MEMORY_BENCH_MAX_HYBRID_P99_MS`
+- `BASIC_MEMORY_BENCH_MIN_LEXICAL_FTS_RECALL_AT_5`
+- `BASIC_MEMORY_BENCH_MIN_LEXICAL_FTS_MRR_AT_10`
+- `BASIC_MEMORY_BENCH_MIN_LEXICAL_VECTOR_RECALL_AT_5`
+- `BASIC_MEMORY_BENCH_MIN_LEXICAL_VECTOR_MRR_AT_10`
+- `BASIC_MEMORY_BENCH_MIN_LEXICAL_HYBRID_RECALL_AT_5`
+- `BASIC_MEMORY_BENCH_MIN_LEXICAL_HYBRID_MRR_AT_10`
+- `BASIC_MEMORY_BENCH_MIN_PARAPHRASE_FTS_RECALL_AT_5`
+- `BASIC_MEMORY_BENCH_MIN_PARAPHRASE_FTS_MRR_AT_10`
+- `BASIC_MEMORY_BENCH_MIN_PARAPHRASE_VECTOR_RECALL_AT_5`
+- `BASIC_MEMORY_BENCH_MIN_PARAPHRASE_VECTOR_MRR_AT_10`
+- `BASIC_MEMORY_BENCH_MIN_PARAPHRASE_HYBRID_RECALL_AT_5`
+- `BASIC_MEMORY_BENCH_MIN_PARAPHRASE_HYBRID_MRR_AT_10`
 
 ## Related Issues
 
@@ -131,9 +187,8 @@ After optimizations:
 
 ## Test File Generation
 
-Benchmarks generate realistic markdown files with:
+Benchmarks generate realistic markdown notes with:
 - YAML frontmatter with tags
-- 3-10 observations per file with categories
-- 1-3 relations per file (including forward references)
-- Varying content to simulate real usage
-- Files organized in category subdirectories
+- Multiple markdown sections per note
+- Repeated domain-specific terms for retrieval-mode comparisons
+- Sufficient content length to exercise chunk-based semantic indexing

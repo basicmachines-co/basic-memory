@@ -8,7 +8,6 @@ import pytest
 
 from basic_memory.cli.commands.cloud.rclone_commands import (
     MIN_RCLONE_VERSION_EMPTY_DIRS,
-    TIGRIS_CONSISTENCY_HEADERS,
     RcloneError,
     SyncProject,
     bisync_initialized,
@@ -42,15 +41,14 @@ class _Runner:
 
 
 def _assert_has_consistency_headers(cmd: list[str]) -> None:
-    """Assert the rclone command includes Tigris consistency headers."""
-    assert "--header-download" in cmd
-    assert "X-Tigris-Consistent: true" in cmd
-    assert "--header-upload" in cmd
-    # Verify upload header value follows --header-upload
-    upload_idx = cmd.index("--header-upload")
-    assert cmd[upload_idx + 1] == "X-Tigris-Consistent: true"
-    download_idx = cmd.index("--header-download")
-    assert cmd[download_idx + 1] == "X-Tigris-Consistent: true"
+    """Assert the rclone command includes Tigris consistency headers.
+
+    Uses --header (global flag) so the header applies to ALL HTTP transactions,
+    including S3 list requests that bisync issues before any download/upload.
+    """
+    assert "--header" in cmd
+    header_idx = cmd.index("--header")
+    assert cmd[header_idx + 1] == "X-Tigris-Consistent: true"
 
 
 def _write_filter_file(tmp_path: Path) -> Path:

@@ -28,11 +28,13 @@ console = Console()
 MIN_RCLONE_VERSION_EMPTY_DIRS = (1, 64, 0)
 
 # Tigris edge caching returns stale data for users outside the origin region (iad).
-# These headers bypass edge cache and force reads/writes against the origin.
+# --header is rclone's global flag that applies to ALL HTTP transactions (list, download,
+# upload). This is critical because bisync starts with S3 ListObjectsV2, which is neither
+# a download nor upload — so --header-download/--header-upload would miss list requests.
 # See: https://www.tigrisdata.com/docs/objects/consistency/
 TIGRIS_CONSISTENCY_HEADERS = [
-    "--header-download", "X-Tigris-Consistent: true",
-    "--header-upload", "X-Tigris-Consistent: true",
+    "--header",
+    "X-Tigris-Consistent: true",
 ]
 
 

@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 from loguru import logger
 from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from sqlalchemy.exc import OperationalError
 
 from basic_memory import db
@@ -103,3 +104,126 @@ def reset(
                 # ensures db.shutdown_db() is called even if _reindex_projects changes
                 run_with_cleanup(_reindex_projects(app_config))
                 console.print("[green]Reindex complete[/green]")
+
+
+@app.command()
+def reindex(
+    embeddings: bool = typer.Option(
+        False, "--embeddings", "-e", help="Rebuild vector embeddings (requires semantic search)"
+    ),
+    search: bool = typer.Option(
+        False, "--search", "-s", help="Rebuild full-text search index"
+    ),
+    project: str = typer.Option(
+        None, "--project", "-p", help="Reindex a specific project (default: all)"
+    ),
+):  # pragma: no cover
+    """Rebuild search indexes and/or vector embeddings without dropping the database.
+
+    By default rebuilds everything (search + embeddings if semantic is enabled).
+    Use --search or --embeddings to rebuild only one.
+
+    Examples:
+        bm reindex                  # Rebuild everything
+        bm reindex --embeddings     # Only rebuild vector embeddings
+        bm reindex --search         # Only rebuild FTS index
+        bm reindex -p claw          # Reindex only the 'claw' project
+    """
+    # If neither flag is set, do both
+    if not embeddings and not search:
+        embeddings = True
+        search = True
+
+    config_manager = ConfigManager()
+    app_config = config_manager.config
+
+    if embeddings and not app_config.semantic_search_enabled:
+        console.print(
+            "[yellow]Semantic search is not enabled.[/yellow] "
+            "Set [cyan]semantic_search_enabled: true[/cyan] in config to use embeddings."
+        )
+        embeddings = False
+        if not search:
+            raise typer.Exit(0)
+
+    run_with_cleanup(_reindex(app_config, search=search, embeddings=embeddings, project=project))
+
+
+async def _reindex(app_config, search: bool, embeddings: bool, project: str | None):
+    """Run reindex operations."""
+    from basic_memory.repository import EntityRepository
+    from basic_memory.repository.search_repository import create_search_repository
+    from basic_memory.services.search_service import SearchService
+    from basic_memory.services.file_service import FileService
+    from basic_memory.markdown.markdown_processor import MarkdownProcessor
+    from basic_memory.markdown.entity_parser import EntityParser
+
+    try:
+        await reconcile_projects_with_config(app_config)
+
+        _, session_maker = await db.get_or_create_db(
+            db_path=app_config.database_path,
+            db_type=db.DatabaseType.FILESYSTEM,
+        )
+        project_repository = ProjectRepository(session_maker)
+        projects = await project_repository.get_active_projects()
+
+        if project:
+            projects = [p for p in projects if p.name == project]
+            if not projects:
+                console.print(f"[red]Project '{project}' not found.[/red]")
+                raise typer.Exit(1)
+
+        for proj in projects:
+            console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
+
+            if search:
+                console.print("  Rebuilding full-text search index...")
+                sync_service = await get_sync_service(proj)
+                sync_dir = Path(proj.path)
+                await sync_service.sync(sync_dir, project_name=proj.name)
+                console.print("  [green]✓[/green] Full-text search index rebuilt")
+
+            if embeddings:
+                console.print("  Building vector embeddings...")
+                entity_repository = EntityRepository(session_maker, project_id=proj.id)
+                search_repository = create_search_repository(
+                    session_maker, project_id=proj.id, app_config=app_config
+                )
+                project_path = Path(proj.path)
+                entity_parser = EntityParser(project_path)
+                markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
+                file_service = FileService(
+                    project_path, markdown_processor, app_config=app_config
+                )
+                search_service = SearchService(
+                    search_repository, entity_repository, file_service
+                )
+
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TaskProgressColumn(),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("  Embedding entities...", total=None)
+
+                    def on_progress(entity_id, index, total):
+                        progress.update(task, total=total, completed=index)
+
+                    stats = await search_service.reindex_vectors(
+                        progress_callback=on_progress
+                    )
+                    progress.update(task, completed=stats["total_entities"])
+
+                console.print(
+                    f"  [green]✓[/green] Embeddings complete: "
+                    f"{stats['embedded']} entities embedded, "
+                    f"{stats['skipped']} skipped, "
+                    f"{stats['errors']} errors"
+                )
+
+        console.print("\n[green]Reindex complete![/green]")
+    finally:
+        await db.shutdown_db()
