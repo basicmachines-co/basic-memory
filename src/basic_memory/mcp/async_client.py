@@ -61,13 +61,18 @@ async def get_client(
        OAuth token. Honored even when FORCE_LOCAL is set, because the user
        explicitly declared this project as cloud.
 
-    3. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
+    3. **Per-project local mode** (project_name provided):
+       If the project's mode is LOCAL (or unspecified, default LOCAL), route
+       to local ASGI transport. This allows mixed local/cloud routing even when
+       global cloud mode is enabled.
+
+    4. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
        Routes to local ASGI transport, ignoring global cloud settings.
 
-    4. **Global cloud mode** (deprecated fallback):
+    5. **Global cloud mode** (deprecated fallback):
        When cloud_mode_enabled is True, uses OAuth JWT token.
 
-    5. **Local mode** (default):
+    6. **Local mode** (default):
        Use ASGI transport for in-process requests to local FastAPI app.
 
     Args:
@@ -131,6 +136,17 @@ async def get_client(
                 base_url=proxy_base_url,
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=timeout,
+            ) as client:
+                yield client
+
+        # Trigger: project is not explicitly cloud (LOCAL is the default)
+        # Why: project-scoped routing should honor local mode even when global
+        #      cloud mode is enabled for backward compatibility
+        # Outcome: uses ASGI transport for in-process local API calls
+        elif project_name and config.get_project_mode(project_name) == ProjectMode.LOCAL:
+            logger.info(f"Project '{project_name}' is set to local mode - using ASGI transport")
+            async with AsyncClient(
+                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
             ) as client:
                 yield client
 

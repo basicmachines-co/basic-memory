@@ -133,6 +133,21 @@ async def test_get_client_local_project_uses_asgi_transport(config_manager, conf
 
 
 @pytest.mark.asyncio
+async def test_get_client_local_project_honored_with_global_cloud_enabled(config_manager, config_home):
+    """LOCAL project mode should take priority over global cloud mode fallback."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = True
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = None
+    # "main" defaults to LOCAL since we didn't set_project_mode
+    config_manager.save_config(cfg)
+
+    # Should use ASGI transport without requiring OAuth token.
+    async with get_client(project_name="main") as client:
+        assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
 async def test_get_client_no_project_name_uses_default_routing(config_manager, config_home):
     """Test that get_client without project_name falls through to default routing."""
     cfg = config_manager.load_config()
