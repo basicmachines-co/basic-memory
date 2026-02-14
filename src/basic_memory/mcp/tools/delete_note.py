@@ -7,6 +7,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.memory import parse_memory_url
 
 
 def _format_delete_error_response(project: str, error_message: str, identifier: str) -> str:
@@ -215,6 +216,12 @@ async def delete_note(
         with suggestions for finding the correct identifier, including search
         commands and alternative formats to try.
     """
+    # Extract ?project= from identifier when no explicit project parameter was provided
+    if identifier.startswith("memory://"):
+        identifier, url_params = parse_memory_url(identifier)
+        if project is None and "project" in url_params:
+            project = url_params["project"]
+
     async with get_project_client(project, context) as (client, active_project):
         logger.debug(
             f"Deleting {'directory' if is_directory else 'note'}: {identifier} in project: {active_project.name}"

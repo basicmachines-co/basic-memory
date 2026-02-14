@@ -8,6 +8,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client
+from basic_memory.schemas.memory import parse_memory_url
 from basic_memory.utils import validate_project_path
 
 
@@ -411,6 +412,12 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
+    # Extract ?project= from identifier when no explicit project parameter was provided
+    if identifier.startswith("memory://"):
+        identifier, url_params = parse_memory_url(identifier)
+        if project is None and "project" in url_params:
+            project = url_params["project"]
+
     async with get_project_client(project, context) as (client, active_project):
         logger.debug(
             f"Moving {'directory' if is_directory else 'note'}: {identifier} to {destination_path} in project: {active_project.name}"

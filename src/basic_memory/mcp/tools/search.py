@@ -9,6 +9,7 @@ from fastmcp import Context
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.formatting import format_search_results_ascii
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.memory import parse_memory_url
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
@@ -395,6 +396,12 @@ async def search_notes(
         # Explicit project specification
         results = await search_notes("project planning", project="my-project")
     """
+    # Extract ?project= from query when it's a memory:// URL
+    if query.startswith("memory://"):
+        query, url_params = parse_memory_url(query)
+        if project is None and "project" in url_params:
+            project = url_params["project"]
+
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     types = types or []
     entity_types = entity_types or []

@@ -7,6 +7,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.memory import parse_memory_url
 
 
 def _format_error_response(
@@ -211,6 +212,12 @@ async def edit_note(
         search_notes() first to find the correct identifier. The tool provides detailed
         error messages with suggestions if operations fail.
     """
+    # Extract ?project= from identifier when no explicit project parameter was provided
+    if identifier.startswith("memory://"):
+        identifier, url_params = parse_memory_url(identifier)
+        if project is None and "project" in url_params:
+            project = url_params["project"]
+
     async with get_project_client(project, context) as (client, active_project):
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
