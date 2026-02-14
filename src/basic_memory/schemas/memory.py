@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional, Annotated, Sequence, Literal, Union, Dict
+from urllib.parse import parse_qs
 
 from annotated_types import MinLen, MaxLen
 from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, field_serializer
@@ -13,7 +14,7 @@ def validate_memory_url_path(path: str) -> bool:
     """Validate that a memory URL path is well-formed.
 
     Args:
-        path: The path part of a memory URL (without memory:// prefix)
+        path: The path part of a memory URL (without memory:// prefix or query string)
 
     Returns:
         True if the path is valid, False otherwise
@@ -38,22 +39,69 @@ def validate_memory_url_path(path: str) -> bool:
     if "//" in path:
         return False
 
-    # Check for invalid characters (excluding * which is used for pattern matching)
-    invalid_chars = {"<", ">", '"', "|", "?"}
+    # Check for invalid characters (excluding * for pattern matching and ? for query strings)
+    invalid_chars = {"<", ">", '"', "|"}
     if any(char in path for char in invalid_chars):
         return False
 
     return True
 
 
+def _split_query_string(url: str) -> tuple[str, str]:
+    """Split a URL into path and query string portions.
+
+    Returns:
+        Tuple of (path_portion, query_string) where query_string excludes the leading '?'.
+        If no query string is present, query_string is empty.
+    """
+    if "?" in url:
+        path, query_string = url.split("?", 1)
+        return path, query_string
+    return url, ""
+
+
+def parse_memory_url(url: str) -> tuple[str, dict[str, str]]:
+    """Parse a memory:// URL into its path and query parameters.
+
+    Extracts query parameters (like ?project=myproject) from a memory URL,
+    returning the clean URL and a dict of single-valued params.
+
+    Args:
+        url: A memory URL, possibly with query parameters.
+
+    Returns:
+        Tuple of (clean_memory_url, params_dict).
+        The clean URL has query parameters stripped.
+        Params are flattened to single values (last value wins for duplicates).
+
+    Examples:
+        >>> parse_memory_url("memory://specs/search?project=research")
+        ('memory://specs/search', {'project': 'research'})
+        >>> parse_memory_url("memory://specs/search")
+        ('memory://specs/search', {})
+        >>> parse_memory_url("specs/search?project=foo")
+        ('specs/search', {'project': 'foo'})
+    """
+    base, query_string = _split_query_string(url)
+    if not query_string:
+        return url, {}
+
+    # parse_qs returns lists; flatten to single values (last wins)
+    parsed = parse_qs(query_string, keep_blank_values=False)
+    params = {k: v[-1] for k, v in parsed.items()}
+    return base, params
+
+
 def normalize_memory_url(url: str | None) -> str:
     """Normalize a MemoryUrl string with validation.
 
+    Query parameters (e.g. ?project=foo) are preserved through normalization.
+
     Args:
-        url: A path like "specs/search" or "memory://specs/search"
+        url: A path like "specs/search" or "memory://specs/search?project=foo"
 
     Returns:
-        Normalized URL starting with memory://
+        Normalized URL starting with memory://, with any query params preserved
 
     Raises:
         ValueError: If the URL path is malformed
@@ -61,8 +109,8 @@ def normalize_memory_url(url: str | None) -> str:
     Examples:
         >>> normalize_memory_url("specs/search")
         'memory://specs/search'
-        >>> normalize_memory_url("memory://specs/search")
-        'memory://specs/search'
+        >>> normalize_memory_url("memory://specs/search?project=foo")
+        'memory://specs/search?project=foo'
         >>> normalize_memory_url("memory//test")
         Traceback (most recent call last):
         ...
@@ -77,9 +125,12 @@ def normalize_memory_url(url: str | None) -> str:
     if not url:
         raise ValueError("Memory URL cannot be empty or whitespace")
 
-    clean_path = url.removeprefix("memory://")
+    # Separate query string before validation — query params are not part of the path
+    base, query_string = _split_query_string(url)
 
-    # Validate the extracted path
+    clean_path = base.removeprefix("memory://")
+
+    # Validate the path portion only (query string is handled separately)
     if not validate_memory_url_path(clean_path):
         # Provide specific error messages for common issues
         if "://" in clean_path:
@@ -89,7 +140,10 @@ def normalize_memory_url(url: str | None) -> str:
         else:
             raise ValueError(f"Invalid memory URL path: '{clean_path}' contains invalid characters")
 
-    return f"memory://{clean_path}"
+    normalized = f"memory://{clean_path}"
+    if query_string:
+        normalized = f"{normalized}?{query_string}"
+    return normalized
 
 
 MemoryUrl = Annotated[
@@ -105,19 +159,20 @@ memory_url = TypeAdapter(MemoryUrl)
 
 def memory_url_path(url: memory_url) -> str:  # pyright: ignore
     """
-    Returns the uri for a url value by removing the prefix "memory://" from a given MemoryUrl.
+    Returns the path for a url value by removing the "memory://" prefix and any query string.
 
-    This function processes a given MemoryUrl by removing the "memory://"
-    prefix and returns the resulting string. If the provided url does not
-    begin with "memory://", the function will simply return the input url
-    unchanged.
+    Strips both the memory:// scheme and any query parameters (?project=foo etc.)
+    to return just the path portion used for entity lookup.
 
     :param url: A MemoryUrl object representing the URL with a "memory://" prefix.
     :type url: MemoryUrl
-    :return: A string representing the URL with the "memory://" prefix removed.
+    :return: The path portion of the URL, without prefix or query string.
     :rtype: str
     """
-    return url.removeprefix("memory://")
+    path = url.removeprefix("memory://")
+    # Strip query string — callers need just the path for lookups
+    path, _ = _split_query_string(path)
+    return path
 
 
 class EntitySummary(BaseModel):

@@ -10,7 +10,7 @@ from basic_memory.mcp.project_context import get_project_client, resolve_project
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.formatting import format_note_preview_ascii
 from basic_memory.mcp.tools.search import search_notes
-from basic_memory.schemas.memory import memory_url_path
+from basic_memory.schemas.memory import memory_url_path, parse_memory_url
 from basic_memory.utils import validate_project_path
 
 
@@ -81,6 +81,12 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
+    # Extract ?project= from identifier when no explicit project parameter was provided
+    if identifier.startswith("memory://"):
+        identifier, url_params = parse_memory_url(identifier)
+        if project is None and "project" in url_params:
+            project = url_params["project"]
+
     async with get_project_client(project, context) as (client, active_project):
         # Resolve identifier with project-prefix awareness for memory:// URLs
         _, entity_path, _ = await resolve_project_and_path(

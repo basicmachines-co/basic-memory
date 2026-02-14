@@ -8,7 +8,7 @@ from fastmcp import Context
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
-from basic_memory.schemas.memory import GraphContext, MemoryUrl
+from basic_memory.schemas.memory import GraphContext, MemoryUrl, parse_memory_url
 
 
 @mcp.tool(
@@ -19,9 +19,10 @@ from basic_memory.schemas.memory import GraphContext, MemoryUrl
     Memory URL Format:
     - Use paths like "folder/note" or "memory://folder/note"
     - Pattern matching: "folder/*" matches all notes in folder
+    - Query parameters: "memory://folder/note?project=myproject" to target a specific project
     - Valid characters: letters, numbers, hyphens, underscores, forward slashes
     - Avoid: double slashes (//), angle brackets (<>), quotes, pipes (|)
-    - Examples: "specs/search", "projects/basic-memory", "notes/*"
+    - Examples: "specs/search", "memory://specs/search?project=research", "notes/*"
 
     Timeframes support natural language like:
     - "2 days ago", "last week", "today", "3 months ago"
@@ -52,7 +53,9 @@ async def build_context(
     Args:
         project: Project name to build context from. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
+                Can also be specified via ?project= query parameter on the URL.
         url: memory:// URI pointing to discussion content (e.g. memory://specs/search)
+             Supports ?project= query parameter (e.g. memory://specs/search?project=research)
         depth: How many relation hops to traverse (1-3 recommended for performance)
         timeframe: How far back to look. Supports natural language like "2 days ago", "last week"
         page: Page number of results to return (default: 1)
@@ -82,6 +85,11 @@ async def build_context(
     Raises:
         ToolError: If project doesn't exist or depth parameter is invalid
     """
+    # Extract ?project= from URL when no explicit project parameter was provided
+    url, url_params = parse_memory_url(url)
+    if project is None and "project" in url_params:
+        project = url_params["project"]
+
     logger.info(f"Building context from {url} in project {project}")
 
     # Convert string depth to integer if needed
@@ -92,8 +100,6 @@ async def build_context(
             from mcp.server.fastmcp.exceptions import ToolError
 
             raise ToolError(f"Invalid depth parameter: '{depth}' is not a valid integer")
-
-    # URL is already validated and normalized by MemoryUrl type annotation
 
     async with get_project_client(project, context) as (client, active_project):
         # Resolve memory:// identifier with project-prefix awareness

@@ -18,7 +18,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
-from basic_memory.schemas.memory import memory_url_path
+from basic_memory.schemas.memory import memory_url_path, parse_memory_url
 from basic_memory.utils import validate_project_path
 
 
@@ -199,6 +199,12 @@ async def read_content(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If path attempts path traversal
     """
+    # Extract ?project= from path when no explicit project parameter was provided
+    if path.startswith("memory://"):
+        path, url_params = parse_memory_url(path)
+        if project is None and "project" in url_params:
+            project = url_params["project"]
+
     logger.info("Reading file", path=path, project=project)
 
     async with get_project_client(project, context) as (client, active_project):

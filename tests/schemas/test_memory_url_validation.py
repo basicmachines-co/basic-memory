@@ -7,6 +7,8 @@ from basic_memory.schemas.memory import (
     normalize_memory_url,
     validate_memory_url_path,
     memory_url,
+    memory_url_path,
+    parse_memory_url,
 )
 
 
@@ -83,13 +85,16 @@ class TestValidateMemoryUrlPath:
             "notes<with>brackets",
             'notes"with"quotes',
             "notes|with|pipes",
-            "notes?with?questions",
         ]
 
         for path in invalid_paths:
             assert not validate_memory_url_path(path), (
                 f"Path '{path}' should be invalid (invalid chars)"
             )
+
+    def test_question_mark_allowed_in_path(self):
+        """Test that ? is allowed since it serves as query string separator."""
+        assert validate_memory_url_path("notes?project=foo")
 
 
 class TestNormalizeMemoryUrl:
@@ -104,6 +109,26 @@ class TestNormalizeMemoryUrl:
             ("memory://notes/meeting-2025", "memory://notes/meeting-2025"),
             ("pattern/*", "memory://pattern/*"),
             ("memory://pattern/*", "memory://pattern/*"),
+        ]
+
+        for input_url, expected in test_cases:
+            result = normalize_memory_url(input_url)
+            assert result == expected, (
+                f"normalize_memory_url('{input_url}') should return '{expected}', got '{result}'"
+            )
+
+    def test_query_params_preserved(self):
+        """Test that query parameters are preserved through normalization."""
+        test_cases = [
+            ("specs/search?project=research", "memory://specs/search?project=research"),
+            (
+                "memory://specs/search?project=research",
+                "memory://specs/search?project=research",
+            ),
+            (
+                "notes/meeting?project=work&depth=2",
+                "memory://notes/meeting?project=work&depth=2",
+            ),
         ]
 
         for input_url, expected in test_cases:
@@ -164,7 +189,6 @@ class TestNormalizeMemoryUrl:
             "notes<brackets>",
             'notes"quotes"',
             "notes|pipes|",
-            "notes?questions?",
         ]
 
         for url in invalid_urls:
@@ -183,6 +207,8 @@ class TestMemoryUrlPydanticValidation:
             "notes/meeting-2025",
             "projects/basic-memory/docs",
             "pattern/*",
+            "specs/search?project=research",
+            "memory://specs/search?project=research",
         ]
 
         for url in valid_urls:
@@ -272,3 +298,63 @@ class TestMemoryUrlErrorMessages:
         error_msg = str(exc_info.value)
         assert "notes<brackets>" in error_msg
         assert "invalid characters" in error_msg
+
+
+class TestParseMemoryUrl:
+    """Test the parse_memory_url function."""
+
+    def test_url_without_params(self):
+        """Test parsing a URL with no query parameters."""
+        url, params = parse_memory_url("memory://specs/search")
+        assert url == "memory://specs/search"
+        assert params == {}
+
+    def test_url_with_project_param(self):
+        """Test parsing a URL with ?project= query parameter."""
+        url, params = parse_memory_url("memory://specs/search?project=research")
+        assert url == "memory://specs/search"
+        assert params == {"project": "research"}
+
+    def test_url_with_multiple_params(self):
+        """Test parsing a URL with multiple query parameters."""
+        url, params = parse_memory_url("memory://specs/search?project=research&depth=2")
+        assert url == "memory://specs/search"
+        assert params == {"project": "research", "depth": "2"}
+
+    def test_bare_path_with_params(self):
+        """Test parsing a bare path (no memory:// prefix) with query parameters."""
+        url, params = parse_memory_url("specs/search?project=foo")
+        assert url == "specs/search"
+        assert params == {"project": "foo"}
+
+    def test_duplicate_params_last_wins(self):
+        """Test that duplicate query parameters use last value."""
+        url, params = parse_memory_url("memory://specs/search?project=a&project=b")
+        assert url == "memory://specs/search"
+        assert params == {"project": "b"}
+
+    def test_empty_param_values_excluded(self):
+        """Test that empty parameter values are excluded."""
+        url, params = parse_memory_url("memory://specs/search?project=")
+        assert url == "memory://specs/search"
+        assert params == {}
+
+
+class TestMemoryUrlPathWithQueryParams:
+    """Test that memory_url_path strips query parameters."""
+
+    def test_path_without_params(self):
+        """Test extracting path from URL without query params."""
+        assert memory_url_path("memory://specs/search") == "specs/search"
+
+    def test_path_strips_query_params(self):
+        """Test that query params are stripped when extracting the path."""
+        assert memory_url_path("memory://specs/search?project=research") == "specs/search"
+
+    def test_path_strips_multiple_params(self):
+        """Test stripping multiple query parameters."""
+        assert memory_url_path("memory://notes/meeting?project=work&depth=2") == "notes/meeting"
+
+    def test_no_prefix(self):
+        """Test path extraction when no memory:// prefix."""
+        assert memory_url_path("specs/search?project=foo") == "specs/search"
