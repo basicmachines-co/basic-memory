@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from basic_memory.schemas.search import SearchResponse, SearchResult
 
