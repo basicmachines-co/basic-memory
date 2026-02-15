@@ -513,7 +513,9 @@ async def test_synchronize_projects_normalizes_project_names(project_service: Pr
 
             # Add project with unnormalized name directly to config
             config = config_manager.load_config()
-            config.projects[unnormalized_name] = test_project_path
+            from basic_memory.config import ProjectEntry
+
+            config.projects[unnormalized_name] = ProjectEntry(path=test_project_path)
             config_manager.save_config(config)
 
             # Verify the unnormalized name is in config
@@ -704,7 +706,9 @@ async def test_synchronize_projects_handles_case_sensitivity_bug(project_service
         try:
             # Add project with uppercase name to config (simulating the bug scenario)
             config = config_manager.load_config()
-            config.projects[config_name] = test_project_path
+            from basic_memory.config import ProjectEntry
+
+            config.projects[config_name] = ProjectEntry(path=test_project_path)
             config_manager.save_config(config)
 
             # Verify the uppercase name is in config

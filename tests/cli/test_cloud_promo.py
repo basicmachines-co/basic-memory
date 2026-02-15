@@ -45,7 +45,6 @@ def test_version_notice_shows_when_promo_version_changes():
     assert messages[0].startswith("New in Basic Memory Cloud")
 
 
-
 def test_no_message_when_already_shown_for_current_version():
     config_manager = ConfigManager()
     config = config_manager.load_config()
@@ -62,7 +61,6 @@ def test_no_message_when_already_shown_for_current_version():
     )
 
     assert messages == []
-
 
 
 def test_no_message_when_cloud_mode_enabled():
@@ -82,7 +80,6 @@ def test_no_message_when_cloud_mode_enabled():
     assert messages == []
 
 
-
 def test_no_message_when_user_opted_out():
     config_manager = ConfigManager()
     config = config_manager.load_config()
@@ -100,7 +97,6 @@ def test_no_message_when_user_opted_out():
     assert messages == []
 
 
-
 def test_no_message_for_mcp_subcommand():
     messages: list[str] = []
     maybe_show_cloud_promo(
@@ -111,7 +107,6 @@ def test_no_message_for_mcp_subcommand():
     )
 
     assert messages == []
-
 
 
 def test_no_message_when_env_disables_promos(monkeypatch):

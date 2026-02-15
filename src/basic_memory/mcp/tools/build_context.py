@@ -97,9 +97,7 @@ async def build_context(
 
     async with get_project_client(project, context) as (client, active_project):
         # Resolve memory:// identifier with project-prefix awareness
-        _, resolved_path, _ = await resolve_project_and_path(
-            client, url, project, context
-        )
+        _, resolved_path, _ = await resolve_project_and_path(client, url, project, context)
 
         # Import here to avoid circular import
         from basic_memory.mcp.clients import MemoryClient

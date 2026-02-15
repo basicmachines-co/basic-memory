@@ -133,7 +133,9 @@ async def test_get_client_local_project_uses_asgi_transport(config_manager, conf
 
 
 @pytest.mark.asyncio
-async def test_get_client_local_project_honored_with_global_cloud_enabled(config_manager, config_home):
+async def test_get_client_local_project_honored_with_global_cloud_enabled(
+    config_manager, config_home
+):
     """LOCAL project mode should take priority over global cloud mode fallback."""
     cfg = config_manager.load_config()
     cfg.cloud_mode = True

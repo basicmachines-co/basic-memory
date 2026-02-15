@@ -83,9 +83,7 @@ async def read_note(
     """
     async with get_project_client(project, context) as (client, active_project):
         # Resolve identifier with project-prefix awareness for memory:// URLs
-        _, entity_path, _ = await resolve_project_and_path(
-            client, identifier, project, context
-        )
+        _, entity_path, _ = await resolve_project_and_path(client, identifier, project, context)
 
         # Validate identifier to prevent path traversal attacks
         # For memory:// URLs, validate the extracted path (not the raw URL which

@@ -200,10 +200,7 @@ async def test_write_note_all_transformations_combined(app, test_project, app_co
     )
 
     assert "file_path: test/my-project-v3.0-feature-update-draft.md" in result
-    assert (
-        f"permalink: {test_project.name}/test/my-project-v3.0-feature-update-draft"
-        in result
-    )
+    assert f"permalink: {test_project.name}/test/my-project-v3.0-feature-update-draft" in result
 
 
 @pytest.mark.asyncio

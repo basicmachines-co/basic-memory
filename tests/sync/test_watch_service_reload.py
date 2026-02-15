@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from basic_memory.config import BasicMemoryConfig, ProjectMode
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.models.project import Project
 from basic_memory.sync.watch_service import WatchService
 
@@ -147,7 +147,9 @@ async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path):
 async def test_run_filters_cloud_projects_each_cycle(monkeypatch, tmp_path):
     config = BasicMemoryConfig(
         watch_project_reload_interval=1,
-        project_modes={"cloud-project": ProjectMode.CLOUD},
+        projects={
+            "cloud-project": {"path": str(tmp_path / "cloud"), "mode": "cloud"},
+        },
     )
     repo = _Repo(
         projects_return=[

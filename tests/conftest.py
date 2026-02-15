@@ -78,7 +78,8 @@ def postgres_container(db_backend):
         yield None
         return
 
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    # Use pgvector image so CREATE EXTENSION vector succeeds in search repository
+    with PostgresContainer("pgvector/pgvector:pg16") as postgres:
         yield postgres
 
 

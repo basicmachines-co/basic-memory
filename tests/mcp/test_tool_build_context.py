@@ -39,8 +39,7 @@ async def test_get_discussion_context_pattern(client, test_graph, test_project):
     assert isinstance(context, GraphContext)
     assert len(context.results) > 1  # Should match multiple test/* paths
     assert all(
-        f"{test_project.name}/test/" in item.primary_result.permalink
-        for item in context.results
+        f"{test_project.name}/test/" in item.primary_result.permalink for item in context.results
     )  # pyright: ignore [reportOperatorIssue]
     assert context.metadata.depth == 1
 

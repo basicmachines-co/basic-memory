@@ -2,8 +2,7 @@
 
 # Install dependencies
 install:
-    uv pip install -e ".[dev]"
-    uv sync
+    uv sync --extra semantic
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
 
@@ -43,9 +42,9 @@ test-unit-sqlite:
 test-unit-postgres:
     BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov tests
 
-# Run integration tests against SQLite
+# Run integration tests against SQLite (excludes semantic benchmarks — use just test-semantic)
 test-int-sqlite:
-    uv run pytest -p pytest_mock -v --no-cov test-int
+    uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
 
 # Run integration tests against Postgres
 # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
@@ -56,10 +55,10 @@ test-int-postgres:
     # Use gtimeout (macOS/Homebrew) or timeout (Linux)
     TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int' || test $? -eq 137
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int' || test $? -eq 137
     else
         echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov test-int
+        BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
     fi
 
 # Run tests impacted by recent changes (requires pytest-testmon)
@@ -106,6 +105,24 @@ test-windows:
 # Excluded from default test runs to keep CI fast
 test-benchmark:
     uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
+
+# Run semantic search quality benchmarks (all combos)
+test-semantic:
+    uv run pytest -p pytest_mock -v --no-cov -m semantic test-int/semantic/
+
+# Run semantic benchmarks with JSON artifact output, then show report
+test-semantic-report:
+    BASIC_MEMORY_BENCHMARK_OUTPUT=.benchmarks/semantic-quality.jsonl uv run pytest -p pytest_mock -v -s --no-cov -m semantic test-int/semantic/
+    uv run python test-int/semantic/report.py .benchmarks/semantic-quality.jsonl
+
+# Run semantic benchmarks (Postgres combos only)
+test-semantic-postgres:
+    uv run pytest -p pytest_mock -v --no-cov -m semantic -k postgres test-int/semantic/
+
+# View semantic benchmark results (rich formatted table)
+# Usage: just semantic-report [--filter-combo sqlite] [--filter-suite paraphrase] [--sort-by avg_latency_ms]
+semantic-report *args:
+    uv run python test-int/semantic/report.py .benchmarks/semantic-quality.jsonl {{args}}
 
 # Compare two search benchmark JSONL outputs
 # Usage:

@@ -49,7 +49,9 @@ async def test_write_note(app, test_project):
 
         # Test
         This is a test note
-        """).format(permalink=f"{test_project.name}/test/test-note").strip()
+        """)
+        .format(permalink=f"{test_project.name}/test/test-note")
+        .strip()
     )
     assert expected in content
 
@@ -78,7 +80,9 @@ async def test_write_note_no_tags(app, test_project):
         ---
 
         Just some text
-        """).format(permalink=f"{test_project.name}/test/simple-note").strip()
+        """)
+        .format(permalink=f"{test_project.name}/test/simple-note")
+        .strip()
     )
     assert expected in content
 
@@ -143,7 +147,9 @@ async def test_write_note_update_existing(app, test_project):
         # Test
         This is an updated note
         """
-            ).format(permalink=f"{test_project.name}/test/test-note").strip()
+            )
+            .format(permalink=f"{test_project.name}/test/test-note")
+            .strip()
         )
         == content
     )
@@ -449,7 +455,9 @@ async def test_write_note_preserves_content_frontmatter(app, test_project):
 
             This is a test note
             """
-            ).format(permalink=f"{test_project.name}/test/test-note").strip()
+            )
+            .format(permalink=f"{test_project.name}/test/test-note")
+            .strip()
         )
         in content
     )
@@ -564,7 +572,9 @@ async def test_write_note_with_custom_entity_type(app, test_project):
 
         # Guide Content
         This is a guide
-        """).format(permalink=f"{test_project.name}/guides/test-guide").strip()
+        """)
+        .format(permalink=f"{test_project.name}/guides/test-guide")
+        .strip()
     )
     assert expected in content
 
@@ -1032,9 +1042,7 @@ class TestWriteNoteSecurityValidation:
         assert "paths must stay within project boundaries" not in result
         assert "# Created note" in result
         assert "file_path: security-tests/Full Feature Security Test.md" in result
-        assert (
-            f"permalink: {test_project.name}/security-tests/full-feature-security-test" in result
-        )
+        assert f"permalink: {test_project.name}/security-tests/full-feature-security-test" in result
 
         # Should process observations and relations
         assert "## Observations" in result

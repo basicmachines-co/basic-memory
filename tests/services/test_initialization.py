@@ -66,9 +66,14 @@ async def test_reconcile_projects_with_config_creates_projects_and_default(
         proj_a.mkdir(parents=True, exist_ok=True)
         proj_b.mkdir(parents=True, exist_ok=True)
 
+        from basic_memory.config import ProjectEntry
+
         updated = app_config.model_copy(
             update={
-                "projects": {"proj-a": str(proj_a), "proj-b": str(proj_b)},
+                "projects": {
+                    "proj-a": ProjectEntry(path=str(proj_a)),
+                    "proj-b": ProjectEntry(path=str(proj_b)),
+                },
                 "default_project": "proj-b",
             }
         )

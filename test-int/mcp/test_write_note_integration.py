@@ -338,7 +338,9 @@ async def test_write_note_kebab_filenames_basic(mcp_server, app, test_project, a
         # File path and permalink should be kebab-case and sanitized
         assert f"project: {test_project.name}" in response_text
         assert "file_path: my-folder/my-note-with-invalid-chars.md" in response_text
-        assert f"permalink: {test_project.name}/my-folder/my-note-with-invalid-chars" in response_text
+        assert (
+            f"permalink: {test_project.name}/my-folder/my-note-with-invalid-chars" in response_text
+        )
         assert f"[Session: Using project '{test_project.name}']" in response_text
 
 

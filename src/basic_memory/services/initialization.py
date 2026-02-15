@@ -13,7 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ProjectMode
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectMode
 from basic_memory.models import Project
 from basic_memory.repository import (
     ProjectRepository,
@@ -174,9 +174,13 @@ async def initialize_app(
     Args:
         app_config: The Basic Memory project configuration
     """
-    # Skip initialization in cloud mode - cloud manages its own projects
-    if app_config.cloud_mode_enabled:
-        logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
+    # Trigger: database backend is Postgres (cloud deployment)
+    # Why: cloud deployments manage their own projects and migrations via the cloud platform.
+    # The local MCP server always uses SQLite and needs initialization even when
+    # cloud_mode is enabled (for per-project cloud routing).
+    # Outcome: skip initialization only for actual cloud Postgres deployments.
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        logger.info("Skipping local initialization - Postgres backend manages its own schema")
         return
 
     logger.info("Initializing app...")
@@ -186,7 +190,7 @@ async def initialize_app(
     # Reconcile projects from config.json with projects table
     await reconcile_projects_with_config(app_config)
 
-    logger.info("App initialization completed (migration running in background if needed)")
+    logger.info("App initialization completed")
 
 
 def ensure_initialization(app_config: BasicMemoryConfig) -> None:
@@ -195,14 +199,13 @@ def ensure_initialization(app_config: BasicMemoryConfig) -> None:
     This is a wrapper for the async initialize_app function that can be
     called from synchronous code like CLI entry points.
 
-    No-op if app_config.cloud_mode == True. Cloud basic memory manages it's own projects
+    No-op if database backend is Postgres (cloud deployment manages its own schema).
 
     Args:
         app_config: The Basic Memory project configuration
     """
-    # Skip initialization in cloud mode - cloud manages its own projects
-    if app_config.cloud_mode_enabled:
-        logger.debug("Skipping initialization in cloud mode - projects managed by cloud")
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        logger.info("Skipping local initialization - Postgres backend manages its own schema")
         return
 
     async def _init_and_cleanup():

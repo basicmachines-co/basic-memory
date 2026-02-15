@@ -225,9 +225,7 @@ async def resolve_project_and_path(
             if context:
                 context.set_state("active_project", active_project)
 
-            resolved_path = (
-                f"{resolved.permalink}/{remainder}" if include_project else remainder
-            )
+            resolved_path = f"{resolved.permalink}/{remainder}" if include_project else remainder
             return active_project, resolved_path, True
 
     # Trigger: no resolvable project prefix in the memory URL

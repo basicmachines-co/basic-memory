@@ -59,8 +59,7 @@ def login():
             console.print("\n[red]Subscription Required[/red]\n")
             console.print(f"[yellow]{e.args[0]}[/yellow]\n")
             console.print(
-                f"OSS discount code: [bold]{OSS_DISCOUNT_CODE}[/bold] "
-                "(20% off for 3 months)\n"
+                f"OSS discount code: [bold]{OSS_DISCOUNT_CODE}[/bold] (20% off for 3 months)\n"
             )
             console.print(f"Subscribe at: [blue underline]{e.subscribe_url}[/blue underline]\n")
             console.print(

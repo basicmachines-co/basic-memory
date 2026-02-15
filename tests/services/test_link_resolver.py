@@ -353,7 +353,9 @@ async def test_link_normalization_with_strict_mode(link_resolver, test_entities,
 
 
 @pytest.mark.asyncio
-async def test_duplicate_title_handling_in_strict_mode(link_resolver, test_entities, project_prefix):
+async def test_duplicate_title_handling_in_strict_mode(
+    link_resolver, test_entities, project_prefix
+):
     """Test how duplicate titles are handled in strict mode."""
 
     # "Core Service" appears twice in test data (components/core-service and components2/core-service)

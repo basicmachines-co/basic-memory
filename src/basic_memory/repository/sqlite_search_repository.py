@@ -51,6 +51,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._app_config = app_config or ConfigManager().config
         self._semantic_enabled = self._app_config.semantic_search_enabled
         self._semantic_vector_k = self._app_config.semantic_vector_k
+        self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._embedding_provider = embedding_provider
         self._sqlite_vec_lock = asyncio.Lock()
         self._vector_tables_initialized = False
@@ -72,7 +73,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         """Create FTS5 virtual table for search if it doesn't exist.
 
         Uses CREATE VIRTUAL TABLE IF NOT EXISTS to preserve existing indexed data
-        across server restarts.
+        across server restarts. Also creates vector tables when semantic search
+        is enabled so missing dependencies are caught at startup, not first query.
         """
         logger.info("Initializing SQLite FTS5 search index")
         try:
@@ -83,6 +85,11 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         except Exception as e:  # pragma: no cover
             logger.error(f"Error initializing search index: {e}")
             raise e
+
+        # Fail fast: create vector tables at startup so missing sqlite-vec
+        # or embedding provider errors surface immediately
+        if self._semantic_enabled:
+            await self._ensure_vector_tables()
 
     # ------------------------------------------------------------------
     # FTS5 query preparation (backend-specific)
@@ -367,6 +374,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         if self._vector_tables_initialized:
             return
 
+        logger.info("Ensuring SQLite vector tables exist for semantic search")
+
         async with db.scoped_session(self.session_maker) as session:
             await self._ensure_sqlite_vec_loaded(session)
 
@@ -386,6 +395,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             }
             schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns
             if schema_mismatch:
+                logger.warning("search_vector_chunks schema mismatch, recreating vector tables")
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
 
@@ -408,11 +418,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             expected_dimension_sql = f"float[{self._vector_dimensions}]"
 
             if vector_sql and expected_dimension_sql not in vector_sql:
+                logger.warning(
+                    f"Embedding dimension mismatch (expected {self._vector_dimensions}), "
+                    "recreating search_vector_embeddings"
+                )
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
 
             await session.execute(create_sqlite_search_vector_embeddings(self._vector_dimensions))
             await session.commit()
 
+        logger.info(f"SQLite vector tables ready (dimensions={self._vector_dimensions})")
         self._vector_tables_initialized = True
 
     async def _prepare_vector_session(self, session: AsyncSession) -> None:
@@ -566,6 +581,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -581,6 +597,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             metadata_filters=metadata_filters,
             retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
             limit=limit,
             offset=offset,
         )

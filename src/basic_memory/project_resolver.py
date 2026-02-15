@@ -168,7 +168,7 @@ class ProjectResolver:
                     mode=ResolutionMode.CLOUD_DISCOVERY,
                     reason="Discovery mode enabled in cloud",
                 )
-            raise ValueError("No project specified. Project is required for cloud mode.")
+            raise ValueError("No project specified. Project is required.")
 
         # Local mode: no resolution possible
         logger.debug("No project resolution possible")

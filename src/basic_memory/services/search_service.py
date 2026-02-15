@@ -135,6 +135,7 @@ class SearchService:
             after_date=after_date,
             metadata_filters=metadata_filters,
             retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
+            min_similarity=query.min_similarity,
             limit=limit,
             offset=offset,
         )

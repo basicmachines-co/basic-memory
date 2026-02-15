@@ -32,7 +32,6 @@ def mock_config(tmp_path, monkeypatch):
         "projects": {},
         "default_project": "main",
         "cloud_mode": True,
-        "cloud_projects": {},
     }
 
     config_file.write_text(json.dumps(config_data, indent=2))
@@ -104,13 +103,14 @@ def test_project_add_with_local_path_saves_to_config(
     assert "test-project" in result.stdout
     assert "sync" in result.stdout
 
-    # Verify config was updated
+    # Verify config was updated — sync path stored on the project entry
     config_data = json.loads(mock_config.read_text())
-    assert "test-project" in config_data["cloud_projects"]
+    assert "test-project" in config_data["projects"]
+    entry = config_data["projects"]["test-project"]
     # Use as_posix() for cross-platform compatibility (Windows uses backslashes)
-    assert config_data["cloud_projects"]["test-project"]["local_path"] == local_sync_dir.as_posix()
-    assert config_data["cloud_projects"]["test-project"]["last_sync"] is None
-    assert config_data["cloud_projects"]["test-project"]["bisync_initialized"] is False
+    assert entry["cloud_sync_path"] == local_sync_dir.as_posix()
+    assert entry.get("last_sync") is None
+    assert entry.get("bisync_initialized", False) is False
 
     # Verify local directory was created
     assert local_sync_dir.exists()
@@ -128,9 +128,12 @@ def test_project_add_without_local_path_no_config_entry(runner, mock_config, moc
     assert "Project 'test-project' added successfully" in result.stdout
     assert "Local sync path configured" not in result.stdout
 
-    # Verify config was NOT updated with cloud_projects entry
+    # Verify config was NOT updated with cloud sync path
     config_data = json.loads(mock_config.read_text())
-    assert "test-project" not in config_data.get("cloud_projects", {})
+    # Project may or may not be in config, but if it is, cloud_sync_path should be null
+    entry = config_data.get("projects", {}).get("test-project")
+    if entry:
+        assert entry.get("cloud_sync_path") is None
 
 
 def test_project_add_local_path_expands_tilde(runner, mock_config, mock_api_client):
@@ -144,7 +147,7 @@ def test_project_add_local_path_expands_tilde(runner, mock_config, mock_api_clie
 
     # Verify config has expanded path
     config_data = json.loads(mock_config.read_text())
-    local_path = config_data["cloud_projects"]["test-project"]["local_path"]
+    local_path = config_data["projects"]["test-project"]["cloud_sync_path"]
     # Path should be absolute (starts with / on Unix or drive letter on Windows)
     assert Path(local_path).is_absolute()
     assert "~" not in local_path

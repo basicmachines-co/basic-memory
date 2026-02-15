@@ -42,6 +42,7 @@ class SearchRepository(Protocol):
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:

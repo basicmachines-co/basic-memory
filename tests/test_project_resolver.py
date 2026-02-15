@@ -14,7 +14,7 @@ class TestProjectResolver:
     def test_cloud_mode_requires_project(self):
         """In cloud mode, project is required."""
         resolver = ProjectResolver(cloud_mode=True)
-        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+        with pytest.raises(ValueError, match="Project is required"):
             resolver.resolve(project=None)
 
     def test_cloud_mode_with_explicit_project(self):
@@ -168,7 +168,7 @@ class TestProjectResolver:
             cloud_mode=True,
             default_project_mode=False,
         )
-        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+        with pytest.raises(ValueError, match="Project is required"):
             resolver.resolve(project=None)
 
     def test_cloud_mode_explicit_overrides_default(self):
@@ -190,7 +190,7 @@ class TestProjectResolver:
             default_project_mode=True,
             default_project=None,
         )
-        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+        with pytest.raises(ValueError, match="Project is required"):
             resolver.resolve(project=None)
 
     def test_cloud_mode_discovery_fallback_after_no_default(self):

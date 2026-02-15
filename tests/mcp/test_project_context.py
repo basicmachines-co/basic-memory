@@ -24,7 +24,7 @@ async def test_cloud_mode_requires_project_when_no_default(config_manager, monke
         await resolve_project_parameter(project=None, allow_discovery=False)
 
     assert "No project specified" in str(exc_info.value)
-    assert "Project is required for cloud mode" in str(exc_info.value)
+    assert "Project is required" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -86,8 +86,10 @@ async def test_local_mode_uses_default_project(config_manager, config_home, monk
     cfg.default_project_mode = True
     # default_project must exist in the config project list, otherwise config validation
     # will coerce it back to an existing default.
+    from basic_memory.config import ProjectEntry
+
     (config_home / "default-project").mkdir(parents=True, exist_ok=True)
-    cfg.projects["default-project"] = str(config_home / "default-project")
+    cfg.projects["default-project"] = ProjectEntry(path=str(config_home / "default-project"))
     cfg.default_project = "default-project"
     config_manager.save_config(cfg)
 
@@ -116,8 +118,10 @@ async def test_cloud_mode_uses_default_project(config_manager, config_home, monk
     cfg = config_manager.load_config()
     cfg.cloud_mode = True
     cfg.default_project_mode = True
+    from basic_memory.config import ProjectEntry
+
     (config_home / "cloud-default").mkdir(parents=True, exist_ok=True)
-    cfg.projects["cloud-default"] = str(config_home / "cloud-default")
+    cfg.projects["cloud-default"] = ProjectEntry(path=str(config_home / "cloud-default"))
     cfg.default_project = "cloud-default"
     config_manager.save_config(cfg)
 
