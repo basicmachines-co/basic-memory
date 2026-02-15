@@ -65,10 +65,12 @@ class LinkResolver:
         clean_text = normalize_project_reference(clean_text)
 
         # --- External ID Resolution ---
-        # Try external_id first if identifier looks like a UUID
+        # Try external_id first if identifier looks like a UUID.
+        # Canonicalize to lowercase-hyphen form so uppercase or unhyphenated
+        # UUIDs also match the stored external_id values.
         try:
-            uuid_mod.UUID(clean_text)
-            entity = await self.entity_repository.get_by_external_id(clean_text)
+            canonical_id = str(uuid_mod.UUID(clean_text))
+            entity = await self.entity_repository.get_by_external_id(canonical_id)
             if entity:
                 logger.debug(f"Found entity by external_id: {entity.permalink}")
                 return entity
