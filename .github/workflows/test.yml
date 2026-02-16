@@ -15,6 +15,7 @@ on:
 jobs:
   test-sqlite:
     name: Test SQLite (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +63,7 @@ jobs:
 
   test-postgres:
     name: Test Postgres (Python ${{ matrix.python-version }})
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -102,6 +104,7 @@ jobs:
 
   coverage:
     name: Coverage Summary (combined, Python 3.12)
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
