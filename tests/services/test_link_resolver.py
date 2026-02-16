@@ -1,5 +1,6 @@
 """Tests for link resolution service."""
 
+import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -859,3 +860,44 @@ async def test_simple_link_no_slash_skips_relative_resolution(relative_path_reso
     # testing/nested/ is not the same folder as testing/, but it's closer than nested/
     # The context-aware resolution will pick the closest match
     assert result.file_path == "testing/nested/deep-note.md"
+
+
+# ============================================================================
+# External ID (UUID) resolution tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_resolve_link_by_external_id(link_resolver, test_entities):
+    """Test resolving a link using a valid external_id (UUID)."""
+    entity = test_entities[0]
+    result = await link_resolver.resolve_link(entity.external_id)
+    assert result is not None
+    assert result.id == entity.id
+    assert result.external_id == entity.external_id
+
+
+@pytest.mark.asyncio
+async def test_resolve_link_by_external_id_uppercase(link_resolver, test_entities):
+    """Test that uppercase UUID is canonicalized and resolves correctly."""
+    entity = test_entities[0]
+    upper_id = entity.external_id.upper()
+    result = await link_resolver.resolve_link(upper_id)
+    assert result is not None
+    assert result.id == entity.id
+
+
+@pytest.mark.asyncio
+async def test_resolve_link_by_external_id_nonexistent(link_resolver):
+    """Test that a valid UUID format that doesn't match any entity returns None."""
+    fake_id = str(uuid.uuid4())
+    result = await link_resolver.resolve_link(fake_id)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_link_non_uuid_falls_through(link_resolver, test_entities, project_prefix):
+    """Test that non-UUID strings skip UUID resolution and use normal lookup."""
+    result = await link_resolver.resolve_link("Core Service")
+    assert result is not None
+    assert result.permalink == f"{project_prefix}/components/core-service"

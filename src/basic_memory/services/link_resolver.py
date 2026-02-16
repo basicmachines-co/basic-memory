@@ -1,5 +1,6 @@
 """Service for resolving markdown links to permalinks."""
 
+import uuid as uuid_mod
 from typing import Optional, Tuple, Dict
 
 from loguru import logger
@@ -62,6 +63,19 @@ class LinkResolver:
         clean_text, alias = self._normalize_link_text(link_text)
         explicit_project_reference = "::" in clean_text
         clean_text = normalize_project_reference(clean_text)
+
+        # --- External ID Resolution ---
+        # Try external_id first if identifier looks like a UUID.
+        # Canonicalize to lowercase-hyphen form so uppercase or unhyphenated
+        # UUIDs also match the stored external_id values.
+        try:
+            canonical_id = str(uuid_mod.UUID(clean_text))
+            entity = await self.entity_repository.get_by_external_id(canonical_id)
+            if entity:
+                logger.debug(f"Found entity by external_id: {entity.permalink}")
+                return entity
+        except ValueError:
+            pass
 
         # Trigger: link uses project namespace syntax (project::note)
         # Why: treat it as an explicit cross-project reference
