@@ -340,7 +340,9 @@ class LinkResolver:
         if not project:
             project = await self._project_repository.get_by_name_case_insensitive(identifier)
         if not project:
-            project = await self._project_repository.get_by_permalink(generate_permalink(identifier))
+            project = await self._project_repository.get_by_permalink(
+                generate_permalink(identifier)
+            )
 
         if project:
             self._project_cache_by_identifier[cache_key] = project

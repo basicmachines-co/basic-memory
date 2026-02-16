@@ -68,6 +68,7 @@ class SearchQuery(BaseModel):
     tags: Optional[List[str]] = None  # Convenience tag filter
     status: Optional[str] = None  # Convenience status filter
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
+    min_similarity: Optional[float] = None  # Per-query override for semantic_min_similarity
 
     @field_validator("after_date")
     @classmethod

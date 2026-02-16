@@ -8,6 +8,7 @@ This module provides service-layer dependencies:
 """
 
 import asyncio
+import os
 from typing import Annotated, Any, Callable, Coroutine, Mapping, Protocol
 
 from fastapi import Depends
@@ -446,13 +447,22 @@ def _log_task_failure(completed: asyncio.Task) -> None:
 
 
 class LocalTaskScheduler:
-    """Default scheduler that runs tasks in-process via asyncio.create_task."""
+    """Default scheduler that runs tasks in-process via asyncio.create_task.
+
+    In test mode (BASIC_MEMORY_ENV=test), tasks run as no-ops to avoid
+    background asyncio tasks racing against test teardown and causing
+    SQLite 'cannot commit transaction' errors.
+    """
 
     def __init__(
         self,
         handlers: Mapping[str, Callable[..., Coroutine[Any, Any, None]]],
+        test_mode: bool | None = None,
     ) -> None:
         self._handlers = handlers
+        self._test_mode = (
+            test_mode if test_mode is not None else os.environ.get("BASIC_MEMORY_ENV") == "test"
+        )
 
     def schedule(self, task_name: str, **payload: Any) -> None:
         handler = self._handlers.get(task_name)
@@ -461,6 +471,15 @@ class LocalTaskScheduler:
         # Outcome: fail fast to surface misconfiguration
         if not handler:
             raise ValueError(f"Unknown task name: {task_name}")
+
+        # Trigger: running inside pytest (BASIC_MEMORY_ENV=test)
+        # Why: background create_task() outlives test fixtures and races
+        #      against engine disposal, causing flaky SQLite errors
+        # Outcome: skip background scheduling; tests exercise the sync
+        #          codepaths directly when they need to
+        if self._test_mode:
+            return
+
         task = asyncio.create_task(handler(**payload))
         task.add_done_callback(_log_task_failure)
 
@@ -516,7 +535,8 @@ async def get_task_scheduler(
             "sync_entity_vectors": _sync_entity_vectors,
             "sync_project": _sync_project,
             "reindex_project": _reindex_project,
-        }
+        },
+        test_mode=app_config.is_test_env,
     )
     return scheduler
 

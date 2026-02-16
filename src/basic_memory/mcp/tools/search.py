@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Literal
 from loguru import logger
 from fastmcp import Context
 
+from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.formatting import format_search_results_ascii
 from basic_memory.mcp.server import mcp
@@ -231,7 +232,8 @@ Error searching for '{query}': {error_message}
 
 @mcp.tool(
     description="Search across all content in the knowledge base with advanced syntax support.",
-    meta={"ui/resourceUri": "ui://basic-memory/search-results"},
+    # TODO: re-enable once MCP client rendering is working
+    # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
 )
 async def search_notes(
     query: str,
@@ -246,6 +248,7 @@ async def search_notes(
     metadata_filters: Optional[Dict[str, Any]] = None,
     tags: Optional[List[str]] = None,
     status: Optional[str] = None,
+    min_similarity: Optional[float] = None,
     context: Context | None = None,
 ) -> SearchResponse | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
@@ -322,7 +325,7 @@ async def search_notes(
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of:
-                    "text", "title", "permalink", "vector", "hybrid" (default: "text")
+                    "text", "title", "permalink", "vector", "semantic", "hybrid" (default: "text")
         output_format: "default" returns structured data, "ascii" returns a plain text table,
             "ansi" returns a colorized table for TUI clients.
         types: Optional list of note types to search (e.g., ["note", "person"])
@@ -331,6 +334,9 @@ async def search_notes(
         metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"})
         tags: Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"]
         status: Optional status filter (frontmatter status); shorthand for metadata_filters["status"]
+        min_similarity: Optional float to override the global semantic_min_similarity threshold
+                       for this query. E.g., 0.0 to see all vector results, or 0.8 for high precision.
+                       Only applies to vector and hybrid search types.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -408,44 +414,57 @@ async def search_notes(
             query = resolved_query
             search_type = "permalink"
 
-        # Create a SearchQuery object based on the parameters
-        search_query = SearchQuery()
-
-        # Set the appropriate search field based on search_type
-        if search_type == "text":
-            search_query.text = query
-        elif search_type == "vector":
-            search_query.text = query
-            search_query.retrieval_mode = SearchRetrievalMode.VECTOR
-        elif search_type == "hybrid":
-            search_query.text = query
-            search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-        elif search_type == "title":
-            search_query.title = query
-        elif search_type == "permalink" and "*" in query:
-            search_query.permalink_match = query
-        elif search_type == "permalink":
-            search_query.permalink = query
-        else:  # pragma: no cover
-            search_query.text = query  # Default to text search
-
-        # Add optional filters if provided (empty lists are treated as no filter)
-        if entity_types:
-            search_query.entity_types = [SearchItemType(t) for t in entity_types]
-        if types:
-            search_query.types = types
-        if after_date:
-            search_query.after_date = after_date
-        if metadata_filters:
-            search_query.metadata_filters = metadata_filters
-        if tags:
-            search_query.tags = tags
-        if status:
-            search_query.status = status
-
-        logger.info(f"Searching for {search_query} in project {active_project.name}")
-
         try:
+            # Create a SearchQuery object based on the parameters
+            search_query = SearchQuery()
+
+            # Map search_type to the appropriate query field and retrieval mode
+            valid_search_types = {"text", "title", "permalink", "vector", "semantic", "hybrid"}
+            if search_type == "text":
+                search_query.text = query
+                # Upgrade to hybrid when semantic search is available —
+                # combines FTS keyword matching with vector similarity for better results
+                try:
+                    container = get_container()
+                    if container.config.semantic_search_enabled:
+                        search_query.retrieval_mode = SearchRetrievalMode.HYBRID
+                except RuntimeError:
+                    pass  # Container not initialized (e.g., CLI context) — stay with FTS
+            elif search_type in ("vector", "semantic"):
+                search_query.text = query
+                search_query.retrieval_mode = SearchRetrievalMode.VECTOR
+            elif search_type == "hybrid":
+                search_query.text = query
+                search_query.retrieval_mode = SearchRetrievalMode.HYBRID
+            elif search_type == "title":
+                search_query.title = query
+            elif search_type == "permalink" and "*" in query:
+                search_query.permalink_match = query
+            elif search_type == "permalink":
+                search_query.permalink = query
+            else:
+                raise ValueError(
+                    f"Invalid search_type '{search_type}'. "
+                    f"Valid options: {', '.join(sorted(valid_search_types))}"
+                )
+
+            # Add optional filters if provided (empty lists are treated as no filter)
+            if entity_types:
+                search_query.entity_types = [SearchItemType(t) for t in entity_types]
+            if types:
+                search_query.types = types
+            if after_date:
+                search_query.after_date = after_date
+            if metadata_filters:
+                search_query.metadata_filters = metadata_filters
+            if tags:
+                search_query.tags = tags
+            if status:
+                search_query.status = status
+            if min_similarity is not None:
+                search_query.min_similarity = min_similarity
+
+            logger.info(f"Searching for {search_query} in project {active_project.name}")
             # Import here to avoid circular import (tools → clients → utils → tools)
             from basic_memory.mcp.clients import SearchClient
 

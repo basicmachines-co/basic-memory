@@ -50,7 +50,7 @@ async def _write_note_json(
     await mcp_write_note.fn(title, content, folder, project_name, tags)
 
     # Resolve the entity to get metadata back
-    async with get_client() as client:
+    async with get_client(project_name=project_name) as client:
         active_project = await get_active_project(client, project_name)
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
@@ -72,7 +72,7 @@ async def _read_note_json(
     identifier: str, project_name: Optional[str], page: int, page_size: int
 ) -> dict:
     """Read a note and return structured JSON with content and metadata."""
-    async with get_client() as client:
+    async with get_client(project_name=project_name) as client:
         active_project = await get_active_project(client, project_name)
         knowledge_client = KnowledgeClient(client, active_project.external_id)
         resource_client = ResourceClient(client, active_project.external_id)
@@ -120,7 +120,7 @@ async def _recent_activity_json(
     page_size: int = 50,
 ) -> list:
     """Get recent activity and return structured JSON list."""
-    async with get_client() as client:
+    async with get_client(project_name=project_name) as client:
         # Build query params matching the MCP tool's logic
         params: dict = {"page": page, "page_size": page_size, "max_related": 10}
         if depth:
@@ -364,7 +364,7 @@ def build_context(
         project_name = project_name or config_manager.default_project
 
         with force_routing(local=local, cloud=cloud):
-            context = run_with_cleanup(
+            result = run_with_cleanup(
                 mcp_build_context.fn(
                     project=project_name,
                     url=url,
@@ -375,8 +375,8 @@ def build_context(
                     max_related=max_related,
                 )
             )
-        context_dict = context.model_dump(exclude_none=True)
-        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
+        # build_context now returns a slimmed dict (already serializable)
+        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

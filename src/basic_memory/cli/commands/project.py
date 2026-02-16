@@ -13,7 +13,7 @@ from rich.table import Table
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.config import ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.tools.utils import call_delete, call_get, call_patch, call_post, call_put
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
@@ -79,34 +79,38 @@ def list_projects(
         table.add_column("Path", style="green")
         table.add_column("Mode", style="blue")
 
-        # Add Local Path column if in cloud mode and not forcing local
+        # Add cloud-specific columns when in cloud mode
         if config.cloud_mode_enabled and not local:
             table.add_column("Local Path", style="yellow", no_wrap=True, overflow="fold")
+            table.add_column("Sync", style="green")
 
-        # Show Default column in local mode or if default_project_mode is enabled in cloud mode
-        show_default_column = local or not config.cloud_mode_enabled or config.default_project_mode
-        if show_default_column:
-            table.add_column("Default", style="magenta")
+        table.add_column("Default", style="magenta")
 
         for project in result.projects:
             is_default = "[X]" if project.is_default else ""
             normalized_path = normalize_project_path(project.path)
-            project_mode = config.get_project_mode(project.name).value
+            # Trigger: cloud mode and project not in local config
+            # Why: cloud-discovered projects default to LOCAL in get_project_mode
+            # Outcome: show "cloud" for projects only known to the cloud API
+            entry = config.projects.get(project.name)
+            if config.cloud_mode_enabled and not local and entry is None:
+                project_mode = ProjectMode.CLOUD.value
+            else:
+                project_mode = config.get_project_mode(project.name).value
 
             # Build row based on mode
             row = [project.name, format_path(normalized_path), project_mode]
 
-            # Add local path if in cloud mode and not forcing local
+            # Add cloud-specific columns
             if config.cloud_mode_enabled and not local:
                 local_path = ""
-                if project.name in config.cloud_projects:
-                    local_path = config.cloud_projects[project.name].local_path or ""
-                    local_path = format_path(local_path)
+                if entry:
+                    local_path = format_path(entry.cloud_sync_path or entry.path)
                 row.append(local_path)
+                has_sync = "[X]" if entry and entry.cloud_sync_path else ""
+                row.append(has_sync)
 
-            # Add default indicator if showing default column
-            if show_default_column:
-                row.append(is_default)
+            row.append(is_default)
 
             table.add_row(*row)
 
@@ -194,18 +198,20 @@ def add_project(
 
         # Save local sync path to config if in cloud mode
         if effective_cloud_mode and local_sync_path:
-            from basic_memory.config import CloudProjectConfig
-
             # Create local directory if it doesn't exist
             local_dir = Path(local_sync_path)
             local_dir.mkdir(parents=True, exist_ok=True)
 
-            # Update config with sync path
-            config.cloud_projects[name] = CloudProjectConfig(
-                local_path=local_sync_path,
-                last_sync=None,
-                bisync_initialized=False,
-            )
+            # Update project entry with sync path
+            entry = config.projects.get(name)
+            if entry:
+                entry.cloud_sync_path = local_sync_path
+            else:
+                # Project may not be in local config yet (cloud-only add)
+                config.projects[name] = ProjectEntry(
+                    path=local_sync_path,
+                    cloud_sync_path=local_sync_path,
+                )
             ConfigManager().save_config(config)
 
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
@@ -252,14 +258,17 @@ def setup_project_sync(
         resolved_path = Path(os.path.abspath(os.path.expanduser(local_path)))
         resolved_path.mkdir(parents=True, exist_ok=True)
 
-        # Update local config with sync path
-        from basic_memory.config import CloudProjectConfig
-
-        config.cloud_projects[name] = CloudProjectConfig(
-            local_path=resolved_path.as_posix(),
-            last_sync=None,
-            bisync_initialized=False,
-        )
+        # Update project entry with sync path
+        entry = config.projects.get(name)
+        if entry:
+            entry.cloud_sync_path = resolved_path.as_posix()
+            entry.bisync_initialized = False
+            entry.last_sync = None
+        else:
+            config.projects[name] = ProjectEntry(
+                path=resolved_path.as_posix(),
+                cloud_sync_path=resolved_path.as_posix(),
+            )
         config_manager.save_config(config)
 
         console.print(f"[green]Sync configured for project '{name}'[/green]")
@@ -316,8 +325,9 @@ def remove_project(
         local_path_config = None
         has_bisync_state = False
 
-        if config.cloud_mode_enabled and not local and name in config.cloud_projects:
-            local_path_config = config.cloud_projects[name].local_path
+        entry = config.projects.get(name)
+        if config.cloud_mode_enabled and not local and entry and entry.cloud_sync_path:
+            local_path_config = entry.cloud_sync_path
 
             # Check for bisync state
             from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
@@ -349,9 +359,11 @@ def remove_project(
                 shutil.rmtree(bisync_state_path)
                 console.print("[green]Removed bisync state[/green]")
 
-        # Clean up cloud_projects config entry
-        if config.cloud_mode_enabled and not local and name in config.cloud_projects:
-            del config.cloud_projects[name]
+        # Clean up cloud sync fields on the project entry
+        if config.cloud_mode_enabled and not local and entry and entry.cloud_sync_path:
+            entry.cloud_sync_path = None
+            entry.bisync_initialized = False
+            entry.last_sync = None
             ConfigManager().save_config(config)
 
         # Show informative message if files were not deleted
@@ -371,7 +383,7 @@ def set_default_project(
         False, "--local", help="Force local API routing (required in cloud mode)"
     ),
 ) -> None:
-    """Set the default project when 'config.default_project_mode' is set.
+    """Set the default project used as fallback when no project is specified.
 
     In cloud mode, use --local to modify the local configuration.
     """
@@ -618,10 +630,9 @@ def sync_project_command(
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
 
-        # Get local_sync_path from cloud_projects config
-        local_sync_path = None
-        if name in config.cloud_projects:
-            local_sync_path = config.cloud_projects[name].local_path
+        # Get local_sync_path from project entry
+        sync_entry = config.projects.get(name)
+        local_sync_path = sync_entry.cloud_sync_path if sync_entry else None
 
         if not local_sync_path:
             console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
@@ -710,10 +721,9 @@ def bisync_project_command(
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
 
-        # Get local_sync_path from cloud_projects config
-        local_sync_path = None
-        if name in config.cloud_projects:
-            local_sync_path = config.cloud_projects[name].local_path
+        # Get local_sync_path from project entry
+        sync_entry = config.projects.get(name)
+        local_sync_path = sync_entry.cloud_sync_path if sync_entry else None
 
         if not local_sync_path:
             console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")
@@ -736,9 +746,11 @@ def bisync_project_command(
         if success:
             console.print(f"[green]{name} bisync completed successfully[/green]")
 
-            # Update config
-            config.cloud_projects[name].last_sync = datetime.now()
-            config.cloud_projects[name].bisync_initialized = True
+            # Update config — sync_entry is guaranteed non-None because
+            # we checked local_sync_path above (which comes from sync_entry)
+            assert sync_entry is not None
+            sync_entry.last_sync = datetime.now()
+            sync_entry.bisync_initialized = True
             ConfigManager().save_config(config)
 
             # Trigger database sync if not a dry run
@@ -805,10 +817,9 @@ def check_project_command(
             console.print(f"[red]Error: Project '{name}' not found[/red]")
             raise typer.Exit(1)
 
-        # Get local_sync_path from cloud_projects config
-        local_sync_path = None
-        if name in config.cloud_projects:
-            local_sync_path = config.cloud_projects[name].local_path
+        # Get local_sync_path from project entry
+        check_entry = config.projects.get(name)
+        local_sync_path = check_entry.cloud_sync_path if check_entry else None
 
         if not local_sync_path:
             console.print(f"[red]Error: Project '{name}' has no local_sync_path configured[/red]")

@@ -4,7 +4,12 @@ import tempfile
 import pytest
 from datetime import datetime
 
-from basic_memory.config import BasicMemoryConfig, CloudProjectConfig, ConfigManager, ProjectMode
+from basic_memory.config import (
+    BasicMemoryConfig,
+    ConfigManager,
+    ProjectEntry,
+    ProjectMode,
+)
 from pathlib import Path
 
 
@@ -20,7 +25,7 @@ class TestBasicMemoryConfig:
 
         # Should use the default path (home/basic-memory)
         expected_path = config_home / "basic-memory"
-        assert Path(config.projects["main"]) == expected_path
+        assert Path(config.projects["main"].path) == expected_path
 
     def test_respects_basic_memory_home_environment_variable(self, config_home, monkeypatch):
         """Test that config respects BASIC_MEMORY_HOME environment variable."""
@@ -30,7 +35,7 @@ class TestBasicMemoryConfig:
         config = BasicMemoryConfig()
 
         # Should use the custom path from environment variable
-        assert Path(config.projects["main"]) == custom_path
+        assert Path(config.projects["main"].path) == custom_path
 
     def test_model_post_init_respects_basic_memory_home_creates_main(
         self, config_home, monkeypatch
@@ -44,7 +49,7 @@ class TestBasicMemoryConfig:
 
         # model_post_init should have added main project with BASIC_MEMORY_HOME
         assert "main" in config.projects
-        assert Path(config.projects["main"]) == custom_path
+        assert Path(config.projects["main"].path) == custom_path
 
     def test_model_post_init_respects_basic_memory_home_sets_non_main_default(
         self, config_home, monkeypatch
@@ -55,11 +60,11 @@ class TestBasicMemoryConfig:
 
         # Create config without main project
         other_path = config_home / "some" / "path"
-        config = BasicMemoryConfig(projects={"other": str(other_path)})
+        config = BasicMemoryConfig(projects={"other": {"path": str(other_path)}})
 
         # model_post_init should not add main project with BASIC_MEMORY_HOME
         assert "main" not in config.projects
-        assert Path(config.projects["other"]) == other_path
+        assert Path(config.projects["other"].path) == other_path
 
     def test_model_post_init_fallback_without_basic_memory_home(self, config_home, monkeypatch):
         """Test that model_post_init can set a non-main default when BASIC_MEMORY_HOME is not set."""
@@ -68,11 +73,11 @@ class TestBasicMemoryConfig:
 
         # Create config without main project
         other_path = config_home / "some" / "path"
-        config = BasicMemoryConfig(projects={"other": str(other_path)})
+        config = BasicMemoryConfig(projects={"other": {"path": str(other_path)}})
 
         # model_post_init should not add main project, but "other" should now be the default
         assert "main" not in config.projects
-        assert Path(config.projects["other"]) == other_path
+        assert Path(config.projects["other"].path) == other_path
 
     def test_basic_memory_home_with_relative_path(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME works with relative paths."""
@@ -82,7 +87,7 @@ class TestBasicMemoryConfig:
         config = BasicMemoryConfig()
 
         # Should normalize to platform-native path format
-        assert Path(config.projects["main"]) == Path(relative_path)
+        assert Path(config.projects["main"].path) == Path(relative_path)
 
     def test_basic_memory_home_overrides_existing_main_project(self, config_home, monkeypatch):
         """Test that BASIC_MEMORY_HOME is not used when a map is passed in the constructor."""
@@ -91,18 +96,18 @@ class TestBasicMemoryConfig:
 
         # Try to create config with a different main project path
         original_path = str(config_home / "original" / "path")
-        config = BasicMemoryConfig(projects={"main": original_path})
+        config = BasicMemoryConfig(projects={"main": {"path": original_path}})
 
         # The default_factory should override with BASIC_MEMORY_HOME value
         # Note: This tests the current behavior where default_factory takes precedence
-        assert config.projects["main"] == original_path
+        assert config.projects["main"].path == original_path
 
     def test_app_database_path_uses_custom_config_dir(self, tmp_path, monkeypatch):
         """Default SQLite DB should live under BASIC_MEMORY_CONFIG_DIR when set."""
         custom_config_dir = tmp_path / "instance-a" / "state"
         monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(custom_config_dir))
 
-        config = BasicMemoryConfig(projects={"main": str(tmp_path / "project")})
+        config = BasicMemoryConfig(projects={"main": {"path": str(tmp_path / "project")}})
 
         assert config.data_dir_path == custom_config_dir
         assert config.app_database_path == custom_config_dir / "memory.db"
@@ -137,11 +142,11 @@ class TestConfigManager:
             test_config = BasicMemoryConfig(
                 default_project="main",
                 projects={
-                    "main": str(temp_path / "main"),
-                    "test-project": str(temp_path / "test"),
-                    "special-chars": str(
-                        temp_path / "special"
-                    ),  # This will be the config key for "Special/Chars"
+                    "main": {"path": str(temp_path / "main")},
+                    "test-project": {"path": str(temp_path / "test")},
+                    "special-chars": {
+                        "path": str(temp_path / "special")
+                    },  # This will be the config key for "Special/Chars"
                 },
             )
             config_manager.save_config(test_config)
@@ -168,7 +173,7 @@ class TestConfigManager:
 
         # First add a project with original name that gets normalized
         config = config_manager.load_config()
-        config.projects["special-chars-project"] = str(Path("/tmp/special"))
+        config.projects["special-chars-project"] = ProjectEntry(path=str(Path("/tmp/special")))
         config_manager.save_config(config)
 
         # Now test setting default using a name that will normalize to the config key
@@ -186,7 +191,7 @@ class TestConfigManager:
 
         # Add a project with a config key that differs from user input
         config = config_manager.load_config()
-        config.projects["my-test-project"] = str(Path("/tmp/mytest"))
+        config.projects["my-test-project"] = ProjectEntry(path=str(Path("/tmp/mytest")))
         config_manager.save_config(config)
 
         # Set default using input that will match but is different from config key
@@ -271,7 +276,7 @@ class TestConfigManager:
 
         # Add a project with normalized key
         config = config_manager.load_config()
-        config.projects["special-chars-project"] = str(Path("/tmp/special"))
+        config.projects["special-chars-project"] = ProjectEntry(path=str(Path("/tmp/special")))
         config_manager.save_config(config)
 
         # Remove using a name that will normalize to the config key
@@ -289,7 +294,7 @@ class TestConfigManager:
 
         # Add a project with a config key that differs from user input
         config = config_manager.load_config()
-        config.projects["my-test-project"] = str(Path("/tmp/mytest"))
+        config.projects["my-test-project"] = ProjectEntry(path=str(Path("/tmp/mytest")))
         config_manager.save_config(config)
 
         # Remove using input that will match but is different from config key
@@ -314,16 +319,18 @@ class TestConfigManager:
         with pytest.raises(ValueError, match="Cannot remove the default project"):
             config_manager.remove_project("main")
 
-    def test_config_with_cloud_projects_empty_by_default(self, temp_config_manager):
-        """Test that cloud_projects field exists and defaults to empty dict."""
+    def test_config_project_entry_cloud_sync_defaults(self, temp_config_manager):
+        """Test that ProjectEntry cloud sync fields default to None/False."""
         config_manager = temp_config_manager
         config = config_manager.load_config()
 
-        assert hasattr(config, "cloud_projects")
-        assert config.cloud_projects == {}
+        entry = config.projects["main"]
+        assert entry.cloud_sync_path is None
+        assert entry.bisync_initialized is False
+        assert entry.last_sync is None
 
-    def test_save_and_load_config_with_cloud_projects(self):
-        """Test that config with cloud_projects can be saved and loaded."""
+    def test_save_and_load_config_with_cloud_sync_fields(self):
+        """Test that config with cloud sync fields can be saved and loaded."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
@@ -332,31 +339,32 @@ class TestConfigManager:
             config_manager.config_file = config_manager.config_dir / "config.json"
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create config with cloud_projects
+            # Create config with cloud sync fields on a project entry
             now = datetime.now()
             test_config = BasicMemoryConfig(
-                projects={"main": str(temp_path / "main")},
-                cloud_projects={
-                    "research": CloudProjectConfig(
-                        local_path=str(temp_path / "research-local"),
-                        last_sync=now,
-                        bisync_initialized=True,
-                    )
+                projects={
+                    "main": {"path": str(temp_path / "main")},
+                    "research": {
+                        "path": str(temp_path / "research"),
+                        "mode": "cloud",
+                        "cloud_sync_path": str(temp_path / "research-local"),
+                        "last_sync": now.isoformat(),
+                        "bisync_initialized": True,
+                    },
                 },
             )
             config_manager.save_config(test_config)
 
             # Load and verify
             loaded_config = config_manager.load_config()
-            assert "research" in loaded_config.cloud_projects
-            assert loaded_config.cloud_projects["research"].local_path == str(
-                temp_path / "research-local"
-            )
-            assert loaded_config.cloud_projects["research"].bisync_initialized is True
-            assert loaded_config.cloud_projects["research"].last_sync == now
+            assert "research" in loaded_config.projects
+            entry = loaded_config.projects["research"]
+            assert entry.cloud_sync_path == str(temp_path / "research-local")
+            assert entry.bisync_initialized is True
+            assert entry.last_sync == now
 
-    def test_add_cloud_project_to_existing_config(self):
-        """Test adding cloud projects to an existing config file."""
+    def test_add_cloud_sync_to_existing_project(self):
+        """Test adding cloud sync fields to an existing project entry."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
@@ -365,29 +373,24 @@ class TestConfigManager:
             config_manager.config_file = config_manager.config_dir / "config.json"
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create initial config without cloud projects
-            initial_config = BasicMemoryConfig(projects={"main": str(temp_path / "main")})
+            # Create initial config without cloud sync fields
+            initial_config = BasicMemoryConfig(projects={"main": {"path": str(temp_path / "main")}})
             config_manager.save_config(initial_config)
 
             # Load, modify, and save
             config = config_manager.load_config()
-            assert config.cloud_projects == {}
+            assert config.projects["main"].cloud_sync_path is None
 
-            config.cloud_projects["work"] = CloudProjectConfig(
-                local_path=str(temp_path / "work-local")
-            )
+            config.projects["main"].cloud_sync_path = str(temp_path / "work-local")
             config_manager.save_config(config)
 
             # Reload and verify persistence
             reloaded_config = config_manager.load_config()
-            assert "work" in reloaded_config.cloud_projects
-            assert reloaded_config.cloud_projects["work"].local_path == str(
-                temp_path / "work-local"
-            )
-            assert reloaded_config.cloud_projects["work"].bisync_initialized is False
+            assert reloaded_config.projects["main"].cloud_sync_path == str(temp_path / "work-local")
+            assert reloaded_config.projects["main"].bisync_initialized is False
 
-    def test_backward_compatibility_loading_config_without_cloud_projects(self):
-        """Test that old config files without cloud_projects field can be loaded."""
+    def test_backward_compatibility_loading_old_format_config(self):
+        """Test that old config files with Dict[str, str] projects can be loaded and migrated."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
@@ -396,7 +399,7 @@ class TestConfigManager:
             config_manager.config_file = config_manager.config_dir / "config.json"
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Manually write old-style config without cloud_projects
+            # Manually write old-style config with Dict[str, str] projects
             import json
 
             old_config_data = {
@@ -412,10 +415,53 @@ class TestConfigManager:
 
             basic_memory.config._CONFIG_CACHE = None
 
-            # Should load successfully with cloud_projects defaulting to empty dict
+            # Should load successfully with migration to ProjectEntry
             config = config_manager.load_config()
-            assert config.cloud_projects == {}
-            assert config.projects == {"main": str(temp_path / "main")}
+            assert isinstance(config.projects["main"], ProjectEntry)
+            assert config.projects["main"].path == str(temp_path / "main")
+            assert config.projects["main"].mode == ProjectMode.LOCAL
+
+    def test_backward_compatibility_migrates_project_modes_and_cloud_projects(self):
+        """Test that old config with project_modes and cloud_projects is migrated."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            import json
+
+            old_config_data = {
+                "env": "dev",
+                "projects": {
+                    "main": str(temp_path / "main"),
+                    "research": str(temp_path / "research"),
+                },
+                "default_project": "main",
+                "project_modes": {"research": "cloud"},
+                "cloud_projects": {
+                    "research": {
+                        "local_path": str(temp_path / "research-local"),
+                        "bisync_initialized": True,
+                        "last_sync": "2026-02-06T17:36:38",
+                    }
+                },
+            }
+            config_manager.config_file.write_text(json.dumps(old_config_data, indent=2))
+
+            import basic_memory.config
+
+            basic_memory.config._CONFIG_CACHE = None
+
+            config = config_manager.load_config()
+
+            # Verify migration
+            assert config.projects["research"].mode == ProjectMode.CLOUD
+            assert config.projects["research"].cloud_sync_path == str(temp_path / "research-local")
+            assert config.projects["research"].bisync_initialized is True
+            assert config.projects["main"].mode == ProjectMode.LOCAL
 
 
 class TestPlatformNativePathSeparators:
@@ -440,7 +486,7 @@ class TestPlatformNativePathSeparators:
 
             # Add project via ConfigManager
             config = BasicMemoryConfig(projects={})
-            config.projects["test-project"] = str(project_path)
+            config.projects["test-project"] = ProjectEntry(path=str(project_path))
             config_manager.save_config(config)
 
             # Read the raw JSON file
@@ -449,7 +495,7 @@ class TestPlatformNativePathSeparators:
             config_data = json.loads(config_manager.config_file.read_text())
 
             # Verify path uses platform-native separators
-            saved_path = config_data["projects"]["test-project"]
+            saved_path = config_data["projects"]["test-project"]["path"]
 
             # On Windows, should have backslashes; on Unix, forward slashes
             if platform.system() == "Windows":
@@ -485,7 +531,7 @@ class TestPlatformNativePathSeparators:
 
             # Load and verify
             config = config_manager.load_config()
-            saved_path = config.projects["new-project"]
+            saved_path = config.projects["new-project"].path
 
             # Verify platform-native separators
             if platform.system() == "Windows":
@@ -504,7 +550,7 @@ class TestPlatformNativePathSeparators:
         config = BasicMemoryConfig(projects={})
 
         # Verify main project path uses platform-native separators
-        main_path = config.projects["main"]
+        main_path = config.projects["main"].path
 
         if platform.system() == "Windows":
             # Windows: should have backslashes or drive letter
@@ -516,6 +562,11 @@ class TestPlatformNativePathSeparators:
 
 class TestSemanticSearchConfig:
     """Test semantic search configuration options."""
+
+    def test_semantic_search_enabled_defaults_to_false(self):
+        """Semantic search stays opt-in because semantic deps are optional extras."""
+        config = BasicMemoryConfig()
+        assert config.semantic_search_enabled is False
 
     def test_semantic_embedding_dimensions_defaults_to_none(self):
         """Dimensions should default to None, letting the provider choose."""
@@ -531,6 +582,22 @@ class TestSemanticSearchConfig:
         """Description should not say 'SQLite only' anymore."""
         field_info = BasicMemoryConfig.model_fields["semantic_search_enabled"]
         assert "SQLite only" not in (field_info.description or "")
+
+    def test_semantic_min_similarity_defaults_to_055(self):
+        """Threshold defaults to 0.55 to filter irrelevant vector results."""
+        config = BasicMemoryConfig()
+        assert config.semantic_min_similarity == 0.55
+
+    def test_semantic_min_similarity_bounds_validation(self):
+        """Threshold must be between 0.0 and 1.0."""
+        config = BasicMemoryConfig(semantic_min_similarity=0.55)
+        assert config.semantic_min_similarity == 0.55
+
+        with pytest.raises(Exception):
+            BasicMemoryConfig(semantic_min_similarity=-0.1)
+
+        with pytest.raises(Exception):
+            BasicMemoryConfig(semantic_min_similarity=1.1)
 
 
 class TestFormattingConfig:
@@ -627,7 +694,7 @@ class TestFormattingConfig:
 
             # Create config with formatting settings
             test_config = BasicMemoryConfig(
-                projects={"main": str(temp_path / "main")},
+                projects={"main": {"path": str(temp_path / "main")}},
                 format_on_save=True,
                 formatter_command="prettier --write {file}",
                 formatters={"md": "prettier --write {file}", "json": "prettier --write {file}"},
@@ -665,15 +732,16 @@ class TestProjectMode:
         config.set_project_mode("research", ProjectMode.CLOUD)
         assert config.get_project_mode("research") == ProjectMode.CLOUD
 
-    def test_set_project_mode_local_removes_entry(self):
-        """Test that setting a project back to LOCAL removes it from project_modes dict."""
+    def test_set_project_mode_local_resets_to_default(self):
+        """Test that setting a project back to LOCAL resets the entry's mode."""
         config = BasicMemoryConfig()
+        # Need a project entry to set mode on
+        config.projects["research"] = ProjectEntry(path="/tmp/research")
         config.set_project_mode("research", ProjectMode.CLOUD)
-        assert "research" in config.project_modes
+        assert config.projects["research"].mode == ProjectMode.CLOUD
 
         config.set_project_mode("research", ProjectMode.LOCAL)
-        # LOCAL is the default, so the entry is removed to keep config clean
-        assert "research" not in config.project_modes
+        assert config.projects["research"].mode == ProjectMode.LOCAL
         assert config.get_project_mode("research") == ProjectMode.LOCAL
 
     def test_cloud_api_key_defaults_to_none(self):
@@ -686,13 +754,8 @@ class TestProjectMode:
         config = BasicMemoryConfig(cloud_api_key="bmc_test123")
         assert config.cloud_api_key == "bmc_test123"
 
-    def test_project_modes_defaults_to_empty(self):
-        """Test that project_modes defaults to empty dict."""
-        config = BasicMemoryConfig()
-        assert config.project_modes == {}
-
-    def test_project_modes_round_trip(self):
-        """Test that project_modes survives save/load cycle."""
+    def test_project_mode_round_trip(self):
+        """Test that project mode survives save/load cycle."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
@@ -701,11 +764,13 @@ class TestProjectMode:
             config_manager.config_file = config_manager.config_dir / "config.json"
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create config with project_modes and cloud_api_key
+            # Create config with project mode and cloud_api_key
             test_config = BasicMemoryConfig(
-                projects={"main": str(temp_path / "main"), "research": str(temp_path / "research")},
+                projects={
+                    "main": {"path": str(temp_path / "main")},
+                    "research": {"path": str(temp_path / "research"), "mode": "cloud"},
+                },
                 cloud_api_key="bmc_test123",
-                project_modes={"research": ProjectMode.CLOUD},
             )
             config_manager.save_config(test_config)
 
@@ -715,8 +780,8 @@ class TestProjectMode:
             assert loaded.get_project_mode("research") == ProjectMode.CLOUD
             assert loaded.get_project_mode("main") == ProjectMode.LOCAL
 
-    def test_backward_compat_loading_without_project_modes(self):
-        """Test that old config files without project_modes field can be loaded."""
+    def test_backward_compat_loading_old_format_without_project_modes(self):
+        """Test that old config files with Dict[str, str] projects are migrated."""
         import json
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -727,7 +792,7 @@ class TestProjectMode:
             config_manager.config_file = config_manager.config_dir / "config.json"
             config_manager.config_dir.mkdir(parents=True, exist_ok=True)
 
-            # Write old-style config without project_modes or cloud_api_key
+            # Write old-style config with Dict[str, str] projects
             old_config_data = {
                 "env": "dev",
                 "projects": {"main": str(temp_path / "main")},
@@ -741,17 +806,19 @@ class TestProjectMode:
 
             basic_memory.config._CONFIG_CACHE = None
 
-            # Should load successfully with defaults
+            # Should load successfully with migration
             config = config_manager.load_config()
-            assert config.project_modes == {}
             assert config.cloud_api_key is None
             assert config.get_project_mode("main") == ProjectMode.LOCAL
+            assert isinstance(config.projects["main"], ProjectEntry)
 
     def test_project_list_includes_mode(self, config_home):
         """Test that project_list property includes mode information."""
         config = BasicMemoryConfig(
-            projects={"main": str(config_home / "main"), "research": str(config_home / "research")},
-            project_modes={"research": ProjectMode.CLOUD},
+            projects={
+                "main": {"path": str(config_home / "main")},
+                "research": {"path": str(config_home / "research"), "mode": "cloud"},
+            },
         )
 
         project_list = config.project_list

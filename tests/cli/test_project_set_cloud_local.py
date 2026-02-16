@@ -30,12 +30,11 @@ def mock_config(tmp_path, monkeypatch):
     config_data = {
         "env": "dev",
         "projects": {
-            "main": str(tmp_path / "main"),
-            "research": str(tmp_path / "research"),
+            "main": {"path": str(tmp_path / "main")},
+            "research": {"path": str(tmp_path / "research")},
         },
         "default_project": "main",
         "cloud_api_key": "bmc_test_key_123",
-        "project_modes": {},
     }
 
     config_file.write_text(json.dumps(config_data, indent=2))
@@ -56,7 +55,7 @@ class TestSetCloud:
 
         # Verify config was updated
         config_data = json.loads(mock_config.read_text())
-        assert config_data["project_modes"]["research"] == "cloud"
+        assert config_data["projects"]["research"]["mode"] == "cloud"
 
     def test_set_cloud_nonexistent_project(self, runner, mock_config):
         """Test set-cloud with a project that doesn't exist in config."""
@@ -77,7 +76,7 @@ class TestSetCloud:
         # Config without cloud_api_key
         config_data = {
             "env": "dev",
-            "projects": {"research": str(tmp_path / "research")},
+            "projects": {"research": {"path": str(tmp_path / "research")}},
             "default_project": "research",
         }
         config_file.write_text(json.dumps(config_data, indent=2))
@@ -100,7 +99,7 @@ class TestSetCloud:
         # Config without cloud_api_key but with a project
         config_data = {
             "env": "dev",
-            "projects": {"research": str(tmp_path / "research")},
+            "projects": {"research": {"path": str(tmp_path / "research")}},
             "default_project": "research",
         }
         config_file.write_text(json.dumps(config_data, indent=2))
@@ -122,7 +121,7 @@ class TestSetCloud:
 
         # Verify config was updated
         config_data = json.loads(config_file.read_text())
-        assert config_data["project_modes"]["research"] == "cloud"
+        assert config_data["projects"]["research"]["mode"] == "cloud"
 
 
 class TestSetLocal:
@@ -133,16 +132,16 @@ class TestSetLocal:
         # First set to cloud
         runner.invoke(app, ["project", "set-cloud", "research"])
         config_data = json.loads(mock_config.read_text())
-        assert config_data["project_modes"]["research"] == "cloud"
+        assert config_data["projects"]["research"]["mode"] == "cloud"
 
         # Now set back to local
         result = runner.invoke(app, ["project", "set-local", "research"])
         assert result.exit_code == 0
         assert "local mode" in result.stdout.lower()
 
-        # Verify config was updated — LOCAL removes the entry
+        # Verify config was updated — mode reset to local
         config_data = json.loads(mock_config.read_text())
-        assert "research" not in config_data.get("project_modes", {})
+        assert config_data["projects"]["research"]["mode"] == "local"
 
     def test_set_local_nonexistent_project(self, runner, mock_config):
         """Test set-local with a project that doesn't exist in config."""

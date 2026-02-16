@@ -15,16 +15,15 @@ async def test_cloud_mode_requires_project_when_no_default(config_manager, monke
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = True
-    # default_project_mode defaults to True, so explicitly disable it
-    # to test the "no default available" path
-    cfg.default_project_mode = False
+    # Clear default_project to test the "no default available" path
+    cfg.default_project = None
     config_manager.save_config(cfg)
 
     with pytest.raises(ValueError) as exc_info:
         await resolve_project_parameter(project=None, allow_discovery=False)
 
     assert "No project specified" in str(exc_info.value)
-    assert "Project is required for cloud mode" in str(exc_info.value)
+    assert "Project is required" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -33,8 +32,8 @@ async def test_cloud_mode_allows_discovery_when_enabled(config_manager):
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = True
-    # Disable default_project_mode so discovery fallback is reached
-    cfg.default_project_mode = False
+    # Clear default_project so discovery fallback is reached
+    cfg.default_project = None
     config_manager.save_config(cfg)
 
     assert await resolve_project_parameter(project=None, allow_discovery=True) is None
@@ -57,7 +56,6 @@ async def test_local_mode_uses_env_var_priority(config_manager, monkeypatch):
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = False
-    cfg.default_project_mode = False
     config_manager.save_config(cfg)
 
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "env-project")
@@ -70,7 +68,6 @@ async def test_local_mode_uses_explicit_project(config_manager, monkeypatch):
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = False
-    cfg.default_project_mode = False
     config_manager.save_config(cfg)
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
@@ -83,11 +80,10 @@ async def test_local_mode_uses_default_project(config_manager, config_home, monk
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = False
-    cfg.default_project_mode = True
-    # default_project must exist in the config project list, otherwise config validation
-    # will coerce it back to an existing default.
+    from basic_memory.config import ProjectEntry
+
     (config_home / "default-project").mkdir(parents=True, exist_ok=True)
-    cfg.projects["default-project"] = str(config_home / "default-project")
+    cfg.projects["default-project"] = ProjectEntry(path=str(config_home / "default-project"))
     cfg.default_project = "default-project"
     config_manager.save_config(cfg)
 
@@ -96,12 +92,12 @@ async def test_local_mode_uses_default_project(config_manager, config_home, monk
 
 
 @pytest.mark.asyncio
-async def test_local_mode_returns_none_when_no_resolution(config_manager, monkeypatch):
+async def test_local_mode_returns_none_when_no_default(config_manager, monkeypatch):
     from basic_memory.mcp.project_context import resolve_project_parameter
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = False
-    cfg.default_project_mode = False
+    cfg.default_project = None
     config_manager.save_config(cfg)
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
@@ -110,14 +106,15 @@ async def test_local_mode_returns_none_when_no_resolution(config_manager, monkey
 
 @pytest.mark.asyncio
 async def test_cloud_mode_uses_default_project(config_manager, config_home, monkeypatch):
-    """In cloud mode with default_project_mode=True, default project is resolved."""
+    """In cloud mode with default_project set, default project is resolved."""
     from basic_memory.mcp.project_context import resolve_project_parameter
 
     cfg = config_manager.load_config()
     cfg.cloud_mode = True
-    cfg.default_project_mode = True
+    from basic_memory.config import ProjectEntry
+
     (config_home / "cloud-default").mkdir(parents=True, exist_ok=True)
-    cfg.projects["cloud-default"] = str(config_home / "cloud-default")
+    cfg.projects["cloud-default"] = ProjectEntry(path=str(config_home / "cloud-default"))
     cfg.default_project = "cloud-default"
     config_manager.save_config(cfg)
 

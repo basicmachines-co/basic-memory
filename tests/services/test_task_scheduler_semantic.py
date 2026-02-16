@@ -62,6 +62,8 @@ async def test_reindex_entity_task_chains_vector_sync_when_semantic_enabled(tmp_
         project_config=project_config,
         app_config=app_config,
     )
+    # Enable background tasks for this test — uses stubs, no real DB race risk
+    scheduler._test_mode = False  # pyright: ignore [reportAttributeAccessIssue]
     scheduler.schedule("reindex_entity", entity_id=42)
     await asyncio.sleep(0.05)
 
@@ -90,6 +92,8 @@ async def test_reindex_entity_task_skips_vector_sync_when_semantic_disabled(tmp_
         project_config=project_config,
         app_config=app_config,
     )
+    # Enable background tasks for this test — uses stubs, no real DB race risk
+    scheduler._test_mode = False  # pyright: ignore [reportAttributeAccessIssue]
     scheduler.schedule("reindex_entity", entity_id=42)
     await asyncio.sleep(0.05)
 
@@ -118,6 +122,8 @@ async def test_sync_entity_vectors_task_maps_to_search_service(tmp_path):
         project_config=project_config,
         app_config=app_config,
     )
+    # Enable background tasks for this test — uses stubs, no real DB race risk
+    scheduler._test_mode = False  # pyright: ignore [reportAttributeAccessIssue]
     scheduler.schedule("sync_entity_vectors", entity_id=7)
     await asyncio.sleep(0.05)
 

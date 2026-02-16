@@ -51,6 +51,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._app_config = app_config or ConfigManager().config
         self._semantic_enabled = self._app_config.semantic_search_enabled
         self._semantic_vector_k = self._app_config.semantic_vector_k
+        self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._embedding_provider = embedding_provider
         self._vector_dimensions = 384
         self._vector_tables_initialized = False
@@ -64,17 +65,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
     async def init_search_index(self):
         """Create Postgres table with tsvector column and GIN indexes.
 
-        Note: This is handled by Alembic migrations. This method is a no-op
-        for Postgres as the schema is created via migrations.
+        Note: FTS schema is handled by Alembic migrations. Vector tables are
+        created here at startup so missing pgvector or provider errors surface
+        immediately.
         """
         logger.info("PostgreSQL search index initialization handled by migrations")
-        # Table creation is done via Alembic migrations
-        # This includes:
-        # - CREATE TABLE search_index (...)
-        # - ADD COLUMN textsearchable_index_col tsvector GENERATED ALWAYS AS (...)
-        # - CREATE INDEX USING GIN on textsearchable_index_col
-        # - CREATE INDEX USING GIN on metadata jsonb_path_ops
-        pass
+
+        # Fail fast: create vector tables at startup so missing pgvector
+        # or embedding provider errors surface immediately
+        if self._semantic_enabled:
+            await self._ensure_vector_tables()
 
     async def index_item(self, search_index_row: SearchIndexRow) -> None:
         """Index or update a single item using UPSERT.
@@ -260,6 +260,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         if self._vector_tables_initialized:
             return
 
+        logger.info("Ensuring Postgres vector tables exist for semantic search")
+
         async with self._vector_tables_lock:
             if self._vector_tables_initialized:
                 return
@@ -349,6 +351,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 await session.commit()
 
+            logger.info(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
             self._vector_tables_initialized = True
 
     async def _get_existing_embedding_dims(self, session: AsyncSession) -> int | None:
@@ -587,6 +590,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -602,6 +606,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             metadata_filters=metadata_filters,
             retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
             limit=limit,
             offset=offset,
         )

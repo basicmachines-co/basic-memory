@@ -78,6 +78,7 @@ markers = [
     "postgres: Tests that run against Postgres backend (deselect with '-m \"not postgres\"')",
     "windows: Windows-specific tests (deselect with '-m \"not windows\"')",
     "smoke: Fast end-to-end smoke tests for MCP flows",
+    "semantic: Tests requiring [semantic] extras (fastembed, sqlite-vec, openai)",
 ]
 
 [tool.ruff]

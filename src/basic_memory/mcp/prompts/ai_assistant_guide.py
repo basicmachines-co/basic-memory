@@ -14,8 +14,8 @@ def ai_assistant_guide() -> str:
     """Return a concise guide on Basic Memory tools and how to use them.
 
     Dynamically adapts instructions based on configuration:
-    - Default project mode: Simplified instructions with automatic project
-    - Regular mode: Project discovery and selection guidance
+    - Default project set: Simplified instructions with automatic project fallback
+    - No default project: Project discovery and selection guidance
     - CLI constraint mode: Single project constraint information
 
     Returns:
@@ -30,34 +30,32 @@ def ai_assistant_guide() -> str:
     # Check configuration for mode-specific instructions
     config = ConfigManager().config
 
-    # Add mode-specific header
-    mode_info = ""
-    if config.default_project_mode:
+    # Add mode-specific header based on whether a default project is configured
+    if config.default_project:
         mode_info = f"""
-# 🎯 Default Project Mode Active
+# Default Project Active
 
-**Current Configuration**: All operations automatically use project '{config.default_project}'
+**Current Configuration**: Operations automatically fall back to project '{config.default_project}'
 
 **Simplified Usage**: You don't need to specify the project parameter in tool calls.
-- `write_note(title="Note", content="...", folder="docs")` ✅
-- Project parameter is optional and will default to '{config.default_project}'
+- `write_note(title="Note", content="...", folder="docs")` - uses '{config.default_project}'
 - To use a different project, explicitly specify: `project="other-project"`
 
-────────────────────────────────────────
+---
 
 """
     else:  # pragma: no cover
         mode_info = """
-# 🔧 Multi-Project Mode Active
+# Multi-Project Mode
 
-**Current Configuration**: Project parameter required for all operations
+**Current Configuration**: No default project set — project parameter required for all operations
 
 **Project Discovery Required**: Use these tools to select a project:
 - `list_memory_projects()` - See all available projects
 - `recent_activity()` - Get project activity and recommendations
 - Remember the user's project choice throughout the conversation
 
-────────────────────────────────────────
+---
 
 """
 
@@ -65,6 +63,7 @@ def ai_assistant_guide() -> str:
     enhanced_content = mode_info + content
 
     logger.info(
-        f"Loaded AI assistant guide ({len(enhanced_content)} chars) with mode: {'default_project' if config.default_project_mode else 'multi_project'}"
+        f"Loaded AI assistant guide ({len(enhanced_content)} chars) "
+        f"with default_project: {config.default_project or 'none'}"
     )
     return enhanced_content

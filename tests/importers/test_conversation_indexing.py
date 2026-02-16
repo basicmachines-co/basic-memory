@@ -85,9 +85,7 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     assert (
         f"permalink: {project_config.name}/conversations/20250115-my-test-conversation-title"
         in content
-    ), (
-        "File should have permalink in frontmatter"
-    )
+    ), "File should have permalink in frontmatter"
 
     # Run sync to index the imported file
     await sync_service.sync(base_path, project_config.name)
@@ -105,9 +103,7 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     assert (
         entity.permalink
         == f"{project_config.name}/conversations/20250115-my-test-conversation-title"
-    ), (
-        f"Permalink should be from frontmatter, got: {entity.permalink}"
-    )
+    ), f"Permalink should be from frontmatter, got: {entity.permalink}"
 
     # Verify search index also has correct data
     results = await search_service.search(SearchQuery(text="Test Conversation"))
@@ -122,6 +118,4 @@ async def test_imported_conversations_have_correct_permalink_and_title(
     assert (
         search_result.permalink
         == f"{project_config.name}/conversations/20250115-my-test-conversation-title"
-    ), (
-        f"Search permalink should not be null, got: {search_result.permalink}"
-    )
+    ), f"Search permalink should not be null, got: {search_result.permalink}"

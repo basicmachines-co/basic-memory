@@ -5,6 +5,7 @@ import warnings
 
 from basic_memory.cli.app import app  # pragma: no cover
 
+
 def _version_only_invocation(argv: list[str]) -> bool:
     # Trigger: invocation is exactly `bm --version` or `bm -v`
     # Why: avoid importing command modules on the hot version path

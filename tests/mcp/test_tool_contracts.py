@@ -8,7 +8,16 @@ from basic_memory.mcp import tools
 
 
 EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
-    "build_context": ["url", "project", "depth", "timeframe", "page", "page_size", "max_related"],
+    "build_context": [
+        "url",
+        "project",
+        "depth",
+        "timeframe",
+        "page",
+        "page_size",
+        "max_related",
+        "format",
+    ],
     "canvas": ["nodes", "edges", "title", "directory", "project"],
     "cloud_info": [],
     "create_memory_project": ["project_name", "project_path", "set_default"],
@@ -46,9 +55,10 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "metadata_filters",
         "tags",
         "status",
+        "min_similarity",
     ],
     "view_note": ["identifier", "project", "page", "page_size"],
-    "write_note": ["title", "content", "directory", "project", "tags", "note_type"],
+    "write_note": ["title", "content", "directory", "project", "tags", "note_type", "metadata"],
 }
 
 

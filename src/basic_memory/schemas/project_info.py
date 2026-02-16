@@ -88,7 +88,7 @@ class ProjectInfoResponse(BaseModel):
     available_projects: Dict[str, Dict[str, Any]] = Field(
         description="Map of configured project names to detailed project information"
     )
-    default_project: str = Field(description="Name of the default project")
+    default_project: Optional[str] = Field(description="Name of the default project")
 
     # Statistics
     statistics: ProjectStatistics = Field(description="Statistics about the knowledge base")
@@ -196,7 +196,7 @@ class ProjectList(BaseModel):
     """Response model for listing projects."""
 
     projects: List[ProjectItem]
-    default_project: str
+    default_project: Optional[str]
 
 
 class ProjectStatusResponse(BaseModel):

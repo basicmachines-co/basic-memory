@@ -16,7 +16,8 @@ from basic_memory.utils import validate_project_path
 
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
-    meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
+    # TODO: re-enable once MCP client rendering is working
+    # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
 )
 async def read_note(
     identifier: str,
@@ -83,9 +84,7 @@ async def read_note(
     """
     async with get_project_client(project, context) as (client, active_project):
         # Resolve identifier with project-prefix awareness for memory:// URLs
-        _, entity_path, _ = await resolve_project_and_path(
-            client, identifier, project, context
-        )
+        _, entity_path, _ = await resolve_project_and_path(client, identifier, project, context)
 
         # Validate identifier to prevent path traversal attacks
         # For memory:// URLs, validate the extracted path (not the raw URL which

@@ -38,8 +38,8 @@ async def project_info(
 
     Args:
         project: Optional project name. If not provided, uses default_project
-                (if default_project_mode=true) or CLI constraint. If unknown,
-                use list_memory_projects() to discover available projects.
+                from config or CLI constraint. If unknown, use
+                list_memory_projects() to discover available projects.
         context: Optional FastMCP context for performance caching.
 
     Returns:

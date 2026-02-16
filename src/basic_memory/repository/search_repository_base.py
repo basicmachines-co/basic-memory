@@ -49,6 +49,7 @@ class SearchRepositoryBase(ABC):
     # --- Subclass-populated attributes ---
     _semantic_enabled: bool
     _semantic_vector_k: int
+    _semantic_min_similarity: float
     _embedding_provider: Optional[EmbeddingProvider]
     _vector_dimensions: int
     _vector_tables_initialized: bool
@@ -112,6 +113,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
+        min_similarity: Optional[float] = None,
         limit: int = 10,
         offset: int = 0,
     ) -> List[SearchIndexRow]:
@@ -753,6 +755,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]],
         metadata_filters: Optional[dict],
         retrieval_mode: SearchRetrievalMode,
+        min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
     ) -> Optional[List[SearchIndexRow]]:
@@ -784,6 +787,7 @@ class SearchRepositoryBase(ABC):
                 after_date=after_date,
                 search_item_types=search_item_types,
                 metadata_filters=metadata_filters,
+                min_similarity=min_similarity,
                 limit=limit,
                 offset=offset,
             )
@@ -802,6 +806,7 @@ class SearchRepositoryBase(ABC):
                 after_date=after_date,
                 search_item_types=search_item_types,
                 metadata_filters=metadata_filters,
+                min_similarity=min_similarity,
                 limit=limit,
                 offset=offset,
             )
@@ -830,6 +835,7 @@ class SearchRepositoryBase(ABC):
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         metadata_filters: Optional[dict],
+        min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
     ) -> List[SearchIndexRow]:
@@ -843,7 +849,7 @@ class SearchRepositoryBase(ABC):
         await self._ensure_vector_tables()
         assert self._embedding_provider is not None
         query_embedding = await self._embedding_provider.embed_query(search_text.strip())
-        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 5)
+        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
 
         async with db.scoped_session(self.session_maker) as session:
             await self._prepare_vector_session(session)
@@ -871,6 +877,18 @@ class SearchRepositoryBase(ABC):
 
         if not similarity_by_si_id:
             return []
+
+        # Filter out results below the minimum similarity threshold.
+        # Per-query min_similarity overrides the instance-level default.
+        effective_min_similarity = (
+            min_similarity if min_similarity is not None else self._semantic_min_similarity
+        )
+        if effective_min_similarity > 0.0:
+            similarity_by_si_id = {
+                k: v for k, v in similarity_by_si_id.items() if v >= effective_min_similarity
+            }
+            if not similarity_by_si_id:
+                return []
 
         # Fetch the actual search_index rows
         si_ids = list(similarity_by_si_id.keys())
@@ -1029,6 +1047,7 @@ class SearchRepositoryBase(ABC):
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         metadata_filters: Optional[dict],
+        min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
     ) -> List[SearchIndexRow]:
@@ -1061,26 +1080,39 @@ class SearchRepositoryBase(ABC):
             after_date=after_date,
             search_item_types=search_item_types,
             metadata_filters=metadata_filters,
+            min_similarity=min_similarity,
             limit=candidate_limit,
             offset=0,
         )
 
-        # RRF fusion keyed on search_index row id for granular results.
-        # This allows observations and relations to surface as individual results,
-        # not collapsed into their parent entity.
+        # Score-weighted RRF fusion keyed on search_index row id.
+        # Multiplies the standard 1/(k+rank) score by the normalized original score
+        # so that high-confidence matches contribute more than weak ones at the same rank.
         fused_scores: dict[int, float] = {}
         rows_by_id: dict[int, SearchIndexRow] = {}
+
+        # Normalize FTS scores to [0, 1] — handles both SQLite (negative bm25)
+        # and Postgres (positive ts_rank) by using absolute values
+        fts_abs = [abs(row.score or 0.0) for row in fts_results]
+        fts_max = max(fts_abs) if fts_abs else 1.0
 
         for rank, row in enumerate(fts_results, start=1):
             if row.id is None:
                 continue
-            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (1.0 / (RRF_K + rank))
+            norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
+            weight = max(norm, 0.1)  # floor preserves RRF stability
+            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + weight * (1.0 / (RRF_K + rank))
             rows_by_id[row.id] = row
+
+        # Vector scores already in [0, 1] from the similarity formula
+        vec_max = max((row.score or 0.0) for row in vector_results) if vector_results else 1.0
 
         for rank, row in enumerate(vector_results, start=1):
             if row.id is None:
                 continue
-            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + (1.0 / (RRF_K + rank))
+            norm = (row.score or 0.0) / vec_max if vec_max > 0 else 0.0
+            weight = max(norm, 0.1)  # floor preserves RRF stability
+            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + weight * (1.0 / (RRF_K + rank))
             rows_by_id[row.id] = row
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)

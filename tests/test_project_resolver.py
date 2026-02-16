@@ -14,7 +14,7 @@ class TestProjectResolver:
     def test_cloud_mode_requires_project(self):
         """In cloud mode, project is required."""
         resolver = ProjectResolver(cloud_mode=True)
-        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+        with pytest.raises(ValueError, match="Project is required"):
             resolver.resolve(project=None)
 
     def test_cloud_mode_with_explicit_project(self):
@@ -42,7 +42,6 @@ class TestProjectResolver:
         monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "constrained-project")
         resolver = ProjectResolver.from_env(
             cloud_mode=False,
-            default_project_mode=True,
             default_project="default-project",
         )
 
@@ -57,7 +56,6 @@ class TestProjectResolver:
         """Explicit project parameter has second priority."""
         resolver = ProjectResolver(
             cloud_mode=False,
-            default_project_mode=True,
             default_project="default-project",
         )
 
@@ -67,10 +65,9 @@ class TestProjectResolver:
         assert result.mode == ResolutionMode.EXPLICIT
 
     def test_local_mode_default_project(self):
-        """Default project is used when default_project_mode is true."""
+        """Default project is used as fallback when set."""
         resolver = ProjectResolver(
             cloud_mode=False,
-            default_project_mode=True,
             default_project="my-default",
         )
 
@@ -79,12 +76,11 @@ class TestProjectResolver:
         assert result.project == "my-default"
         assert result.mode == ResolutionMode.DEFAULT
 
-    def test_local_mode_no_default_when_mode_disabled(self):
-        """Default project is NOT used when default_project_mode is false."""
+    def test_local_mode_no_default_project(self):
+        """No default_project configured → ResolutionMode.NONE."""
         resolver = ProjectResolver(
             cloud_mode=False,
-            default_project_mode=False,
-            default_project="my-default",
+            default_project=None,
         )
 
         result = resolver.resolve(project=None)
@@ -106,7 +102,6 @@ class TestProjectResolver:
         """require_project returns result when project resolved."""
         resolver = ProjectResolver(
             cloud_mode=False,
-            default_project_mode=True,
             default_project="required-project",
         )
 
@@ -117,14 +112,14 @@ class TestProjectResolver:
 
     def test_require_project_raises_on_failure(self):
         """require_project raises ValueError when not resolved."""
-        resolver = ProjectResolver(cloud_mode=False, default_project_mode=False)
+        resolver = ProjectResolver(cloud_mode=False)
 
         with pytest.raises(ValueError, match="No project specified"):
             resolver.require_project()
 
     def test_require_project_custom_error_message(self):
         """require_project uses custom error message."""
-        resolver = ProjectResolver(cloud_mode=False, default_project_mode=False)
+        resolver = ProjectResolver(cloud_mode=False)
 
         with pytest.raises(ValueError, match="Custom error message"):
             resolver.require_project(error_message="Custom error message")
@@ -134,7 +129,6 @@ class TestProjectResolver:
         monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
         resolver = ProjectResolver.from_env(
             cloud_mode=False,
-            default_project_mode=True,
             default_project="test",
         )
 
@@ -150,10 +144,9 @@ class TestProjectResolver:
         assert resolver.constrained_project == "env-project"
 
     def test_cloud_mode_uses_default_project(self):
-        """In cloud mode, default project is used when default_project_mode=True."""
+        """In cloud mode, default project is used when configured."""
         resolver = ProjectResolver(
             cloud_mode=True,
-            default_project_mode=True,
             default_project="my-default",
         )
         result = resolver.resolve(project=None)
@@ -163,19 +156,17 @@ class TestProjectResolver:
         assert result.is_resolved is True
 
     def test_cloud_mode_no_default_still_requires_project(self):
-        """In cloud mode with default_project_mode=False, project is still required."""
+        """In cloud mode with no default_project, project is still required."""
         resolver = ProjectResolver(
             cloud_mode=True,
-            default_project_mode=False,
         )
-        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+        with pytest.raises(ValueError, match="Project is required"):
             resolver.resolve(project=None)
 
     def test_cloud_mode_explicit_overrides_default(self):
         """In cloud mode, explicit project wins over default project."""
         resolver = ProjectResolver(
             cloud_mode=True,
-            default_project_mode=True,
             default_project="my-default",
         )
         result = resolver.resolve(project="explicit-project")
@@ -183,21 +174,19 @@ class TestProjectResolver:
         assert result.project == "explicit-project"
         assert result.mode == ResolutionMode.CLOUD_EXPLICIT
 
-    def test_cloud_mode_default_mode_true_but_no_default_project(self):
-        """In cloud mode with default_project_mode=True but no default_project, still raises."""
+    def test_cloud_mode_no_default_project_raises(self):
+        """In cloud mode with no default_project set, still raises."""
         resolver = ProjectResolver(
             cloud_mode=True,
-            default_project_mode=True,
             default_project=None,
         )
-        with pytest.raises(ValueError, match="Project is required for cloud mode"):
+        with pytest.raises(ValueError, match="Project is required"):
             resolver.resolve(project=None)
 
     def test_cloud_mode_discovery_fallback_after_no_default(self):
         """In cloud mode, discovery still works as last resort when no default is configured."""
         resolver = ProjectResolver(
             cloud_mode=True,
-            default_project_mode=False,
         )
         result = resolver.resolve(project=None, allow_discovery=True)
 
@@ -210,7 +199,6 @@ class TestProjectResolver:
         monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "constrained-project")
         resolver = ProjectResolver.from_env(
             cloud_mode=True,
-            default_project_mode=True,
             default_project="default-project",
         )
         result = resolver.resolve(project="explicit-project")

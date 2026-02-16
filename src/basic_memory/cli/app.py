@@ -9,7 +9,7 @@ from typing import Optional  # noqa: E402
 import typer  # noqa: E402
 
 from basic_memory.cli.container import CliContainer, set_container  # noqa: E402
-from basic_memory.cli.promo import maybe_show_cloud_promo  # noqa: E402
+from basic_memory.cli.promo import maybe_show_cloud_promo, maybe_show_init_line  # noqa: E402
 from basic_memory.config import init_cli_logging  # noqa: E402
 
 
@@ -47,7 +47,15 @@ def app_callback(
     container = CliContainer.create()
     set_container(container)
 
-    maybe_show_cloud_promo(ctx.invoked_subcommand)
+    # Trigger: first-run init confirmation before command output.
+    # Why: informational "initialized" message belongs above command results, not in the upsell panel.
+    # Outcome: one-time plain line printed before the subcommand runs.
+    maybe_show_init_line(ctx.invoked_subcommand)
+
+    # Trigger: register promo as a post-command callback.
+    # Why: promo output should appear after the command's own output, not before.
+    # Outcome: promo panel renders below the command results (status tree, table, etc.).
+    ctx.call_on_close(lambda: maybe_show_cloud_promo(ctx.invoked_subcommand))
 
     # Run initialization for commands that don't use the API
     # Skip for 'mcp' command - it has its own lifespan that handles initialization

@@ -275,12 +275,15 @@ def test_build_context_format_json(mock_build_ctx, mock_config_cls):
     """build-context --format json outputs valid JSON."""
     mock_config_cls.return_value = _mock_config_manager()
 
-    mock_context = MagicMock()
-    mock_context.model_dump.return_value = {
-        "primary_results": [],
-        "related_results": [],
-    }
-    mock_build_ctx.fn = AsyncMock(return_value=mock_context)
+    # build_context now returns a slimmed dict directly
+    mock_build_ctx.fn = AsyncMock(
+        return_value={
+            "results": [],
+            "metadata": {"uri": "test/topic", "depth": 1},
+            "page": 1,
+            "page_size": 10,
+        }
+    )
 
     result = runner.invoke(
         cli_app,
@@ -289,7 +292,7 @@ def test_build_context_format_json(mock_build_ctx, mock_config_cls):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
-    assert "primary_results" in data
+    assert "results" in data
     mock_build_ctx.fn.assert_called_once()
 
 
@@ -299,9 +302,15 @@ def test_build_context_default_format_is_json(mock_build_ctx, mock_config_cls):
     """build-context defaults to JSON output (backward compatible)."""
     mock_config_cls.return_value = _mock_config_manager()
 
-    mock_context = MagicMock()
-    mock_context.model_dump.return_value = {"results": []}
-    mock_build_ctx.fn = AsyncMock(return_value=mock_context)
+    # build_context now returns a slimmed dict directly
+    mock_build_ctx.fn = AsyncMock(
+        return_value={
+            "results": [],
+            "metadata": {"uri": "test/topic", "depth": 1},
+            "page": 1,
+            "page_size": 10,
+        }
+    )
 
     result = runner.invoke(
         cli_app,

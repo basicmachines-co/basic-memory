@@ -54,9 +54,9 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             for chat in conversations:
                 # Get name, providing default for unnamed conversations
                 chat_name = chat.get("name") or f"Conversation {chat.get('uuid', 'untitled')}"
-                date_prefix = datetime.fromisoformat(chat["created_at"].replace("Z", "+00:00")).strftime(
-                    "%Y%m%d"
-                )
+                date_prefix = datetime.fromisoformat(
+                    chat["created_at"].replace("Z", "+00:00")
+                ).strftime("%Y%m%d")
                 clean_title = clean_filename(chat_name)
                 relative_path = (
                     f"{destination_folder}/{date_prefix}-{clean_title}"

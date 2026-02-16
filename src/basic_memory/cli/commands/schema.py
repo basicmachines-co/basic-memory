@@ -10,7 +10,6 @@ from typing import Annotated, Optional
 import typer
 from loguru import logger
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 from basic_memory.cli.app import app
@@ -49,11 +48,11 @@ async def _run_validate(
     """Run schema validation via the API."""
     from basic_memory.mcp.clients.schema import SchemaClient
 
-    async with get_client() as client:
+    async with get_client(project_name=project) as client:
         active_project = await get_active_project(client, project, None)
         schema_client = SchemaClient(client, active_project.external_id)
 
-        # Determine if target is a note identifier or entity type
+        # Determine if target is a note identifier or note type
         # Heuristic: if target contains / or ., treat as identifier
         entity_type = None
         identifier = None
@@ -70,7 +69,13 @@ async def _run_validate(
 
         # --- Display results ---
         if report.total_notes == 0:
-            console.print("[yellow]No notes matched for validation.[/yellow]")
+            if report.total_entities == 0:
+                console.print(f"[yellow]No notes of type '{entity_type}' found.[/yellow]")
+            else:
+                console.print(
+                    f"[yellow]Found {report.total_entities} notes but no schema "
+                    f"defined for '{entity_type}'.[/yellow]"
+                )
             return
 
         table = Table(title=f"Schema Validation: {entity_type or identifier or 'all'}")
@@ -109,7 +114,7 @@ async def _run_validate(
 def validate(
     target: Annotated[
         Optional[str],
-        typer.Argument(help="Note path or entity type to validate"),
+        typer.Argument(help="Note path or note type to validate"),
     ] = None,
     project: Annotated[
         Optional[str],
@@ -123,8 +128,8 @@ def validate(
 ):
     """Validate notes against their schemas.
 
-    TARGET can be a note path (e.g., people/ada-lovelace.md) or an entity type
-    (e.g., Person). If omitted, validates all notes that have schemas.
+    TARGET can be a note path (e.g., people/ada-lovelace.md) or a note type
+    (e.g., person). If omitted, validates all notes that have schemas.
 
     Use --strict to exit with error code 1 if any validation errors are found.
     Use --local to force local routing when cloud mode is enabled.
@@ -158,7 +163,7 @@ async def _run_infer(
     """Run schema inference via the API."""
     from basic_memory.mcp.clients.schema import SchemaClient
 
-    async with get_client() as client:
+    async with get_client(project_name=project) as client:
         active_project = await get_active_project(client, project, None)
         schema_client = SchemaClient(client, active_project.external_id)
 
@@ -166,6 +171,27 @@ async def _run_infer(
 
         if report.notes_analyzed == 0:
             console.print(f"[yellow]No notes found with type: {entity_type}[/yellow]")
+            return
+
+        # --- Empty schema guard ---
+        # Trigger: notes were analyzed but no fields met the threshold
+        # Why: dumping hundreds of excluded fields is not useful output
+        # Outcome: show count and suggest a more specific type
+        if not report.suggested_schema:
+            console.print(
+                f"\n[yellow]Analyzed {report.notes_analyzed} notes of type '{entity_type}', "
+                f"but no fields met the {threshold:.0%} threshold.[/yellow]\n"
+            )
+            console.print(
+                f"This usually means '{entity_type}' is too broad — "
+                f"the notes don't share a consistent structure.\n"
+            )
+            console.print("[bold]Suggestions:[/bold]")
+            console.print("  1. Use a more specific type")
+            console.print(
+                f"  2. Lower the threshold: bm schema infer {entity_type} --threshold 0.1"
+            )
+            console.print("  3. Create typed notes with write_note using a specific note_type")
             return
 
         # --- Display frequency analysis ---
@@ -201,7 +227,7 @@ async def _run_infer(
 
         # --- Display suggested schema ---
         console.print("\n[bold]Suggested schema:[/bold]")
-        console.print(Panel(json.dumps(report.suggested_schema, indent=2), title="Picoschema"))
+        console.print(json.dumps(report.suggested_schema, indent=2))
 
         if save:
             console.print(
@@ -214,7 +240,7 @@ async def _run_infer(
 def infer(
     entity_type: Annotated[
         str,
-        typer.Argument(help="Entity type to analyze (e.g., Person, meeting)"),
+        typer.Argument(help="Note type to analyze (e.g., person, meeting)"),
     ],
     project: Annotated[
         Optional[str],
@@ -231,7 +257,7 @@ def infer(
 ):
     """Infer schema from existing notes of a type.
 
-    Analyzes all notes with the given entity type and suggests a Picoschema
+    Analyzes all notes with the given type and suggests a Picoschema
     definition based on observation and relation frequency.
 
     Fields present in 95%+ of notes become required. Fields above the
@@ -266,7 +292,7 @@ async def _run_diff(
     """Run schema drift detection via the API."""
     from basic_memory.mcp.clients.schema import SchemaClient
 
-    async with get_client() as client:
+    async with get_client(project_name=project) as client:
         active_project = await get_active_project(client, project, None)
         schema_client = SchemaClient(client, active_project.external_id)
 
@@ -300,7 +326,7 @@ async def _run_diff(
 def diff(
     entity_type: Annotated[
         str,
-        typer.Argument(help="Entity type to check for drift"),
+        typer.Argument(help="Note type to check for drift"),
     ],
     project: Annotated[
         Optional[str],
@@ -313,8 +339,8 @@ def diff(
 ):
     """Show drift between schema and actual usage.
 
-    Compares the existing schema definition for an entity type against
-    how notes of that type are actually structured. Identifies new fields,
+    Compares the existing schema definition against how notes of that type
+    are actually structured. Identifies new fields,
     dropped fields, and cardinality changes.
 
     Use --local to force local routing when cloud mode is enabled.

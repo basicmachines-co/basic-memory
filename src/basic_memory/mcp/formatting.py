@@ -84,7 +84,9 @@ def format_search_results_ascii(
     if query:
         lines.append(f"Query: {query}")
 
-    summary = f"Results: {len(results)} | Page: {result.current_page} | Page size: {result.page_size}"
+    summary = (
+        f"Results: {len(results)} | Page: {result.current_page} | Page size: {result.page_size}"
+    )
     lines.append(_apply_style(summary, ANSI_DIM, color))
 
     if not results:

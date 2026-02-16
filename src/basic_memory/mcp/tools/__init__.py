@@ -11,7 +11,9 @@ from basic_memory.mcp.tools.read_content import read_content
 from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.mcp.tools.ui_sdk import read_note_ui, search_notes_ui
+
+# TODO: re-enable once MCP client rendering is working
+# from basic_memory.mcp.tools.ui_sdk import read_note_ui, search_notes_ui
 from basic_memory.mcp.tools.view_note import view_note
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.cloud_info import cloud_info
@@ -48,7 +50,7 @@ __all__ = [
     "read_content",
     "read_note",
     "release_notes",
-    "read_note_ui",
+    # "read_note_ui",
     "recent_activity",
     "schema_diff",
     "schema_infer",
@@ -56,7 +58,7 @@ __all__ = [
     "search",
     "search_by_metadata",
     "search_notes",
-    "search_notes_ui",
+    # "search_notes_ui",
     "view_note",
     "write_note",
 ]

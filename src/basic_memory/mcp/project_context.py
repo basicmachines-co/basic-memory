@@ -31,7 +31,6 @@ async def resolve_project_parameter(
     project: Optional[str] = None,
     allow_discovery: bool = False,
     cloud_mode: Optional[bool] = None,
-    default_project_mode: Optional[bool] = None,
     default_project: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve project parameter using unified linear priority chain.
@@ -43,7 +42,7 @@ async def resolve_project_parameter(
     Resolution order (same for local and cloud modes):
     1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
     2. EXPLICIT: project parameter passed directly
-    3. DEFAULT: default project when default_project_mode=true
+    3. DEFAULT: default_project from config (if set)
     4. Fallback: cloud → CLOUD_DISCOVERY or ValueError; local → NONE
 
     Args:
@@ -51,26 +50,22 @@ async def resolve_project_parameter(
         allow_discovery: If True, allows returning None in cloud mode for discovery mode
             (used by tools like recent_activity that can operate across all projects)
         cloud_mode: Optional explicit cloud mode. If not provided, reads from ConfigManager.
-        default_project_mode: Optional explicit default project mode. If not provided, reads from ConfigManager.
         default_project: Optional explicit default project. If not provided, reads from ConfigManager.
 
     Returns:
         Resolved project name or None if no resolution possible
     """
     # Load config for any values not explicitly provided
-    if cloud_mode is None or default_project_mode is None or default_project is None:
+    if cloud_mode is None or default_project is None:
         config = ConfigManager().config
         if cloud_mode is None:
             cloud_mode = config.cloud_mode
-        if default_project_mode is None:
-            default_project_mode = config.default_project_mode
         if default_project is None:
             default_project = config.default_project
 
     # Create resolver with configuration and resolve
     resolver = ProjectResolver.from_env(
         cloud_mode=cloud_mode,
-        default_project_mode=default_project_mode,
         default_project=default_project,
     )
     result = resolver.resolve(project=project, allow_discovery=allow_discovery)
@@ -114,7 +109,7 @@ async def get_active_project(
         project_names = await get_project_names(client, headers)
         raise ValueError(
             "No project specified. "
-            "Either set 'default_project_mode=true' in config, or use 'project' argument.\n"
+            "Either set 'default_project' in config, or use 'project' argument.\n"
             f"Available projects: {project_names}"
         )
 
@@ -225,9 +220,7 @@ async def resolve_project_and_path(
             if context:
                 context.set_state("active_project", active_project)
 
-            resolved_path = (
-                f"{resolved.permalink}/{remainder}" if include_project else remainder
-            )
+            resolved_path = f"{resolved.permalink}/{remainder}" if include_project else remainder
             return active_project, resolved_path, True
 
     # Trigger: no resolvable project prefix in the memory URL
@@ -295,7 +288,7 @@ async def get_project_client(
             project_names = await get_project_names(client)
             raise ValueError(
                 "No project specified. "
-                "Either set 'default_project_mode=true' in config, or use 'project' argument.\n"
+                "Either set 'default_project' in config, or use 'project' argument.\n"
                 f"Available projects: {project_names}"
             )
 

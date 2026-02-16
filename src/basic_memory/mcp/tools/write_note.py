@@ -24,6 +24,7 @@ async def write_note(
     project: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
+    metadata: dict | None = None,
     context: Context | None = None,
 ) -> str:
     """Write a markdown note to the knowledge base.
@@ -67,6 +68,9 @@ async def write_note(
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         note_type: Type of note to create (stored in frontmatter). Defaults to "note".
                    Can be "guide", "report", "config", "person", etc.
+        metadata: Optional dict of extra frontmatter fields merged into entity_metadata.
+                  Useful for schema notes or any note that needs custom YAML frontmatter
+                  beyond title/type/tags. Nested dicts are supported.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -105,6 +109,20 @@ async def write_note(
             content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech"
         )
 
+        # Create a schema note with custom frontmatter via metadata
+        write_note(
+            title="Person",
+            directory="schemas",
+            note_type="schema",
+            content="# Person\\n\\nSchema for person entities.",
+            metadata={
+                "entity": "person",
+                "version": 1,
+                "schema": {"name": "string", "role?": "string"},
+                "settings": {"validation": "warn"},
+            },
+        )
+
     Raises:
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If directory path attempts path traversal
@@ -130,15 +148,22 @@ async def write_note(
 
         # Process tags using the helper function
         tag_list = parse_tags(tags)
-        # Create the entity request
-        metadata = {"tags": tag_list} if tag_list else None
+
+        # Build entity_metadata from optional metadata, then explicit tags on top
+        # Order matters: explicit tags parameter takes precedence over metadata["tags"]
+        entity_metadata = {}
+        if metadata:
+            entity_metadata.update(metadata)
+        if tag_list:
+            entity_metadata["tags"] = tag_list
+
         entity = Entity(
             title=title,
             directory=directory,
             entity_type=note_type,
             content_type="text/markdown",
             content=content,
-            entity_metadata=metadata,
+            entity_metadata=entity_metadata or None,
         )
 
         # Import here to avoid circular import
