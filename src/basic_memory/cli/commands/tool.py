@@ -364,7 +364,7 @@ def build_context(
         project_name = project_name or config_manager.default_project
 
         with force_routing(local=local, cloud=cloud):
-            context = run_with_cleanup(
+            result = run_with_cleanup(
                 mcp_build_context.fn(
                     project=project_name,
                     url=url,
@@ -375,8 +375,8 @@ def build_context(
                     max_related=max_related,
                 )
             )
-        context_dict = context.model_dump(exclude_none=True)
-        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
+        # build_context now returns a slimmed dict (already serializable)
+        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

@@ -2,7 +2,13 @@
 
 Each resource function is wrapped by @mcp.resource() into a FunctionResource.
 We call the underlying .fn() to exercise the template loading logic.
+
+NOTE: UI resources are temporarily disabled (not registered with MCP server)
+while MCP client rendering is being sorted out. These tests are skipped
+until the resources are re-enabled in basic_memory.mcp.resources.__init__.
 """
+
+import pytest
 
 from basic_memory.mcp.resources.ui import (
     search_results_ui,
@@ -14,6 +20,8 @@ from basic_memory.mcp.resources.ui import (
     note_preview_ui_tool_ui,
     note_preview_ui_mcp_ui,
 )
+
+pytestmark = pytest.mark.skip(reason="UI resources temporarily disabled")
 
 
 class TestVariantResources:

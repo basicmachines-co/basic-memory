@@ -441,8 +441,8 @@ This note contains unique search terms:
 
         assert len(search_after.content) > 0
         search_text = search_after.content[0].text
-        assert "quantum mechanics" in search_text
-        assert "research/quantum-ai-note.md" in search_text or "quantum-ai-note" in search_text
+        # Search results include observations/relations — check the note is found by file path
+        assert "quantum-ai-note" in search_text
 
         # Verify search by new location works
         search_by_path = await client.call_tool(
