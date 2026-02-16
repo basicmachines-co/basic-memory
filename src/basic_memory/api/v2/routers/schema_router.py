@@ -8,6 +8,8 @@ observations and relations.
 Flow: Entity loaded with eager observations/relations -> convert to tuples -> core functions.
 """
 
+from pathlib import Path as FilePath
+
 from fastapi import APIRouter, Path, Query
 
 from basic_memory.deps import EntityRepositoryV2ExternalDep
@@ -25,6 +27,7 @@ from basic_memory.schema.resolver import resolve_schema
 from basic_memory.schema.validator import validate_note
 from basic_memory.schema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.schema.diff import diff_schema
+from basic_memory.utils import generate_permalink
 
 # Note: No prefix here -- it's added during registration as /v2/{project_id}/schema
 router = APIRouter(tags=["schema"])
@@ -88,20 +91,24 @@ async def validate_schema(
     """
     results: list[NoteValidationResponse] = []
 
-    async def search_fn(query: str) -> list[dict]:
-        # Trigger: resolve_schema passes the entity type name as query
-        # Why: direct metadata match avoids fragile text search that fails when
-        #      schema title doesn't match entity type (e.g. "Strict Person" vs "strictperson")
-        entities = await _find_schema_entities(entity_repository, query)
-        return [_entity_frontmatter(e) for e in entities]
-
     # --- Single note validation ---
     if identifier:
         entity = await entity_repository.get_by_permalink(identifier)
         if not entity:
             return ValidationReport(entity_type=entity_type, total_notes=0, results=[])
 
-        schema_def = await resolve_schema(_entity_frontmatter(entity), search_fn)
+        frontmatter = _entity_frontmatter(entity)
+        schema_ref = frontmatter.get("schema")
+
+        async def search_fn(query: str) -> list[dict]:
+            entities = await _find_schema_entities(
+                entity_repository,
+                query,
+                allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
+            )
+            return [_entity_frontmatter(e) for e in entities]
+
+        schema_def = await resolve_schema(frontmatter, search_fn)
         if schema_def:
             result = validate_note(
                 entity.permalink or identifier,
@@ -124,7 +131,18 @@ async def validate_schema(
     entities = await _find_by_entity_type(entity_repository, entity_type) if entity_type else []
 
     for entity in entities:
-        schema_def = await resolve_schema(_entity_frontmatter(entity), search_fn)
+        frontmatter = _entity_frontmatter(entity)
+        schema_ref = frontmatter.get("schema")
+
+        async def search_fn(query: str) -> list[dict]:
+            entities = await _find_schema_entities(
+                entity_repository,
+                query,
+                allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
+            )
+            return [_entity_frontmatter(e) for e in entities]
+
+        schema_def = await resolve_schema(frontmatter, search_fn)
         if schema_def:
             result = validate_note(
                 entity.permalink or entity.file_path,
@@ -138,6 +156,7 @@ async def validate_schema(
     return ValidationReport(
         entity_type=entity_type,
         total_notes=len(results),
+        total_entities=len(entities),
         valid_count=valid,
         warning_count=sum(len(r.warnings) for r in results),
         error_count=sum(len(r.errors) for r in results),
@@ -263,21 +282,49 @@ async def _find_by_entity_type(
 async def _find_schema_entities(
     entity_repository: EntityRepositoryV2ExternalDep,
     target_entity_type: str,
+    *,
+    allow_reference_match: bool = False,
 ) -> list[Entity]:
-    """Find schema entities whose entity_metadata['entity'] matches the target type.
+    """Find schema entities for resolver lookups.
 
-    Queries all schema-type entities, then filters by metadata in Python.
-    JSON column filtering syntax varies across SQLite/Postgres; an in-memory
-    filter on the small set of schema notes is simple and portable.
+    Resolution strategy:
+    1) Always try exact entity_metadata['entity'] match (for implicit type lookup
+       and explicit references that use entity names)
+    2) Only when allow_reference_match=True and no entity match was found, try
+       exact reference matching by title/permalink (explicit schema references)
     """
     query = entity_repository.select().where(Entity.entity_type == "schema")
     result = await entity_repository.execute_query(query)
     entities = list(result.scalars().all())
-    return [
+
+    normalized_target = generate_permalink(target_entity_type)
+
+    entity_matches = [
         e
         for e in entities
-        if e.entity_metadata and e.entity_metadata.get("entity") == target_entity_type
+        if e.entity_metadata
+        and isinstance(e.entity_metadata.get("entity"), str)
+        and generate_permalink(e.entity_metadata["entity"]) == normalized_target
     ]
+    if entity_matches:
+        return entity_matches
+
+    if not allow_reference_match:
+        return []
+
+    reference_matches: list[Entity] = []
+    for entity in entities:
+        candidate_refs: list[str] = []
+        if entity.title:
+            candidate_refs.append(entity.title)
+        if entity.permalink:
+            candidate_refs.append(entity.permalink)
+            candidate_refs.append(FilePath(entity.permalink).name)
+
+        if any(generate_permalink(ref) == normalized_target for ref in candidate_refs):
+            reference_matches.append(entity)
+
+    return reference_matches
 
 
 def _to_note_validation_response(result) -> NoteValidationResponse:

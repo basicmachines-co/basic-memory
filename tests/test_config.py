@@ -563,6 +563,11 @@ class TestPlatformNativePathSeparators:
 class TestSemanticSearchConfig:
     """Test semantic search configuration options."""
 
+    def test_semantic_search_enabled_defaults_to_false(self):
+        """Semantic search stays opt-in because semantic deps are optional extras."""
+        config = BasicMemoryConfig()
+        assert config.semantic_search_enabled is False
+
     def test_semantic_embedding_dimensions_defaults_to_none(self):
         """Dimensions should default to None, letting the provider choose."""
         config = BasicMemoryConfig()

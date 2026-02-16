@@ -138,7 +138,7 @@ class BasicMemoryConfig(BaseSettings):
 
     # Semantic search configuration
     semantic_search_enabled: bool = Field(
-        default=True,
+        default=False,
         description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic extras.",
     )
     semantic_embedding_provider: str = Field(

@@ -221,6 +221,64 @@ async def test_validate_with_inline_schema(
 
 
 @pytest.mark.asyncio
+async def test_validate_with_explicit_schema_reference_by_permalink_slug(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Validate resolves explicit schema refs by exact schema identifier (non-fuzzy)."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Strict Person V2",
+            directory="schemas",
+            entity_type="schema",
+            entity_metadata={
+                "entity": "person",
+                "schema": {"name": "string", "role": "string"},
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Strict schema for person notes
+            """),
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    note_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Frank",
+            directory="people",
+            entity_type="person",
+            entity_metadata={
+                # Explicit schema identifier does not equal entity metadata field ("person")
+                # and must resolve by schema identifier, not fuzzy text search.
+                "schema": "strict-person-v2",
+            },
+            content=dedent("""\
+                ## Observations
+                - [name] Frank Nguyen
+                - [role] Engineer
+            """),
+        )
+    )
+    await search_service.index_entity(note_entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": note_entity.permalink},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_notes"] == 1
+    assert len(data["results"]) == 1
+    assert data["results"][0]["schema_entity"] == "person"
+    assert data["results"][0]["passed"] is True
+
+
+@pytest.mark.asyncio
 async def test_validate_missing_required_field(
     client: AsyncClient,
     test_project: Project,
@@ -277,6 +335,32 @@ async def test_validate_no_matching_notes(
     assert response.status_code == 200
     data = response.json()
     assert data["total_notes"] == 0
+    assert data["total_entities"] == 0
+    assert data["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_total_entities_without_schema(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Validate reports total_entities even when no schema exists (total_notes == 0)."""
+    await create_person_entities(entity_service, search_service)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"entity_type": "person"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    # No schema -> no notes validated
+    assert data["total_notes"] == 0
+    # But entities of this type do exist
+    assert data["total_entities"] == 3
     assert data["results"] == []
 
 
