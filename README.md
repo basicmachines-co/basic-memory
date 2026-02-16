@@ -393,6 +393,22 @@ basic-memory project info my-project --cloud
 
 The local MCP server (`basic-memory mcp`) automatically uses local routing, so you can use both local Claude Desktop and cloud-based clients simultaneously.
 
+**CLI Note Editing (`tool edit-note`):**
+
+```bash
+# Append content
+basic-memory tool edit-note project-plan --operation append --content $'\n## Next Steps\n- Finalize rollout'
+
+# Find/replace with replacement count validation
+basic-memory tool edit-note docs/api --operation find_replace --find-text "v0.14.0" --content "v0.15.0" --expected-replacements 2
+
+# Replace a section body
+basic-memory tool edit-note docs/setup --operation replace_section --section "## Installation" --content $'Updated install steps\n- Run just install'
+
+# JSON metadata output for integrations
+basic-memory tool edit-note docs/setup --operation append --content $'\n- Added note' --format json
+```
+
 4. In Claude Desktop, the LLM can now use these tools:
 
 **Content Management:**

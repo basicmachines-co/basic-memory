@@ -60,6 +60,25 @@ class TestRoutingFlagsValidation:
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
+    def test_tool_edit_note_both_flags_error(self):
+        """Using both --local and --cloud should produce an error."""
+        result = runner.invoke(
+            cli_app,
+            [
+                "tool",
+                "edit-note",
+                "test",
+                "--operation",
+                "append",
+                "--content",
+                "test",
+                "--local",
+                "--cloud",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "Cannot specify both --local and --cloud" in result.output
+
 
 class TestMcpCommandForcesLocal:
     """Tests that the MCP command forces local routing."""
@@ -99,6 +118,7 @@ class TestToolCommandsAcceptFlags:
             ("search-notes", ["test query"]),
             ("recent-activity", []),
             ("read-note", ["test"]),
+            ("edit-note", ["test", "--operation", "append", "--content", "test"]),
             ("build-context", ["memory://test"]),
             ("continue-conversation", []),
         ],
@@ -116,6 +136,7 @@ class TestToolCommandsAcceptFlags:
             ("search-notes", ["test query"]),
             ("recent-activity", []),
             ("read-note", ["test"]),
+            ("edit-note", ["test", "--operation", "append", "--content", "test"]),
             ("build-context", ["memory://test"]),
             ("continue-conversation", []),
         ],

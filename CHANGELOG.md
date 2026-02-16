@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased
+
+### Features
+
+- Add `--strip-frontmatter` to `basic-memory tool read-note`
+  - Default behavior is unchanged: `content` still includes raw markdown with frontmatter.
+  - With `--strip-frontmatter`, both text and JSON modes return body-only markdown content.
+  - JSON output now includes an additive `frontmatter` field with parsed YAML metadata (or `null`
+    when no valid opening frontmatter block exists).
+
 ## v0.18.3 (2026-02-12)
 
 ### Bug Fixes
