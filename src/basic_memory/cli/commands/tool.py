@@ -2,9 +2,10 @@
 
 import json
 import sys
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
 import typer
+import yaml
 from loguru import logger
 from rich import print as rprint
 
@@ -28,6 +29,7 @@ from basic_memory.mcp.prompts.recent_activity import (
     recent_activity_prompt as recent_activity_prompt,
 )
 from basic_memory.mcp.tools import build_context as mcp_build_context
+from basic_memory.mcp.tools import edit_note as mcp_edit_note
 from basic_memory.mcp.tools import read_note as mcp_read_note
 from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
 from basic_memory.mcp.tools import search_notes as mcp_search
@@ -35,6 +37,60 @@ from basic_memory.mcp.tools import write_note as mcp_write_note
 
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
+
+VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
+
+
+# --- Frontmatter helpers ---
+
+
+def _parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]:
+    """Parse and strip an opening YAML frontmatter block if valid.
+
+    Returns a tuple of (body_content_or_original, parsed_frontmatter_or_none).
+
+    Behavior:
+    - Only parses frontmatter if the first line is an opening '---' delimiter.
+    - Requires a closing '---' delimiter.
+    - Accepts mapping YAML only; malformed or non-mapping YAML is ignored.
+    - Supports UTF-8 BOM at document start.
+    """
+    if not content:
+        return content, None
+
+    original_content = content
+    if content.startswith("\ufeff"):
+        content = content[1:]
+
+    lines = content.splitlines(keepends=True)
+    if not lines:
+        return original_content, None
+
+    if lines[0].rstrip("\r\n").strip() != "---":
+        return original_content, None
+
+    closing_index = None
+    for index in range(1, len(lines)):
+        if lines[index].rstrip("\r\n").strip() == "---":
+            closing_index = index
+            break
+
+    if closing_index is None:
+        return original_content, None
+
+    frontmatter_text = "".join(lines[1:closing_index])
+    try:
+        parsed = yaml.safe_load(frontmatter_text) if frontmatter_text else {}
+    except yaml.YAMLError:
+        return original_content, None
+
+    if parsed is None:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        return original_content, None
+
+    body_content = "".join(lines[closing_index + 1 :])
+    return body_content, parsed
 
 
 # --- JSON output helpers ---
@@ -109,6 +165,61 @@ async def _read_note_json(
             "content": response.text,
             "file_path": entity.file_path,
         }
+
+
+async def _edit_note_json(
+    identifier: str,
+    operation: str,
+    content: str,
+    project_name: Optional[str],
+    section: Optional[str],
+    find_text: Optional[str],
+    expected_replacements: int,
+) -> dict:
+    """Edit a note and return structured JSON metadata."""
+    async with get_client(project_name=project_name) as client:
+        active_project = await get_active_project(client, project_name)
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+        entity_id = await knowledge_client.resolve_entity(identifier)
+
+        edit_data: dict[str, Any] = {
+            "operation": operation,
+            "content": content,
+            "expected_replacements": expected_replacements,
+        }
+        if section:
+            edit_data["section"] = section
+        if find_text:
+            edit_data["find_text"] = find_text
+
+        result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
+        return {
+            "title": result.title,
+            "permalink": result.permalink,
+            "file_path": result.file_path,
+            "operation": operation,
+            "checksum": result.checksum,
+        }
+
+
+def _validate_edit_note_args(
+    operation: str, find_text: Optional[str], section: Optional[str]
+) -> None:
+    """Validate operation-specific required arguments for edit-note."""
+    if operation not in VALID_EDIT_OPERATIONS:
+        raise ValueError(
+            f"Invalid operation '{operation}'. Must be one of: {', '.join(VALID_EDIT_OPERATIONS)}"
+        )
+    if operation == "find_replace" and not find_text:
+        raise ValueError("find_text parameter is required for find_replace operation")
+    if operation == "replace_section" and not section:
+        raise ValueError("section parameter is required for replace_section operation")
+
+
+def _is_edit_note_failure_response(result: str) -> bool:
+    """Check whether the MCP edit_note text response indicates a failed edit."""
+    return result.lstrip().startswith("# Edit Failed")
 
 
 async def _recent_activity_json(
@@ -281,6 +392,14 @@ def read_note(
     page: int = 1,
     page_size: int = 10,
     format: str = typer.Option("text", "--format", help="Output format: text or json"),
+    strip_frontmatter: bool = typer.Option(
+        False,
+        "--strip-frontmatter",
+        help=(
+            "Strip opening YAML frontmatter from content. "
+            "JSON output includes parsed frontmatter under 'frontmatter'."
+        ),
+    ),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -290,6 +409,7 @@ def read_note(
 
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
+    Use --strip-frontmatter to return body-only markdown content.
     """
     try:
         validate_routing_flags(local, cloud)
@@ -311,9 +431,15 @@ def read_note(
                 result = run_with_cleanup(
                     _read_note_json(identifier, project_name, page, page_size)
                 )
+                stripped_content, parsed_frontmatter = _parse_opening_frontmatter(result["content"])
+                result["frontmatter"] = parsed_frontmatter
+                if strip_frontmatter:
+                    result["content"] = stripped_content
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
                 note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
+                if strip_frontmatter:
+                    note, _ = _parse_opening_frontmatter(note)
                 rprint(note)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -321,6 +447,95 @@ def read_note(
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during read_note: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command()
+def edit_note(
+    identifier: str,
+    operation: Annotated[str, typer.Option("--operation", help="Edit operation to apply")],
+    content: Annotated[str, typer.Option("--content", help="Content for the edit operation")],
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The project to edit. If not provided, the default project will be used."
+        ),
+    ] = None,
+    find_text: Annotated[
+        Optional[str], typer.Option("--find-text", help="Text to find for find_replace operation")
+    ] = None,
+    section: Annotated[
+        Optional[str],
+        typer.Option("--section", help="Section heading for replace_section operation"),
+    ] = None,
+    expected_replacements: int = typer.Option(
+        1,
+        "--expected-replacements",
+        help="Expected replacement count for find_replace operation",
+    ),
+    format: str = typer.Option("text", "--format", help="Output format: text or json"),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Edit an existing markdown note using append/prepend/find_replace/replace_section.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
+    try:
+        validate_routing_flags(local, cloud)
+        _validate_edit_note_args(operation, find_text, section)
+
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
+        with force_routing(local=local, cloud=cloud):
+            if format == "json":
+                result = run_with_cleanup(
+                    _edit_note_json(
+                        identifier=identifier,
+                        operation=operation,
+                        content=content,
+                        project_name=project_name,
+                        section=section,
+                        find_text=find_text,
+                        expected_replacements=expected_replacements,
+                    )
+                )
+                print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+            else:
+                result = run_with_cleanup(
+                    mcp_edit_note.fn(
+                        identifier=identifier,
+                        operation=operation,
+                        content=content,
+                        project=project_name,
+                        section=section,
+                        find_text=find_text,
+                        expected_replacements=expected_replacements,
+                    )
+                )
+                rprint(result)
+                if _is_edit_note_failure_response(result):
+                    raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during edit_note: {e}", err=True)
             raise typer.Exit(1)
         raise
 

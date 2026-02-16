@@ -78,6 +78,92 @@ def test_read_note_json_format(app, app_config, test_project, config_manager):
     assert data["permalink"] == permalink
     assert "content" in data
     assert "file_path" in data
+    assert "frontmatter" in data
+    assert isinstance(data["frontmatter"], dict)
+
+
+def test_read_note_json_strip_frontmatter_permalink(app, app_config, test_project, config_manager):
+    """read-note strips frontmatter in JSON mode for permalink lookup."""
+    write_result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Read Strip Permalink Note",
+            "--folder",
+            "test-notes",
+            "--content",
+            "# Read Strip Permalink Note\n\nPermalink lookup content.",
+            "--format",
+            "json",
+        ],
+    )
+    assert write_result.exit_code == 0
+    write_data = json.loads(write_result.stdout)
+
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "read-note",
+            write_data["permalink"],
+            "--format",
+            "json",
+            "--strip-frontmatter",
+        ],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["title"] == "Read Strip Permalink Note"
+    assert data["permalink"] == write_data["permalink"]
+    assert not data["content"].startswith("---")
+    assert "# Read Strip Permalink Note" in data["content"]
+    assert isinstance(data["frontmatter"], dict)
+    assert data["frontmatter"].get("title") == "Read Strip Permalink Note"
+
+
+def test_read_note_json_strip_frontmatter_title(app, app_config, test_project, config_manager):
+    """read-note strips frontmatter in JSON mode for title-based lookup."""
+    write_result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Read Strip Title Note",
+            "--folder",
+            "test-notes",
+            "--content",
+            "# Read Strip Title Note\n\nTitle lookup content.",
+            "--format",
+            "json",
+        ],
+    )
+    assert write_result.exit_code == 0
+    write_data = json.loads(write_result.stdout)
+
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "read-note",
+            "Read Strip Title Note",
+            "--format",
+            "json",
+            "--strip-frontmatter",
+        ],
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["title"] == "Read Strip Title Note"
+    assert data["permalink"] == write_data["permalink"]
+    assert not data["content"].startswith("---")
+    assert "# Read Strip Title Note" in data["content"]
+    assert isinstance(data["frontmatter"], dict)
+    assert data["frontmatter"].get("title") == "Read Strip Title Note"
 
 
 def test_recent_activity_json_format(app, app_config, test_project, config_manager, monkeypatch):
