@@ -8,6 +8,7 @@ from rich.panel import Panel
 
 import basic_memory
 from basic_memory.config import ConfigManager
+
 OSS_DISCOUNT_CODE = "BMFOSS"
 CLOUD_LEARN_MORE_URL = "https://basicmemory.com"
 

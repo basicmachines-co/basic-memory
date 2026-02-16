@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Literal
 from loguru import logger
 from fastmcp import Context
 
+from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.formatting import format_search_results_ascii
 from basic_memory.mcp.server import mcp
@@ -420,6 +421,14 @@ async def search_notes(
             valid_search_types = {"text", "title", "permalink", "vector", "semantic", "hybrid"}
             if search_type == "text":
                 search_query.text = query
+                # Upgrade to hybrid when semantic search is available —
+                # combines FTS keyword matching with vector similarity for better results
+                try:
+                    container = get_container()
+                    if container.config.semantic_search_enabled:
+                        search_query.retrieval_mode = SearchRetrievalMode.HYBRID
+                except RuntimeError:
+                    pass  # Container not initialized (e.g., CLI context) — stay with FTS
             elif search_type in ("vector", "semantic"):
                 search_query.text = query
                 search_query.retrieval_mode = SearchRetrievalMode.VECTOR
