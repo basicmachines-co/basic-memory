@@ -47,6 +47,7 @@ class ValidationReport(BaseModel):
 
     entity_type: str | None = None
     total_notes: int = 0
+    total_entities: int = 0
     valid_count: int = 0
     warning_count: int = 0
     error_count: int = 0

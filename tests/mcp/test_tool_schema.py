@@ -339,6 +339,22 @@ permalink: things/{name}
 
 
 @pytest.mark.asyncio
+async def test_schema_validate_no_notes_returns_guidance(app, test_project, sync_service):
+    """When no notes of the requested type exist, return guidance on creating notes."""
+    result = await schema_validate.fn(
+        note_type="employee",
+        project=test_project.name,
+    )
+
+    # Should return guidance about creating notes, not about missing schema
+    assert isinstance(result, str)
+    assert "No Notes Found" in result
+    assert "employee" in result
+    assert "write_note" in result
+    assert "search_notes" in result
+
+
+@pytest.mark.asyncio
 async def test_schema_validate_no_schema_returns_guidance(app, test_project, sync_service):
     """When notes exist but no schema is defined, return guidance on creating one."""
     project_path = Path(test_project.path)

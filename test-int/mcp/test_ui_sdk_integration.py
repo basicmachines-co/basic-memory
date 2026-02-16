@@ -1,11 +1,17 @@
 """
 Integration tests for MCP-UI Python SDK embedded resources.
+
+NOTE: UI tools are temporarily disabled (not registered with MCP server)
+while MCP client rendering is being sorted out. These tests are skipped
+until the tools are re-enabled in basic_memory.mcp.tools.__init__.
 """
 
 import pytest
 from fastmcp import Client
 
 pytest.importorskip("mcp_ui_server")
+
+pytestmark = pytest.mark.skip(reason="UI tools temporarily disabled")
 
 
 @pytest.mark.asyncio

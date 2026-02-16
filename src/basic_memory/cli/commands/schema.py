@@ -69,7 +69,13 @@ async def _run_validate(
 
         # --- Display results ---
         if report.total_notes == 0:
-            console.print("[yellow]No notes matched for validation.[/yellow]")
+            if report.total_entities == 0:
+                console.print(f"[yellow]No notes of type '{entity_type}' found.[/yellow]")
+            else:
+                console.print(
+                    f"[yellow]Found {report.total_entities} notes but no schema "
+                    f"defined for '{entity_type}'.[/yellow]"
+                )
             return
 
         table = Table(title=f"Schema Validation: {entity_type or identifier or 'all'}")

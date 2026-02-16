@@ -232,7 +232,8 @@ Error searching for '{query}': {error_message}
 
 @mcp.tool(
     description="Search across all content in the knowledge base with advanced syntax support.",
-    meta={"ui/resourceUri": "ui://basic-memory/search-results"},
+    # TODO: re-enable once MCP client rendering is working
+    # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
 )
 async def search_notes(
     query: str,

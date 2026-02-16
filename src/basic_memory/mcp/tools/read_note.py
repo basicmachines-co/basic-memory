@@ -16,7 +16,8 @@ from basic_memory.utils import validate_project_path
 
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
-    meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
+    # TODO: re-enable once MCP client rendering is working
+    # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
 )
 async def read_note(
     identifier: str,

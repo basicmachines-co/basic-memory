@@ -15,6 +15,25 @@ from basic_memory.mcp.server import mcp
 from basic_memory.schemas.schema import ValidationReport, InferenceReport, DriftReport
 
 
+def _no_notes_guidance(note_type: str, tool_name: str) -> str:
+    """Build guidance string when no notes of a given type exist.
+
+    Used by schema_validate when the project has zero notes of the
+    requested type — a different situation from "notes exist but no schema".
+    """
+    return (
+        f"# No Notes Found of Type '{note_type}'\n\n"
+        f"`{tool_name}` found no notes with type '{note_type}' in the project.\n\n"
+        f"## Next Steps\n\n"
+        f"1. **Create notes of this type** — use `write_note` with "
+        f'`note_type="{note_type}"` to create notes\n'
+        f"2. **Check existing types** — use `search_notes` with `entity_types` "
+        f"filter to see what types exist\n"
+        f"3. **Browse content** — use `list_directory` or `recent_activity` to "
+        f"see what's in the project\n"
+    )
+
+
 def _no_schema_guidance(note_type: str, tool_name: str) -> str:
     """Build guidance string when no schema exists for a note type.
 
@@ -118,8 +137,15 @@ async def schema_validate(
                 f"warnings={result.warning_count} errors={result.error_count}"
             )
 
+            # --- No notes guard ---
+            # Trigger: no entities of this type exist in the project
+            # Why: can't validate notes that don't exist yet
+            # Outcome: return guidance on creating notes of this type
+            if note_type and result.total_entities == 0:
+                return _no_notes_guidance(note_type, "schema_validate")
+
             # --- No schema guard ---
-            # Trigger: batch validation returned zero results
+            # Trigger: entities exist but none were validated (no schema found)
             # Why: notes of this type exist but no schema was found, so none were validated
             # Outcome: return guidance on how to create a schema
             if note_type and result.total_notes == 0:
