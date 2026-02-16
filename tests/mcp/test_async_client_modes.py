@@ -245,3 +245,58 @@ async def test_get_client_per_project_cloud_oauth_fallback(config_manager, confi
     async with get_client(project_name="research") as client:
         assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
         assert client.headers.get("Authorization") == "Bearer oauth-token-456"
+
+
+# --- Explicit routing override tests ---
+
+
+@pytest.mark.asyncio
+async def test_get_client_explicit_routing_overrides_cloud_project(
+    config_manager, config_home, monkeypatch
+):
+    """EXPLICIT_ROUTING + FORCE_LOCAL should override a CLOUD project to use local ASGI."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = False
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    # Simulate CLI --local flag: sets both FORCE_LOCAL and EXPLICIT_ROUTING
+    monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+    monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+
+    async with get_client(project_name="research") as client:
+        # Should use local ASGI transport, NOT cloud proxy
+        assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
+async def test_get_client_explicit_routing_cloud_flag_overrides_local_project(
+    config_manager, config_home, monkeypatch
+):
+    """EXPLICIT_ROUTING + cloud mode should override a LOCAL project to use cloud."""
+    cfg = config_manager.load_config()
+    cfg.cloud_mode = True
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_client_id = "cid"
+    cfg.cloud_domain = "https://auth.example.test"
+    # "main" defaults to LOCAL
+    config_manager.save_config(cfg)
+
+    # Write OAuth token for cloud auth
+    auth = CLIAuth(client_id=cfg.cloud_client_id, authkit_domain=cfg.cloud_domain)
+    auth.token_file.parent.mkdir(parents=True, exist_ok=True)
+    auth.token_file.write_text(
+        '{"access_token":"token-cloud","refresh_token":null,"expires_at":9999999999,"token_type":"Bearer"}',
+        encoding="utf-8",
+    )
+
+    # Simulate CLI --cloud flag: sets EXPLICIT_ROUTING, no FORCE_LOCAL
+    monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
+    monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+
+    async with get_client(project_name="main") as client:
+        # Should use cloud proxy, NOT local ASGI
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("Authorization") == "Bearer token-cloud"

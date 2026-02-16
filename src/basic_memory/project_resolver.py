@@ -8,7 +8,7 @@ identically in both local and cloud modes:
 
 1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
 2. EXPLICIT: Project passed directly to operation
-3. DEFAULT: Default project when default_project_mode=true
+3. DEFAULT: default_project from config (if set)
 4. Fallback: cloud → CLOUD_DISCOVERY or ValueError; local → NONE
 """
 
@@ -27,7 +27,7 @@ class ResolutionMode(Enum):
     CLOUD_DISCOVERY = auto()  # Discovery mode allowed in cloud (no project)
     ENV_CONSTRAINT = auto()  # BASIC_MEMORY_MCP_PROJECT env var
     EXPLICIT = auto()  # Explicit project parameter
-    DEFAULT = auto()  # default_project with default_project_mode=true
+    DEFAULT = auto()  # default_project from config
     NONE = auto()  # No resolution possible
 
 
@@ -70,14 +70,12 @@ class ProjectResolver:
 
     Args:
         cloud_mode: Whether running in cloud mode
-        default_project_mode: Whether to use default project when not specified
-        default_project: The default project name
+        default_project: The default project name (used as fallback when set)
         constrained_project: Optional env-constrained project override
             (typically from BASIC_MEMORY_MCP_PROJECT)
     """
 
     cloud_mode: bool = False
-    default_project_mode: bool = False
     default_project: Optional[str] = None
     constrained_project: Optional[str] = None
 
@@ -85,14 +83,12 @@ class ProjectResolver:
     def from_env(
         cls,
         cloud_mode: bool = False,
-        default_project_mode: bool = False,
         default_project: Optional[str] = None,
     ) -> "ProjectResolver":
         """Create resolver with constrained_project from environment.
 
         Args:
             cloud_mode: Whether running in cloud mode
-            default_project_mode: Whether to use default project when not specified
             default_project: The default project name
 
         Returns:
@@ -101,7 +97,6 @@ class ProjectResolver:
         constrained = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         return cls(
             cloud_mode=cloud_mode,
-            default_project_mode=default_project_mode,
             default_project=default_project,
             constrained_project=constrained,
         )
@@ -116,7 +111,7 @@ class ProjectResolver:
         The same resolution order applies in both local and cloud modes:
         1. ENV_CONSTRAINT — BASIC_MEMORY_MCP_PROJECT env var (highest priority)
         2. EXPLICIT — project parameter passed directly
-        3. DEFAULT — default project when default_project_mode=true
+        3. DEFAULT — default_project from config (if set)
         4. Fallback — cloud: CLOUD_DISCOVERY or ValueError; local: NONE
 
         Args:
@@ -150,13 +145,13 @@ class ProjectResolver:
                 reason=f"Explicit parameter: {project}",
             )
 
-        # --- Priority 3: Default project mode ---
-        if self.default_project_mode and self.default_project:
+        # --- Priority 3: Default project from config ---
+        if self.default_project:
             logger.debug(f"Using default project from config: {self.default_project}")
             return ResolvedProject(
                 project=self.default_project,
                 mode=ResolutionMode.DEFAULT,
-                reason=f"Default project mode: {self.default_project}",
+                reason=f"Default project: {self.default_project}",
             )
 
         # --- Fallback: mode-dependent behavior ---
@@ -200,7 +195,7 @@ class ProjectResolver:
         result = self.resolve(project, allow_discovery=False)
         if not result.is_resolved:
             msg = error_message or (
-                "No project specified. Either set 'default_project_mode=true' in config, "
+                "No project specified. Either set 'default_project' in config, "
                 "or provide a 'project' argument."
             )
             raise ValueError(msg)

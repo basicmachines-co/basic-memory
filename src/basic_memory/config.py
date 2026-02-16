@@ -117,13 +117,9 @@ class BasicMemoryConfig(BaseSettings):
         else {},
         description="Mapping of project names to their ProjectEntry configuration",
     )
-    default_project: str = Field(
+    default_project: Optional[str] = Field(
         default="main",
-        description="Name of the default project to use",
-    )
-    default_project_mode: bool = Field(
-        default=True,
-        description="When True, MCP tools automatically use default_project when no project parameter is specified. Enables simplified UX for single-project workflows.",
+        description="Name of the default project to use. When set, acts as fallback when no project parameter is specified. Set to null to disable automatic project resolution.",
     )
 
     # overridden by ~/.basic-memory/config.json
@@ -328,9 +324,15 @@ class BasicMemoryConfig(BaseSettings):
 
         New format unifies them into:
           projects: {"name": {"path": "/path", "mode": "cloud", ...}}
+
+        Also removes stale keys (default_project_mode, permalinks_include_project)
+        that are no longer part of the config model.
         """
         if not isinstance(data, dict):
             return data
+
+        # --- Remove stale keys from old config versions ---
+        data.pop("default_project_mode", None)
 
         projects = data.get("projects", {})
         if not projects:
@@ -359,6 +361,21 @@ class BasicMemoryConfig(BaseSettings):
                         entry["bisync_initialized"] = getattr(cp, "bisync_initialized", False)
                         entry["last_sync"] = getattr(cp, "last_sync", None)
                 new_projects[name] = entry
+
+            # Pick up cloud_projects entries not already in projects
+            # These are cloud-only projects — path is the cloud permalink,
+            # local_path goes into cloud_sync_path for bisync
+            for name, cp in cloud_projects.items():
+                if name not in new_projects:
+                    if isinstance(cp, dict):
+                        new_projects[name] = {
+                            "path": generate_permalink(name),
+                            "mode": project_modes.get(name, "cloud"),
+                            "cloud_sync_path": cp.get("local_path"),
+                            "bisync_initialized": cp.get("bisync_initialized", False),
+                            "last_sync": cp.get("last_sync"),
+                        }
+
             data["projects"] = new_projects
         else:
             # New format or dict-based — just clean up stale keys
@@ -477,7 +494,10 @@ class BasicMemoryConfig(BaseSettings):
             )
 
         # Ensure default project is valid (i.e. points to an existing project)
-        if self.default_project not in self.projects:  # pragma: no cover
+        # None means "no default" — intentionally left unset
+        if (
+            self.default_project is not None and self.default_project not in self.projects
+        ):  # pragma: no cover
             # Set default to first available project
             self.default_project = next(iter(self.projects.keys()))
 
@@ -596,6 +616,17 @@ class ConfigManager:
             try:
                 file_data = json.loads(self.config_file.read_text(encoding="utf-8"))
 
+                # Detect legacy format before model validators strip stale keys
+                _STALE_KEYS = {"default_project_mode", "project_modes", "cloud_projects"}
+                needs_resave = bool(_STALE_KEYS & file_data.keys())
+
+                # Check if projects dict uses old string-value format
+                projects_raw = file_data.get("projects", {})
+                if projects_raw:
+                    first_val = next(iter(projects_raw.values()), None)
+                    if isinstance(first_val, str):
+                        needs_resave = True
+
                 # First, create config from environment variables (Pydantic will read them)
                 # Then overlay with file data for fields that aren't set via env vars
                 # This ensures env vars take precedence
@@ -617,6 +648,12 @@ class ConfigManager:
                         merged_data[field_name] = env_dict[field_name]
 
                 _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
+
+                # Re-save to normalize legacy config into current format
+                if needs_resave:
+                    logger.info("Migrating config to current format")
+                    save_basic_memory_config(self.config_file, _CONFIG_CACHE)
+
                 return _CONFIG_CACHE
             except Exception as e:  # pragma: no cover
                 logger.exception(f"Failed to load config: {e}")
@@ -643,7 +680,7 @@ class ConfigManager:
         return {name: entry.path for name, entry in self.config.projects.items()}
 
     @property
-    def default_project(self) -> str:
+    def default_project(self) -> Optional[str]:
         """Get the default project name."""
         return self.config.default_project
 

@@ -14,36 +14,30 @@ Basic Memory creates a semantic knowledge graph from markdown files. Focus on bu
 
 **Your role**: You're helping humans build enduring knowledge they'll own forever. The semantic graph (observations, relations, context) helps you provide better assistance by understanding connections and maintaining continuity. Think: lasting insights worth keeping, not disposable chat logs.
 
-## Project Management 
+## Project Management
 
-All tools require explicit project specification.
-
-**Three-tier resolution:**
-1. CLI constraint: `--project name` (highest priority)
+**Resolution priority:**
+1. CLI constraint: `BASIC_MEMORY_MCP_PROJECT` env var (highest priority)
 2. Explicit parameter: `project="name"` in tool calls
-3. Default mode: `default_project_mode=true` in config (fallback)
+3. Default project: `default_project` in config (fallback)
 
 ### Quick Setup Check
 
 ```python
 # Discover projects
 projects = await list_memory_projects()
-
-# Check if default_project_mode enabled
-# If yes: project parameter optional
-# If no: project parameter required
 ```
 
-### Default Project Mode
+### Default Project
 
-When `default_project_mode=true`:
+When `default_project` is set in config:
 ```python
 # These are equivalent:
 await write_note("Note", "Content", "folder")
 await write_note("Note", "Content", "folder", project="main")
 ```
 
-When `default_project_mode=false`:
+When no `default_project` is configured:
 ```python
 # Project required:
 await write_note("Note", "Content", "folder", project="main")  # ✓
@@ -59,7 +53,7 @@ await write_note(
     title="Topic",
     content="# Topic\n## Observations\n- [category] fact\n## Relations\n- relates_to [[Other]]",
     folder="notes",
-    project="main"  # Required unless default_project_mode=true
+    project="main"  # Optional if default_project is set in config
 )
 ```
 
@@ -143,12 +137,11 @@ await write_note(
 ### 1. Project Management
 
 **Single-project users:**
-- Enable `default_project_mode=true`
-- Simpler tool calls
+- Set `default_project` in config (e.g., `"main"`)
+- Simpler tool calls — project parameter is optional
 
 **Multi-project users:**
-- Keep `default_project_mode=false`
-- Always specify project explicitly
+- Always specify project explicitly in tool calls
 
 **Discovery:**
 ```python
@@ -200,7 +193,7 @@ Background information
 **Missing project:**
 ```python
 try:
-    await search_notes(query="test")  # Missing project parameter - will error
+    await search_notes(query="test")  # Fails if no default_project configured
 except:
     # Show available projects
     projects = await list_memory_projects()

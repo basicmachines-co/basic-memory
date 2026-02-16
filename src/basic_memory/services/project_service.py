@@ -68,20 +68,20 @@ class ProjectService:
         return self.config_manager.projects
 
     @property
-    def default_project(self) -> str:
+    def default_project(self) -> Optional[str]:
         """Get the name of the default project.
 
         Returns:
-            The name of the default project
+            The name of the default project, or None if not set
         """
         return self.config_manager.default_project
 
     @property
-    def current_project(self) -> str:
+    def current_project(self) -> Optional[str]:
         """Get the name of the currently active project.
 
         Returns:
-            The name of the current project
+            The name of the current project, or None if not set
         """
         return os.environ.get("BASIC_MEMORY_PROJECT", self.config_manager.default_project)
 
@@ -346,7 +346,9 @@ class ProjectService:
             # No default project - set the config default as default
             # This is defensive code for edge cases where no default exists
             config_default = self.config_manager.default_project  # pragma: no cover
-            config_project = await self.repository.get_by_name(config_default)  # pragma: no cover
+            config_project = (
+                await self.repository.get_by_name(config_default) if config_default else None
+            )  # pragma: no cover
             if config_project:  # pragma: no cover
                 await self.repository.set_as_default(config_project.id)  # pragma: no cover
                 logger.info(

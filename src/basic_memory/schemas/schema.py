@@ -110,6 +110,10 @@ class DriftReport(BaseModel):
     """Schema drift analysis comparing schema definition to actual usage."""
 
     entity_type: str
+    schema_found: bool = Field(
+        default=True,
+        description="Whether a schema was found for this type",
+    )
     new_fields: list[DriftFieldResponse] = Field(
         default_factory=list,
         description="Fields common in notes but not in schema",

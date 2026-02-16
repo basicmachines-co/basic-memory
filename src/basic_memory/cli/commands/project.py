@@ -79,34 +79,38 @@ def list_projects(
         table.add_column("Path", style="green")
         table.add_column("Mode", style="blue")
 
-        # Add Local Path column if in cloud mode and not forcing local
+        # Add cloud-specific columns when in cloud mode
         if config.cloud_mode_enabled and not local:
             table.add_column("Local Path", style="yellow", no_wrap=True, overflow="fold")
+            table.add_column("Sync", style="green")
 
-        # Show Default column in local mode or if default_project_mode is enabled in cloud mode
-        show_default_column = local or not config.cloud_mode_enabled or config.default_project_mode
-        if show_default_column:
-            table.add_column("Default", style="magenta")
+        table.add_column("Default", style="magenta")
 
         for project in result.projects:
             is_default = "[X]" if project.is_default else ""
             normalized_path = normalize_project_path(project.path)
-            project_mode = config.get_project_mode(project.name).value
+            # Trigger: cloud mode and project not in local config
+            # Why: cloud-discovered projects default to LOCAL in get_project_mode
+            # Outcome: show "cloud" for projects only known to the cloud API
+            entry = config.projects.get(project.name)
+            if config.cloud_mode_enabled and not local and entry is None:
+                project_mode = ProjectMode.CLOUD.value
+            else:
+                project_mode = config.get_project_mode(project.name).value
 
             # Build row based on mode
             row = [project.name, format_path(normalized_path), project_mode]
 
-            # Add local path if in cloud mode and not forcing local
+            # Add cloud-specific columns
             if config.cloud_mode_enabled and not local:
                 local_path = ""
-                entry = config.projects.get(project.name)
-                if entry and entry.cloud_sync_path:
-                    local_path = format_path(entry.cloud_sync_path)
+                if entry:
+                    local_path = format_path(entry.cloud_sync_path or entry.path)
                 row.append(local_path)
+                has_sync = "[X]" if entry and entry.cloud_sync_path else ""
+                row.append(has_sync)
 
-            # Add default indicator if showing default column
-            if show_default_column:
-                row.append(is_default)
+            row.append(is_default)
 
             table.add_row(*row)
 
@@ -379,7 +383,7 @@ def set_default_project(
         False, "--local", help="Force local API routing (required in cloud mode)"
     ),
 ) -> None:
-    """Set the default project when 'config.default_project_mode' is set.
+    """Set the default project used as fallback when no project is specified.
 
     In cloud mode, use --local to modify the local configuration.
     """

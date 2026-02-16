@@ -22,6 +22,19 @@ def _force_local_mode() -> bool:
     return os.environ.get("BASIC_MEMORY_FORCE_LOCAL", "").lower() in ("true", "1", "yes")
 
 
+def _explicit_routing() -> bool:
+    """Check if CLI --local/--cloud flag was explicitly passed.
+
+    Set by force_routing() in CLI commands. When active, --local/--cloud
+    flags override per-project routing. The MCP server sets FORCE_LOCAL
+    directly (without this flag), so per-project routing still works there.
+
+    Returns:
+        True if BASIC_MEMORY_EXPLICIT_ROUTING is set to a truthy value
+    """
+    return os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING", "").lower() in ("true", "1", "yes")
+
+
 # Optional factory override for dependency injection
 _client_factory: Optional[Callable[[], AbstractAsyncContextManager[AsyncClient]]] = None
 
@@ -56,23 +69,29 @@ async def get_client(
     1. **Factory injection** (cloud app, tests):
        If a custom factory is set via set_client_factory(), use that.
 
-    2. **Per-project cloud mode** (project_name provided):
-       If the project's mode is CLOUD, routes to cloud using API key or
-       OAuth token. Honored even when FORCE_LOCAL is set, because the user
-       explicitly declared this project as cloud.
+    2. **CLI explicit override** (BASIC_MEMORY_EXPLICIT_ROUTING env var):
+       When --local or --cloud is explicitly passed via CLI, skip per-project
+       routing and fall through to force-local / global cloud mode handling.
+       This allows users to override per-project mode for commands like
+       `bm status --project specs --local` (check local copy of a cloud project).
 
-    3. **Per-project local mode** (project_name provided):
+    3. **Per-project cloud mode** (project_name provided, no explicit override):
+       If the project's mode is CLOUD, routes to cloud using API key or
+       OAuth token. Honored even when FORCE_LOCAL is set (e.g. MCP server),
+       because the user explicitly declared this project as cloud.
+
+    4. **Per-project local mode** (project_name provided, no explicit override):
        If the project's mode is LOCAL (or unspecified, default LOCAL), route
        to local ASGI transport. This allows mixed local/cloud routing even when
        global cloud mode is enabled.
 
-    4. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
+    5. **Force-local** (BASIC_MEMORY_FORCE_LOCAL env var):
        Routes to local ASGI transport, ignoring global cloud settings.
 
-    5. **Global cloud mode** (deprecated fallback):
-       When cloud_mode_enabled is True, uses OAuth JWT token.
+    6. **Global cloud mode**:
+       When cloud_mode_enabled is True, uses OAuth JWT token or API key.
 
-    6. **Local mode** (default):
+    7. **Local mode** (default):
        Use ASGI transport for in-process requests to local FastAPI app.
 
     Args:
@@ -108,53 +127,65 @@ async def get_client(
             pool=30.0,  # 30 seconds for connection pool
         )
 
-        # Trigger: project has per-project cloud mode set
-        # Why: per-project CLOUD is an explicit user declaration that should be
+        # --- Per-project routing (when project_name given and no CLI override) ---
+        # Trigger: CLI --local/--cloud flag was NOT explicitly passed
+        # Why: per-project routing is an explicit user declaration that should be
         #      honored even from the MCP server (which sets FORCE_LOCAL)
-        # Outcome: HTTP client with API key or OAuth auth to cloud proxy
-        if project_name and config.get_project_mode(project_name) == ProjectMode.CLOUD:
-            # Try API key first (explicit, no network)
-            token = config.cloud_api_key
-            if not token:
-                # Fall back to OAuth session (may refresh token)
-                from basic_memory.cli.auth import CLIAuth
+        # Outcome: route based on project's configured mode (CLOUD or LOCAL)
+        if project_name is not None and not _explicit_routing():
+            project_mode = config.get_project_mode(project_name)
 
-                auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-                token = await auth.get_valid_token()
+            if project_mode == ProjectMode.CLOUD:
+                # Try API key first (explicit, no network)
+                token = config.cloud_api_key
+                if not token:
+                    # Fall back to OAuth session (may refresh token)
+                    from basic_memory.cli.auth import CLIAuth
 
-            if not token:
-                raise RuntimeError(
-                    f"Project '{project_name}' is set to cloud mode but no credentials found. "
-                    "Run 'bm cloud set-key <key>' or 'bm cloud login' first."
+                    auth = CLIAuth(
+                        client_id=config.cloud_client_id, authkit_domain=config.cloud_domain
+                    )
+                    token = await auth.get_valid_token()
+
+                if not token:
+                    raise RuntimeError(
+                        f"Project '{project_name}' is set to cloud mode but no credentials "
+                        "found. Run 'bm cloud set-key <key>' or 'bm cloud login' first."
+                    )
+
+                proxy_base_url = f"{config.cloud_host}/proxy"
+                logger.info(
+                    f"Creating HTTP client for cloud project '{project_name}' at: {proxy_base_url}"
                 )
+                async with AsyncClient(
+                    base_url=proxy_base_url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=timeout,
+                ) as client:
+                    yield client
+                return
 
-            proxy_base_url = f"{config.cloud_host}/proxy"
-            logger.info(
-                f"Creating HTTP client for cloud project '{project_name}' at: {proxy_base_url}"
-            )
-            async with AsyncClient(
-                base_url=proxy_base_url,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=timeout,
-            ) as client:
-                yield client
+            # Trigger: project is LOCAL (the default, no CLI override)
+            # Why: project-scoped routing should honor local mode even when global
+            #      cloud mode is enabled for backward compatibility
+            # Outcome: uses ASGI transport for in-process local API calls
+            else:
+                logger.info(f"Project '{project_name}' is set to local mode - using ASGI transport")
+                async with AsyncClient(
+                    transport=ASGITransport(app=fastapi_app),
+                    base_url="http://test",
+                    timeout=timeout,
+                ) as client:
+                    yield client
+                return
 
-        # Trigger: project is not explicitly cloud (LOCAL is the default)
-        # Why: project-scoped routing should honor local mode even when global
-        #      cloud mode is enabled for backward compatibility
-        # Outcome: uses ASGI transport for in-process local API calls
-        elif project_name and config.get_project_mode(project_name) == ProjectMode.LOCAL:
-            logger.info(f"Project '{project_name}' is set to local mode - using ASGI transport")
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-            ) as client:
-                yield client
+        # --- Fallback routing (no per-project routing applies) ---
 
         # Trigger: BASIC_MEMORY_FORCE_LOCAL env var is set
         # Why: allows local MCP server and CLI commands to route locally
         #      even when cloud_mode_enabled is True
         # Outcome: uses ASGI transport for in-process local API calls
-        elif _force_local_mode():
+        if _force_local_mode():
             logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
             async with AsyncClient(
                 transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout

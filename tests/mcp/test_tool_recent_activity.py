@@ -130,9 +130,9 @@ async def test_recent_activity_type_invalid(client, test_project, test_graph):
 @pytest.mark.asyncio
 async def test_recent_activity_discovery_mode(client, test_project, test_graph, config_manager):
     """Test that recent_activity discovery mode works without project parameter."""
-    # Explicit False to test discovery mode - default_project_mode is True by default
+    # Clear default_project to test discovery mode
     cfg = config_manager.load_config()
-    cfg.default_project_mode = False
+    cfg.default_project = None
     config_manager.save_config(cfg)
 
     # Test discovery mode (no project parameter)
@@ -154,9 +154,9 @@ async def test_recent_activity_discovery_mode(client, test_project, test_graph, 
 @pytest.mark.asyncio
 async def test_recent_activity_discovery_mode_no_activity(client, test_project, config_manager):
     """If there is no activity in any project, discovery mode should say so."""
-    # Explicit False to test discovery mode - default_project_mode is True by default
+    # Clear default_project to test discovery mode
     cfg = config_manager.load_config()
-    cfg.default_project_mode = False
+    cfg.default_project = None
     config_manager.save_config(cfg)
 
     result = await recent_activity.fn()
@@ -169,9 +169,9 @@ async def test_recent_activity_discovery_mode_multiple_active_projects(
     app, client, test_project, tmp_path_factory, config_manager
 ):
     """Discovery mode should use the multi-project guidance when multiple projects have activity."""
-    # Explicit False to test discovery mode - default_project_mode is True by default
+    # Clear default_project to test discovery mode
     cfg = config_manager.load_config()
-    cfg.default_project_mode = False
+    cfg.default_project = None
     config_manager.save_config(cfg)
 
     from basic_memory.mcp.tools import create_memory_project, write_note

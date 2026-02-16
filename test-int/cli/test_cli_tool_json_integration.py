@@ -83,7 +83,7 @@ def test_read_note_json_format(app, app_config, test_project, config_manager):
 def test_recent_activity_json_format(app, app_config, test_project, config_manager, monkeypatch):
     """Test recent-activity --format json returns valid JSON list."""
     # _recent_activity_json uses resolve_project_parameter which requires either
-    # default_project_mode=True or BASIC_MEMORY_MCP_PROJECT to resolve a project
+    # default_project set or BASIC_MEMORY_MCP_PROJECT to resolve a project
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
 
     # Write a note to ensure there's recent activity

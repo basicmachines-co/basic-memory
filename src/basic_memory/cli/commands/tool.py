@@ -50,7 +50,7 @@ async def _write_note_json(
     await mcp_write_note.fn(title, content, folder, project_name, tags)
 
     # Resolve the entity to get metadata back
-    async with get_client() as client:
+    async with get_client(project_name=project_name) as client:
         active_project = await get_active_project(client, project_name)
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
@@ -72,7 +72,7 @@ async def _read_note_json(
     identifier: str, project_name: Optional[str], page: int, page_size: int
 ) -> dict:
     """Read a note and return structured JSON with content and metadata."""
-    async with get_client() as client:
+    async with get_client(project_name=project_name) as client:
         active_project = await get_active_project(client, project_name)
         knowledge_client = KnowledgeClient(client, active_project.external_id)
         resource_client = ResourceClient(client, active_project.external_id)
@@ -120,7 +120,7 @@ async def _recent_activity_json(
     page_size: int = 50,
 ) -> list:
     """Get recent activity and return structured JSON list."""
-    async with get_client() as client:
+    async with get_client(project_name=project_name) as client:
         # Build query params matching the MCP tool's logic
         params: dict = {"page": page, "page_size": page_size, "max_related": 10}
         if depth:

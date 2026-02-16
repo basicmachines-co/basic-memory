@@ -10,10 +10,7 @@ Flow: Entity loaded with eager observations/relations -> convert to tuples -> co
 
 from fastapi import APIRouter, Path, Query
 
-from basic_memory.deps import (
-    SearchServiceV2ExternalDep,
-    EntityRepositoryV2ExternalDep,
-)
+from basic_memory.deps import EntityRepositoryV2ExternalDep
 from basic_memory.models.knowledge import Entity
 from basic_memory.schemas.schema import (
     ValidationReport,
@@ -24,7 +21,6 @@ from basic_memory.schemas.schema import (
     FieldFrequencyResponse,
     DriftFieldResponse,
 )
-from basic_memory.schemas.search import SearchQuery
 from basic_memory.schema.resolver import resolve_schema
 from basic_memory.schema.validator import validate_note
 from basic_memory.schema.inference import infer_schema, NoteData, ObservationData, RelationData
@@ -81,7 +77,6 @@ def _entity_frontmatter(entity: Entity) -> dict:
 @router.post("/schema/validate", response_model=ValidationReport)
 async def validate_schema(
     entity_repository: EntityRepositoryV2ExternalDep,
-    search_service: SearchServiceV2ExternalDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_type: str | None = Query(None, description="Entity type to validate"),
     identifier: str | None = Query(None, description="Specific note identifier"),
@@ -93,18 +88,12 @@ async def validate_schema(
     """
     results: list[NoteValidationResponse] = []
 
-    async def search_fn(query: str) -> list:
-        # Search for schema notes, then load full entity_metadata from the entity table.
-        # The search index only stores minimal metadata (e.g., {"entity_type": "schema"}),
-        # but parse_schema_note needs the full frontmatter with entity/schema/version keys.
-        results = await search_service.search(SearchQuery(text=query, types=["schema"]), limit=5)
-        frontmatters = []
-        for row in results:
-            if row.permalink:
-                entity = await entity_repository.get_by_permalink(row.permalink)
-                if entity:
-                    frontmatters.append(_entity_frontmatter(entity))
-        return frontmatters
+    async def search_fn(query: str) -> list[dict]:
+        # Trigger: resolve_schema passes the entity type name as query
+        # Why: direct metadata match avoids fragile text search that fails when
+        #      schema title doesn't match entity type (e.g. "Strict Person" vs "strictperson")
+        entities = await _find_schema_entities(entity_repository, query)
+        return [_entity_frontmatter(e) for e in entities]
 
     # --- Single note validation ---
     if identifier:
@@ -205,7 +194,6 @@ async def infer_schema_endpoint(
 @router.get("/schema/diff/{entity_type}", response_model=DriftReport)
 async def diff_schema_endpoint(
     entity_repository: EntityRepositoryV2ExternalDep,
-    search_service: SearchServiceV2ExternalDep,
     entity_type: str = Path(..., description="Entity type to check for drift"),
     project_id: str = Path(..., description="Project external UUID"),
 ):
@@ -216,25 +204,16 @@ async def diff_schema_endpoint(
     fields, and cardinality changes.
     """
 
-    async def search_fn(query: str) -> list:
-        # Search for schema notes, then load full entity_metadata from the entity table.
-        # The search index only stores minimal metadata (e.g., {"entity_type": "schema"}),
-        # but parse_schema_note needs the full frontmatter with entity/schema/version keys.
-        results = await search_service.search(SearchQuery(text=query, types=["schema"]), limit=5)
-        frontmatters = []
-        for row in results:
-            if row.permalink:
-                entity = await entity_repository.get_by_permalink(row.permalink)
-                if entity:
-                    frontmatters.append(_entity_frontmatter(entity))
-        return frontmatters
+    async def search_fn(query: str) -> list[dict]:
+        entities = await _find_schema_entities(entity_repository, query)
+        return [_entity_frontmatter(e) for e in entities]
 
     # Resolve schema by entity type
     schema_frontmatter = {"type": entity_type}
     schema_def = await resolve_schema(schema_frontmatter, search_fn)
 
     if not schema_def:
-        return DriftReport(entity_type=entity_type)
+        return DriftReport(entity_type=entity_type, schema_found=False)
 
     # Collect all notes of this type
     entities = await _find_by_entity_type(entity_repository, entity_type)
@@ -279,6 +258,26 @@ async def _find_by_entity_type(
     query = entity_repository.select().where(Entity.entity_type == entity_type)
     result = await entity_repository.execute_query(query)
     return list(result.scalars().all())
+
+
+async def _find_schema_entities(
+    entity_repository: EntityRepositoryV2ExternalDep,
+    target_entity_type: str,
+) -> list[Entity]:
+    """Find schema entities whose entity_metadata['entity'] matches the target type.
+
+    Queries all schema-type entities, then filters by metadata in Python.
+    JSON column filtering syntax varies across SQLite/Postgres; an in-memory
+    filter on the small set of schema notes is simple and portable.
+    """
+    query = entity_repository.select().where(Entity.entity_type == "schema")
+    result = await entity_repository.execute_query(query)
+    entities = list(result.scalars().all())
+    return [
+        e
+        for e in entities
+        if e.entity_metadata and e.entity_metadata.get("entity") == target_entity_type
+    ]
 
 
 def _to_note_validation_response(result) -> NoteValidationResponse:
