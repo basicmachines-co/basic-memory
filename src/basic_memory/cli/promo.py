@@ -26,7 +26,7 @@ def _is_interactive_session() -> bool:
 def _build_cloud_promo_message() -> str:
     """Build benefit-led cloud upsell copy with Rich markup."""
     return (
-        "[bold]Your knowledge, everywhere.[/bold]\n"
+        "☁️ [bold]Your knowledge, everywhere.[/bold] ✨\n"
         "Stop losing context when you switch machines.\n"
         "Basic Memory Cloud syncs your memory across every device, including mobile and web.\n"
         f"Subscribe and use [bold cyan]{OSS_DISCOUNT_CODE}[/bold cyan] "
