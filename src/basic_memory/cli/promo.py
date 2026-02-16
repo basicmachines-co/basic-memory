@@ -29,8 +29,8 @@ def _build_cloud_promo_message() -> str:
         "☁️ [bold]Your knowledge, everywhere.[/bold] ✨\n"
         "Stop losing context when you switch machines.\n"
         "Basic Memory Cloud syncs your memory across every device, including mobile and web.\n"
-        f"Subscribe and use [bold cyan]{OSS_DISCOUNT_CODE}[/bold cyan] "
-        "for 20% off your first 3 months.\n"
+        "Try it free for 7 days.\n"
+        f"Use [bold cyan]{OSS_DISCOUNT_CODE}[/bold cyan] for 20% off when you subscribe.\n"
         "[bold green]→ bm cloud login[/bold green]"
     )
 
