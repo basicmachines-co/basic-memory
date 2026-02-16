@@ -344,24 +344,33 @@ async def engine_session_factory(
 
     global _engine, _session_maker
 
-    # Use the same helper function as production code
-    _engine, _session_maker = _create_engine_and_session(db_path, db_type, config)
+    # Use the same helper function as production code.
+    #
+    # Keep local references so teardown can deterministically dispose the
+    # specific engine created by this context manager, even if other code calls
+    # shutdown_db() and mutates module-level globals mid-test.
+    created_engine, created_session_maker = _create_engine_and_session(db_path, db_type, config)
+    _engine, _session_maker = created_engine, created_session_maker
 
     try:
         # Verify that engine and session maker are initialized
-        if _engine is None:  # pragma: no cover
+        if created_engine is None:  # pragma: no cover
             logger.error("Database engine is None in engine_session_factory")
             raise RuntimeError("Database engine initialization failed")
 
-        if _session_maker is None:  # pragma: no cover
+        if created_session_maker is None:  # pragma: no cover
             logger.error("Session maker is None in engine_session_factory")
             raise RuntimeError("Session maker initialization failed")
 
-        yield _engine, _session_maker
+        yield created_engine, created_session_maker
     finally:
-        if _engine:
-            await _engine.dispose()
+        await created_engine.dispose()
+
+        # Only clear module-level globals if they still point to this context's
+        # engine/session. This avoids clobbering newer globals from other callers.
+        if _engine is created_engine:
             _engine = None
+        if _session_maker is created_session_maker:
             _session_maker = None
 
 

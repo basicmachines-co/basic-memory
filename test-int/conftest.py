@@ -292,10 +292,16 @@ def app(app_config, project_config, engine_factory, test_project, config_manager
     from basic_memory.api.app import app as fastapi_app
 
     app = fastapi_app
+    previous_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_project_config] = lambda: project_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     app.dependency_overrides[get_app_config] = lambda: app_config
-    return app
+    try:
+        yield app
+    finally:
+        # Restore overrides so one test's injected dependencies don't leak into
+        # subsequent tests that use the same global FastAPI app instance.
+        app.dependency_overrides = previous_overrides
 
 
 @pytest_asyncio.fixture
