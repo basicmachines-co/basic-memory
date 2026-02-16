@@ -457,9 +457,12 @@ class LocalTaskScheduler:
     def __init__(
         self,
         handlers: Mapping[str, Callable[..., Coroutine[Any, Any, None]]],
+        test_mode: bool | None = None,
     ) -> None:
         self._handlers = handlers
-        self._test_mode = os.environ.get("BASIC_MEMORY_ENV") == "test"
+        self._test_mode = (
+            test_mode if test_mode is not None else os.environ.get("BASIC_MEMORY_ENV") == "test"
+        )
 
     def schedule(self, task_name: str, **payload: Any) -> None:
         handler = self._handlers.get(task_name)
@@ -532,7 +535,8 @@ async def get_task_scheduler(
             "sync_entity_vectors": _sync_entity_vectors,
             "sync_project": _sync_project,
             "reindex_project": _reindex_project,
-        }
+        },
+        test_mode=app_config.is_test_env,
     )
     return scheduler
 

@@ -44,7 +44,7 @@ test-unit-postgres:
 
 # Run integration tests against SQLite (excludes semantic benchmarks — use just test-semantic)
 test-int-sqlite:
-    uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
 
 # Run integration tests against Postgres
 # Note: Uses timeout due to FastMCP Client + asyncpg cleanup hang (tests pass, process hangs on exit)
@@ -55,10 +55,10 @@ test-int-postgres:
     # Use gtimeout (macOS/Homebrew) or timeout (Linux)
     TIMEOUT_CMD=$(command -v gtimeout || command -v timeout || echo "")
     if [[ -n "$TIMEOUT_CMD" ]]; then
-        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int' || test $? -eq 137
+        $TIMEOUT_CMD --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int' || test $? -eq 137
     else
         echo "⚠️  No timeout command found, running without timeout..."
-        BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
+        BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
     fi
 
 # Run tests impacted by recent changes (requires pytest-testmon)
@@ -98,26 +98,26 @@ postgres-migrate:
 # These tests verify Windows-specific database optimizations (locking mode, NullPool)
 # Will be skipped automatically on non-Windows platforms
 test-windows:
-    uv run pytest -p pytest_mock -v --no-cov -m windows tests test-int
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m windows tests test-int
 
 # Run benchmark tests only (performance testing)
 # These are slow tests that measure sync performance with various file counts
 # Excluded from default test runs to keep CI fast
 test-benchmark:
-    uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m benchmark tests test-int
 
 # Run semantic search quality benchmarks (all combos)
 test-semantic:
-    uv run pytest -p pytest_mock -v --no-cov -m semantic test-int/semantic/
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m semantic test-int/semantic/
 
 # Run semantic benchmarks with JSON artifact output, then show report
 test-semantic-report:
-    BASIC_MEMORY_BENCHMARK_OUTPUT=.benchmarks/semantic-quality.jsonl uv run pytest -p pytest_mock -v -s --no-cov -m semantic test-int/semantic/
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_BENCHMARK_OUTPUT=.benchmarks/semantic-quality.jsonl uv run pytest -p pytest_mock -v -s --no-cov -m semantic test-int/semantic/
     uv run python test-int/semantic/report.py .benchmarks/semantic-quality.jsonl
 
 # Run semantic benchmarks (Postgres combos only)
 test-semantic-postgres:
-    uv run pytest -p pytest_mock -v --no-cov -m semantic -k postgres test-int/semantic/
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m semantic -k postgres test-int/semantic/
 
 # View semantic benchmark results (rich formatted table)
 # Usage: just semantic-report [--filter-combo sqlite] [--filter-suite paraphrase] [--sort-by avg_latency_ms]
@@ -134,7 +134,7 @@ benchmark-compare baseline candidate *args:
 # Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
 # Use this before releasing to ensure everything works across all backends and platforms
 test-all:
-    uv run pytest -p pytest_mock -v --no-cov tests test-int
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov tests test-int
 
 # Generate HTML coverage report
 coverage:
