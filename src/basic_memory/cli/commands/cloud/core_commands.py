@@ -6,6 +6,13 @@ from rich.console import Console
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.cli.analytics import (
+    track,
+    EVENT_CLOUD_LOGIN_STARTED,
+    EVENT_CLOUD_LOGIN_SUCCESS,
+    EVENT_CLOUD_LOGIN_SUB_REQUIRED,
+    EVENT_PROMO_OPTED_OUT,
+)
 from basic_memory.cli.promo import OSS_DISCOUNT_CODE
 from basic_memory.config import ConfigManager
 from basic_memory.cli.commands.cloud.api_client import (
@@ -33,6 +40,7 @@ def login():
     """Authenticate with WorkOS using OAuth Device Authorization flow."""
 
     async def _login():
+        track(EVENT_CLOUD_LOGIN_STARTED)
         client_id, domain, host_url = get_cloud_config()
         auth = CLIAuth(client_id=client_id, authkit_domain=domain)
 
@@ -46,10 +54,12 @@ def login():
             console.print("[dim]Verifying subscription access...[/dim]")
             await make_api_request("GET", f"{host_url.rstrip('/')}/proxy/health")
 
+            track(EVENT_CLOUD_LOGIN_SUCCESS)
             console.print("[green]Cloud authentication successful[/green]")
             console.print(f"[dim]Cloud host ready: {host_url}[/dim]")
 
         except SubscriptionRequiredError as e:
+            track(EVENT_CLOUD_LOGIN_SUB_REQUIRED)
             console.print("\n[red]Subscription Required[/red]\n")
             console.print(f"[yellow]{e.args[0]}[/yellow]\n")
             console.print(
@@ -205,6 +215,7 @@ def promo(enabled: bool = typer.Option(True, "--on/--off", help="Enable or disab
     if enabled:
         console.print("[green]Cloud promo messages enabled[/green]")
     else:
+        track(EVENT_PROMO_OPTED_OUT)
         console.print("[yellow]Cloud promo messages disabled[/yellow]")
 
 
