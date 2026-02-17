@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Literal
 from loguru import logger
 from fastmcp import Context
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
 from basic_memory.mcp.formatting import format_search_results_ascii
@@ -16,6 +17,17 @@ from basic_memory.schemas.search import (
     SearchResponse,
     SearchRetrievalMode,
 )
+
+
+def _semantic_search_enabled_for_text_search() -> bool:
+    """Resolve semantic-search enablement in both MCP and CLI invocation paths."""
+    try:
+        return get_container().config.semantic_search_enabled
+    except RuntimeError:
+        # Trigger: MCP container is not initialized (e.g., `bm tool search-notes` direct call).
+        # Why: CLI path still needs the same semantic-default behavior as MCP server path.
+        # Outcome: load config directly and keep text-mode retrieval behavior consistent.
+        return ConfigManager().config.semantic_search_enabled
 
 
 def _format_search_error_response(
@@ -268,7 +280,8 @@ async def search_notes(
     - `search_notes("work-docs", "'exact phrase'")` - Search for exact phrase match
 
     ### Advanced Boolean Searches
-    - `search_notes("my-project", "term1 term2")` - Find content with both terms (implicit AND)
+    - `search_notes("my-project", "term1 term2")` - Strict implicit-AND first; retries with
+      relaxed OR terms only if strict search returns no results
     - `search_notes("my-project", "term1 AND term2")` - Explicit AND search (both terms required)
     - `search_notes("my-project", "term1 OR term2")` - Either term can be present
     - `search_notes("my-project", "term1 NOT term2")` - Include term1 but exclude term2
@@ -282,7 +295,8 @@ async def search_notes(
     ### Search Type Examples
     - `search_notes("my-project", "Meeting", search_type="title")` - Search only in titles
     - `search_notes("work-docs", "docs/meeting-*", search_type="permalink")` - Pattern match permalinks
-    - `search_notes("research", "keyword", search_type="text")` - Full-text search (default)
+    - `search_notes("research", "keyword", search_type="text")` - Text search (default; auto-upgrades
+      to hybrid when semantic search is enabled)
 
     ### Filtering Options
     - `search_notes("my-project", "query", types=["entity"])` - Search only entities
@@ -325,7 +339,8 @@ async def search_notes(
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of:
-                    "text", "title", "permalink", "vector", "semantic", "hybrid" (default: "text")
+                    "text", "title", "permalink", "vector", "semantic", "hybrid" (default: "text";
+                    text mode auto-upgrades to hybrid when semantic search is enabled)
         output_format: "default" returns structured data, "ascii" returns a plain text table,
             "ansi" returns a colorized table for TUI clients.
         types: Optional list of note types to search (e.g., ["note", "person"])
@@ -345,6 +360,7 @@ async def search_notes(
     Examples:
         # Basic text search
         results = await search_notes("project planning")
+        # Plain multi-term text uses strict matching first, then relaxed OR fallback if needed
 
         # Boolean AND search (both terms must be present)
         results = await search_notes("project AND planning")
@@ -424,12 +440,8 @@ async def search_notes(
                 search_query.text = query
                 # Upgrade to hybrid when semantic search is available —
                 # combines FTS keyword matching with vector similarity for better results
-                try:
-                    container = get_container()
-                    if container.config.semantic_search_enabled:
-                        search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-                except RuntimeError:
-                    pass  # Container not initialized (e.g., CLI context) — stay with FTS
+                if _semantic_search_enabled_for_text_search():
+                    search_query.retrieval_mode = SearchRetrievalMode.HYBRID
             elif search_type in ("vector", "semantic"):
                 search_query.text = query
                 search_query.retrieval_mode = SearchRetrievalMode.VECTOR

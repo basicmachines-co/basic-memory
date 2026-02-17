@@ -138,6 +138,7 @@ def test_ensure_initialization_runs_and_cleans_up(app_config: BasicMemoryConfig,
 async def test_initialize_app_warns_on_frontmatter_permalink_precedence(
     app_config: BasicMemoryConfig, monkeypatch
 ):
+    app_config.database_backend = DatabaseBackend.SQLITE
     app_config.ensure_frontmatter_on_sync = True
     app_config.disable_permalinks = True
 

@@ -603,10 +603,45 @@ class TestPlatformNativePathSeparators:
 class TestSemanticSearchConfig:
     """Test semantic search configuration options."""
 
-    def test_semantic_search_enabled_defaults_to_false(self):
-        """Semantic search stays opt-in because semantic deps are optional extras."""
+    def test_semantic_search_enabled_defaults_to_true_when_fastembed_is_available(
+        self, monkeypatch
+    ):
+        """Semantic search defaults on when fastembed is importable."""
+        import basic_memory.config as config_module
+
+        monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
+        monkeypatch.setattr(
+            config_module.importlib.util,
+            "find_spec",
+            lambda name: object() if name == "fastembed" else None,
+        )
+        config = BasicMemoryConfig()
+        assert config.semantic_search_enabled is True
+
+    def test_semantic_search_enabled_defaults_to_false_when_fastembed_is_unavailable(
+        self, monkeypatch
+    ):
+        """Semantic search defaults off when fastembed is not importable."""
+        import basic_memory.config as config_module
+
+        monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
+        monkeypatch.setattr(config_module.importlib.util, "find_spec", lambda name: None)
         config = BasicMemoryConfig()
         assert config.semantic_search_enabled is False
+
+    def test_semantic_search_enabled_env_var_overrides_dependency_default(self, monkeypatch):
+        """Environment overrides should win over dependency-based defaults."""
+        import basic_memory.config as config_module
+
+        monkeypatch.setattr(config_module.importlib.util, "find_spec", lambda name: None)
+
+        monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "true")
+        enabled = BasicMemoryConfig()
+        assert enabled.semantic_search_enabled is True
+
+        monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "false")
+        disabled = BasicMemoryConfig()
+        assert disabled.semantic_search_enabled is False
 
     def test_semantic_embedding_dimensions_defaults_to_none(self):
         """Dimensions should default to None, letting the provider choose."""

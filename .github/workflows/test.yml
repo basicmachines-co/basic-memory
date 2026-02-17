@@ -102,6 +102,41 @@ jobs:
           uv pip install pytest pytest-cov
           just test-postgres
 
+  test-semantic:
+    name: Test Semantic (Python 3.12)
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - uses: extractions/setup-just@v3
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev,semantic]"
+
+      - name: Run tests (Semantic)
+        run: |
+          uv pip install pytest pytest-cov
+          just test-semantic
+
   coverage:
     name: Coverage Summary (combined, Python 3.12)
     timeout-minutes: 30

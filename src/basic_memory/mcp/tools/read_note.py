@@ -14,6 +14,11 @@ from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
 
+def _is_exact_title_match(identifier: str, title: str) -> bool:
+    """Return True when identifier exactly matches a title (case-insensitive)."""
+    return identifier.strip().casefold() == title.strip().casefold()
+
+
 @mcp.tool(
     description="Read a markdown note by title or permalink.",
     # TODO: re-enable once MCP client rendering is working
@@ -118,7 +123,7 @@ async def read_note(
 
         try:
             # Try to resolve identifier to entity ID
-            entity_id = await knowledge_client.resolve_entity(entity_path)
+            entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
 
             # Fetch content using entity ID
             response = await resource_client.read(entity_id, page=page, page_size=page_size)
@@ -148,17 +153,29 @@ async def read_note(
 
         # Handle both SearchResponse object and error strings
         if title_results and hasattr(title_results, "results") and title_results.results:
-            result = title_results.results[0]  # Get the first/best match
-            if result.permalink:
+            # Trigger: direct resolution failed and title search returned candidates.
+            # Why: avoid returning unrelated notes when search yields only fuzzy matches.
+            # Outcome: fetch content only when a true exact title match exists.
+            result = next(
+                (
+                    candidate
+                    for candidate in title_results.results
+                    if _is_exact_title_match(identifier, candidate.title)
+                ),
+                None,
+            )
+            if not result:
+                logger.info(f"No exact title match found for: {identifier}")
+            elif result.permalink:
                 try:
                     # Resolve the permalink to entity ID
-                    entity_id = await knowledge_client.resolve_entity(result.permalink)
+                    entity_id = await knowledge_client.resolve_entity(result.permalink, strict=True)
 
                     # Fetch content using the entity ID
                     response = await resource_client.read(entity_id, page=page, page_size=page_size)
 
                     if response.status_code == 200:
-                        logger.info(f"Found note by title search: {result.permalink}")
+                        logger.info(f"Found note by exact title search: {result.permalink}")
                         if output_format in ("ascii", "ansi"):
                             return format_note_preview_ascii(
                                 response.text,

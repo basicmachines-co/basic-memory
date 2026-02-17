@@ -209,6 +209,9 @@ update-deps:
 # Run all code quality checks and tests
 check: lint format typecheck test
 
+# Run all code quality checks and all test suites, including semantic benchmarks
+check-all: lint format typecheck test test-semantic
+
 # Generate Alembic migration with descriptive message
 migration message:
     cd src/basic_memory/alembic && alembic revision --autogenerate -m "{{message}}"

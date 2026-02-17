@@ -205,9 +205,9 @@ class ProjectService:
                         f"Projects cannot share directory trees."
                     )
 
-        if self.config_manager.config.database_backend != DatabaseBackend.POSTGRES:
-            # First add to config file (this will validate the project doesn't exist)
-            self.config_manager.add_project(name, resolved_path)
+        # First add to config file (this validates project uniqueness and keeps
+        # config + database aligned for all backends).
+        self.config_manager.add_project(name, resolved_path)
 
         # Then add to database
         project_data = {
@@ -307,9 +307,8 @@ class ProjectService:
         # Update database
         await self.repository.set_as_default(project.id)
 
-        # Update config file only in local mode (cloud mode uses database only)
-        if self.config_manager.config.database_backend != DatabaseBackend.POSTGRES:
-            self.config_manager.set_default_project(name)
+        # Keep config and database default project in sync for all backends.
+        self.config_manager.set_default_project(name)
 
         logger.info(f"Project '{name}' set as default in configuration and database")
 

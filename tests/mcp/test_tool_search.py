@@ -899,8 +899,8 @@ async def test_search_notes_text_stays_fts_when_semantic_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_notes_text_stays_fts_when_container_not_initialized(monkeypatch):
-    """Default text search should stay FTS when MCP container is not available (e.g., CLI)."""
+async def test_search_notes_text_upgrades_to_hybrid_when_container_not_initialized(monkeypatch):
+    """Default text search should upgrade to hybrid in CLI contexts when semantic is enabled."""
     import importlib
 
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
@@ -938,6 +938,15 @@ async def test_search_notes_text_stays_fts_when_container_not_initialized(monkey
         raise RuntimeError("MCP container not initialized")
 
     monkeypatch.setattr(search_mod, "get_container", raise_runtime_error)
+    monkeypatch.setattr(
+        search_mod,
+        "ConfigManager",
+        lambda: type(
+            "StubConfigManager",
+            (),
+            {"config": type("Cfg", (), {"semantic_search_enabled": True})()},
+        )(),
+    )
 
     await search_mod.search_notes.fn(
         project="test-project",
@@ -945,6 +954,67 @@ async def test_search_notes_text_stays_fts_when_container_not_initialized(monkey
         search_type="text",
     )
 
-    # Should stay as default FTS
+    # Should upgrade using ConfigManager fallback
+    assert captured_payload["retrieval_mode"] == "hybrid"
+    assert captured_payload["text"] == "test query"
+
+
+@pytest.mark.asyncio
+async def test_search_notes_text_stays_fts_when_container_not_initialized_and_semantic_disabled(
+    monkeypatch,
+):
+    """Default text search should remain FTS in CLI contexts when semantic is disabled."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    async def fake_resolve_project_and_path(
+        client, identifier, project=None, context=None, headers=None
+    ):
+        return StubProject(), identifier, False
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    def raise_runtime_error():
+        raise RuntimeError("MCP container not initialized")
+
+    monkeypatch.setattr(search_mod, "get_container", raise_runtime_error)
+    monkeypatch.setattr(
+        search_mod,
+        "ConfigManager",
+        lambda: type(
+            "StubConfigManager",
+            (),
+            {"config": type("Cfg", (), {"semantic_search_enabled": False})()},
+        )(),
+    )
+
+    await search_mod.search_notes.fn(
+        project="test-project",
+        query="test query",
+        search_type="text",
+    )
+
     assert captured_payload["retrieval_mode"] == "fts"
     assert captured_payload["text"] == "test query"

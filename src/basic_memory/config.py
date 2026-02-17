@@ -1,5 +1,6 @@
 """Configuration management for basic-memory."""
 
+import importlib.util
 import json
 import os
 from dataclasses import dataclass
@@ -36,6 +37,11 @@ class DatabaseBackend(str, Enum):
 
     SQLITE = "sqlite"
     POSTGRES = "postgres"
+
+
+def _default_semantic_search_enabled() -> bool:
+    """Enable semantic search by default when semantic extras are installed."""
+    return importlib.util.find_spec("fastembed") is not None
 
 
 @dataclass
@@ -138,7 +144,7 @@ class BasicMemoryConfig(BaseSettings):
 
     # Semantic search configuration
     semantic_search_enabled: bool = Field(
-        default=False,
+        default_factory=_default_semantic_search_enabled,
         description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic extras.",
     )
     semantic_embedding_provider: str = Field(

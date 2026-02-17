@@ -224,11 +224,12 @@ class KnowledgeClient:
 
     # --- Resolution ---
 
-    async def resolve_entity(self, identifier: str) -> str:
+    async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
         """Resolve a string identifier to an entity external_id.
 
         Args:
             identifier: The identifier to resolve (permalink, title, or path)
+            strict: If True, require exact matching (no fuzzy fallback)
 
         Returns:
             The resolved entity external_id (UUID)
@@ -239,7 +240,7 @@ class KnowledgeClient:
         response = await call_post(
             self.http_client,
             f"{self._base_path}/resolve",
-            json={"identifier": identifier},
+            json={"identifier": identifier, "strict": strict},
         )
         data = response.json()
         return data["external_id"]

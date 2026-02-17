@@ -6,7 +6,8 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
-from basic_memory.schemas.search import SearchQuery, SearchItemType
+from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 
 
 @pytest.mark.asyncio
@@ -409,6 +410,143 @@ async def test_boolean_operators_detection(search_service):
         assert not query.has_boolean_operators(), (
             f"Incorrectly detected boolean operators in: {query_text}"
         )
+
+
+@pytest.mark.asyncio
+async def test_plain_multiterm_fts_retries_with_relaxed_or_when_strict_empty(
+    search_service, monkeypatch
+):
+    """Plain multi-term FTS should retry with relaxed OR query after strict no-results."""
+    call_texts: list[str | None] = []
+
+    now = datetime.now().astimezone()
+    fallback_row = SearchIndexRow(
+        project_id=1,
+        id=1,
+        type=SearchItemType.ENTITY.value,
+        file_path="test/fallback.md",
+        created_at=now,
+        updated_at=now,
+        permalink="test/fallback",
+        metadata={"entity_type": "note"},
+        title="Fallback Match",
+        score=1.0,
+    )
+
+    async def fake_search(**kwargs):
+        call_texts.append(kwargs.get("search_text"))
+        if len(call_texts) == 1:
+            return []
+        return [fallback_row]
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    results = await search_service.search(
+        SearchQuery(text="fundraising venture capital", retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert len(results) == 1
+    assert call_texts[0] == "fundraising venture capital"
+    assert call_texts[1] == "fundraising OR venture OR capital"
+    assert len(call_texts) == 2
+
+
+@pytest.mark.asyncio
+async def test_relaxed_query_prunes_stopwords(search_service):
+    """Relaxed query should remove stopwords and keep high-signal terms."""
+    relaxed = search_service._build_relaxed_fts_query("who are our main competitors and partners?")
+    assert relaxed == "main OR competitors OR partners"
+
+
+@pytest.mark.asyncio
+async def test_no_relax_for_explicit_boolean_query(search_service, monkeypatch):
+    """Explicit boolean query should remain strict and avoid fallback retries."""
+    call_texts: list[str | None] = []
+
+    async def fake_search(**kwargs):
+        call_texts.append(kwargs.get("search_text"))
+        return []
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    await search_service.search(
+        SearchQuery(text="term1 AND term2", retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert call_texts == ["term1 AND term2"]
+
+
+@pytest.mark.asyncio
+async def test_no_relax_for_quoted_phrase_query(search_service, monkeypatch):
+    """Quoted phrase query should remain strict and avoid fallback retries."""
+    call_texts: list[str | None] = []
+
+    async def fake_search(**kwargs):
+        call_texts.append(kwargs.get("search_text"))
+        return []
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    await search_service.search(
+        SearchQuery(text='"weekly standup"', retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert call_texts == ['"weekly standup"']
+
+
+@pytest.mark.asyncio
+async def test_no_relax_for_two_term_query(search_service, monkeypatch):
+    """Two-term queries should remain strict to avoid short-query false positives."""
+    call_texts: list[str | None] = []
+
+    async def fake_search(**kwargs):
+        call_texts.append(kwargs.get("search_text"))
+        return []
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    await search_service.search(
+        SearchQuery(text="new feature", retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert call_texts == ["new feature"]
+
+
+@pytest.mark.asyncio
+async def test_no_relax_for_numeric_identifier_query(search_service, monkeypatch):
+    """Queries with numeric identifiers should remain strict to avoid OR over-broadening."""
+    call_texts: list[str | None] = []
+
+    async def fake_search(**kwargs):
+        call_texts.append(kwargs.get("search_text"))
+        return []
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    await search_service.search(
+        SearchQuery(text="root note 1", retrieval_mode=SearchRetrievalMode.FTS)
+    )
+
+    assert call_texts == ["root note 1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retrieval_mode", [SearchRetrievalMode.VECTOR, SearchRetrievalMode.HYBRID])
+async def test_no_relax_for_vector_or_hybrid_modes(search_service, monkeypatch, retrieval_mode):
+    """Vector and hybrid modes should never run the FTS fallback retry path."""
+    call_texts: list[str | None] = []
+
+    async def fake_search(**kwargs):
+        call_texts.append(kwargs.get("search_text"))
+        return []
+
+    monkeypatch.setattr(search_service.repository, "search", fake_search)
+
+    await search_service.search(
+        SearchQuery(text="who are our competitors", retrieval_mode=retrieval_mode)
+    )
+
+    assert call_texts == ["who are our competitors"]
 
 
 # Tests for frontmatter tag search functionality
