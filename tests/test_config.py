@@ -220,6 +220,16 @@ class TestConfigManager:
         config = BasicMemoryConfig(disable_permalinks=True)
         assert config.disable_permalinks is True
 
+    def test_ensure_frontmatter_on_sync_flag_default(self):
+        """Test that ensure_frontmatter_on_sync defaults to False."""
+        config = BasicMemoryConfig()
+        assert config.ensure_frontmatter_on_sync is False
+
+    def test_ensure_frontmatter_on_sync_flag_can_be_enabled(self):
+        """Test that ensure_frontmatter_on_sync can be set to True."""
+        config = BasicMemoryConfig(ensure_frontmatter_on_sync=True)
+        assert config.ensure_frontmatter_on_sync is True
+
     def test_permalinks_include_project_flag_default(self):
         """Test that permalinks_include_project defaults to True."""
         config = BasicMemoryConfig()

@@ -7,11 +7,13 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
 
+WIDE_TERMINAL_ENV = {"COLUMNS": "240", "LINES": "60"}
+
 
 def test_project_list(app, app_config, test_project, config_manager):
     """Test 'bm project list' command shows projects."""
     runner = CliRunner()
-    result = runner.invoke(cli_app, ["project", "list"])
+    result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
 
     if result.exit_code != 0:
         print(f"STDOUT: {result.stdout}")
@@ -77,7 +79,7 @@ def test_project_add_and_remove(app, app_config, config_manager):
         )
 
         # Verify it shows up in list
-        result = runner.invoke(cli_app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
         assert result.exit_code == 0
         assert "new-project" in result.stdout
 
@@ -114,7 +116,7 @@ def test_project_set_default(app, app_config, config_manager):
         assert "default" in result.stdout.lower()
 
         # Verify in list
-        result = runner.invoke(cli_app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
         assert result.exit_code == 0
         # The new project should have the [X] marker now
         lines = result.stdout.split("\n")
@@ -136,14 +138,14 @@ def test_remove_main_project(app, app_config, config_manager):
         new_default_path = Path(new_default_dir)
 
         # Ensure main exists
-        result = runner.invoke(cli_app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
         if "main" not in result.stdout:
             result = runner.invoke(cli_app, ["project", "add", "main", str(main_path)])
             print(result.stdout)
             assert result.exit_code == 0
 
         # Confirm main is present
-        result = runner.invoke(cli_app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
         assert "main" in result.stdout
 
         # Add a second project
@@ -159,7 +161,7 @@ def test_remove_main_project(app, app_config, config_manager):
         assert result.exit_code == 0
 
         # Confirm only new_default exists and main does not
-        result = runner.invoke(cli_app, ["project", "list"])
+        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
         assert result.exit_code == 0
         assert "main" not in result.stdout
         assert "new_default" in result.stdout

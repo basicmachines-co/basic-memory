@@ -669,6 +669,21 @@ class SyncService:
             ctime=file_metadata.created_at.timestamp(),
         )
 
+        # Trigger: markdown file has no frontmatter and frontmatter enforcement is enabled
+        # Why: watch/sync consumers rely on normalized metadata and stable permalinks
+        # Outcome: file is updated in-place with derived title/type/permalink metadata
+        if not file_contains_frontmatter and self.app_config.ensure_frontmatter_on_sync:
+            permalink = await self.entity_service.resolve_permalink(
+                path, markdown=entity_markdown, skip_conflict_check=True
+            )
+            frontmatter_updates = {
+                "title": entity_markdown.frontmatter.title,
+                "type": entity_markdown.frontmatter.type,
+                "permalink": permalink,
+            }
+            await self.file_service.update_frontmatter(path, frontmatter_updates)
+            entity_markdown.frontmatter.metadata.update(frontmatter_updates)
+
         # if the file contains frontmatter, resolve a permalink (unless disabled)
         if file_contains_frontmatter and not self.app_config.disable_permalinks:
             # Resolve permalink - skip conflict checks during bulk sync for performance

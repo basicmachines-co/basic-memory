@@ -1116,6 +1116,59 @@ async def test_sync_permalink_not_created_if_no_frontmatter(
     assert "permalink:" not in file_content
 
 
+@pytest.mark.asyncio
+async def test_sync_frontmatter_created_if_missing_when_enabled(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    file_service: FileService,
+    app_config: BasicMemoryConfig,
+):
+    """Sync should add derived frontmatter when configured for missing-frontmatter files."""
+    app_config.ensure_frontmatter_on_sync = True
+
+    project_dir = project_config.home
+    file = project_dir / "one.md"
+    await create_test_file(file, "# One\n")
+
+    await sync_service.sync(project_config.home)
+
+    file_content, _ = await file_service.read_file(file)
+    project_prefix = generate_permalink(project_config.name)
+    assert "title: one" in file_content
+    assert "type: note" in file_content
+    assert f"permalink: {project_prefix}/one" in file_content
+
+    entity = await sync_service.entity_repository.get_by_file_path("one.md")
+    assert entity is not None
+    assert entity.permalink == f"{project_prefix}/one"
+
+
+@pytest.mark.asyncio
+async def test_sync_frontmatter_created_if_missing_overrides_disable_permalinks(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    file_service: FileService,
+    app_config: BasicMemoryConfig,
+):
+    """Missing-frontmatter sync path should write permalink even when disable_permalinks is true."""
+    app_config.ensure_frontmatter_on_sync = True
+    app_config.disable_permalinks = True
+
+    project_dir = project_config.home
+    file = project_dir / "override.md"
+    await create_test_file(file, "# Override\n")
+
+    await sync_service.sync(project_config.home)
+
+    file_content, _ = await file_service.read_file(file)
+    project_prefix = generate_permalink(project_config.name)
+    assert f"permalink: {project_prefix}/override" in file_content
+
+    entity = await sync_service.entity_repository.get_by_file_path("override.md")
+    assert entity is not None
+    assert entity.permalink == f"{project_prefix}/override"
+
+
 @pytest.fixture
 def test_config_update_permamlinks_on_move(app_config) -> BasicMemoryConfig:
     """Test configuration using in-memory DB."""

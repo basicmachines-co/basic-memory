@@ -174,6 +174,16 @@ async def initialize_app(
     Args:
         app_config: The Basic Memory project configuration
     """
+    # Trigger: frontmatter enforcement is enabled while permalink generation is disabled
+    # Why: missing-frontmatter sync path needs canonical permalinks for deterministic indexing
+    # Outcome: log startup precedence so behavior is explicit to operators
+    if app_config.ensure_frontmatter_on_sync and app_config.disable_permalinks:
+        logger.warning(
+            "Config precedence: ensure_frontmatter_on_sync=True overrides "
+            "disable_permalinks=True for markdown files missing frontmatter during sync; "
+            "permalinks will be written."
+        )
+
     # Trigger: database backend is Postgres (cloud deployment)
     # Why: cloud deployments manage their own projects and migrations via the cloud platform.
     # The local MCP server always uses SQLite and needs initialization even when
