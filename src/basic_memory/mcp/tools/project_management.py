@@ -58,7 +58,8 @@ async def list_memory_projects(context: Context | None = None) -> str:
             result = "Available projects:\n"
 
             for project in project_list.projects:
-                result += f"• {project.name}\n"
+                label = f"{project.display_name} ({project.name})" if project.display_name else project.name
+                result += f"• {label}\n"
 
             result += "\n" + "─" * 40 + "\n"
             result += "Next: Ask which project to use for this session.\n"
