@@ -177,7 +177,7 @@ async def initialize_app(
     # Trigger: database backend is Postgres (cloud deployment)
     # Why: cloud deployments manage their own projects and migrations via the cloud platform.
     # The local MCP server always uses SQLite and needs initialization even when
-    # cloud_mode is enabled (for per-project cloud routing).
+    # projects are configured for cloud routing.
     # Outcome: skip initialization only for actual cloud Postgres deployments.
     if app_config.database_backend == DatabaseBackend.POSTGRES:
         logger.info("Skipping local initialization - Postgres backend manages its own schema")

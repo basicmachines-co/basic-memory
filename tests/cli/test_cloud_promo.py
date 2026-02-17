@@ -162,10 +162,10 @@ def test_no_message_when_already_shown_for_current_version():
     assert buf.getvalue() == ""
 
 
-def test_no_message_when_cloud_mode_enabled():
+def test_no_message_when_cloud_access_is_configured():
     config_manager = ConfigManager()
     config = config_manager.load_config()
-    config.cloud_mode = True
+    config.cloud_api_key = "bmc_test_key_123"
     config_manager.save_config(config)
 
     console, buf = _capture_console()

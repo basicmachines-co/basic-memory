@@ -30,7 +30,7 @@ console = Console()
 
 @cloud_app.command()
 def login():
-    """Authenticate with WorkOS using OAuth Device Authorization flow and enable cloud mode."""
+    """Authenticate with WorkOS using OAuth Device Authorization flow."""
 
     async def _login():
         client_id, domain, host_url = get_cloud_config()
@@ -46,14 +46,8 @@ def login():
             console.print("[dim]Verifying subscription access...[/dim]")
             await make_api_request("GET", f"{host_url.rstrip('/')}/proxy/health")
 
-            # Enable cloud mode after successful login and subscription validation
-            config_manager = ConfigManager()
-            config = config_manager.load_config()
-            config.cloud_mode = True
-            config_manager.save_config(config)
-
-            console.print("[green]Cloud mode enabled[/green]")
-            console.print(f"[dim]All CLI commands now work against {host_url}[/dim]")
+            console.print("[green]Cloud authentication successful[/green]")
+            console.print(f"[dim]Cloud host ready: {host_url}[/dim]")
 
         except SubscriptionRequiredError as e:
             console.print("\n[red]Subscription Required[/red]\n")
@@ -72,50 +66,52 @@ def login():
 
 @cloud_app.command()
 def logout():
-    """Disable cloud mode and return to local mode."""
-
-    # Disable cloud mode
-    config_manager = ConfigManager()
-    config = config_manager.load_config()
-    config.cloud_mode = False
-    config_manager.save_config(config)
-
-    console.print("[green]Cloud mode disabled[/green]")
-    console.print("[dim]All CLI commands now work locally[/dim]")
+    """Remove stored OAuth tokens."""
+    config = ConfigManager().config
+    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+    auth.logout()
+    console.print("[dim]API key (if configured) remains available for cloud project routing.[/dim]")
 
 
 @cloud_app.command("status")
 def status() -> None:
-    """Check cloud mode status and cloud instance health."""
-    # Check cloud mode
+    """Check cloud authentication state and cloud instance health."""
     config_manager = ConfigManager()
     config = config_manager.load_config()
+    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+    tokens = auth.load_tokens()
 
-    console.print("[bold blue]Cloud Mode Status[/bold blue]")
-    if config.cloud_mode:
-        console.print("  Mode: [green]Cloud (enabled)[/green]")
-        console.print(f"  Host: {config.cloud_host}")
-        console.print("  [dim]All CLI commands work against cloud[/dim]")
-    else:
-        console.print("  Mode: [yellow]Local (disabled)[/yellow]")
-        console.print("  [dim]All CLI commands work locally[/dim]")
-        console.print("\n[dim]To enable cloud mode, run: bm cloud login[/dim]")
-        return
+    console.print("[bold blue]Cloud Authentication Status[/bold blue]")
+    console.print(f"  Host: {config.cloud_host}")
+    console.print(
+        f"  API Key: {'[green]configured[/green]' if config.cloud_api_key else '[yellow]not set[/yellow]'}"
+    )
+
+    oauth_status = "[yellow]not logged in[/yellow]"
+    if tokens:
+        oauth_status = (
+            "[green]token valid[/green]"
+            if auth.is_token_valid(tokens)
+            else "[yellow]token expired[/yellow]"
+        )
+    console.print(f"  OAuth: {oauth_status}")
 
     # Get cloud configuration
     _, _, host_url = get_cloud_config()
     host_url = host_url.rstrip("/")
 
-    # Prepare headers
-    headers = {}
+    has_credentials = bool(config.cloud_api_key) or tokens is not None
+    if not has_credentials:
+        console.print(
+            "\n[dim]No cloud credentials found. Run: bm cloud login or bm cloud set-key <key>[/dim]"
+        )
+        return
 
     try:
         console.print("\n[blue]Checking cloud instance health...[/blue]")
 
         # Make API request to check health
-        response = run_with_cleanup(
-            make_api_request(method="GET", url=f"{host_url}/proxy/health", headers=headers)
-        )
+        response = run_with_cleanup(make_api_request(method="GET", url=f"{host_url}/proxy/health"))
 
         health_data = response.json()
 
@@ -132,11 +128,12 @@ def status() -> None:
         console.print("\n[dim]To sync projects, use: bm project bisync --name <project>[/dim]")
 
     except CloudAPIError as e:
-        console.print(f"[red]Error checking cloud health: {e}[/red]")
-        raise typer.Exit(1)
+        console.print(f"[yellow]Cloud health check failed: {e}[/yellow]")
+        console.print(
+            "[dim]Try re-authenticating with 'bm cloud login' or setting API key with 'bm cloud set-key'.[/dim]"
+        )
     except Exception as e:
-        console.print(f"[red]Unexpected error: {e}[/red]")
-        raise typer.Exit(1)
+        console.print(f"[yellow]Unexpected health check error: {e}[/yellow]")
 
 
 @cloud_app.command("setup")

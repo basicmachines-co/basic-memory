@@ -17,7 +17,7 @@ def runner():
 
 @pytest.fixture
 def mock_config(tmp_path, monkeypatch):
-    """Create a mock config in cloud mode using environment variables."""
+    """Create a mock config with cloud credentials using environment variables."""
     # Invalidate config cache to ensure clean state for each test
     from basic_memory import config as config_module
 
@@ -31,7 +31,7 @@ def mock_config(tmp_path, monkeypatch):
         "env": "dev",
         "projects": {},
         "default_project": "main",
-        "cloud_mode": True,
+        "cloud_api_key": "bmc_test_key_123",
     }
 
     config_file.write_text(json.dumps(config_data, indent=2))
@@ -91,6 +91,7 @@ def test_project_add_with_local_path_saves_to_config(
             "project",
             "add",
             "test-project",
+            "--cloud",
             "--local-path",
             str(local_sync_dir),
         ],
@@ -121,7 +122,7 @@ def test_project_add_without_local_path_no_config_entry(runner, mock_config, moc
     """Test that bm project add without --local-path doesn't save to config."""
     result = runner.invoke(
         app,
-        ["project", "add", "test-project"],
+        ["project", "add", "test-project", "--cloud"],
     )
 
     assert result.exit_code == 0
@@ -140,7 +141,7 @@ def test_project_add_local_path_expands_tilde(runner, mock_config, mock_api_clie
     """Test that --local-path ~/path expands to absolute path."""
     result = runner.invoke(
         app,
-        ["project", "add", "test-project", "--local-path", "~/test-sync"],
+        ["project", "add", "test-project", "--cloud", "--local-path", "~/test-sync"],
     )
 
     assert result.exit_code == 0
@@ -162,7 +163,7 @@ def test_project_add_local_path_creates_nested_directories(
 
     result = runner.invoke(
         app,
-        ["project", "add", "test-project", "--local-path", str(nested_path)],
+        ["project", "add", "test-project", "--cloud", "--local-path", str(nested_path)],
     )
 
     assert result.exit_code == 0

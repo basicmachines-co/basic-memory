@@ -21,6 +21,7 @@ from basic_memory.schemas import (
     SystemStatus,
 )
 from basic_memory.config import (
+    DatabaseBackend,
     WATCH_STATUS_JSON,
     ConfigManager,
     ProjectEntry,
@@ -204,7 +205,7 @@ class ProjectService:
                         f"Projects cannot share directory trees."
                     )
 
-        if not self.config_manager.config.cloud_mode:
+        if self.config_manager.config.database_backend != DatabaseBackend.POSTGRES:
             # First add to config file (this will validate the project doesn't exist)
             self.config_manager.add_project(name, resolved_path)
 
@@ -251,7 +252,7 @@ class ProjectService:
         # In cloud mode: database is source of truth
         # In local mode: also check config file
         is_default = project.is_default
-        if not self.config_manager.config.cloud_mode:
+        if self.config_manager.config.database_backend != DatabaseBackend.POSTGRES:
             is_default = is_default or name == self.config_manager.config.default_project
         if is_default:
             raise ValueError(f"Cannot remove the default project '{name}'")  # pragma: no cover
@@ -307,7 +308,7 @@ class ProjectService:
         await self.repository.set_as_default(project.id)
 
         # Update config file only in local mode (cloud mode uses database only)
-        if not self.config_manager.config.cloud_mode:
+        if self.config_manager.config.database_backend != DatabaseBackend.POSTGRES:
             self.config_manager.set_default_project(name)
 
         logger.info(f"Project '{name}' set as default in configuration and database")

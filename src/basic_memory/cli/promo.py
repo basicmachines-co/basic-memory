@@ -74,6 +74,10 @@ def maybe_show_cloud_promo(
     """Show cloud promo copy when discovery gates are satisfied."""
     manager = config_manager or ConfigManager()
     config = manager.load_config()
+    from basic_memory.cli.auth import CLIAuth
+
+    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+    has_cloud_access = bool(config.cloud_api_key) or auth.load_tokens() is not None
 
     interactive = _is_interactive_session() if is_interactive is None else is_interactive
 
@@ -89,7 +93,7 @@ def maybe_show_cloud_promo(
     if invoked_subcommand in {None, "mcp"}:
         return
 
-    if config.cloud_mode_enabled or config.cloud_promo_opt_out:
+    if has_cloud_access or config.cloud_promo_opt_out:
         return
 
     show_first_run = not config.cloud_promo_first_run_shown

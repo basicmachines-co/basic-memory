@@ -18,7 +18,7 @@ Each entrypoint uses a **composition root** pattern to manage configuration and 
 A composition root is the single place in an application where dependencies are wired together. In Basic Memory, each entrypoint has its own composition root that:
 
 1. Reads configuration from `ConfigManager`
-2. Resolves runtime mode (cloud/local/test)
+2. Resolves runtime mode (local/test)
 3. Creates and provides dependencies to downstream code
 
 **Key principle**: Only composition roots read global configuration. All other modules receive configuration explicitly.
@@ -52,10 +52,7 @@ class Container:
     def create(cls) -> "Container":
         """Create container by reading ConfigManager."""
         config = ConfigManager().config
-        mode = resolve_runtime_mode(
-            cloud_mode_enabled=config.cloud_mode_enabled,
-            is_test_env=config.is_test_env,
-        )
+        mode = resolve_runtime_mode(is_test_env=config.is_test_env)
         return cls(config=config, mode=mode)
 
     @property
@@ -99,18 +96,19 @@ class RuntimeMode(Enum):
         return self == RuntimeMode.TEST
 ```
 
-Resolution follows this precedence: **TEST > CLOUD > LOCAL**
+Resolution follows this precedence in local app flows: **TEST > LOCAL**
 
 ```python
-def resolve_runtime_mode(cloud_mode_enabled: bool, is_test_env: bool) -> RuntimeMode:
+def resolve_runtime_mode(is_test_env: bool) -> RuntimeMode:
     if is_test_env:
         return RuntimeMode.TEST
-    if cloud_mode_enabled:
-        return RuntimeMode.CLOUD
     return RuntimeMode.LOCAL
 ```
 
-**Note**: `RuntimeMode` determines global behavior (e.g., whether to start file sync). Per-project routing is orthogonal — individual projects can be set to `cloud` mode via `ProjectMode` in config, which affects client routing in `get_client(project_name=...)` without changing the global runtime mode.
+**Note**: `RuntimeMode` determines global behavior (e.g., whether to start file sync).
+Per-project routing is orthogonal: individual projects can be set to `cloud` mode via `ProjectMode`,
+which affects client routing in `get_client(project_name=...)` without changing global runtime mode.
+`RuntimeMode.CLOUD` may remain for compatibility, but standard local runtime resolution does not select it.
 
 ## Dependencies Package
 

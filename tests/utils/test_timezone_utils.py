@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 
+from basic_memory.config import DatabaseBackend
 from basic_memory.utils import ensure_timezone_aware
 
 
@@ -62,12 +63,12 @@ class TestEnsureTimezoneAware:
         result_local = ensure_timezone_aware(naive_dt, cloud_mode=False)
         assert result_local.tzinfo is not None
 
-    def test_none_cloud_mode_falls_back_to_config(self, config_manager):
-        """When cloud_mode is None, should load from config."""
+    def test_none_cloud_mode_falls_back_to_database_backend(self, config_manager):
+        """When cloud_mode is None, should infer from database backend."""
         naive_dt = datetime(2024, 1, 15, 12, 30, 0)
         # Use the real config file (via test fixtures) rather than mocking.
         cfg = config_manager.config
-        cfg.cloud_mode = True
+        cfg.database_backend = DatabaseBackend.POSTGRES
         config_manager.save_config(cfg)
 
         result = ensure_timezone_aware(naive_dt, cloud_mode=None)

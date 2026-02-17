@@ -287,11 +287,6 @@ class BasicMemoryConfig(BaseSettings):
         description="Basic Memory Cloud host URL",
     )
 
-    cloud_mode: bool = Field(
-        default=False,
-        description="Enable cloud mode - all requests go to cloud instead of local (config file value)",
-    )
-
     cloud_promo_opt_out: bool = Field(
         default=False,
         description="Disable CLI cloud promo messages when true.",
@@ -333,6 +328,7 @@ class BasicMemoryConfig(BaseSettings):
 
         # --- Remove stale keys from old config versions ---
         data.pop("default_project_mode", None)
+        data.pop("cloud_mode", None)
 
         projects = data.get("projects", {})
         if not projects:
@@ -401,22 +397,6 @@ class BasicMemoryConfig(BaseSettings):
             or os.getenv("PYTEST_CURRENT_TEST") is not None
         )
 
-    @property
-    def cloud_mode_enabled(self) -> bool:
-        """Check if cloud mode is enabled.
-
-        Priority:
-        1. BASIC_MEMORY_CLOUD_MODE environment variable
-        2. Config file value (cloud_mode)
-        """
-        env_value = os.environ.get("BASIC_MEMORY_CLOUD_MODE", "").lower()
-        if env_value in ("true", "1", "yes"):
-            return True
-        elif env_value in ("false", "0", "no"):
-            return False
-        # Fall back to config file value
-        return self.cloud_mode
-
     def get_project_mode(self, project_name: str) -> ProjectMode:
         """Get the routing mode for a project.
 
@@ -463,7 +443,6 @@ class BasicMemoryConfig(BaseSettings):
             database_backend=DatabaseBackend.POSTGRES,
             database_url=database_url,
             projects=projects or {},
-            cloud_mode=True,
             skip_initialization_sync=True,
         )
 
@@ -617,7 +596,12 @@ class ConfigManager:
                 file_data = json.loads(self.config_file.read_text(encoding="utf-8"))
 
                 # Detect legacy format before model validators strip stale keys
-                _STALE_KEYS = {"default_project_mode", "project_modes", "cloud_projects"}
+                _STALE_KEYS = {
+                    "default_project_mode",
+                    "project_modes",
+                    "cloud_projects",
+                    "cloud_mode",
+                }
                 needs_resave = bool(_STALE_KEYS & file_data.keys())
 
                 # Check if projects dict uses old string-value format

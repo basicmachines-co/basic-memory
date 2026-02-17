@@ -40,6 +40,15 @@ class TestRoutingFlagsValidation:
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
+    def test_project_ls_both_flags_error(self):
+        """Using both --local and --cloud on project ls should produce an error."""
+        result = runner.invoke(
+            cli_app,
+            ["project", "ls", "--name", "test", "--local", "--cloud"],
+        )
+        assert result.exit_code != 0
+        assert "Cannot specify both --local and --cloud" in result.output
+
     def test_tool_search_both_flags_error(self):
         """Using both --local and --cloud should produce an error."""
         result = runner.invoke(cli_app, ["tool", "search-notes", "test", "--local", "--cloud"])
@@ -186,6 +195,16 @@ class TestProjectCommandsAcceptFlags:
         """project move should accept --local flag."""
         result = runner.invoke(cli_app, ["project", "move", "test", "/tmp/dest", "--local"])
         assert "No such option: --local" not in result.output
+
+    def test_project_ls_accepts_local_flag(self, app_config):
+        """project ls should accept --local flag."""
+        result = runner.invoke(cli_app, ["project", "ls", "--name", "test", "--local"])
+        assert "No such option: --local" not in result.output
+
+    def test_project_ls_accepts_cloud_flag(self, app_config):
+        """project ls should accept --cloud flag."""
+        result = runner.invoke(cli_app, ["project", "ls", "--name", "test", "--cloud"])
+        assert "No such option: --cloud" not in result.output
 
 
 class TestStatusCommandAcceptsFlags:

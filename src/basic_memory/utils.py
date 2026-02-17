@@ -488,17 +488,18 @@ def ensure_timezone_aware(dt: datetime, cloud_mode: bool | None = None) -> datet
 
     Args:
         dt: The datetime to ensure is timezone-aware
-        cloud_mode: Optional explicit cloud_mode setting. If None, loads from config.
+        cloud_mode: Optional explicit cloud_mode setting. If None, inferred from
+            configured database backend (Postgres => UTC semantics).
 
     Returns:
         A timezone-aware datetime
     """
     if dt.tzinfo is None:
-        # Determine cloud_mode: use explicit parameter if provided, otherwise load from config
+        # Determine cloud_mode: use explicit parameter if provided, otherwise infer from config.
         if cloud_mode is None:
-            from basic_memory.config import ConfigManager
+            from basic_memory.config import ConfigManager, DatabaseBackend
 
-            cloud_mode = ConfigManager().config.cloud_mode_enabled
+            cloud_mode = ConfigManager().config.database_backend == DatabaseBackend.POSTGRES
 
         if cloud_mode:
             # Cloud/PostgreSQL mode: naive datetimes from asyncpg are already UTC

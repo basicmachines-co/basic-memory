@@ -45,10 +45,14 @@ def mcp(
     Users who have cloud mode enabled can still use local MCP for Claude Code
     and Claude Desktop while using cloud MCP for web and mobile access.
     """
-    # Force local routing for local MCP server
-    # Why: The local MCP server should always talk to the local API, not the cloud proxy.
-    # Even when cloud_mode_enabled is True, stdio MCP runs locally and needs local API access.
+    # Force local routing for local MCP server.
+    # Trigger: MCP server command invocation (all transports).
+    # Why: local MCP must never route through cloud; stdio in particular must
+    #      remain local-only to avoid cross-environment ambiguity.
+    # Outcome: explicit local override disables per-project cloud routing.
     os.environ["BASIC_MEMORY_FORCE_LOCAL"] = "true"
+    os.environ.pop("BASIC_MEMORY_FORCE_CLOUD", None)
+    os.environ["BASIC_MEMORY_EXPLICIT_ROUTING"] = "true"
 
     # Import mcp tools/prompts to register them with the server
     import basic_memory.mcp.tools  # noqa: F401  # pragma: no cover

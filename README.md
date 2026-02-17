@@ -344,22 +344,20 @@ basic-memory sync --watch
 3. Cloud features (optional, requires subscription):
 
 ```bash
-# Authenticate with cloud (global cloud mode via OAuth)
+# Authenticate with cloud (stores OAuth token locally)
 basic-memory cloud login
 
-# Bidirectional sync with cloud
-basic-memory cloud sync
+# (Optional) install/configure rclone for file sync commands
+basic-memory cloud setup
 
-# Verify cloud integrity
-basic-memory cloud check
-
-# Mount cloud storage
-basic-memory cloud mount
+# Check cloud auth + health
+basic-memory cloud status
 ```
 
 **Per-Project Cloud Routing** (API key based):
 
-Individual projects can be routed through the cloud while others stay local. This uses an API key instead of OAuth:
+Individual projects can be routed through the cloud while others stay local. This uses an API key for routed
+project calls:
 
 ```bash
 # Save an API key (create one in the web app or via CLI)
@@ -373,25 +371,32 @@ basic-memory project set-cloud research
 # Revert a project to local mode
 basic-memory project set-local research
 
-# List projects with mode column (local/cloud)
+# List projects and route metadata
 basic-memory project list
 ```
 
-**Routing Flags** (for users with global cloud mode):
+`basic-memory cloud login` / `basic-memory cloud logout` are authentication commands. They do not change default CLI
+routing behavior.
 
-When global cloud mode is enabled, CLI commands communicate with the cloud API by default. Use routing flags to override this:
+**Routing Flags**:
+
+Use routing flags to disambiguate command targets:
 
 ```bash
-# Force local routing (useful for local MCP server while cloud mode is enabled)
+# Force local routing for this command
 basic-memory status --local
 basic-memory project list --local
+basic-memory project ls --name main --local
 
-# Force cloud routing (when cloud mode is disabled but you want cloud access)
+# Force cloud routing for this command
 basic-memory status --cloud
 basic-memory project info my-project --cloud
+basic-memory project ls --name main --cloud
 ```
 
-The local MCP server (`basic-memory mcp`) automatically uses local routing, so you can use both local Claude Desktop and cloud-based clients simultaneously.
+No-flag behavior defaults to local when no project context is present.
+
+The local MCP server (`basic-memory mcp`) always uses local routing (including `--transport stdio`).
 
 **CLI Note Editing (`tool edit-note`):**
 
@@ -493,7 +498,9 @@ Basic Memory uses [Loguru](https://github.com/Delgan/loguru) for logging. The lo
 |----------|---------|-------------|
 | `BASIC_MEMORY_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
 | `BASIC_MEMORY_CLOUD_MODE` | `false` | When `true`, API logs to stdout with structured context |
-| `BASIC_MEMORY_FORCE_LOCAL` | `false` | When `true`, forces local API routing (ignores cloud mode) |
+| `BASIC_MEMORY_FORCE_LOCAL` | `false` | When `true`, forces local API routing |
+| `BASIC_MEMORY_FORCE_CLOUD` | `false` | When `true`, forces cloud API routing |
+| `BASIC_MEMORY_EXPLICIT_ROUTING` | `false` | When `true`, marks route selection as explicit (`--local`/`--cloud`) |
 | `BASIC_MEMORY_ENV` | `dev` | Set to `test` for test mode (stderr only) |
 
 ### Examples

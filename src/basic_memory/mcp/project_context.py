@@ -30,7 +30,6 @@ from basic_memory.utils import generate_permalink, normalize_project_reference
 async def resolve_project_parameter(
     project: Optional[str] = None,
     allow_discovery: bool = False,
-    cloud_mode: Optional[bool] = None,
     default_project: Optional[str] = None,
 ) -> Optional[str]:
     """Resolve project parameter using unified linear priority chain.
@@ -39,33 +38,29 @@ async def resolve_project_parameter(
     New code should consider using ProjectResolver directly for more detailed
     resolution information.
 
-    Resolution order (same for local and cloud modes):
+    Resolution order:
     1. ENV_CONSTRAINT: BASIC_MEMORY_MCP_PROJECT env var (highest priority)
     2. EXPLICIT: project parameter passed directly
     3. DEFAULT: default_project from config (if set)
-    4. Fallback: cloud → CLOUD_DISCOVERY or ValueError; local → NONE
+    4. Fallback: discovery (if allowed) → NONE
 
     Args:
         project: Optional explicit project parameter
-        allow_discovery: If True, allows returning None in cloud mode for discovery mode
+        allow_discovery: If True, allows returning None for discovery mode
             (used by tools like recent_activity that can operate across all projects)
-        cloud_mode: Optional explicit cloud mode. If not provided, reads from ConfigManager.
         default_project: Optional explicit default project. If not provided, reads from ConfigManager.
 
     Returns:
         Resolved project name or None if no resolution possible
     """
     # Load config for any values not explicitly provided
-    if cloud_mode is None or default_project is None:
+    if default_project is None:
         config = ConfigManager().config
-        if cloud_mode is None:
-            cloud_mode = config.cloud_mode
         if default_project is None:
             default_project = config.default_project
 
     # Create resolver with configuration and resolve
     resolver = ProjectResolver.from_env(
-        cloud_mode=cloud_mode,
         default_project=default_project,
     )
     result = resolver.resolve(project=project, allow_discovery=allow_discovery)

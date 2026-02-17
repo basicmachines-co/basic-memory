@@ -1,175 +1,135 @@
-# Per-Project Local/Cloud Routing
+# Simplified Local/Cloud Routing
 
 ## Context
 
-basic-memory's cloud/local mode is currently a global toggle (`cloud_mode: bool`). When enabled, ALL projects route through the cloud proxy via OAuth. This is too coarse — users should be able to keep some projects local and route others through cloud.
+Basic Memory now uses explicit, project-aware routing without a global cloud-mode toggle.
+Routing is determined by command-level flags and project mode, not by a global `cloud_mode` state.
 
-The cloud API already supports API key auth (`bmc_`-prefixed keys, `POST /api/keys` to create, `HybridTokenVerifier` routes them automatically). API keys are per-tenant (account-level), not per-project — there are no per-project permissions in the cloud yet.
+This document is the canonical contract for local/cloud routing behavior in CLI, MCP, and API-adjacent clients.
 
-**Goal**: Users can set each project to `local` or `cloud` mode. Local projects use the existing ASGI in-process transport. Cloud projects use the cloud API with a single account-level API key. No OAuth dance needed for cloud project access.
+## Goals
 
-## UX Flow
+1. Remove global `cloud_mode` from runtime/routing semantics.
+2. Keep MCP stdio local-only and predictable.
+3. Make CLI routing explicit and easy to reason about.
+4. Support projects that exist in both local and cloud without ambiguity.
 
-**Option A — Create key in web app:**
-1. User creates API key in cloud web app (already supported)
-2. Copies the key
-3. Runs `bm cloud set-key bmc_abc123...` → saves to config.json
+## Routing Contract
 
-**Option B — Create key via CLI:**
-1. User is already logged in via OAuth (`bm cloud login`)
-2. Runs `bm cloud create-key "my-laptop"` → calls `POST /api/keys` with JWT auth → gets key back → saves to config.json
-3. OAuth login is no longer needed for day-to-day use — the API key handles auth
+Routing is resolved in this order:
 
-**Setting project mode:**
-```bash
-bm project set-cloud research      # route "research" project through cloud
-bm project set-local research      # revert to local
-bm project list                    # shows mode column (local/cloud)
-```
+1. Injected client factory (for composition/integration contexts)
+2. Explicit routing override (`--local` / `--cloud` or env vars below)
+3. Project-scoped routing (`project.mode`) when a project is known
+4. Default local routing
 
-## Implementation Plan
+### Routing Environment Variables
 
-### Step 1: Config model changes
+- `BASIC_MEMORY_FORCE_LOCAL=true`: force local transport
+- `BASIC_MEMORY_FORCE_CLOUD=true`: force cloud proxy transport
+- `BASIC_MEMORY_EXPLICIT_ROUTING=true`: marks routing as explicitly chosen for this command
 
-**File: `src/basic_memory/config.py`**
+When explicit routing is active, project mode does not override the selected route.
 
-- Add `ProjectMode` enum: `LOCAL = "local"`, `CLOUD = "cloud"`
-- Add `ProjectConfigEntry` Pydantic model: `path: str`, `mode: ProjectMode = LOCAL`
-- Evolve `BasicMemoryConfig.projects` from `Dict[str, str]` to `Dict[str, ProjectConfigEntry]`
-- Add `model_validator(mode="before")` to auto-migrate old `{"name": "/path"}` format to `{"name": {"path": "/path", "mode": "local"}}`
-- Add `cloud_api_key: Optional[str] = None` field to `BasicMemoryConfig` (account-level, not per-project)
-- Update `ProjectConfig` dataclass to carry `mode` from config entry
-- Add helpers: `get_project_entry(name)`, `get_project_mode(name)`
-- Keep global `cloud_mode` as deprecated fallback
-- Update all code that reads `config.projects` as `Dict[str, str]` to handle `ProjectConfigEntry`
+## Config Semantics
 
-### Step 2: Client routing
+- `project.mode` is the only config-based routing signal for project-scoped operations.
+- Legacy `cloud_mode` values may be encountered during migration/loading but are not used for routing behavior.
+- Normalization saves remove stale `cloud_mode` from `~/.basic-memory/config.json`.
 
-**File: `src/basic_memory/mcp/async_client.py`**
-
-- Add optional `project_name: Optional[str] = None` parameter to `get_client()`
-- Routing logic (priority order):
-  1. Factory injection (`_client_factory`) — unchanged
-  2. Force-local (`_force_local_mode()`) — unchanged
-  3. **New**: If `project_name` provided and project's mode is `CLOUD` → HTTP client with `cloud_api_key` as Bearer token, hitting `cloud_host/proxy`
-  4. Global `cloud_mode_enabled` fallback — existing OAuth flow (deprecated)
-  5. Default: local ASGI transport
-- Error if cloud project but no `cloud_api_key` in config — actionable message pointing to `bm cloud set-key` or `bm cloud create-key`
-
-### Step 3: Project-aware client helper
-
-**File: `src/basic_memory/mcp/project_context.py`**
-
-- Add `get_project_client(project, context)` async context manager
-- Combines `resolve_project_parameter()` (config-only, no network) + `get_client(project_name=resolved)` + `get_active_project(client, resolved, context)`
-- Returns `(client, active_project)` tuple
-- Solves bootstrap problem: resolve project name first, create correct client, then validate
-
-### Step 4: Simplify ProjectResolver
-
-**File: `src/basic_memory/project_resolver.py`**
-
-- Remove global `cloud_mode` parameter — routing mode is orthogonal to project resolution
-- Resolution becomes purely: constrained env var → explicit param → default project
-- Update `resolve_project_parameter()` in `project_context.py` to drop `cloud_mode` param
-
-### Step 5: Update MCP tools
-
-**Files: `src/basic_memory/mcp/tools/*.py` (~15 files)**
-
-Mechanical change per tool:
-```python
-# Before
-async with get_client() as client:
-    active_project = await get_active_project(client, project, context)
-
-# After
-async with get_project_client(project, context) as (client, active_project):
-```
-
-Special handling for `recent_activity.py` discovery mode: iterate projects, create per-project client for each.
-
-### Step 6: Sync coordinator
-
-**Files: `src/basic_memory/sync/coordinator.py`, `src/basic_memory/mcp/container.py`**
-
-- Filter file watchers to local-mode projects only
-- Cloud projects skip sync
-
-### Step 7: CLI commands
-
-**File: `src/basic_memory/cli/commands/cloud/core_commands.py`**
-
-- `bm cloud set-key <api-key>` — saves API key to config.json
-- `bm cloud create-key <name>` — calls `POST {cloud_host}/api/keys` using existing JWT auth (from `make_api_request`), saves returned key to config. Uses existing `api_client.py:make_api_request()` for the authenticated call.
-
-**File: `src/basic_memory/cli/commands/project.py`**
-
-- `bm project set-cloud <name>` — sets project mode to cloud (validates API key exists in config)
-- `bm project set-local <name>` — reverts project to local mode
-- Extend `bm project list` / `bm project info` to show mode column
-
-### Step 8: RuntimeMode simplification
-
-**File: `src/basic_memory/runtime.py`**
-
-- `resolve_runtime_mode()` drops `cloud_mode_enabled` parameter
-- Simplifies to: TEST if test env, otherwise LOCAL
-- `RuntimeMode.CLOUD` kept for backward compat but not used in global resolution
-
-### Step 9: Tests
-
-- Config: migration from old format, round-trip serialization, `get_project_mode()`
-- `get_client()`: local project → ASGI, cloud project → HTTP+API key, missing key → error
-- `get_project_client()`: resolve + route combined
-- MCP tools: representative sample with new helper
-- Sync: cloud projects skipped, local projects synced
-- CLI: `set-key`, `create-key`, `set-cloud`, `set-local`
-
-## Key Files
-
-| File | Change |
-|------|--------|
-| `src/basic_memory/config.py` | `ProjectMode`, `ProjectConfigEntry`, migration, `cloud_api_key` field |
-| `src/basic_memory/mcp/async_client.py` | `get_client(project_name=)` per-project routing |
-| `src/basic_memory/mcp/project_context.py` | `get_project_client()` helper |
-| `src/basic_memory/project_resolver.py` | Remove global `cloud_mode` concern |
-| `src/basic_memory/mcp/tools/*.py` | Mechanical swap to `get_project_client()` |
-| `src/basic_memory/sync/coordinator.py` | Filter to local-mode projects |
-| `src/basic_memory/mcp/container.py` | Update should_sync logic |
-| `src/basic_memory/cli/commands/cloud/core_commands.py` | `set-key`, `create-key` commands |
-| `src/basic_memory/cli/commands/project.py` | `set-cloud`, `set-local` commands |
-| `src/basic_memory/runtime.py` | Drop cloud_mode from global resolution |
-
-## Config Example
+### Example Config
 
 ```json
 {
   "projects": {
-    "personal": {"path": "/Users/me/notes", "mode": "local"},
-    "research": {"path": "/Users/me/research", "mode": "cloud"}
+    "main": {
+      "path": "/Users/me/basic-memory",
+      "mode": "local",
+      "cloud_sync_path": null,
+      "bisync_initialized": false,
+      "last_sync": null
+    },
+    "specs": {
+      "path": "specs",
+      "mode": "cloud",
+      "cloud_sync_path": "/Users/me/dev/specs",
+      "bisync_initialized": true,
+      "last_sync": "2026-02-06T17:36:38.544153"
+    }
   },
+  "default_project": "main",
   "cloud_api_key": "bmc_abc123...",
-  "cloud_host": "https://cloud.basicmemory.com",
-  "default_project": "personal"
+  "cloud_host": "https://cloud.basicmemory.com"
 }
 ```
 
-## Edge Cases
+## Cloud Commands Are Auth-Only
 
-| Case | Handling |
-|------|----------|
-| No API key + cloud project | `get_client()` raises error: "Run `bm cloud set-key` first" |
-| Old config format loaded | `model_validator` auto-migrates `Dict[str,str]` to new format |
-| Default project is cloud | Works — resolver returns name, routing uses API key |
-| Global `cloud_mode=true` (legacy) | Deprecated fallback still works via OAuth |
-| Factory-injected client (cloud app) | Factory takes priority, unaffected |
-| `--local` CLI flag on cloud project | Force-local override still works |
+`bm cloud login`, `bm cloud logout`, and `bm cloud status` manage authentication state.
 
-## Verification
+- `bm cloud login`
+  - performs OAuth device flow
+  - stores/refreshes token material
+  - may verify cloud health/subscription
+  - does not change routing defaults
+- `bm cloud logout`
+  - removes stored OAuth session tokens
+  - does not change routing defaults
+- `bm cloud status`
+  - reports auth state (API key, OAuth token validity)
+  - runs health checks only when credentials are available
 
-1. `just fast-check` — lint/format/typecheck + impacted tests
-2. `just test` — full suite (SQLite + Postgres)
-3. Manual: `bm cloud set-key bmc_...`, `bm project set-cloud test`, run MCP tools against it
-4. Manual: verify local projects work unchanged
-5. Manual: `bm project list` shows mode column
+## MCP Stdio Local Guarantee
+
+`bm mcp --transport stdio` always routes locally.
+
+The command sets explicit local routing (`BASIC_MEMORY_FORCE_LOCAL=true` and
+`BASIC_MEMORY_EXPLICIT_ROUTING=true`) before starting the server. This prevents cloud routing for stdio MCP,
+even if the selected project has `mode: cloud`.
+
+## Project List UX for Dual Presence
+
+Projects may exist in both local and cloud. `bm project list` should display that clearly in one row per logical
+project identity, with explicit source/target signals.
+
+Recommended display contract:
+
+1. Keep one row per normalized project name/permalink.
+2. Show both local and cloud presence as separate columns/indicators.
+3. Show an explicit `MCP (stdio)` target column that always resolves to `local`.
+4. Keep CLI route semantics explicit:
+   - no flags: default local for non-project commands
+   - `--cloud`: force cloud
+   - `--local`: force local
+
+## Project LS Targeting
+
+`bm project ls` should clearly identify which project instance is being listed.
+
+Targeting rules:
+
+1. No routing flags: list local project files.
+2. `--cloud`: list cloud project files.
+3. `--local`: list local project files (explicit override).
+4. Output should label the active target (`LOCAL` or `CLOUD`) in heading or status line.
+
+## Runtime Mode
+
+Runtime mode is no longer a cloud/local routing switch for local app flows.
+
+- `resolve_runtime_mode(is_test_env)` resolves to:
+  - `TEST` when running in test environment
+  - `LOCAL` otherwise
+- `RuntimeMode.CLOUD` may remain for compatibility with existing tests/call sites but is not selected by normal local
+  runtime resolution.
+
+## Verification Checklist
+
+1. Loading config with legacy `cloud_mode` succeeds.
+2. Saving config strips legacy `cloud_mode`.
+3. `--local/--cloud` always override per-project mode for that command.
+4. No-project + no-flags commands route local by default.
+5. `bm cloud login/logout` do not toggle routing behavior.
+6. `bm mcp` remains local-only in stdio mode.
+7. `bm project list` communicates dual local/cloud presence without ambiguity.
+8. `bm project ls` output identifies route target explicitly.

@@ -48,23 +48,19 @@ async def lifespan(app: FastMCP):
         default = " (default)" if name == config.default_project else ""
         logger.info(f"Project: {name} -> {entry.path} [mode={entry.mode.value}]{default}")
 
-    # Check cloud login status (local file check, no network call)
-    if config.cloud_mode:
-        auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-        tokens = auth.load_tokens()
-        if tokens is None:
-            logger.warning("Cloud mode enabled but not authenticated - run 'bm cloud login'")
-        elif not auth.is_token_valid(tokens):
+    # Check cloud auth status (local file check, no network call)
+    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+    tokens = auth.load_tokens()
+    if tokens is not None:
+        if not auth.is_token_valid(tokens):
             expires_at = tokens.get("expires_at", 0)
             expired_ago = int(time.time() - expires_at)
             logger.warning(f"Cloud token expired {expired_ago}s ago - may need 'bm cloud login'")
         else:
-            logger.info("Cloud: authenticated (token valid)")
+            logger.info("Cloud: authenticated (OAuth token valid)")
 
-        if config.cloud_api_key:
-            logger.info("Cloud: API key configured (preferred for per-project routing)")
-        else:
-            logger.info("Cloud: no API key set (will use OAuth token for cloud projects)")
+    if config.cloud_api_key:
+        logger.info("Cloud: API key configured")
 
     # Track if we created the engine (vs test fixtures providing it)
     # This prevents disposing an engine provided by test fixtures when

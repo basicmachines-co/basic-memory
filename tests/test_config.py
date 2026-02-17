@@ -463,6 +463,36 @@ class TestConfigManager:
             assert config.projects["research"].bisync_initialized is True
             assert config.projects["main"].mode == ProjectMode.LOCAL
 
+    def test_legacy_cloud_mode_key_is_stripped_on_normalization_save(self):
+        """Legacy cloud_mode should be removed from config.json after load/save normalization."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            import json
+
+            legacy_config = {
+                "env": "dev",
+                "projects": {"main": str(temp_path / "main")},
+                "default_project": "main",
+                "cloud_mode": True,
+            }
+            config_manager.config_file.write_text(json.dumps(legacy_config, indent=2))
+
+            import basic_memory.config
+
+            basic_memory.config._CONFIG_CACHE = None
+
+            loaded = config_manager.load_config()
+            assert isinstance(loaded, BasicMemoryConfig)
+
+            raw = json.loads(config_manager.config_file.read_text(encoding="utf-8"))
+            assert "cloud_mode" not in raw
+
 
 class TestPlatformNativePathSeparators:
     """Test that config uses platform-native path separators."""

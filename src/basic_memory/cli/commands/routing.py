@@ -1,14 +1,11 @@
 """CLI routing utilities for --local/--cloud flag handling.
 
-This module provides utilities for CLI commands to override the default routing
-behavior (determined by cloud_mode_enabled in config). This allows users to:
-
-1. Use local MCP server even when cloud mode is enabled
-2. Force local routing for specific CLI commands with --local flag
-3. Force cloud routing with --cloud flag (requires authentication)
+This module provides utilities for CLI commands to override default routing.
+This allows users to force local or cloud routing per-command.
 
 The routing is controlled via environment variables:
 - BASIC_MEMORY_FORCE_LOCAL: When "true", forces local ASGI transport
+- BASIC_MEMORY_FORCE_CLOUD: When "true", forces cloud proxy transport
 - BASIC_MEMORY_EXPLICIT_ROUTING: When "true", signals that --local/--cloud
   was explicitly passed, overriding per-project routing in get_client()
 - These are checked in basic_memory.mcp.async_client.get_client()
@@ -32,8 +29,8 @@ def force_routing(local: bool = False, cloud: bool = False) -> Generator[None, N
     (without EXPLICIT_ROUTING), so per-project routing still works for MCP tools.
 
     Args:
-        local: If True, force local ASGI transport (ignores cloud_mode_enabled)
-        cloud: If True, clear force_local to allow cloud routing
+        local: If True, force local ASGI transport
+        cloud: If True, force cloud proxy transport
 
     Usage:
         with force_routing(local=True):
@@ -48,15 +45,17 @@ def force_routing(local: bool = False, cloud: bool = False) -> Generator[None, N
 
     # Save original values
     original_force_local = os.environ.get("BASIC_MEMORY_FORCE_LOCAL")
+    original_force_cloud = os.environ.get("BASIC_MEMORY_FORCE_CLOUD")
     original_explicit = os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING")
 
     try:
         if local:
             os.environ["BASIC_MEMORY_FORCE_LOCAL"] = "true"
+            os.environ.pop("BASIC_MEMORY_FORCE_CLOUD", None)
             os.environ["BASIC_MEMORY_EXPLICIT_ROUTING"] = "true"
         elif cloud:
-            # Ensure force_local is NOT set, let cloud_mode_enabled take effect
             os.environ.pop("BASIC_MEMORY_FORCE_LOCAL", None)
+            os.environ["BASIC_MEMORY_FORCE_CLOUD"] = "true"
             os.environ["BASIC_MEMORY_EXPLICIT_ROUTING"] = "true"
         # If neither is set, don't change anything (use default behavior)
         yield
@@ -66,6 +65,11 @@ def force_routing(local: bool = False, cloud: bool = False) -> Generator[None, N
             os.environ.pop("BASIC_MEMORY_FORCE_LOCAL", None)
         else:
             os.environ["BASIC_MEMORY_FORCE_LOCAL"] = original_force_local
+
+        if original_force_cloud is None:
+            os.environ.pop("BASIC_MEMORY_FORCE_CLOUD", None)
+        else:
+            os.environ["BASIC_MEMORY_FORCE_CLOUD"] = original_force_cloud
 
         if original_explicit is None:
             os.environ.pop("BASIC_MEMORY_EXPLICIT_ROUTING", None)
