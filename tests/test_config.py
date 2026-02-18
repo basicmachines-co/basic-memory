@@ -580,6 +580,43 @@ class TestPlatformNativePathSeparators:
                 assert "/" in saved_path
                 assert saved_path == str(project_path)
 
+    def test_add_project_skips_mkdir_when_project_root_set(self, monkeypatch):
+        """Test that add_project skips mkdir when project_root is set (cloud mode).
+
+        In cloud mode, file storage is S3 — no local directories needed.
+        Without this, add_project crashes on read-only filesystems (e.g. macOS root /).
+        """
+        import basic_memory.config
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Simulate cloud mode: project_root set, postgres backend
+            monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", "/cloud-root")
+            monkeypatch.setenv("BASIC_MEMORY_DATABASE_BACKEND", "postgres")
+            # Clear module-level cache so env vars are picked up
+            basic_memory.config._CONFIG_CACHE = None
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            initial_config = BasicMemoryConfig(projects={})
+            config_manager.save_config(initial_config)
+
+            # Use a path that would fail mkdir on most systems (read-only root)
+            config_manager.add_project("test-project", "/nonexistent/cloud/path")
+
+            # Verify project was added to config without creating the directory
+            config = config_manager.load_config()
+            assert "test-project" in config.projects
+            assert config.projects["test-project"].path == "/nonexistent/cloud/path"
+            assert not Path("/nonexistent/cloud/path").exists()
+
+            # Clean up cache for subsequent tests
+            basic_memory.config._CONFIG_CACHE = None
+
     def test_model_post_init_uses_platform_native_separators(self, config_home, monkeypatch):
         """Test that model_post_init uses platform-native separators."""
         import platform

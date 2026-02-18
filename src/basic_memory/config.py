@@ -685,9 +685,10 @@ class ConfigManager:
         if project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
 
-        # Ensure the path exists
+        # Ensure the path exists on disk (skip in cloud mode where storage is S3)
         project_path = Path(path)
-        project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
+        if not self.config.project_root:
+            project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
 
         # Load config, modify it, and save it
         config = self.load_config()

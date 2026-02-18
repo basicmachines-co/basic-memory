@@ -459,8 +459,9 @@ class ProjectService:
         if name not in self.config_manager.projects:
             raise ValueError(f"Project '{name}' not found in configuration")
 
-        # Create the new directory if it doesn't exist
-        Path(resolved_path).mkdir(parents=True, exist_ok=True)
+        # Create the new directory if it doesn't exist (skip in cloud mode where storage is S3)
+        if not self.config_manager.config.project_root:
+            Path(resolved_path).mkdir(parents=True, exist_ok=True)
 
         # Update in configuration
         config = self.config_manager.load_config()
