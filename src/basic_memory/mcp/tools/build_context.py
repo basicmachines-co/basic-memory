@@ -196,6 +196,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
 async def build_context(
     url: MemoryUrl,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     depth: str | int | None = 1,
     timeframe: Optional[TimeFrame] = "7d",
     page: int = 1,
@@ -257,7 +258,7 @@ async def build_context(
 
     # URL is already validated and normalized by MemoryUrl type annotation
 
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         # Resolve memory:// identifier with project-prefix awareness
         _, resolved_path, _ = await resolve_project_and_path(client, url, project, context)
 

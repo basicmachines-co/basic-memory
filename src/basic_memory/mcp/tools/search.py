@@ -250,6 +250,7 @@ Error searching for '{query}': {error_message}
 async def search_notes(
     query: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
@@ -421,7 +422,7 @@ async def search_notes(
     types = types or []
     entity_types = entity_types or []
 
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         # Handle memory:// URLs by resolving to permalink search
         _, resolved_query, is_memory_url = await resolve_project_and_path(
             client, query, project, context
@@ -517,6 +518,7 @@ async def search_notes(
 async def search_by_metadata(
     filters: Dict[str, Any],
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
     context: Context | None = None,
@@ -546,7 +548,7 @@ async def search_by_metadata(
     page = (offset // limit) + 1
     offset_within_page = offset % limit
 
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
             f"Structured search in project {active_project.name} filters={filters} limit={limit} offset={offset}"
         )

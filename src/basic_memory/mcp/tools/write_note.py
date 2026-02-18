@@ -22,6 +22,7 @@ async def write_note(
     content: str,
     directory: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: dict | None = None,
@@ -127,7 +128,7 @@ async def write_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If directory path attempts path traversal
     """
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
             f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
         )

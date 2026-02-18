@@ -16,6 +16,7 @@ from basic_memory.mcp.tools.read_note import read_note
 async def view_note(
     identifier: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
     context: Context | None = None,
@@ -57,7 +58,14 @@ async def view_note(
     logger.info(f"Viewing note: {identifier} in project: {project}")
 
     # Call the existing read_note logic
-    content = await read_note.fn(identifier, project, page, page_size, context)
+    content = await read_note.fn(
+        identifier=identifier,
+        project=project,
+        workspace=workspace,
+        page=page,
+        page_size=page_size,
+        context=context,
+    )
 
     # Check if this is an error message (note not found)
     if "# Note Not Found" in content:
