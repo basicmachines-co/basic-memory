@@ -57,8 +57,7 @@ async def resolve_project_parameter(
     # Load config for any values not explicitly provided
     if default_project is None:
         config = ConfigManager().config
-        if default_project is None:
-            default_project = config.default_project
+        default_project = config.default_project
 
     # Create resolver with configuration and resolve
     resolver = ProjectResolver.from_env(

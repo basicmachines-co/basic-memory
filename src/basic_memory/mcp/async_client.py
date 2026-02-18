@@ -1,6 +1,6 @@
 import os
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import AsyncIterator, Callable, Optional
+from typing import AsyncGenerator, AsyncIterator, Callable, Optional
 
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
@@ -64,7 +64,7 @@ async def _cloud_client(
     config,
     timeout: Timeout,
     workspace: Optional[str] = None,
-) -> AsyncIterator[AsyncClient]:
+) -> AsyncGenerator[AsyncClient, None]:
     """Create a cloud proxy client with resolved credentials."""
     token = await _resolve_cloud_token(config)
     proxy_base_url = f"{config.cloud_host}/proxy"
@@ -97,7 +97,7 @@ async def get_cloud_control_plane_client() -> AsyncIterator[AsyncClient]:
     """Create a control-plane cloud client for endpoints outside /proxy."""
     config = ConfigManager().config
     timeout = _build_timeout()
-    token = await _resolve_oauth_token(config)
+    token = await _resolve_cloud_token(config)
     logger.info(f"Creating HTTP client for cloud control plane at: {config.cloud_host}")
     async with AsyncClient(
         base_url=config.cloud_host,

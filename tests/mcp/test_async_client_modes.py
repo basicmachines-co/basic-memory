@@ -239,7 +239,7 @@ async def test_get_client_explicit_cloud_overrides_local_project(config_manager,
 
 
 @pytest.mark.asyncio
-async def test_get_cloud_control_plane_client_requires_oauth(config_manager):
+async def test_get_cloud_control_plane_client_uses_api_key_when_available(config_manager):
     cfg = config_manager.load_config()
     cfg.cloud_host = "https://cloud.example.test"
     cfg.cloud_api_key = "bmc_test_key_123"
@@ -247,16 +247,16 @@ async def test_get_cloud_control_plane_client_requires_oauth(config_manager):
     cfg.cloud_domain = "https://auth.example.test"
     config_manager.save_config(cfg)
 
-    with pytest.raises(RuntimeError, match="Workspace discovery requires OAuth login"):
-        async with get_cloud_control_plane_client():
-            pass
+    async with get_cloud_control_plane_client() as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test"
+        assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
 
 
 @pytest.mark.asyncio
 async def test_get_cloud_control_plane_client_uses_oauth_token(config_manager):
     cfg = config_manager.load_config()
     cfg.cloud_host = "https://cloud.example.test"
-    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.cloud_api_key = None
     cfg.cloud_client_id = "cid"
     cfg.cloud_domain = "https://auth.example.test"
     config_manager.save_config(cfg)
@@ -271,3 +271,17 @@ async def test_get_cloud_control_plane_client_uses_oauth_token(config_manager):
     async with get_cloud_control_plane_client() as client:
         assert str(client.base_url).rstrip("/") == "https://cloud.example.test"
         assert client.headers.get("Authorization") == "Bearer oauth-control-123"
+
+
+@pytest.mark.asyncio
+async def test_get_cloud_control_plane_client_raises_without_credentials(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = None
+    cfg.cloud_client_id = "cid"
+    cfg.cloud_domain = "https://auth.example.test"
+    config_manager.save_config(cfg)
+
+    with pytest.raises(RuntimeError, match="Cloud routing requested but no credentials found"):
+        async with get_cloud_control_plane_client():
+            pass

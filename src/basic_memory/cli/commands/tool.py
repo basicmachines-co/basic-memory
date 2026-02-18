@@ -13,9 +13,8 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import KnowledgeClient, ResourceClient
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import Entity, TimeFrame
 from basic_memory.schemas.memory import GraphContext, MemoryUrl, memory_url_path
@@ -24,9 +23,6 @@ from basic_memory.schemas.search import SearchItemType
 # Import prompts
 from basic_memory.mcp.prompts.continue_conversation import (
     continue_conversation as mcp_continue_conversation,
-)
-from basic_memory.mcp.prompts.recent_activity import (
-    recent_activity_prompt as recent_activity_prompt,
 )
 from basic_memory.mcp.tools import build_context as mcp_build_context
 from basic_memory.mcp.tools import edit_note as mcp_edit_note
@@ -118,8 +114,7 @@ async def _write_note_json(
     )
 
     # Resolve the entity to get metadata back
-    async with get_client(project_name=project_name, workspace=workspace) as client:
-        active_project = await get_active_project(client, project_name)
+    async with get_project_client(project_name, workspace) as (client, active_project):
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
         entity = Entity(title=title, directory=folder)
@@ -144,8 +139,7 @@ async def _read_note_json(
     page_size: int,
 ) -> dict:
     """Read a note and return structured JSON with content and metadata."""
-    async with get_client(project_name=project_name, workspace=workspace) as client:
-        active_project = await get_active_project(client, project_name)
+    async with get_project_client(project_name, workspace) as (client, active_project):
         knowledge_client = KnowledgeClient(client, active_project.external_id)
         resource_client = ResourceClient(client, active_project.external_id)
 
@@ -197,8 +191,7 @@ async def _edit_note_json(
     expected_replacements: int,
 ) -> dict:
     """Edit a note and return structured JSON metadata."""
-    async with get_client(project_name=project_name, workspace=workspace) as client:
-        active_project = await get_active_project(client, project_name)
+    async with get_project_client(project_name, workspace) as (client, active_project):
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
         entity_id = await knowledge_client.resolve_entity(identifier)
@@ -252,7 +245,7 @@ async def _recent_activity_json(
     page_size: int = 50,
 ) -> list:
     """Get recent activity and return structured JSON list."""
-    async with get_client(project_name=project_name, workspace=workspace) as client:
+    async with get_project_client(project_name, workspace) as (client, active_project):
         # Build query params matching the MCP tool's logic
         params: dict = {"page": page, "page_size": page_size, "max_related": 10}
         if depth:
@@ -262,7 +255,6 @@ async def _recent_activity_json(
         if type:
             params["type"] = [t.value for t in type]
 
-        active_project = await get_active_project(client, project_name)
         response = await call_get(
             client,
             f"/v2/projects/{active_project.external_id}/memory/recent",
@@ -930,22 +922,3 @@ def continue_conversation(
             typer.echo(f"Error continuing conversation: {e}", err=True)
             raise typer.Exit(1)
         raise
-
-
-# @tool_app.command(name="show-recent-activity")
-# def show_recent_activity(
-#     timeframe: Annotated[
-#         str, typer.Option(help="How far back to look for activity")
-#     ] = "7d",
-# ):
-#     """Prompt to show recent activity."""
-#     try:
-#         # Prompt functions return formatted strings directly
-#         session = asyncio.run(recent_activity_prompt(timeframe=timeframe))
-#         rprint(session)
-#     except Exception as e:  # pragma: no cover
-#         if not isinstance(e, typer.Exit):
-#             logger.exception("Error continuing conversation", e)
-#             typer.echo(f"Error continuing conversation: {e}", err=True)
-#             raise typer.Exit(1)
-#         raise
