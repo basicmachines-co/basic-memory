@@ -80,18 +80,6 @@ async def _cloud_client(
         yield client
 
 
-async def _resolve_oauth_token(config) -> str:
-    """Resolve OAuth token for control-plane calls that require interactive login."""
-    from basic_memory.cli.auth import CLIAuth
-
-    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-    token = await auth.get_valid_token()
-    if token:
-        return token
-
-    raise RuntimeError("Workspace discovery requires OAuth login. Run 'bm cloud login' first.")
-
-
 @asynccontextmanager
 async def get_cloud_control_plane_client() -> AsyncIterator[AsyncClient]:
     """Create a control-plane cloud client for endpoints outside /proxy."""
