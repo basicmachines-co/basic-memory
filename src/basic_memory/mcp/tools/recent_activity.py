@@ -40,6 +40,7 @@ async def recent_activity(
     depth: int = 1,
     timeframe: TimeFrame = "7d",
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """Get recent activity for a specific project or across all projects.
@@ -246,7 +247,10 @@ async def recent_activity(
             f"Getting recent activity from project {resolved_project}: type={type}, depth={depth}, timeframe={timeframe}"
         )
 
-        async with get_project_client(resolved_project, context) as (client, active_project):
+        async with get_project_client(resolved_project, workspace, context) as (
+            client,
+            active_project,
+        ):
             response = await call_get(
                 client,
                 f"/v2/projects/{active_project.external_id}/memory/recent",

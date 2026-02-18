@@ -348,6 +348,7 @@ async def move_note(
     destination_path: str,
     is_directory: bool = False,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """Move a note or directory to a new location within the same project.
@@ -411,7 +412,7 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.debug(
             f"Moving {'directory' if is_directory else 'note'}: {identifier} to {destination_path} in project: {active_project.name}"
         )

@@ -131,6 +131,7 @@ async def edit_note(
     operation: str,
     content: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     section: Optional[str] = None,
     find_text: Optional[str] = None,
     expected_replacements: int = 1,
@@ -211,7 +212,7 @@ async def edit_note(
         search_notes() first to find the correct identifier. The tool provides detailed
         error messages with suggestions if operations fail.
     """
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
         # Validate operation

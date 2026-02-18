@@ -151,6 +151,7 @@ async def delete_note(
     identifier: str,
     is_directory: bool = False,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> bool | str:
     """Delete a note or directory from the knowledge base.
@@ -215,7 +216,7 @@ async def delete_note(
         with suggestions for finding the correct identifier, including search
         commands and alternative formats to try.
     """
-    async with get_project_client(project, context) as (client, active_project):
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.debug(
             f"Deleting {'directory' if is_directory else 'note'}: {identifier} in project: {active_project.name}"
         )

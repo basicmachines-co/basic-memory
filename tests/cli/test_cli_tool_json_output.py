@@ -176,6 +176,23 @@ def test_read_note_text_output(mock_mcp_read, mock_config_cls):
 
 
 @patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch("basic_memory.cli.commands.tool.mcp_read_note")
+def test_read_note_workspace_passthrough(mock_mcp_read, mock_config_cls):
+    """read-note --workspace passes workspace through to the MCP tool call."""
+    mock_config_cls.return_value = _mock_config_manager()
+    mock_mcp_read.fn = AsyncMock(return_value="# Test Note")
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--workspace", "tenant-123"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    mock_mcp_read.fn.assert_called_once()
+    assert mock_mcp_read.fn.call_args.kwargs["workspace"] == "tenant-123"
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool._read_note_json",
     new_callable=AsyncMock,
@@ -387,10 +404,9 @@ def test_recent_activity_json_pagination(mock_recent_json):
     assert isinstance(data, list)
     # Verify pagination params were passed through
     mock_recent_json.assert_called_once()
-    call_kwargs = mock_recent_json.call_args
-    # positional args: type, depth, timeframe, project_name, page, page_size
-    assert call_kwargs[0][4] == 2  # page
-    assert call_kwargs[0][5] == 10  # page_size
+    call_kwargs = mock_recent_json.call_args.kwargs
+    assert call_kwargs["page"] == 2
+    assert call_kwargs["page_size"] == 10
 
 
 # --- build-context --format json ---
