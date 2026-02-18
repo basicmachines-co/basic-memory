@@ -138,30 +138,36 @@ def test_remove_main_project(app, app_config, config_manager):
         new_default_path = Path(new_default_dir)
 
         # Ensure main exists
-        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
+        # Force local routing to keep this regression test independent from cloud auth/mode state.
+        result = runner.invoke(cli_app, ["project", "list", "--local"], env=WIDE_TERMINAL_ENV)
         if "main" not in result.stdout:
-            result = runner.invoke(cli_app, ["project", "add", "main", str(main_path)])
+            result = runner.invoke(cli_app, ["project", "add", "main", str(main_path), "--local"])
             print(result.stdout)
             assert result.exit_code == 0
 
         # Confirm main is present
-        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
+        result = runner.invoke(cli_app, ["project", "list", "--local"], env=WIDE_TERMINAL_ENV)
         assert "main" in result.stdout
 
         # Add a second project
-        result = runner.invoke(cli_app, ["project", "add", "new_default", str(new_default_path)])
+        result = runner.invoke(
+            cli_app, ["project", "add", "new_default", str(new_default_path), "--local"]
+        )
         assert result.exit_code == 0
 
         # Set new_default as default (if needed)
-        result = runner.invoke(cli_app, ["project", "default", "new_default"])
+        result = runner.invoke(cli_app, ["project", "default", "new_default", "--local"])
         assert result.exit_code == 0
 
         # Remove main
-        result = runner.invoke(cli_app, ["project", "remove", "main"])
+        result = runner.invoke(cli_app, ["project", "remove", "main", "--local"])
+        if result.exit_code != 0:
+            print(f"STDOUT: {result.stdout}")
+            print(f"STDERR: {result.stderr}")
         assert result.exit_code == 0
 
         # Confirm only new_default exists and main does not
-        result = runner.invoke(cli_app, ["project", "list"], env=WIDE_TERMINAL_ENV)
+        result = runner.invoke(cli_app, ["project", "list", "--local"], env=WIDE_TERMINAL_ENV)
         assert result.exit_code == 0
         assert "main" not in result.stdout
         assert "new_default" in result.stdout
