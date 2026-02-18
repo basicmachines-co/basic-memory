@@ -6,7 +6,11 @@ import pytest
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.config import ProjectMode
 from basic_memory.mcp import async_client as async_client_module
-from basic_memory.mcp.async_client import get_client, set_client_factory
+from basic_memory.mcp.async_client import (
+    get_client,
+    get_cloud_control_plane_client,
+    set_client_factory,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +64,19 @@ async def test_get_client_explicit_cloud_uses_api_key(config_manager, monkeypatc
     async with get_client() as client:
         assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
         assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
+
+
+@pytest.mark.asyncio
+async def test_get_client_cloud_adds_workspace_header(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research", workspace="tenant-123") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("X-Workspace-ID") == "tenant-123"
 
 
 @pytest.mark.asyncio
@@ -219,3 +236,38 @@ async def test_get_client_explicit_cloud_overrides_local_project(config_manager,
     async with get_client(project_name="main") as client:
         assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
         assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
+
+
+@pytest.mark.asyncio
+async def test_get_cloud_control_plane_client_requires_oauth(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.cloud_client_id = "cid"
+    cfg.cloud_domain = "https://auth.example.test"
+    config_manager.save_config(cfg)
+
+    with pytest.raises(RuntimeError, match="Workspace discovery requires OAuth login"):
+        async with get_cloud_control_plane_client():
+            pass
+
+
+@pytest.mark.asyncio
+async def test_get_cloud_control_plane_client_uses_oauth_token(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.cloud_client_id = "cid"
+    cfg.cloud_domain = "https://auth.example.test"
+    config_manager.save_config(cfg)
+
+    auth = CLIAuth(client_id=cfg.cloud_client_id, authkit_domain=cfg.cloud_domain)
+    auth.token_file.parent.mkdir(parents=True, exist_ok=True)
+    auth.token_file.write_text(
+        '{"access_token":"oauth-control-123","refresh_token":null,"expires_at":9999999999,"token_type":"Bearer"}',
+        encoding="utf-8",
+    )
+
+    async with get_cloud_control_plane_client() as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test"
+        assert client.headers.get("Authorization") == "Bearer oauth-control-123"

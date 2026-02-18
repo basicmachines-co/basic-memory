@@ -9,8 +9,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.schema import ValidationReport, InferenceReport, DriftReport
 
@@ -77,6 +76,7 @@ async def schema_validate(
     note_type: Optional[str] = None,
     identifier: Optional[str] = None,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> ValidationReport | str:
     """Validate notes against their resolved schema.
@@ -115,8 +115,7 @@ async def schema_validate(
         # Validate in a specific project
         schema_validate(note_type="person", project="my-research")
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
             f"MCP tool call tool=schema_validate project={active_project.name} "
             f"note_type={note_type} identifier={identifier}"
@@ -172,6 +171,7 @@ async def schema_infer(
     note_type: str,
     threshold: float = 0.25,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> InferenceReport | str:
     """Analyze existing notes and suggest a schema definition.
@@ -209,8 +209,7 @@ async def schema_infer(
         # Infer in a specific project
         schema_infer("person", project="my-research")
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
             f"MCP tool call tool=schema_infer project={active_project.name} "
             f"note_type={note_type} threshold={threshold}"
@@ -272,6 +271,7 @@ async def schema_infer(
 async def schema_diff(
     note_type: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> DriftReport | str:
     """Detect drift between a schema definition and actual note usage.
@@ -304,8 +304,7 @@ async def schema_diff(
         # Check drift in a specific project
         schema_diff("person", project="my-research")
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
             f"MCP tool call tool=schema_diff project={active_project.name} note_type={note_type}"
         )
