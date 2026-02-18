@@ -10,28 +10,6 @@ from basic_memory.cli.main import app as cli_app
 WIDE_TERMINAL_ENV = {"COLUMNS": "240", "LINES": "60"}
 
 
-def _extract_project_names(output: str) -> set[str]:
-    """Extract project names from rich table output."""
-    names: set[str] = set()
-    separator = "│" if "│" in output else "|"
-
-    for line in output.splitlines():
-        if separator not in line:
-            continue
-
-        columns = [column.strip() for column in line.split(separator)]
-        if len(columns) < 3:
-            continue
-
-        name = columns[1]
-        if not name or name == "Name":
-            continue
-
-        names.add(name)
-
-    return names
-
-
 def test_project_list(app, app_config, test_project, config_manager):
     """Test 'bm project list' command shows projects."""
     runner = CliRunner()
@@ -160,19 +138,16 @@ def test_remove_main_project(app, app_config, config_manager):
         new_default_path = Path(new_default_dir)
 
         # Ensure main exists
-        # Force local routing to keep this regression test independent from cloud auth/mode state.
-        result = runner.invoke(cli_app, ["project", "list", "--local"], env=WIDE_TERMINAL_ENV)
-        assert result.exit_code == 0
-        listed_projects = _extract_project_names(result.stdout)
-        if "main" not in listed_projects:
+        # Trigger: this test must work on Windows runners where output may contain "runneradmin".
+        # Why: substring checks against command output can mistake path text for project names.
+        # Outcome: use config state for setup decisions, then validate behavior via CLI invocation.
+        if "main" not in config_manager.config.projects:
             result = runner.invoke(cli_app, ["project", "add", "main", str(main_path), "--local"])
             print(result.stdout)
             assert result.exit_code == 0
 
         # Confirm main is present
-        result = runner.invoke(cli_app, ["project", "list", "--local"], env=WIDE_TERMINAL_ENV)
-        assert result.exit_code == 0
-        assert "main" in _extract_project_names(result.stdout)
+        assert "main" in config_manager.config.projects
 
         # Add a second project
         result = runner.invoke(
@@ -194,6 +169,6 @@ def test_remove_main_project(app, app_config, config_manager):
         # Confirm only new_default exists and main does not
         result = runner.invoke(cli_app, ["project", "list", "--local"], env=WIDE_TERMINAL_ENV)
         assert result.exit_code == 0
-        listed_projects = _extract_project_names(result.stdout)
-        assert "main" not in listed_projects
-        assert "new_default" in listed_projects
+        config_after_list = config_manager.load_config()
+        assert "main" not in config_after_list.projects
+        assert "new_default" in config_after_list.projects
