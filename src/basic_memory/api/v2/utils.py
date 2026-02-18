@@ -138,6 +138,8 @@ async def to_graph_context(
         total_results=context_result.metadata.primary_count + context_result.metadata.related_count,
         total_relations=context_result.metadata.total_relations,
         total_observations=context_result.metadata.total_observations,
+        resolved_path=context_result.metadata.resolved_path,
+        no_primary_match=context_result.metadata.no_primary_match,
     )
 
     # Return new GraphContext with just hierarchical results

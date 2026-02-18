@@ -200,6 +200,9 @@ class MemoryMetadata(BaseModel):
     total_results: Optional[int] = None  # For backward compatibility
     total_relations: Optional[int] = None
     total_observations: Optional[int] = None
+    # Diagnostics for empty-result debugging
+    resolved_path: Optional[str] = None
+    no_primary_match: Optional[str] = None
 
     @field_serializer("generated_at")
     def serialize_generated_at(self, dt: datetime) -> str:

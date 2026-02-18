@@ -333,3 +333,89 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
         assert entity1_p1.project_id == project1.id
         assert entity2_p1.project_id == project1.id
         assert entity1_p2.project_id == project2.id
+
+
+@pytest.mark.asyncio
+async def test_build_context_fallback_wildcard_prefix(context_service, test_graph):
+    """Fallback 1: wildcard prefix match recovers note when caller omits leading segment.
+
+    The root entity is stored with permalink 'test-project/test/root'.
+    When the caller passes 'memory://test/root' (missing the project segment),
+    the exact lookup fails and the wildcard-prefix fallback '*/test/root' should
+    find the entity.
+    """
+    # Pass the path WITHOUT the project prefix — exact lookup will miss,
+    # wildcard fallback '*/test/root' should succeed.
+    url = memory_url.validate_strings("memory://test/root")
+    context_result = await context_service.build_context(url)
+
+    assert len(context_result.results) == 1
+    primary = context_result.results[0].primary_result
+    assert primary.id == test_graph["root"].id
+    assert primary.title == "Root"
+    # Diagnostic fields: fallback succeeded so no_primary_match is None
+    assert context_result.metadata.no_primary_match is None
+    assert context_result.metadata.resolved_path == "test/root"
+
+
+@pytest.mark.asyncio
+async def test_build_context_fallback_strip_prefix(context_service, test_graph):
+    """Fallback 2: stripping leading segment recovers note when caller adds extra prefix.
+
+    If the caller passes 'memory://extra/test-project/test/root' (with an extra
+    leading segment not in the stored permalink), the strip-prefix fallback should
+    find the entity stored at 'test-project/test/root'.
+    """
+    # Pass path with an extra leading segment; exact lookup and wildcard-prefix
+    # both fail, then strip-prefix retry should succeed.
+    url = memory_url.validate_strings("memory://extra/test-project/test/root")
+    context_result = await context_service.build_context(url)
+
+    assert len(context_result.results) == 1
+    primary = context_result.results[0].primary_result
+    assert primary.id == test_graph["root"].id
+    assert context_result.metadata.no_primary_match is None
+
+
+@pytest.mark.asyncio
+async def test_build_context_fallback_title_search(context_service, test_graph):
+    """Fallback 3: title search recovers note when permalink normalization differs.
+
+    When the path doesn't match any stored permalink variant but the last segment
+    happens to be the title slug, a title FTS search should still find the entity.
+    """
+    # Use a path whose last segment 'root' matches the title 'Root' via FTS
+    url = memory_url.validate_strings("memory://completely/different/path/root")
+    context_result = await context_service.build_context(url)
+
+    # Title search for 'root' should find the Root entity
+    assert len(context_result.results) == 1
+    primary = context_result.results[0].primary_result
+    assert primary.id == test_graph["root"].id
+    assert context_result.metadata.no_primary_match is None
+
+
+@pytest.mark.asyncio
+async def test_build_context_diagnostics_no_match(context_service):
+    """When all fallbacks fail, no_primary_match and resolved_path explain the miss."""
+    url = memory_url.validate_strings("memory://nonexistent/note/xyz123")
+    context_result = await context_service.build_context(url)
+
+    assert len(context_result.results) == 0
+    assert context_result.metadata.primary_count == 0
+    # Diagnostic fields must be populated for debugging
+    assert context_result.metadata.resolved_path == "nonexistent/note/xyz123"
+    assert context_result.metadata.no_primary_match is not None
+    assert "nonexistent/note/xyz123" in context_result.metadata.no_primary_match
+
+
+@pytest.mark.asyncio
+async def test_build_context_diagnostics_exact_match_no_diagnostic(context_service, test_graph):
+    """When exact lookup succeeds, diagnostic fields are absent (None)."""
+    url = memory_url.validate_strings("memory://test-project/test/root")
+    context_result = await context_service.build_context(url)
+
+    assert len(context_result.results) == 1
+    # No diagnostic needed — exact lookup succeeded
+    assert context_result.metadata.no_primary_match is None
+    assert context_result.metadata.resolved_path == "test-project/test/root"

@@ -57,6 +57,9 @@ class ContextMetadata:
     related_count: int = 0
     total_observations: int = 0
     total_relations: int = 0
+    # Diagnostics for empty-result debugging
+    resolved_path: Optional[str] = None
+    no_primary_match: Optional[str] = None
 
 
 @dataclass
@@ -103,6 +106,7 @@ class ContextService:
         )
 
         normalized_path: Optional[str] = None
+        no_primary_match: Optional[str] = None
         if memory_url:
             path = memory_url_path(memory_url)
             # Check for wildcards before normalization
@@ -127,6 +131,59 @@ class ContextService:
                 primary = await self.search_repository.search(
                     permalink=normalized_path, limit=limit, offset=offset
                 )
+
+                # --- Fallback resolution when exact permalink returns no results ---
+                # Trigger: exact permalink lookup found nothing, but caller may have passed a
+                #          path-like identifier that doesn't align with stored permalinks
+                #          (e.g., project-prefix mismatch or .md extension not stripped).
+                # Why: build_context should behave like read_note — try alternate resolution
+                #      strategies before giving up, rather than silently returning empty.
+                # Outcome: if a fallback succeeds, primary is populated; otherwise diagnostics
+                #          explain the miss so callers can debug identifier mismatches quickly.
+                if not primary:
+                    logger.debug(
+                        f"Exact permalink lookup returned 0 results for '{normalized_path}', trying fallback"
+                    )
+                    # Fallback 1: wildcard prefix match — handles the case where the stored
+                    # permalink has an extra leading segment (e.g. project prefix) that the
+                    # caller omitted.  We search for "*/<path>" to catch entries like
+                    # "my-project/specs/search" when caller passed "specs/search".
+                    wildcard_path = f"*/{normalized_path}"
+                    logger.debug(f"Fallback: trying wildcard prefix match '{wildcard_path}'")
+                    primary = await self.search_repository.search(
+                        permalink_match=wildcard_path, limit=limit, offset=offset
+                    )
+
+                    # Fallback 2: strip the leading path segment from the caller's path and
+                    # retry exact lookup.  Handles the opposite case: caller included an extra
+                    # prefix (e.g. the project name) that is NOT present in stored permalinks.
+                    if not primary and "/" in normalized_path:
+                        _, remainder = normalized_path.split("/", 1)
+                        if remainder:
+                            logger.debug(f"Fallback: trying stripped path '{remainder}'")
+                            primary = await self.search_repository.search(
+                                permalink=remainder, limit=limit, offset=offset
+                            )
+
+                    # Fallback 3: title search using the last path segment as query text.
+                    # When permalink normalization changes spaces/casing, a title match can
+                    # recover the note the caller intended.
+                    if not primary:
+                        title_fragment = normalized_path.rsplit("/", 1)[-1]
+                        logger.debug(f"Fallback: trying title search for '{title_fragment}'")
+                        primary = await self.search_repository.search(
+                            title=title_fragment, limit=limit, offset=offset
+                        )
+
+                    if primary:
+                        logger.debug(
+                            f"Fallback succeeded: found {len(primary)} result(s) for '{normalized_path}'"
+                        )
+                    else:
+                        # Record diagnostic reason so clients can distinguish lookup-miss
+                        # from "note exists but has no relations".
+                        no_primary_match = f"no entity found for permalink '{normalized_path}'"
+                        logger.debug(f"Fallback exhausted: {no_primary_match}")
         else:
             logger.debug(f"Build context for '{types}'")
             primary = await self.search_repository.search(
@@ -171,6 +228,8 @@ class ContextService:
             related_count=len(related),
             total_observations=sum(len(obs) for obs in observations_by_entity.values()),
             total_relations=sum(1 for r in related if r.type == SearchItemType.RELATION),
+            resolved_path=normalized_path,
+            no_primary_match=no_primary_match,
         )
 
         # Build context results list directly with ContextResultItem objects
