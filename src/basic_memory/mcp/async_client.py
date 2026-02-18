@@ -60,13 +60,36 @@ async def _resolve_cloud_token(config) -> str:
     )
 
 
-async def _cloud_client(config, timeout: Timeout) -> AsyncIterator[AsyncClient]:
+@asynccontextmanager
+async def _cloud_client(
+    config,
+    timeout: Timeout,
+    workspace: Optional[str] = None,
+) -> AsyncIterator[AsyncClient]:
     """Create a cloud proxy client with resolved credentials."""
     token = await _resolve_cloud_token(config)
     proxy_base_url = f"{config.cloud_host}/proxy"
+    headers = {"Authorization": f"Bearer {token}"}
+    if workspace:
+        headers["X-Workspace-ID"] = workspace
     logger.info(f"Creating HTTP client for cloud proxy at: {proxy_base_url}")
     async with AsyncClient(
         base_url=proxy_base_url,
+        headers=headers,
+        timeout=timeout,
+    ) as client:
+        yield client
+
+
+@asynccontextmanager
+async def get_cloud_control_plane_client() -> AsyncIterator[AsyncClient]:
+    """Create a control-plane cloud client for endpoints outside /proxy."""
+    config = ConfigManager().config
+    timeout = _build_timeout()
+    token = await _resolve_cloud_token(config)
+    logger.info(f"Creating HTTP client for cloud control plane at: {config.cloud_host}")
+    async with AsyncClient(
+        base_url=config.cloud_host,
         headers={"Authorization": f"Bearer {token}"},
         timeout=timeout,
     ) as client:
@@ -86,6 +109,7 @@ def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncCl
 @asynccontextmanager
 async def get_client(
     project_name: Optional[str] = None,
+    workspace: Optional[str] = None,
 ) -> AsyncIterator[AsyncClient]:
     """Get an AsyncClient as a context manager.
 
@@ -116,7 +140,7 @@ async def get_client(
 
         if _force_cloud_mode():
             logger.info("Explicit cloud routing enabled - using cloud proxy client")
-            async for client in _cloud_client(config, timeout):
+            async with _cloud_client(config, timeout, workspace=workspace) as client:
                 yield client
             return
 
@@ -129,7 +153,7 @@ async def get_client(
         if project_mode == ProjectMode.CLOUD:
             logger.info(f"Project '{project_name}' is cloud mode - using cloud proxy client")
             try:
-                async for client in _cloud_client(config, timeout):
+                async with _cloud_client(config, timeout, workspace=workspace) as client:
                     yield client
             except RuntimeError as exc:
                 raise RuntimeError(

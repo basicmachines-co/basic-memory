@@ -28,6 +28,7 @@ if not _version_only_invocation(sys.argv[1:]):
         schema,
         status,
         tool,
+        workspace,
     )
 
 warnings.filterwarnings("ignore")  # pragma: no cover
