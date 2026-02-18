@@ -1,6 +1,6 @@
 import os
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import AsyncGenerator, AsyncIterator, Callable, Optional
+from typing import AsyncIterator, Callable, Optional
 
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
@@ -60,11 +60,12 @@ async def _resolve_cloud_token(config) -> str:
     )
 
 
+@asynccontextmanager
 async def _cloud_client(
     config,
     timeout: Timeout,
     workspace: Optional[str] = None,
-) -> AsyncGenerator[AsyncClient, None]:
+) -> AsyncIterator[AsyncClient]:
     """Create a cloud proxy client with resolved credentials."""
     token = await _resolve_cloud_token(config)
     proxy_base_url = f"{config.cloud_host}/proxy"
@@ -139,7 +140,7 @@ async def get_client(
 
         if _force_cloud_mode():
             logger.info("Explicit cloud routing enabled - using cloud proxy client")
-            async for client in _cloud_client(config, timeout, workspace=workspace):
+            async with _cloud_client(config, timeout, workspace=workspace) as client:
                 yield client
             return
 
@@ -152,7 +153,7 @@ async def get_client(
         if project_mode == ProjectMode.CLOUD:
             logger.info(f"Project '{project_name}' is cloud mode - using cloud proxy client")
             try:
-                async for client in _cloud_client(config, timeout, workspace=workspace):
+                async with _cloud_client(config, timeout, workspace=workspace) as client:
                     yield client
             except RuntimeError as exc:
                 raise RuntimeError(
