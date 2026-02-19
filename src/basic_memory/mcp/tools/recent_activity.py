@@ -1,7 +1,7 @@
 """Recent activity tool for Basic Memory MCP server."""
 
 from datetime import timezone
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -41,8 +41,9 @@ async def recent_activity(
     timeframe: TimeFrame = "7d",
     project: Optional[str] = None,
     workspace: Optional[str] = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | list[dict]:
     """Get recent activity for a specific project or across all projects.
 
     Project Resolution:
@@ -78,6 +79,8 @@ async def recent_activity(
         project: Project name to query. Optional - server will resolve using the
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
+        output_format: "text" returns human-readable summary text. "json" returns
+            a flat list of recent entity items.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -186,6 +189,12 @@ async def recent_activity(
                         most_active_count = item_count
                         most_active_project = project_info.name
 
+        if output_format == "json":
+            rows: list[dict] = []
+            for project_name, project_activity in projects_activity.items():
+                rows.extend(_extract_recent_entity_rows(project_activity.activity, project_name))
+            return rows
+
         # Build summary stats
         summary = ActivityStats(
             total_projects=len(project_list.projects),
@@ -258,6 +267,9 @@ async def recent_activity(
             )
             activity_data = GraphContext.model_validate(response.json())
 
+            if output_format == "json":
+                return _extract_recent_entity_rows(activity_data)
+
             # Format project-specific mode output
             return _format_project_output(resolved_project, activity_data, timeframe, type)
 
@@ -313,6 +325,29 @@ async def _get_project_activity(
         last_activity=last_activity,
         active_folders=list(active_folders)[:5],  # Limit to top 5 folders
     )
+
+
+def _extract_recent_entity_rows(
+    activity_data: GraphContext, project_name: Optional[str] = None
+) -> list[dict]:
+    """Flatten GraphContext into a list of recent entity rows."""
+    rows: list[dict] = []
+    for result in activity_data.results:
+        primary = result.primary_result
+        if primary.type != "entity":
+            continue
+        row = {
+            "title": primary.title,
+            "permalink": primary.permalink,
+            "file_path": primary.file_path,
+            "created_at": (
+                primary.created_at.isoformat() if getattr(primary, "created_at", None) else None
+            ),
+        }
+        if project_name is not None:
+            row["project"] = project_name
+        rows.append(row)
+    return rows
 
 
 def _format_discovery_output(

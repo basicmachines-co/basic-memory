@@ -5,6 +5,7 @@ and manage project context during conversations.
 """
 
 import os
+from typing import Literal
 from fastmcp import Context
 
 from basic_memory.mcp.async_client import get_client
@@ -14,65 +15,71 @@ from basic_memory.utils import generate_permalink
 
 
 @mcp.tool("list_memory_projects")
-async def list_memory_projects(context: Context | None = None) -> str:
+async def list_memory_projects(
+    output_format: Literal["text", "json"] = "text",
+    context: Context | None = None,
+) -> str | dict:
     """List all available projects with their status.
 
-    Shows all Basic Memory projects that are available for MCP operations.
-    Use this tool to discover projects when you need to know which project to use.
-
-    Use this tool:
-    - At conversation start when project is unknown
-    - When user asks about available projects
-    - Before any operation requiring a project
-
-    After calling:
-    - Ask user which project to use
-    - Remember their choice for the session
-
-    Returns:
-        Formatted list of projects with session management guidance
-
-    Example:
-        list_memory_projects()
+    Args:
+        output_format: "text" returns the existing human-readable project list.
+            "json" returns structured project metadata.
+        context: Optional FastMCP context for progress/status logging.
     """
     async with get_client() as client:
         if context:  # pragma: no cover
             await context.info("Listing all available projects")
 
-        # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
 
-        # Import here to avoid circular import
         from basic_memory.mcp.clients import ProjectClient
 
-        # Use typed ProjectClient for API calls
         project_client = ProjectClient(client)
         project_list = await project_client.list_projects()
+
+        if output_format == "json":
+            projects = [
+                {
+                    "name": project.name,
+                    "path": project.path,
+                    "is_default": project.is_default,
+                    "is_private": False,
+                    "display_name": None,
+                }
+                for project in project_list.projects
+            ]
+            return {
+                "projects": projects,
+                "default_project": project_list.default_project,
+                "constrained_project": constrained_project,
+            }
 
         if constrained_project:
             result = f"Project: {constrained_project}\n\n"
             result += "Note: This MCP server is constrained to a single project.\n"
             result += "All operations will automatically use this project."
-        else:
-            # Show all projects with session guidance
-            result = "Available projects:\n"
+            return result
 
-            for project in project_list.projects:
-                result += f"• {project.name}\n"
+        result = "Available projects:\n"
+        for project in project_list.projects:
+            result += f"• {project.name}\n"
 
-            result += "\n" + "─" * 40 + "\n"
-            result += "Next: Ask which project to use for this session.\n"
-            result += "Example: 'Which project should I use for this task?'\n\n"
-            result += "Session reminder: Track the selected project for all subsequent operations in this conversation.\n"
-            result += "The user can say 'switch to [project]' to change projects."
-
+        result += "\n" + "─" * 40 + "\n"
+        result += "Next: Ask which project to use for this session.\n"
+        result += "Example: 'Which project should I use for this task?'\n\n"
+        result += "Session reminder: Track the selected project for all subsequent operations in this conversation.\n"
+        result += "The user can say 'switch to [project]' to change projects."
         return result
 
 
 @mcp.tool("create_memory_project")
 async def create_memory_project(
-    project_name: str, project_path: str, set_default: bool = False, context: Context | None = None
-) -> str:
+    project_name: str,
+    project_path: str,
+    set_default: bool = False,
+    output_format: Literal["text", "json"] = "text",
+    context: Context | None = None,
+) -> str | dict:
     """Create a new Basic Memory project.
 
     Creates a new project with the specified name and path. The project directory
@@ -82,6 +89,9 @@ async def create_memory_project(
         project_name: Name for the new project (must be unique)
         project_path: File system path where the project will be stored
         set_default: Whether to set this project as the default (optional, defaults to False)
+        output_format: "text" returns the existing human-readable result text.
+            "json" returns structured project creation metadata.
+        context: Optional FastMCP context for progress/status logging.
 
     Returns:
         Confirmation message with project details
@@ -94,6 +104,19 @@ async def create_memory_project(
         # Check if server is constrained to a specific project
         constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         if constrained_project:
+            if output_format == "json":
+                return {
+                    "name": project_name,
+                    "path": project_path,
+                    "is_default": False,
+                    "created": False,
+                    "already_exists": False,
+                    "error": "PROJECT_CONSTRAINED",
+                    "message": (
+                        f"Project creation disabled - MCP server is constrained to project "
+                        f"'{constrained_project}'."
+                    ),
+                }
             return f'# Error\n\nProject creation disabled - MCP server is constrained to project \'{constrained_project}\'.\nUse the CLI to create projects: `basic-memory project add "{project_name}" "{project_path}"`'
 
         if context:  # pragma: no cover
@@ -109,7 +132,45 @@ async def create_memory_project(
 
         # Use typed ProjectClient for API calls
         project_client = ProjectClient(client)
+        existing = await project_client.list_projects()
+        existing_match = next(
+            (p for p in existing.projects if p.name.casefold() == project_name.casefold()),
+            None,
+        )
+        if existing_match:
+            is_default = bool(
+                existing_match.is_default or existing.default_project == existing_match.name
+            )
+            if output_format == "json":
+                return {
+                    "name": existing_match.name,
+                    "path": existing_match.path,
+                    "is_default": is_default,
+                    "created": False,
+                    "already_exists": True,
+                }
+            return (
+                f"✓ Project already exists: {existing_match.name}\n\n"
+                f"Project Details:\n"
+                f"• Name: {existing_match.name}\n"
+                f"• Path: {existing_match.path}\n"
+                f"{'• Set as default project\\n' if is_default else ''}"
+                "\nProject is already available for use in tool calls.\n"
+            )
+
         status_response = await project_client.create_project(project_request.model_dump())
+
+        if output_format == "json":
+            new_project = status_response.new_project
+            return {
+                "name": new_project.name if new_project else project_name,
+                "path": new_project.path if new_project else project_path,
+                "is_default": bool(
+                    (new_project.is_default if new_project else False) or set_default
+                ),
+                "created": True,
+                "already_exists": False,
+            }
 
         result = f"✓ {status_response.message}\n\n"
 
