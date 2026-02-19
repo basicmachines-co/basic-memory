@@ -193,16 +193,10 @@ async def read_note(
             }
 
         def _search_results(payload: object) -> list[dict]:
-            if isinstance(payload, dict):
-                results = payload.get("results")
-                return results if isinstance(results, list) else []
-            model_dump = getattr(payload, "model_dump", None)
-            if callable(model_dump):
-                dumped = model_dump()
-                if isinstance(dumped, dict):
-                    results = dumped.get("results")
-                    return results if isinstance(results, list) else []
-            return []
+            if not isinstance(payload, dict):
+                return []
+            results = payload.get("results")
+            return results if isinstance(results, list) else []
 
         def _result_title(item: object) -> str:
             if not isinstance(item, dict):
