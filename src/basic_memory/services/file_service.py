@@ -79,6 +79,10 @@ class FileService:
         """
         logger.debug(f"Reading entity content, entity_id={entity.id}, permalink={entity.permalink}")
 
+        # markdown_processor is required for entity content reads — fail fast if not configured
+        if self.markdown_processor is None:
+            raise ValueError("markdown_processor is required for read_entity_content")
+
         file_path = self.get_entity_path(entity)
         markdown = await self.markdown_processor.read_file(file_path)
         return markdown.content or ""
