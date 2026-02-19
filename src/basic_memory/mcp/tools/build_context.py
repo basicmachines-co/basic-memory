@@ -1,6 +1,6 @@
 """Build context tool for Basic Memory MCP server."""
 
-from typing import Optional
+from typing import Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -190,7 +190,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
 
     Format options:
     - "json" (default): Slimmed JSON with redundant fields removed
-    - "markdown": Compact markdown text for LLM consumption
+    - "text": Compact markdown text for LLM consumption
     """,
 )
 async def build_context(
@@ -202,7 +202,7 @@ async def build_context(
     page: int = 1,
     page_size: int = 10,
     max_related: int = 10,
-    format: str = "json",
+    output_format: Literal["json", "text"] = "json",
     context: Context | None = None,
 ) -> dict | str:
     """Get context needed to continue a discussion within a specific project.
@@ -225,12 +225,13 @@ async def build_context(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
-        format: Response format - "json" for slimmed JSON dict, "markdown" for compact text
+        output_format: Response format - "json" for slimmed JSON dict,
+            "text" for compact markdown text
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        dict (format="json"): Slimmed JSON with redundant fields removed
-        str (format="markdown"): Compact markdown representation
+        dict (output_format="json"): Slimmed JSON with redundant fields removed
+        str (output_format="text"): Compact markdown representation
 
     Examples:
         # Continue a specific discussion
@@ -239,8 +240,8 @@ async def build_context(
         # Get deeper context about a component
         build_context("work-docs", "memory://components/memory-service", depth=2)
 
-        # Get markdown output for compact context
-        build_context("research", "memory://specs/search", format="markdown")
+        # Get text output for compact context
+        build_context("research", "memory://specs/search", output_format="text")
 
     Raises:
         ToolError: If project doesn't exist or depth parameter is invalid
@@ -276,7 +277,7 @@ async def build_context(
             max_related=max_related,
         )
 
-        if format == "markdown":
+        if output_format == "text":
             return _format_context_markdown(graph, active_project.name)
 
         return _slim_context(graph)

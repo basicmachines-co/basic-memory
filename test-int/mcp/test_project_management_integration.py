@@ -121,7 +121,7 @@ async def test_create_project_with_default_flag(mcp_server, app, test_project, t
 
 @pytest.mark.asyncio
 async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_path):
-    """Test creating a project with duplicate name shows error."""
+    """Test creating a project with duplicate name is idempotent."""
 
     async with Client(mcp_server) as client:
         # First create a project
@@ -135,25 +135,35 @@ async def test_create_project_duplicate_name(mcp_server, app, test_project, tmp_
             },
         )
 
-        # Try to create another project with same name
-        with pytest.raises(Exception) as exc_info:
-            await client.call_tool(
-                "create_memory_project",
-                {
-                    "project_name": "duplicate-test",
-                    "project_path": str(
-                        tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-2"
-                    ),
-                },
-            )
+        # Second create with same name should succeed idempotently
+        second_result = await client.call_tool(
+            "create_memory_project",
+            {
+                "project_name": "duplicate-test",
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-2"
+                ),
+            },
+        )
+        second_text = second_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "already exists" in second_text.lower()
+        assert "duplicate-test" in second_text
 
-        # Should show error about duplicate name
-        error_message = str(exc_info.value)
-        assert "create_memory_project" in error_message
+        # JSON mode should explicitly report already_exists=true
+        second_json = await client.call_tool(
+            "create_memory_project",
+            {
+                "project_name": "duplicate-test",
+                "project_path": str(
+                    tmp_path.parent / (tmp_path.name + "-projects") / "project-duplicate-test-3"
+                ),
+                "output_format": "json",
+            },
+        )
+        second_json_text = second_json.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert (
-            "duplicate-test" in error_message
-            or "already exists" in error_message
-            or "Invalid request" in error_message
+            '"already_exists":true' in second_json_text
+            or '"already_exists": true' in second_json_text
         )
 
 

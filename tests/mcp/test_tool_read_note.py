@@ -5,7 +5,6 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note
-from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItemType
 from basic_memory.utils import normalize_newlines
 
 
@@ -68,30 +67,30 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 
     async def fake_search_notes_fn(*, query, search_type, **kwargs):
         if search_type == "title":
-            return SearchResponse(results=[], current_page=1, page_size=10)
+            return {"results": [], "current_page": 1, "page_size": 10}
 
-        return SearchResponse(
-            results=[
-                SearchResult(
-                    title="Related One",
-                    permalink="docs/related-one",
-                    content="",
-                    type=SearchItemType.ENTITY,
-                    score=1.0,
-                    file_path="docs/related-one.md",
-                ),
-                SearchResult(
-                    title="Related Two",
-                    permalink="docs/related-two",
-                    content="",
-                    type=SearchItemType.ENTITY,
-                    score=0.9,
-                    file_path="docs/related-two.md",
-                ),
+        return {
+            "results": [
+                {
+                    "title": "Related One",
+                    "permalink": "docs/related-one",
+                    "content": "",
+                    "type": "entity",
+                    "score": 1.0,
+                    "file_path": "docs/related-one.md",
+                },
+                {
+                    "title": "Related Two",
+                    "permalink": "docs/related-two",
+                    "content": "",
+                    "type": "entity",
+                    "score": 0.9,
+                    "file_path": "docs/related-two.md",
+                },
             ],
-            current_page=1,
-            page_size=10,
-        )
+            "current_page": 1,
+            "page_size": 10,
+        }
 
     # Ensure direct resolution doesn't short-circuit the fallback logic.
     class FailingKnowledgeClient(OriginalKnowledgeClient):
@@ -131,21 +130,21 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
 
     async def fake_search_notes_fn(*, query, search_type, **kwargs):
         if search_type == "title":
-            return SearchResponse(
-                results=[
-                    SearchResult(
-                        title="Existing Note",
-                        permalink="test/existing-note",
-                        content="",
-                        type=SearchItemType.ENTITY,
-                        score=1.0,
-                        file_path="test/Existing Note.md",
-                    )
+            return {
+                "results": [
+                    {
+                        "title": "Existing Note",
+                        "permalink": "test/existing-note",
+                        "content": "",
+                        "type": "entity",
+                        "score": 1.0,
+                        "file_path": "test/Existing Note.md",
+                    }
                 ],
-                current_page=1,
-                page_size=10,
-            )
-        return SearchResponse(results=[], current_page=1, page_size=10)
+                "current_page": 1,
+                "page_size": 10,
+            }
+        return {"results": [], "current_page": 1, "page_size": 10}
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", StrictFailingKnowledgeClient)
     monkeypatch.setattr(read_note_module.search_notes, "fn", fake_search_notes_fn)

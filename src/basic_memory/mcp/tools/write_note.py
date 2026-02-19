@@ -1,6 +1,6 @@
 """Write note tool for Basic Memory MCP server."""
 
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Literal
 
 from loguru import logger
 
@@ -26,8 +26,9 @@ async def write_note(
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: dict | None = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict:
     """Write a markdown note to the knowledge base.
 
     Creates or updates a markdown note with semantic observations and relations.
@@ -72,6 +73,8 @@ async def write_note(
         metadata: Optional dict of extra frontmatter fields merged into entity_metadata.
                   Useful for schema notes or any note that needs custom YAML frontmatter
                   beyond title/type/tags. Nested dicts are supported.
+        output_format: "text" returns the existing markdown summary. "json" returns
+                       machine-readable metadata.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -145,6 +148,15 @@ async def write_note(
                 directory=directory,
                 project=active_project.name,
             )
+            if output_format == "json":
+                return {
+                    "title": title,
+                    "permalink": None,
+                    "file_path": None,
+                    "checksum": None,
+                    "action": "created",
+                    "error": "SECURITY_VALIDATION_ERROR",
+                }
             return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
 
         # Process tags using the helper function
@@ -246,5 +258,14 @@ async def write_note(
         logger.info(
             f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
         )
+        if output_format == "json":
+            return {
+                "title": result.title,
+                "permalink": result.permalink,
+                "file_path": result.file_path,
+                "checksum": result.checksum,
+                "action": action.lower(),
+            }
+
         summary_result = "\n".join(summary)
         return add_project_metadata(summary_result, active_project.name)

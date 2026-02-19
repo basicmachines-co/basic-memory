@@ -42,7 +42,7 @@ async def search_notes_ui(
         page=page,
         page_size=page_size,
         search_type=search_type,
-        output_format="default",
+        output_format="json",
         types=types,
         entity_types=entity_types,
         after_date=after_date,
@@ -62,7 +62,7 @@ async def search_notes_ui(
             "page": page,
             "page_size": page_size,
         },
-        "toolOutput": result.model_dump(),
+        "toolOutput": result,
     }
 
     try:
@@ -96,7 +96,7 @@ async def read_note_ui(
         project=project,
         page=page,
         page_size=page_size,
-        output_format="default",
+        output_format="text",
         context=context,
     )
 

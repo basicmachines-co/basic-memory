@@ -152,12 +152,12 @@ async def test_build_context_string_depth_parameter(client, test_graph, test_pro
 
 
 @pytest.mark.asyncio
-async def test_build_context_markdown_format(client, test_graph, test_project):
-    """Test that format='markdown' returns compact text."""
+async def test_build_context_text_format(client, test_graph, test_project):
+    """Test that output_format='text' returns compact text."""
     result = await build_context.fn(
         project=test_project.name,
         url="memory://test/root",
-        format="markdown",
+        output_format="text",
     )
 
     assert isinstance(result, str)
@@ -176,7 +176,7 @@ async def test_build_context_markdown_pattern(client, test_graph, test_project):
     result = await build_context.fn(
         project=test_project.name,
         url="memory://test/*",
-        format="markdown",
+        output_format="text",
     )
 
     assert isinstance(result, str)
@@ -193,7 +193,7 @@ async def test_build_context_markdown_not_found(client, test_project):
     result = await build_context.fn(
         project=test_project.name,
         url="memory://test/does-not-exist",
-        format="markdown",
+        output_format="text",
     )
 
     assert isinstance(result, str)

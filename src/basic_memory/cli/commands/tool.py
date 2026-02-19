@@ -160,11 +160,14 @@ async def _read_note_json(
                 search_type="title",
                 project=project_name,
                 workspace=workspace,
+                output_format="json",
             )
-            if title_results and hasattr(title_results, "results") and title_results.results:
-                result = title_results.results[0]
-                if result.permalink:
-                    entity_id = await knowledge_client.resolve_entity(result.permalink)
+            results = title_results.get("results", []) if isinstance(title_results, dict) else []
+            if results:
+                result = results[0]
+                permalink = result.get("permalink")
+                if permalink:
+                    entity_id = await knowledge_client.resolve_entity(permalink)
 
         if entity_id is None:
             raise ValueError(f"Could not find note matching: {identifier}")
@@ -635,10 +638,13 @@ def build_context(
                     page=page,
                     page_size=page_size,
                     max_related=max_related,
+                    output_format="text" if format == "text" else "json",
                 )
             )
-        # build_context now returns a slimmed dict (already serializable)
-        print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+        if format == "json":
+            print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+        else:
+            print(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
