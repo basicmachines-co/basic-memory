@@ -198,20 +198,14 @@ async def read_note(
             results = payload.get("results")
             return results if isinstance(results, list) else []
 
-        def _result_title(item: object) -> str:
-            if not isinstance(item, dict):
-                return ""
+        def _result_title(item: dict) -> str:
             return str(item.get("title") or "")
 
-        def _result_permalink(item: object) -> Optional[str]:
-            if not isinstance(item, dict):
-                return None
+        def _result_permalink(item: dict) -> Optional[str]:
             value = item.get("permalink")
             return str(value) if value else None
 
-        def _result_file_path(item: object) -> Optional[str]:
-            if not isinstance(item, dict):
-                return None
+        def _result_file_path(item: dict) -> Optional[str]:
             value = item.get("file_path")
             return str(value) if value else None
 
