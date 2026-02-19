@@ -1,6 +1,6 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import Optional
+from typing import Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -135,8 +135,9 @@ async def edit_note(
     section: Optional[str] = None,
     find_text: Optional[str] = None,
     expected_replacements: int = 1,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict:
     """Edit an existing markdown note in the knowledge base.
 
     Makes targeted changes to existing notes without rewriting the entire content.
@@ -160,6 +161,8 @@ async def edit_note(
         section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
+        output_format: "text" returns the existing markdown summary. "json" returns
+            machine-readable edit metadata.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -311,11 +314,29 @@ async def edit_note(
                 relations_count=len(result.relations),
             )
 
+            if output_format == "json":
+                return {
+                    "title": result.title,
+                    "permalink": result.permalink,
+                    "file_path": result.file_path,
+                    "checksum": result.checksum,
+                    "operation": operation,
+                }
+
             summary_result = "\n".join(summary)
             return add_project_metadata(summary_result, active_project.name)
 
         except Exception as e:
             logger.error(f"Error editing note: {e}")
+            if output_format == "json":
+                return {
+                    "title": None,
+                    "permalink": None,
+                    "file_path": None,
+                    "checksum": None,
+                    "operation": operation,
+                    "error": str(e),
+                }
             return _format_error_response(
                 str(e), operation, identifier, find_text, expected_replacements, active_project.name
             )

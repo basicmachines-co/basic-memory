@@ -418,19 +418,19 @@ basic-memory tool edit-note docs/setup --operation append --content $'\n- Added 
 
 **Content Management:**
 ```
-write_note(title, content, folder, tags) - Create or update notes
-read_note(identifier, page, page_size) - Read notes by title or permalink
+write_note(title, content, folder, tags, output_format="text"|"json") - Create or update notes
+read_note(identifier, page, page_size, output_format="text"|"json") - Read notes by title or permalink
 read_content(path) - Read raw file content (text, images, binaries)
 view_note(identifier) - View notes as formatted artifacts
-edit_note(identifier, operation, content) - Edit notes incrementally
-move_note(identifier, destination_path) - Move notes with database consistency
-delete_note(identifier) - Delete notes from knowledge base
+edit_note(identifier, operation, content, output_format="text"|"json") - Edit notes incrementally
+move_note(identifier, destination_path, output_format="text"|"json") - Move notes with database consistency
+delete_note(identifier, output_format="text"|"json") - Delete notes from knowledge base
 ```
 
 **Knowledge Graph Navigation:**
 ```
-build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
-recent_activity(type, depth, timeframe) - Find recently updated information
+build_context(url, depth, timeframe, output_format="json"|"text") - Navigate knowledge graph via memory:// URLs
+recent_activity(type, depth, timeframe, output_format="text"|"json") - Find recently updated information
 list_directory(dir_name, depth) - Browse directory contents with filtering
 ```
 
@@ -443,11 +443,14 @@ search_by_metadata(filters, limit, offset, project) - Structured frontmatter sea
 
 **Project Management:**
 ```
-list_memory_projects() - List all available projects
-create_memory_project(project_name, project_path) - Create new projects
+list_memory_projects(output_format="text"|"json") - List all available projects
+create_memory_project(project_name, project_path, output_format="text"|"json") - Create new projects
 get_current_project() - Show current project stats
 sync_status() - Check synchronization status
 ```
+
+`output_format` defaults to `"text"` for these tools, preserving current human-readable responses.
+`build_context` defaults to `"json"` and can be switched to `"text"` when compact markdown output is preferred.
 
 **Cloud Discovery (opt-in):**
 ```

@@ -9,7 +9,6 @@ from fastmcp import Context
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
-from basic_memory.mcp.formatting import format_search_results_ascii
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -254,7 +253,7 @@ async def search_notes(
     page: int = 1,
     page_size: int = 10,
     search_type: str = "text",
-    output_format: Literal["default", "ascii", "ansi"] = "default",
+    output_format: Literal["text", "json"] = "text",
     types: List[str] | None = None,
     entity_types: List[str] | None = None,
     after_date: Optional[str] = None,
@@ -263,7 +262,7 @@ async def search_notes(
     status: Optional[str] = None,
     min_similarity: Optional[float] = None,
     context: Context | None = None,
-) -> SearchResponse | str:
+) -> SearchResponse | dict | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
 
     This tool searches the knowledge base using full-text search, pattern matching,
@@ -342,8 +341,8 @@ async def search_notes(
         search_type: Type of search to perform, one of:
                     "text", "title", "permalink", "vector", "semantic", "hybrid" (default: "text";
                     text mode auto-upgrades to hybrid when semantic search is enabled)
-        output_format: "default" returns structured data, "ascii" returns a plain text table,
-            "ansi" returns a colorized table for TUI clients.
+        output_format: "text" preserves existing structured search response behavior.
+            "json" returns a machine-readable dictionary payload.
         types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
@@ -497,12 +496,8 @@ async def search_notes(
                 # Don't treat this as an error, but the user might want guidance
                 # We return the empty result as normal - the user can decide if they need help
 
-            if output_format in ("ascii", "ansi"):
-                return format_search_results_ascii(
-                    result,
-                    query=query,
-                    color=output_format == "ansi",
-                )
+            if output_format == "json":
+                return result.model_dump(mode="json", exclude_none=True)
 
             return result
 
