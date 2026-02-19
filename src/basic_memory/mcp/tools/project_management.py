@@ -43,6 +43,8 @@ async def list_memory_projects(
                     "name": project.name,
                     "path": project.path,
                     "is_default": project.is_default,
+                    # Reserved for forward-compatible cloud/private project metadata.
+                    # Local project list responses do not currently provide these values.
                     "is_private": False,
                     "display_name": None,
                 }
@@ -154,7 +156,7 @@ async def create_memory_project(
                 f"Project Details:\n"
                 f"• Name: {existing_match.name}\n"
                 f"• Path: {existing_match.path}\n"
-                f"{'• Set as default project\\n' if is_default else ''}"
+                f"{'• Set as default project\n' if is_default else ''}"
                 "\nProject is already available for use in tool calls.\n"
             )
 

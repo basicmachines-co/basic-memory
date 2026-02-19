@@ -146,7 +146,7 @@ async def test_recent_activity_text_and_json_modes(app, test_project):
     assert isinstance(json_result, list)
     assert any(item.get("title") == "Mode Activity Note" for item in json_result)
     for item in json_result:
-        assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+        assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
 
 
 @pytest.mark.asyncio
@@ -176,8 +176,9 @@ async def test_recent_activity_json_preserves_relation_and_observation_types(app
     )
     assert isinstance(relation_json, list)
     assert relation_json
+    assert all(item.get("type") == "relation" for item in relation_json)
     for item in relation_json:
-        assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+        assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
 
     observation_json = await recent_activity.fn(
         project=test_project.name,
@@ -187,8 +188,9 @@ async def test_recent_activity_json_preserves_relation_and_observation_types(app
     )
     assert isinstance(observation_json, list)
     assert observation_json
+    assert all(item.get("type") == "observation" for item in observation_json)
     for item in observation_json:
-        assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+        assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
 
 
 @pytest.mark.asyncio
@@ -224,6 +226,25 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     assert Path(create_json_again["path"]) == Path(project_path)
     assert create_json_again["created"] is False
     assert create_json_again["already_exists"] is True
+
+    default_project_name = "mode-default-project"
+    default_project_path = str(
+        tmp_path.parent / (tmp_path.name + "-projects") / "mode-default-project"
+    )
+    await create_memory_project.fn(
+        project_name=default_project_name,
+        project_path=default_project_path,
+        set_default=True,
+        output_format="text",
+    )
+
+    default_text_again = await create_memory_project.fn(
+        project_name=default_project_name,
+        project_path=default_project_path,
+        output_format="text",
+    )
+    assert "Set as default project\\n" not in default_text_again
+    assert "Set as default project\n" in default_text_again
 
 
 @pytest.mark.asyncio

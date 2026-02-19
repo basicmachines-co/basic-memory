@@ -128,7 +128,9 @@ async def test_recent_activity_json_output(mcp_server, app, test_project):
         assert isinstance(payload, list)
         assert any(item.get("title") == "JSON Integration Recent" for item in payload)
         for item in payload:
-            assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+            assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(
+                item.keys()
+            )
 
 
 @pytest.mark.asyncio
@@ -171,8 +173,11 @@ async def test_recent_activity_json_output_for_relation_and_observation_types(
         relation_payload = _json_content(relation_result)
         assert isinstance(relation_payload, list)
         assert relation_payload
+        assert all(item.get("type") == "relation" for item in relation_payload)
         for item in relation_payload:
-            assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+            assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(
+                item.keys()
+            )
 
         observation_result = await client.call_tool(
             "recent_activity",
@@ -186,8 +191,11 @@ async def test_recent_activity_json_output_for_relation_and_observation_types(
         observation_payload = _json_content(observation_result)
         assert isinstance(observation_payload, list)
         assert observation_payload
+        assert all(item.get("type") == "observation" for item in observation_payload)
         for item in observation_payload:
-            assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+            assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(
+                item.keys()
+            )
 
 
 @pytest.mark.asyncio

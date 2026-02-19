@@ -288,7 +288,7 @@ async def edit_note(
                 for obs in result.observations:
                     categories[obs.category] = categories.get(obs.category, 0) + 1
 
-                summary.append("\\n## Observations")
+                summary.append("\n## Observations")
                 for category, count in sorted(categories.items()):
                     summary.append(f"- {category}: {count}")
 
@@ -299,7 +299,7 @@ async def edit_note(
                 unresolved = sum(1 for r in result.relations if not r.to_id)
                 resolved = len(result.relations) - unresolved
 
-                summary.append("\\n## Relations")
+                summary.append("\n## Relations")
                 summary.append(f"- Resolved: {resolved}")
                 if unresolved:
                     summary.append(f"- Unresolved: {unresolved}")

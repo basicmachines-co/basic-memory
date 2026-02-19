@@ -80,7 +80,7 @@ async def recent_activity(
                 hierarchy above. If unknown, use list_memory_projects() to discover
                 available projects.
         output_format: "text" returns human-readable summary text. "json" returns
-            a flat list of recent entity items.
+            a flat list of recent items.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -335,6 +335,7 @@ def _extract_recent_rows(
     for result in activity_data.results:
         primary = result.primary_result
         row = {
+            "type": primary.type,
             "title": primary.title,
             "permalink": primary.permalink,
             "file_path": primary.file_path,

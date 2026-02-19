@@ -192,32 +192,33 @@ async def read_note(
                 "frontmatter": None,
             }
 
-        def _search_results(payload: object) -> list:
+        def _search_results(payload: object) -> list[dict]:
             if isinstance(payload, dict):
                 results = payload.get("results")
                 return results if isinstance(results, list) else []
-            if hasattr(payload, "results"):
-                results = getattr(payload, "results")
-                return results if isinstance(results, list) else []
+            model_dump = getattr(payload, "model_dump", None)
+            if callable(model_dump):
+                dumped = model_dump()
+                if isinstance(dumped, dict):
+                    results = dumped.get("results")
+                    return results if isinstance(results, list) else []
             return []
 
         def _result_title(item: object) -> str:
-            if isinstance(item, dict):
-                return str(item.get("title") or "")
-            return str(getattr(item, "title", "") or "")
+            if not isinstance(item, dict):
+                return ""
+            return str(item.get("title") or "")
 
         def _result_permalink(item: object) -> Optional[str]:
-            if isinstance(item, dict):
-                value = item.get("permalink")
-                return str(value) if value else None
-            value = getattr(item, "permalink", None)
+            if not isinstance(item, dict):
+                return None
+            value = item.get("permalink")
             return str(value) if value else None
 
         def _result_file_path(item: object) -> Optional[str]:
-            if isinstance(item, dict):
-                value = item.get("file_path")
-                return str(value) if value else None
-            value = getattr(item, "file_path", None)
+            if not isinstance(item, dict):
+                return None
+            value = item.get("file_path")
             return str(value) if value else None
 
         try:

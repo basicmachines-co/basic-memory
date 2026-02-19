@@ -568,17 +568,25 @@ move_note("path/to/file.md", "{destination_path}/file.md")
         # Use typed KnowledgeClient for API calls
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
-        # Get the source entity information for extension validation
+        # Resolve once and reuse the entity ID across extension validation and move.
         source_ext = "md"  # Default to .md if we can't determine source extension
+        resolved_entity_id: str | None = None
+        source_entity = None
+
+        async def _ensure_resolved_entity_id() -> str:
+            """Resolve and cache the source entity ID for the duration of this move."""
+            nonlocal resolved_entity_id
+            if resolved_entity_id is None:
+                resolved_entity_id = await knowledge_client.resolve_entity(identifier)
+            return resolved_entity_id
+
         try:
-            # Resolve identifier to entity ID
-            entity_id = await knowledge_client.resolve_entity(identifier)
-            # Fetch source entity information to get the current file extension
-            source_entity = await knowledge_client.get_entity(entity_id)
+            resolved_entity_id = await _ensure_resolved_entity_id()
+            source_entity = await knowledge_client.get_entity(resolved_entity_id)
             if "." in source_entity.file_path:
                 source_ext = source_entity.file_path.split(".")[-1]
         except Exception as e:
-            # If we can't fetch the source entity, default to .md extension
+            # If we can't fetch source metadata, continue with extension defaults.
             logger.debug(f"Could not fetch source entity for extension check: {e}")
 
         # Validate that destination path includes a file extension
@@ -612,14 +620,15 @@ move_note("path/to/file.md", "{destination_path}/file.md")
                 All examples in Basic Memory expect file extensions to be explicitly provided.
                 """).strip()
 
-        # Get the source entity to check its file extension
-        try:
-            # Resolve identifier to entity ID (might already be cached from above)
-            entity_id = await knowledge_client.resolve_entity(identifier)
-            # Fetch source entity information
-            source_entity = await knowledge_client.get_entity(entity_id)
+        # Validate extension consistency when source metadata is available.
+        if source_entity is None:
+            try:
+                resolved_entity_id = await _ensure_resolved_entity_id()
+                source_entity = await knowledge_client.get_entity(resolved_entity_id)
+            except Exception as e:
+                logger.debug(f"Could not fetch source entity for extension check: {e}")
 
-            # Extract file extensions
+        if source_entity is not None:
             source_ext = (
                 source_entity.file_path.split(".")[-1] if "." in source_entity.file_path else ""
             )
@@ -656,17 +665,13 @@ move_note("path/to/file.md", "{destination_path}/file.md")
                     move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
                     ```
                     """).strip()
-        except Exception as e:
-            # If we can't fetch the source entity, log it but continue
-            # This might happen if the identifier is not yet resolved
-            logger.debug(f"Could not fetch source entity for extension check: {e}")
 
         try:
-            # Resolve identifier to entity ID for the move operation
-            entity_id = await knowledge_client.resolve_entity(identifier)
+            # Resolve identifier only if earlier checks could not.
+            resolved_entity_id = await _ensure_resolved_entity_id()
 
             # Call the move API using KnowledgeClient
-            result = await knowledge_client.move_entity(entity_id, destination_path)
+            result = await knowledge_client.move_entity(resolved_entity_id, destination_path)
             if output_format == "json":
                 return {
                     "moved": True,
