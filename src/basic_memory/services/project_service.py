@@ -6,7 +6,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 
 from loguru import logger
@@ -30,16 +30,22 @@ from basic_memory.config import (
 )
 from basic_memory.utils import generate_permalink
 
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.services.file_service import FileService
+
 
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
     repository: ProjectRepository
 
-    def __init__(self, repository: ProjectRepository):
+    def __init__(
+        self, repository: ProjectRepository, file_service: Optional["FileService"] = None
+    ):
         """Initialize the project service."""
         super().__init__()
         self.repository = repository
+        self.file_service = file_service
 
     @property
     def config_manager(self) -> ConfigManager:
@@ -204,6 +210,16 @@ class ProjectService:
                         f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
                         f"Projects cannot share directory trees."
                     )
+
+        # Ensure the project directory exists on disk.
+        # Trigger: project_root not set means local filesystem mode (not S3/cloud)
+        # Why: FileService (or future S3FileService) provides cloud-compatible directory creation;
+        #      direct Path.mkdir() bypasses this abstraction
+        # Outcome: directory exists before config/DB entries are written
+        if not self.config_manager.config.project_root:
+            if self.file_service is None:
+                raise ValueError("file_service is required for local project directory creation")
+            await self.file_service.ensure_directory(Path(resolved_path))
 
         # First add to config file (this validates project uniqueness and keeps
         # config + database aligned for all backends).
@@ -460,8 +476,13 @@ class ProjectService:
             raise ValueError(f"Project '{name}' not found in configuration")
 
         # Create the new directory if it doesn't exist (skip in cloud mode where storage is S3)
+        # Trigger: project_root not set means local filesystem mode
+        # Why: FileService (or future S3FileService) provides cloud-compatible directory creation
+        # Outcome: destination directory exists before config/DB are updated
         if not self.config_manager.config.project_root:
-            Path(resolved_path).mkdir(parents=True, exist_ok=True)
+            if self.file_service is None:
+                raise ValueError("file_service is required for local project directory creation")
+            await self.file_service.ensure_directory(Path(resolved_path))
 
         # Update in configuration
         config = self.config_manager.load_config()

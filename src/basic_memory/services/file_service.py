@@ -43,7 +43,7 @@ class FileService:
     def __init__(
         self,
         base_path: Path,
-        markdown_processor: MarkdownProcessor,
+        markdown_processor: Optional[MarkdownProcessor] = None,
         max_concurrent_files: int = 10,
         app_config: Optional["BasicMemoryConfig"] = None,
     ):
