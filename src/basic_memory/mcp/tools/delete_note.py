@@ -143,7 +143,7 @@ delete_note("{project}", "correct-identifier-from-search")
 - Check what notes exist: `list_directory("{project}", "/")`
 
 ## Need help?
-If the note should be deleted but the operation keeps failing, send a message to support@basicmachines.co."""
+If the note should be deleted but the operation keeps failing, send a message to support@basicmemory.com."""
 
 
 @mcp.tool(description="Delete a note or directory by title, permalink, or path")
