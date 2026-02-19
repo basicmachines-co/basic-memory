@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from fastmcp import Client
 
+from basic_memory.mcp.clients.knowledge import KnowledgeClient
+
 
 def _json_content(tool_result) -> dict | list:
     """Parse a FastMCP tool result content block into JSON."""
@@ -130,6 +132,65 @@ async def test_recent_activity_json_output(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_recent_activity_json_output_for_relation_and_observation_types(
+    mcp_server, app, test_project
+):
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "JSON Integration Type Source",
+                "directory": "json-int",
+                "content": (
+                    "# JSON Integration Type Source\n\n"
+                    "- [note] observation from source\n"
+                    "- links_to [[JSON Integration Type Target]]"
+                ),
+            },
+        )
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "JSON Integration Type Target",
+                "directory": "json-int",
+                "content": "# JSON Integration Type Target\n\nBody",
+            },
+        )
+
+        relation_result = await client.call_tool(
+            "recent_activity",
+            {
+                "project": test_project.name,
+                "timeframe": "7d",
+                "type": "relation",
+                "output_format": "json",
+            },
+        )
+        relation_payload = _json_content(relation_result)
+        assert isinstance(relation_payload, list)
+        assert relation_payload
+        for item in relation_payload:
+            assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+
+        observation_result = await client.call_tool(
+            "recent_activity",
+            {
+                "project": test_project.name,
+                "timeframe": "7d",
+                "type": "observation",
+                "output_format": "json",
+            },
+        )
+        observation_payload = _json_content(observation_result)
+        assert isinstance(observation_payload, list)
+        assert observation_payload
+        for item in observation_payload:
+            assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+
+
+@pytest.mark.asyncio
 async def test_list_memory_projects_json_output(mcp_server, app, test_project):
     async with Client(mcp_server) as client:
         result = await client.call_tool(
@@ -211,6 +272,33 @@ async def test_delete_note_json_output(mcp_server, app, test_project):
         assert payload["title"] == "JSON Integration Delete"
         assert payload["permalink"]
         assert payload["file_path"]
+
+
+@pytest.mark.asyncio
+async def test_delete_note_directory_json_output_failure_is_structured(
+    mcp_server, app, test_project, monkeypatch
+):
+    async def mock_delete_directory(self, directory: str):
+        raise RuntimeError("simulated directory delete failure")
+
+    monkeypatch.setattr(KnowledgeClient, "delete_directory", mock_delete_directory)
+
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": "json-int",
+                "is_directory": True,
+                "output_format": "json",
+            },
+        )
+
+        payload = _json_content(result)
+        assert payload["deleted"] is False
+        assert payload["is_directory"] is True
+        assert payload["identifier"] == "json-int"
+        assert "simulated directory delete failure" in payload["error"]
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory.mcp.clients.knowledge import KnowledgeClient
 from basic_memory.mcp.tools import (
     build_context,
     create_memory_project,
@@ -149,6 +150,48 @@ async def test_recent_activity_text_and_json_modes(app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_recent_activity_json_preserves_relation_and_observation_types(app, test_project):
+    await write_note.fn(
+        project=test_project.name,
+        title="Activity Type Source",
+        directory="mode-tests",
+        content=(
+            "# Activity Type Source\n\n"
+            "- [note] observation from source\n"
+            "- links_to [[Activity Type Target]]"
+        ),
+    )
+    await write_note.fn(
+        project=test_project.name,
+        title="Activity Type Target",
+        directory="mode-tests",
+        content="# Activity Type Target",
+    )
+
+    relation_json = await recent_activity.fn(
+        project=test_project.name,
+        type="relation",
+        timeframe="7d",
+        output_format="json",
+    )
+    assert isinstance(relation_json, list)
+    assert relation_json
+    for item in relation_json:
+        assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+
+    observation_json = await recent_activity.fn(
+        project=test_project.name,
+        type="observation",
+        timeframe="7d",
+        output_format="json",
+    )
+    assert isinstance(observation_json, list)
+    assert observation_json
+    for item in observation_json:
+        assert set(["title", "permalink", "file_path", "created_at"]).issubset(item.keys())
+
+
+@pytest.mark.asyncio
 async def test_list_and_create_project_text_and_json_modes(app, test_project, tmp_path):
     list_text = await list_memory_projects.fn(output_format="text")
     assert isinstance(list_text, str)
@@ -216,6 +259,28 @@ async def test_delete_note_text_and_json_modes(app, test_project):
     assert json_delete["title"] == "Mode Delete Json"
     assert json_delete["permalink"]
     assert json_delete["file_path"]
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_json_mode_returns_structured_error_on_failure(
+    app, test_project, monkeypatch
+):
+    async def mock_delete_directory(self, directory: str):
+        raise RuntimeError("simulated directory delete failure")
+
+    monkeypatch.setattr(KnowledgeClient, "delete_directory", mock_delete_directory)
+
+    json_delete = await delete_note.fn(
+        identifier="mode-tests",
+        is_directory=True,
+        project=test_project.name,
+        output_format="json",
+    )
+    assert isinstance(json_delete, dict)
+    assert json_delete["deleted"] is False
+    assert json_delete["is_directory"] is True
+    assert json_delete["identifier"] == "mode-tests"
+    assert "simulated directory delete failure" in json_delete["error"]
 
 
 @pytest.mark.asyncio

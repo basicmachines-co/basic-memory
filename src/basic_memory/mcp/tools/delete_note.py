@@ -281,6 +281,16 @@ async def delete_note(
 
             except Exception as e:  # pragma: no cover
                 logger.error(f"Directory delete failed for '{identifier}': {e}")
+                if output_format == "json":
+                    return {
+                        "deleted": False,
+                        "is_directory": True,
+                        "identifier": identifier,
+                        "total_files": 0,
+                        "successful_deletes": 0,
+                        "failed_deletes": 0,
+                        "error": str(e),
+                    }
                 return f"""# Directory Delete Failed
 
 Error deleting directory '{identifier}': {str(e)}

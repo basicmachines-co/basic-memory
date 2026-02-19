@@ -192,7 +192,7 @@ async def recent_activity(
         if output_format == "json":
             rows: list[dict] = []
             for project_name, project_activity in projects_activity.items():
-                rows.extend(_extract_recent_entity_rows(project_activity.activity, project_name))
+                rows.extend(_extract_recent_rows(project_activity.activity, project_name))
             return rows
 
         # Build summary stats
@@ -268,7 +268,7 @@ async def recent_activity(
             activity_data = GraphContext.model_validate(response.json())
 
             if output_format == "json":
-                return _extract_recent_entity_rows(activity_data)
+                return _extract_recent_rows(activity_data)
 
             # Format project-specific mode output
             return _format_project_output(resolved_project, activity_data, timeframe, type)
@@ -327,15 +327,13 @@ async def _get_project_activity(
     )
 
 
-def _extract_recent_entity_rows(
+def _extract_recent_rows(
     activity_data: GraphContext, project_name: Optional[str] = None
 ) -> list[dict]:
-    """Flatten GraphContext into a list of recent entity rows."""
+    """Flatten GraphContext into a list of recent rows."""
     rows: list[dict] = []
     for result in activity_data.results:
         primary = result.primary_result
-        if primary.type != "entity":
-            continue
         row = {
             "title": primary.title,
             "permalink": primary.permalink,
