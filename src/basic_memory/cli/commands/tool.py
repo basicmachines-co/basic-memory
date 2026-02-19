@@ -847,8 +847,8 @@ def search_notes(
         if not metadata_filters:
             metadata_filters = None
 
-        # set search type
-        search_type = "text"
+        # set search type (None delegates to MCP tool default selection)
+        search_type: str | None = None
         if permalink:
             search_type = "permalink"
             if query and "*" in query:

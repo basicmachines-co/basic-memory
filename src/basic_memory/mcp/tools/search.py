@@ -29,6 +29,11 @@ def _semantic_search_enabled_for_text_search() -> bool:
         return ConfigManager().config.semantic_search_enabled
 
 
+def _default_search_type() -> str:
+    """Pick default search mode from semantic-search config."""
+    return "hybrid" if _semantic_search_enabled_for_text_search() else "text"
+
+
 def _format_search_error_response(
     project: str, error_message: str, query: str, search_type: str = "text"
 ) -> str:
@@ -57,7 +62,7 @@ def _format_search_error_response(
             Semantic retrieval is enabled but required packages are not installed.
 
             ## Fix
-            1. Install semantic extras: `pip install 'basic-memory[semantic]'`
+            1. Install/update Basic Memory: `pip install -U basic-memory`
             2. Restart Basic Memory
             3. Retry your query:
                `search_notes("{project}", "{query}", search_type="{search_type}")`
@@ -252,7 +257,7 @@ async def search_notes(
     workspace: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
-    search_type: str = "text",
+    search_type: str | None = None,
     output_format: Literal["text", "json"] = "text",
     types: List[str] | None = None,
     entity_types: List[str] | None = None,
@@ -295,8 +300,8 @@ async def search_notes(
     ### Search Type Examples
     - `search_notes("my-project", "Meeting", search_type="title")` - Search only in titles
     - `search_notes("work-docs", "docs/meeting-*", search_type="permalink")` - Pattern match permalinks
-    - `search_notes("research", "keyword", search_type="text")` - Text search (default; auto-upgrades
-      to hybrid when semantic search is enabled)
+    - `search_notes("research", "keyword")` - Default search (hybrid when semantic is enabled,
+      text when disabled)
 
     ### Filtering Options
     - `search_notes("my-project", "query", types=["entity"])` - Search only entities
@@ -339,8 +344,8 @@ async def search_notes(
         page: The page number of results to return (default 1)
         page_size: The number of results to return per page (default 10)
         search_type: Type of search to perform, one of:
-                    "text", "title", "permalink", "vector", "semantic", "hybrid" (default: "text";
-                    text mode auto-upgrades to hybrid when semantic search is enabled)
+                    "text", "title", "permalink", "vector", "semantic", "hybrid".
+                    Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".
         output_format: "text" preserves existing structured search response behavior.
             "json" returns a machine-readable dictionary payload.
         types: Optional list of note types to search (e.g., ["note", "person"])
@@ -426,9 +431,10 @@ async def search_notes(
         _, resolved_query, is_memory_url = await resolve_project_and_path(
             client, query, project, context
         )
+        effective_search_type = search_type or _default_search_type()
         if is_memory_url:
             query = resolved_query
-            search_type = "permalink"
+            effective_search_type = "permalink"
 
         try:
             # Create a SearchQuery object based on the parameters
@@ -436,27 +442,24 @@ async def search_notes(
 
             # Map search_type to the appropriate query field and retrieval mode
             valid_search_types = {"text", "title", "permalink", "vector", "semantic", "hybrid"}
-            if search_type == "text":
+            if effective_search_type == "text":
                 search_query.text = query
-                # Upgrade to hybrid when semantic search is available —
-                # combines FTS keyword matching with vector similarity for better results
-                if _semantic_search_enabled_for_text_search():
-                    search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-            elif search_type in ("vector", "semantic"):
+                search_query.retrieval_mode = SearchRetrievalMode.FTS
+            elif effective_search_type in ("vector", "semantic"):
                 search_query.text = query
                 search_query.retrieval_mode = SearchRetrievalMode.VECTOR
-            elif search_type == "hybrid":
+            elif effective_search_type == "hybrid":
                 search_query.text = query
                 search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-            elif search_type == "title":
+            elif effective_search_type == "title":
                 search_query.title = query
-            elif search_type == "permalink" and "*" in query:
+            elif effective_search_type == "permalink" and "*" in query:
                 search_query.permalink_match = query
-            elif search_type == "permalink":
+            elif effective_search_type == "permalink":
                 search_query.permalink = query
             else:
                 raise ValueError(
-                    f"Invalid search_type '{search_type}'. "
+                    f"Invalid search_type '{effective_search_type}'. "
                     f"Valid options: {', '.join(sorted(valid_search_types))}"
                 )
 
@@ -504,7 +507,9 @@ async def search_notes(
         except Exception as e:
             logger.error(f"Search failed for query '{query}': {e}, project: {active_project.name}")
             # Return formatted error message as string for better user experience
-            return _format_search_error_response(active_project.name, str(e), query, search_type)
+            return _format_search_error_response(
+                active_project.name, str(e), query, effective_search_type
+            )
 
 
 @mcp.tool(

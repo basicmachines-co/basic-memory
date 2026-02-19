@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from basic_memory.mcp.tools import write_note
 from basic_memory.mcp.tools.search import search_notes, _format_search_error_response
-from basic_memory.schemas.search import SearchResponse
+from basic_memory.schemas.search import SearchItemType, SearchResponse
 
 
 @pytest.mark.asyncio
@@ -331,13 +331,13 @@ class TestSearchErrorFormatting:
         """Test formatting for missing semantic dependencies."""
         result = _format_search_error_response(
             "test-project",
-            "fastembed package is missing. Install semantic extras: pip install 'basic-memory[semantic]'",
+            "fastembed package is missing. Install/update basic-memory to include semantic dependencies: pip install -U basic-memory",
             "semantic query",
             "hybrid",
         )
 
         assert "# Search Failed - Semantic Dependencies Missing" in result
-        assert "pip install 'basic-memory[semantic]'" in result
+        assert "pip install -U basic-memory" in result
 
     def test_format_search_error_generic(self):
         """Test formatting for generic errors."""
@@ -615,7 +615,7 @@ async def test_search_by_metadata_offset_within_page(monkeypatch):
             title=f"Item {i}",
             permalink=f"item-{i}",
             file_path=f"item-{i}.md",
-            type="entity",
+            type=SearchItemType.ENTITY,
             score=1.0 - i * 0.1,
         )
         for i in range(5)
@@ -775,8 +775,8 @@ async def test_search_notes_passes_min_similarity(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_notes_text_upgrades_to_hybrid_when_semantic_enabled(monkeypatch):
-    """Default text search should auto-upgrade to hybrid when semantic search is enabled."""
+async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch):
+    """When search_type is omitted, semantic-enabled configs should default to hybrid."""
     import importlib
     from dataclasses import dataclass
 
@@ -817,7 +817,7 @@ async def test_search_notes_text_upgrades_to_hybrid_when_semantic_enabled(monkey
 
     @dataclass
     class StubContainer:
-        config: StubConfig = None
+        config: StubConfig | None = None
 
         def __post_init__(self):
             if self.config is None:
@@ -828,17 +828,16 @@ async def test_search_notes_text_upgrades_to_hybrid_when_semantic_enabled(monkey
     await search_mod.search_notes.fn(
         project="test-project",
         query="test query",
-        search_type="text",
     )
 
-    # Default text search should have been upgraded to hybrid
+    # Default mode should be hybrid when semantic search is enabled
     assert captured_payload["retrieval_mode"] == "hybrid"
     assert captured_payload["text"] == "test query"
 
 
 @pytest.mark.asyncio
-async def test_search_notes_text_stays_fts_when_semantic_disabled(monkeypatch):
-    """Default text search should stay FTS when semantic search is disabled."""
+async def test_search_notes_defaults_to_fts_when_semantic_disabled(monkeypatch):
+    """When search_type is omitted, semantic-disabled configs should default to FTS."""
     import importlib
     from dataclasses import dataclass
 
@@ -879,7 +878,67 @@ async def test_search_notes_text_stays_fts_when_semantic_disabled(monkeypatch):
 
     @dataclass
     class StubContainer:
-        config: StubConfig = None
+        config: StubConfig | None = None
+
+        def __post_init__(self):
+            if self.config is None:
+                self.config = StubConfig()
+
+    monkeypatch.setattr(search_mod, "get_container", lambda: StubContainer())
+
+    await search_mod.search_notes.fn(
+        project="test-project",
+        query="test query",
+    )
+
+    # Default mode should be FTS when semantic search is disabled
+    assert captured_payload["retrieval_mode"] == "fts"
+    assert captured_payload["text"] == "test query"
+
+
+@pytest.mark.asyncio
+async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkeypatch):
+    """Explicit text mode should preserve FTS behavior even when semantic is enabled."""
+    import importlib
+    from dataclasses import dataclass
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    async def fake_resolve_project_and_path(
+        client, identifier, project=None, context=None, headers=None
+    ):
+        return StubProject(), identifier, False
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    @dataclass
+    class StubConfig:
+        semantic_search_enabled: bool = True
+
+    @dataclass
+    class StubContainer:
+        config: StubConfig | None = None
 
         def __post_init__(self):
             if self.config is None:
@@ -893,14 +952,13 @@ async def test_search_notes_text_stays_fts_when_semantic_disabled(monkeypatch):
         search_type="text",
     )
 
-    # Should stay as default FTS (no retrieval_mode override)
     assert captured_payload["retrieval_mode"] == "fts"
     assert captured_payload["text"] == "test query"
 
 
 @pytest.mark.asyncio
-async def test_search_notes_text_upgrades_to_hybrid_when_container_not_initialized(monkeypatch):
-    """Default text search should upgrade to hybrid in CLI contexts when semantic is enabled."""
+async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(monkeypatch):
+    """CLI fallback config should still default omitted search_type to hybrid."""
     import importlib
 
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
@@ -951,7 +1009,6 @@ async def test_search_notes_text_upgrades_to_hybrid_when_container_not_initializ
     await search_mod.search_notes.fn(
         project="test-project",
         query="test query",
-        search_type="text",
     )
 
     # Should upgrade using ConfigManager fallback
@@ -960,10 +1017,10 @@ async def test_search_notes_text_upgrades_to_hybrid_when_container_not_initializ
 
 
 @pytest.mark.asyncio
-async def test_search_notes_text_stays_fts_when_container_not_initialized_and_semantic_disabled(
+async def test_search_notes_defaults_to_fts_when_container_not_initialized_and_semantic_disabled(
     monkeypatch,
 ):
-    """Default text search should remain FTS in CLI contexts when semantic is disabled."""
+    """CLI fallback config should default omitted search_type to FTS when semantic is disabled."""
     import importlib
 
     search_mod = importlib.import_module("basic_memory.mcp.tools.search")
@@ -1013,7 +1070,6 @@ async def test_search_notes_text_stays_fts_when_container_not_initialized_and_se
     await search_mod.search_notes.fn(
         project="test-project",
         query="test query",
-        search_type="text",
     )
 
     assert captured_payload["retrieval_mode"] == "fts"

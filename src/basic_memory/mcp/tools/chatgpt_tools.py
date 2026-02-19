@@ -120,7 +120,6 @@ async def search(
             project=default_project,  # Use default project for ChatGPT
             page=1,
             page_size=10,  # Reasonable default for ChatGPT consumption
-            search_type="text",  # Default to full-text search
             output_format="json",
             context=context,
         )
