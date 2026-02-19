@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from basic_memory.mcp.tools import (
@@ -175,7 +177,8 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     )
     assert isinstance(create_json_again, dict)
     assert create_json_again["name"] == project_name
-    assert create_json_again["path"] == project_path
+    # Normalize path separators for cross-platform compatibility.
+    assert Path(create_json_again["path"]) == Path(project_path)
     assert create_json_again["created"] is False
     assert create_json_again["already_exists"] is True
 

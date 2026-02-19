@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fastmcp import Client
@@ -162,7 +163,8 @@ async def test_create_memory_project_json_output_is_idempotent(
         )
         first_payload = _json_content(first)
         assert first_payload["name"] == project_name
-        assert first_payload["path"] == project_path
+        # Normalize path separators for cross-platform compatibility.
+        assert Path(first_payload["path"]) == Path(project_path)
         assert first_payload["created"] is True
         assert first_payload["already_exists"] is False
 
