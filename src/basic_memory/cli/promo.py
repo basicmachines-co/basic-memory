@@ -7,10 +7,14 @@ from rich.console import Console
 from rich.panel import Panel
 
 import basic_memory
+from basic_memory.cli.analytics import track, EVENT_PROMO_SHOWN, EVENT_PROMO_OPTED_OUT
 from basic_memory.config import ConfigManager
 
 OSS_DISCOUNT_CODE = "BMFOSS"
-CLOUD_LEARN_MORE_URL = "https://basicmemory.com"
+CLOUD_LEARN_MORE_URL = (
+    "https://basicmemory.com"
+    "?utm_source=bm-cli&utm_medium=promo&utm_campaign=cloud-upsell"
+)
 
 
 def _promos_disabled_by_env() -> bool:
@@ -112,6 +116,9 @@ def maybe_show_cloud_promo(
     )
     out.print(f"Learn more at [link={CLOUD_LEARN_MORE_URL}]{CLOUD_LEARN_MORE_URL}[/link]")
     out.print("[dim]Disable with: bm cloud promo --off[/dim]")
+
+    trigger = "first_run" if show_first_run else "version_bump"
+    track(EVENT_PROMO_SHOWN, {"trigger": trigger})
 
     config.cloud_promo_first_run_shown = True
     config.cloud_promo_last_version_shown = basic_memory.__version__

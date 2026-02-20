@@ -254,7 +254,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,semantic]"
+          uv pip install -e ".[dev]"
 
       - name: Run tests (Semantic)
         run: |
@@ -296,7 +296,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,semantic]"
+          uv pip install -e ".[dev]"
 
       - name: Run combined coverage (SQLite + Postgres)
         run: |

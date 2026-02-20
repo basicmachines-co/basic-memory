@@ -26,7 +26,7 @@ async def search_notes_ui(
     project: Optional[str] = None,
     page: int = 1,
     page_size: int = 10,
-    search_type: str = "text",
+    search_type: Optional[str] = None,
     types: List[str] | None = None,
     entity_types: List[str] | None = None,
     after_date: Optional[str] = None,

@@ -95,11 +95,11 @@ def skip_if_needed(combo: SearchCombo) -> None:
         pytest.skip("Docker not available for Postgres testcontainer")
 
     if combo.provider_name == "fastembed" and not _fastembed_available():
-        pytest.skip("fastembed not installed (install basic-memory[semantic])")
+        pytest.skip("fastembed not installed (install/update basic-memory)")
 
     if combo.provider_name == "openai":
         if not _fastembed_available():
-            pytest.skip("semantic extras not installed")
+            pytest.skip("semantic dependencies not installed")
         if not _openai_key_available():
             pytest.skip("OPENAI_API_KEY not set")
 

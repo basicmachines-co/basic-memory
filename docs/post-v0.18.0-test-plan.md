@@ -79,7 +79,7 @@ These are the most important post-`v0.18.0` feature modules currently under-cove
 ### Acceptance criteria
 
 - `search_type=text|vector|hybrid` returns expected ranked results on canonical semantic corpus.
-- Missing semantic extras fail fast with actionable install guidance.
+- Missing semantic dependencies fail fast with actionable install guidance.
 - Reindex and provider/model changes produce valid vectors without dimension mismatch.
 - SQLite and Postgres produce equivalent behavior for semantic modes on the same dataset.
 - Generated-column migration path is valid on SQLite environments in use.
