@@ -54,18 +54,27 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             for chat in conversations:
                 # Get name, providing default for unnamed conversations
                 chat_name = chat.get("name") or f"Conversation {chat.get('uuid', 'untitled')}"
+                date_prefix = datetime.fromisoformat(
+                    chat["created_at"].replace("Z", "+00:00")
+                ).strftime("%Y%m%d")
+                clean_title = clean_filename(chat_name)
+                relative_path = (
+                    f"{destination_folder}/{date_prefix}-{clean_title}"
+                    if destination_folder
+                    else f"{date_prefix}-{clean_title}"
+                )
+                permalink, file_path = self.build_import_paths(relative_path)
 
                 # Convert to entity
                 entity = self._format_chat_content(
-                    folder=destination_folder,
                     name=chat_name,
                     messages=chat["chat_messages"],
                     created_at=chat["created_at"],
                     modified_at=chat["updated_at"],
+                    permalink=permalink,
                 )
 
                 # Write file using relative path - FileService handles base_path
-                file_path = f"{entity.frontmatter.metadata['permalink']}.md"
                 await self.write_entity(entity, file_path)
 
                 chats_imported += 1
@@ -84,11 +93,11 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
 
     def _format_chat_content(
         self,
-        folder: str,
         name: str,
         messages: List[Dict[str, Any]],
         created_at: str,
         modified_at: str,
+        permalink: str,
     ) -> EntityMarkdown:
         """Convert chat messages to Basic Memory entity format.
 
@@ -102,11 +111,6 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
         Returns:
             EntityMarkdown instance representing the conversation.
         """
-        # Generate permalink using folder name (relative path)
-        date_prefix = datetime.fromisoformat(created_at.replace("Z", "+00:00")).strftime("%Y%m%d")
-        clean_title = clean_filename(name)
-        permalink = f"{folder}/{date_prefix}-{clean_title}"
-
         # Format content
         content = self._format_chat_markdown(
             name=name,

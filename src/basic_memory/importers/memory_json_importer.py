@@ -80,11 +80,12 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 entity_type = entity_data.get("entityType") or entity_data.get("type") or "entity"
 
                 # Build permalink with optional destination folder prefix
-                permalink = (
+                relative_path = (
                     f"{destination_folder}/{entity_type}/{name}"
                     if destination_folder
                     else f"{entity_type}/{name}"
                 )
+                permalink, file_path = self.build_import_paths(relative_path)
 
                 # Ensure entity type directory exists using FileService with relative path
                 entity_type_dir = (
@@ -109,7 +110,6 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
                 )
 
                 # Write file using relative path - FileService handles base_path
-                file_path = f"{entity.frontmatter.metadata['permalink']}.md"
                 await self.write_entity(entity, file_path)
                 entities_created += 1
 

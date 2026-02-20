@@ -10,7 +10,7 @@ from typing import List, Optional, Set, Sequence, Callable, Awaitable, TYPE_CHEC
 if TYPE_CHECKING:
     from basic_memory.sync.sync_service import SyncService
 
-from basic_memory.config import BasicMemoryConfig, WATCH_STATUS_JSON
+from basic_memory.config import BasicMemoryConfig, ProjectMode, WATCH_STATUS_JSON
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
@@ -176,6 +176,22 @@ class WatchService:
 
                 # Reload projects to catch any new/removed projects
                 projects = await self.project_repository.get_active_projects()
+
+                # Trigger: project is configured for cloud routing
+                # Why: cloud projects should not be watched/synced by local file watchers
+                # Outcome: watch cycle only observes local-mode projects
+                cloud_projects = [
+                    p.name
+                    for p in projects
+                    if self.app_config.get_project_mode(p.name) == ProjectMode.CLOUD
+                ]
+                if cloud_projects:
+                    projects = [
+                        p
+                        for p in projects
+                        if self.app_config.get_project_mode(p.name) != ProjectMode.CLOUD
+                    ]
+                    logger.info(f"Skipping cloud-mode projects in watch cycle: {cloud_projects}")
 
                 project_paths = [project.path for project in projects]
                 logger.debug(f"Starting watch cycle for directories: {project_paths}")

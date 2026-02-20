@@ -26,7 +26,7 @@ WRITE_NOTE_RESULT = {
 READ_NOTE_RESULT = {
     "title": "Test Note",
     "permalink": "notes/test-note",
-    "content": "# Test Note\n\nhello world",
+    "content": "---\ntitle: Test Note\ntags:\n- test\n---\n# Test Note\n\nhello world",
     "file_path": "notes/Test Note.md",
 }
 
@@ -145,7 +145,10 @@ def test_read_note_json_output(mock_read_json, mock_config_cls):
     data = json.loads(result.output)
     assert data["title"] == "Test Note"
     assert data["permalink"] == "notes/test-note"
-    assert data["content"] == "# Test Note\n\nhello world"
+    assert (
+        data["content"] == "---\ntitle: Test Note\ntags:\n- test\n---\n# Test Note\n\nhello world"
+    )
+    assert data["frontmatter"] == {"title": "Test Note", "tags": ["test"]}
     assert data["file_path"] == "notes/Test Note.md"
     mock_read_json.assert_called_once()
 
@@ -158,7 +161,9 @@ def test_read_note_text_output(mock_mcp_read, mock_config_cls):
     """read-note with default text format uses the MCP tool path."""
     mock_config_cls.return_value = _mock_config_manager()
 
-    mock_mcp_read.fn = AsyncMock(return_value="# Test Note\n\nhello world")
+    mock_mcp_read.fn = AsyncMock(
+        return_value="---\ntitle: Test Note\n---\n# Test Note\n\nhello world"
+    )
 
     result = runner.invoke(
         cli_app,
@@ -166,8 +171,147 @@ def test_read_note_text_output(mock_mcp_read, mock_config_cls):
     )
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    assert "Test Note" in result.output
+    assert "---" in result.output
     mock_mcp_read.fn.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch("basic_memory.cli.commands.tool.mcp_read_note")
+def test_read_note_workspace_passthrough(mock_mcp_read, mock_config_cls):
+    """read-note --workspace passes workspace through to the MCP tool call."""
+    mock_config_cls.return_value = _mock_config_manager()
+    mock_mcp_read.fn = AsyncMock(return_value="# Test Note")
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--workspace", "tenant-123"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    mock_mcp_read.fn.assert_called_once()
+    assert mock_mcp_read.fn.call_args.kwargs["workspace"] == "tenant-123"
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch(
+    "basic_memory.cli.commands.tool._read_note_json",
+    new_callable=AsyncMock,
+    return_value=READ_NOTE_RESULT,
+)
+def test_read_note_json_strip_frontmatter(mock_read_json, mock_config_cls):
+    """read-note --format json --strip-frontmatter strips content but keeps frontmatter object."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--format", "json", "--strip-frontmatter"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["title"] == "Test Note"
+    assert data["permalink"] == "notes/test-note"
+    assert data["content"] == "# Test Note\n\nhello world"
+    assert data["frontmatter"] == {"title": "Test Note", "tags": ["test"]}
+    assert data["file_path"] == "notes/Test Note.md"
+    mock_read_json.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+)
+def test_read_note_text_strip_frontmatter(mock_mcp_read, mock_config_cls):
+    """read-note --strip-frontmatter strips opening frontmatter in text mode."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    mock_mcp_read.fn = AsyncMock(
+        return_value="---\ntitle: Test Note\n---\n# Test Note\n\nhello world"
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--strip-frontmatter"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert "---" not in result.output
+    assert "# Test Note" in result.output
+    mock_mcp_read.fn.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch(
+    "basic_memory.cli.commands.tool.mcp_read_note",
+)
+def test_read_note_text_strip_frontmatter_no_frontmatter(mock_mcp_read, mock_config_cls):
+    """read-note --strip-frontmatter keeps notes unchanged when no frontmatter exists."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    mock_mcp_read.fn = AsyncMock(return_value="# Test Note\n\nhello world")
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--strip-frontmatter"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert result.output.strip() == "# Test Note\n\nhello world"
+    mock_mcp_read.fn.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch(
+    "basic_memory.cli.commands.tool._read_note_json",
+    new_callable=AsyncMock,
+    return_value={
+        "title": "Test Note",
+        "permalink": "notes/test-note",
+        "content": "---\ntitle: [bad yaml\n# Test Note\n\nhello world",
+        "file_path": "notes/Test Note.md",
+    },
+)
+def test_read_note_json_malformed_frontmatter_kept(mock_read_json, mock_config_cls):
+    """Malformed opening frontmatter should remain unchanged with frontmatter set to null."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--format", "json", "--strip-frontmatter"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["content"] == "---\ntitle: [bad yaml\n# Test Note\n\nhello world"
+    assert data["frontmatter"] is None
+    mock_read_json.assert_called_once()
+
+
+@patch("basic_memory.cli.commands.tool.ConfigManager")
+@patch(
+    "basic_memory.cli.commands.tool._read_note_json",
+    new_callable=AsyncMock,
+    return_value={
+        "title": "No Frontmatter Note",
+        "permalink": "notes/no-frontmatter-note",
+        "content": "# No Frontmatter Note\n\nhello world",
+        "file_path": "notes/No Frontmatter Note.md",
+    },
+)
+def test_read_note_json_strip_frontmatter_no_frontmatter(mock_read_json, mock_config_cls):
+    """JSON strip mode should keep content unchanged when no frontmatter exists."""
+    mock_config_cls.return_value = _mock_config_manager()
+
+    result = runner.invoke(
+        cli_app,
+        ["tool", "read-note", "test-note", "--format", "json", "--strip-frontmatter"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["content"] == "# No Frontmatter Note\n\nhello world"
+    assert data["frontmatter"] is None
+    mock_read_json.assert_called_once()
 
 
 # --- recent-activity --format json ---
@@ -260,10 +404,9 @@ def test_recent_activity_json_pagination(mock_recent_json):
     assert isinstance(data, list)
     # Verify pagination params were passed through
     mock_recent_json.assert_called_once()
-    call_kwargs = mock_recent_json.call_args
-    # positional args: type, depth, timeframe, project_name, page, page_size
-    assert call_kwargs[0][4] == 2  # page
-    assert call_kwargs[0][5] == 10  # page_size
+    call_kwargs = mock_recent_json.call_args.kwargs
+    assert call_kwargs["page"] == 2
+    assert call_kwargs["page_size"] == 10
 
 
 # --- build-context --format json ---
@@ -275,12 +418,15 @@ def test_build_context_format_json(mock_build_ctx, mock_config_cls):
     """build-context --format json outputs valid JSON."""
     mock_config_cls.return_value = _mock_config_manager()
 
-    mock_context = MagicMock()
-    mock_context.model_dump.return_value = {
-        "primary_results": [],
-        "related_results": [],
-    }
-    mock_build_ctx.fn = AsyncMock(return_value=mock_context)
+    # build_context now returns a slimmed dict directly
+    mock_build_ctx.fn = AsyncMock(
+        return_value={
+            "results": [],
+            "metadata": {"uri": "test/topic", "depth": 1},
+            "page": 1,
+            "page_size": 10,
+        }
+    )
 
     result = runner.invoke(
         cli_app,
@@ -289,7 +435,7 @@ def test_build_context_format_json(mock_build_ctx, mock_config_cls):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
-    assert "primary_results" in data
+    assert "results" in data
     mock_build_ctx.fn.assert_called_once()
 
 
@@ -299,9 +445,15 @@ def test_build_context_default_format_is_json(mock_build_ctx, mock_config_cls):
     """build-context defaults to JSON output (backward compatible)."""
     mock_config_cls.return_value = _mock_config_manager()
 
-    mock_context = MagicMock()
-    mock_context.model_dump.return_value = {"results": []}
-    mock_build_ctx.fn = AsyncMock(return_value=mock_context)
+    # build_context now returns a slimmed dict directly
+    mock_build_ctx.fn = AsyncMock(
+        return_value={
+            "results": [],
+            "metadata": {"uri": "test/topic", "depth": 1},
+            "page": 1,
+            "page_size": 10,
+        }
+    )
 
     result = runner.invoke(
         cli_app,

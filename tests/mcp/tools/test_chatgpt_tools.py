@@ -38,8 +38,8 @@ async def test_search_successful_results(client, test_project):
     assert content["query"] == "test content"
 
     # Verify individual result format
-    assert any(r["id"] == "docs/test-document-1" for r in content["results"])
-    assert any(r["id"] == "docs/test-document-2" for r in content["results"])
+    assert any(r["id"] == f"{test_project.name}/docs/test-document-1" for r in content["results"])
+    assert any(r["id"] == f"{test_project.name}/docs/test-document-2" for r in content["results"])
 
 
 @pytest.mark.asyncio
@@ -64,6 +64,25 @@ async def test_search_with_error_response(monkeypatch, client, test_project):
     assert content["results"] == []
     assert content["error"] == "Search failed"
     assert "error_details" in content
+
+
+@pytest.mark.asyncio
+async def test_search_uses_dynamic_default_search_type(monkeypatch, client, test_project):
+    """ChatGPT adapter should not hardcode search_type so search_notes can pick defaults."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    captured_kwargs: dict = {}
+
+    async def fake_search_notes_fn(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {"results": []}
+
+    monkeypatch.setattr(chatgpt_tools.search_notes, "fn", fake_search_notes_fn)
+
+    result = await chatgpt_tools.search.fn("default search mode query")
+
+    assert isinstance(result, list)
+    assert "search_type" not in captured_kwargs
 
 
 @pytest.mark.asyncio

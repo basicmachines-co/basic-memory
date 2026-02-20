@@ -9,8 +9,7 @@ from typing import Dict, List, Any, Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 
@@ -24,6 +23,7 @@ async def canvas(
     title: str,
     directory: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """Create an Obsidian canvas file with the provided nodes and edges.
@@ -94,9 +94,7 @@ async def canvas(
     Raises:
         ToolError: If project doesn't exist or directory path is invalid
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, workspace, context) as (client, active_project):
         # Ensure path has .canvas extension
         file_title = title if title.endswith(".canvas") else f"{title}.canvas"
         file_path = f"{directory}/{file_title}"

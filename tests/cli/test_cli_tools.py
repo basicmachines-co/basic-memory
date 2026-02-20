@@ -10,9 +10,15 @@ for future use when the CLI initialization issue is fixed.
 
 import pytest
 
+from basic_memory.config import DatabaseBackend
+
 
 def test_ensure_migrations_functionality(app_config, monkeypatch):
-    """Test the database initialization functionality."""
+    """Test the database initialization functionality.
+
+    ensure_initialization is a SQLite-only code path (Postgres manages its own schema),
+    so force SQLite backend regardless of the test environment.
+    """
     import basic_memory.services.initialization as init_mod
 
     calls = {"count": 0}
@@ -21,18 +27,24 @@ def test_ensure_migrations_functionality(app_config, monkeypatch):
         calls["count"] += 1
 
     monkeypatch.setattr(init_mod, "initialize_database", fake_initialize_database)
+    app_config.database_backend = DatabaseBackend.SQLITE
     init_mod.ensure_initialization(app_config)
     assert calls["count"] == 1
 
 
 def test_ensure_migrations_propagates_errors(app_config, monkeypatch):
-    """Test that initialization errors propagate to caller."""
+    """Test that initialization errors propagate to caller.
+
+    ensure_initialization is a SQLite-only code path (Postgres manages its own schema),
+    so force SQLite backend regardless of the test environment.
+    """
     import basic_memory.services.initialization as init_mod
 
     async def fake_initialize_database(*args, **kwargs):
         raise Exception("Test error")
 
     monkeypatch.setattr(init_mod, "initialize_database", fake_initialize_database)
+    app_config.database_backend = DatabaseBackend.SQLITE
 
     with pytest.raises(Exception, match="Test error"):
         init_mod.ensure_initialization(app_config)

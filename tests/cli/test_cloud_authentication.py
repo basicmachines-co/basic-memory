@@ -174,37 +174,10 @@ class TestLoginCommand:
             fake_make_api_request,
         )
 
-        instances: list[object] = []
-
-        class _StubConfig:
-            cloud_mode = False
-
-        class _StubConfigManager:
-            def __init__(self):
-                self._config = _StubConfig()
-                self.config = self._config
-                self.saved_config = None
-                instances.append(self)
-
-            def load_config(self):
-                return self._config
-
-            def save_config(self, config):
-                self.saved_config = config
-
-        monkeypatch.setattr(
-            "basic_memory.cli.commands.cloud.core_commands.ConfigManager",
-            _StubConfigManager,
-        )
-
         result = runner.invoke(app, ["cloud", "login"])
         assert result.exit_code == 0
-        assert "Cloud mode enabled" in result.stdout
-
-        assert len(instances) == 1
-        mgr = instances[0]
-        assert mgr.saved_config is not None
-        assert mgr.saved_config.cloud_mode is True
+        assert "Cloud authentication successful" in result.stdout
+        assert "Cloud host ready: https://cloud.example.com" in result.stdout
 
     def test_login_authentication_failure(self, monkeypatch):
         runner = CliRunner()

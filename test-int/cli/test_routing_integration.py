@@ -1,7 +1,7 @@
 """Integration tests for CLI routing flags (--local/--cloud).
 
 These tests verify that the --local and --cloud flags work correctly
-across CLI commands, and that the MCP command forces local routing.
+across CLI commands, and that MCP routing varies by transport.
 
 Note: Environment variable behavior during command execution is tested
 in unit tests (tests/cli/test_routing.py) which can properly monkeypatch
@@ -40,6 +40,15 @@ class TestRoutingFlagsValidation:
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
+    def test_project_ls_both_flags_error(self):
+        """Using both --local and --cloud on project ls should produce an error."""
+        result = runner.invoke(
+            cli_app,
+            ["project", "ls", "--name", "test", "--local", "--cloud"],
+        )
+        assert result.exit_code != 0
+        assert "Cannot specify both --local and --cloud" in result.output
+
     def test_tool_search_both_flags_error(self):
         """Using both --local and --cloud should produce an error."""
         result = runner.invoke(cli_app, ["tool", "search-notes", "test", "--local", "--cloud"])
@@ -60,34 +69,113 @@ class TestRoutingFlagsValidation:
         assert result.exit_code != 0
         assert "Cannot specify both --local and --cloud" in result.output
 
+    def test_tool_edit_note_both_flags_error(self):
+        """Using both --local and --cloud should produce an error."""
+        result = runner.invoke(
+            cli_app,
+            [
+                "tool",
+                "edit-note",
+                "test",
+                "--operation",
+                "append",
+                "--content",
+                "test",
+                "--local",
+                "--cloud",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "Cannot specify both --local and --cloud" in result.output
 
-class TestMcpCommandForcesLocal:
-    """Tests that the MCP command forces local routing."""
 
-    def test_mcp_sets_force_local_env(self, monkeypatch):
-        """MCP command should set BASIC_MEMORY_FORCE_LOCAL before server starts."""
-        # Track what environment variable was set
-        env_set_value = []
+class TestMcpCommandRouting:
+    """Tests that MCP routing varies by transport."""
 
-        # Mock the MCP server run to capture env state without actually starting server
+    def test_mcp_stdio_does_not_force_local(self, monkeypatch):
+        """Stdio transport should not inject explicit local routing env vars."""
+        # Ensure env is clean before test
+        monkeypatch.delenv("BASIC_MEMORY_FORCE_LOCAL", raising=False)
+        monkeypatch.delenv("BASIC_MEMORY_EXPLICIT_ROUTING", raising=False)
+
+        env_at_run = {}
+
         import basic_memory.cli.commands.mcp as mcp_mod
 
         def mock_run(*args, **kwargs):
-            env_set_value.append(os.environ.get("BASIC_MEMORY_FORCE_LOCAL"))
-            # Don't actually start the server
+            env_at_run["FORCE_LOCAL"] = os.environ.get("BASIC_MEMORY_FORCE_LOCAL")
+            env_at_run["EXPLICIT"] = os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING")
             raise SystemExit(0)
 
-        # Get the actual mcp_server from the module
         monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
+        monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
 
-        # Also mock init_mcp_logging to avoid file operations
+        runner.invoke(cli_app, ["mcp"])  # default transport is stdio
+
+        # Command should not have set these vars
+        assert env_at_run["FORCE_LOCAL"] is None
+        assert env_at_run["EXPLICIT"] is None
+
+    def test_mcp_stdio_honors_external_env_override(self, monkeypatch):
+        """Stdio transport should pass through externally-set routing env vars."""
+        monkeypatch.setenv("BASIC_MEMORY_FORCE_CLOUD", "true")
+        monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+
+        env_at_run = {}
+
+        import basic_memory.cli.commands.mcp as mcp_mod
+
+        def mock_run(*args, **kwargs):
+            env_at_run["FORCE_CLOUD"] = os.environ.get("BASIC_MEMORY_FORCE_CLOUD")
+            env_at_run["EXPLICIT"] = os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING")
+            raise SystemExit(0)
+
+        monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
         monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
 
         runner.invoke(cli_app, ["mcp"])
 
-        # Environment variable should have been set to "true"
-        assert len(env_set_value) == 1
-        assert env_set_value[0] == "true"
+        # Externally-set vars should be preserved
+        assert env_at_run["FORCE_CLOUD"] == "true"
+        assert env_at_run["EXPLICIT"] == "true"
+
+    def test_mcp_streamable_http_forces_local(self, monkeypatch):
+        """Streamable-HTTP transport should force local routing."""
+        env_at_run = {}
+
+        import basic_memory.cli.commands.mcp as mcp_mod
+
+        def mock_run(*args, **kwargs):
+            env_at_run["FORCE_LOCAL"] = os.environ.get("BASIC_MEMORY_FORCE_LOCAL")
+            env_at_run["EXPLICIT"] = os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING")
+            raise SystemExit(0)
+
+        monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
+        monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
+
+        runner.invoke(cli_app, ["mcp", "--transport", "streamable-http"])
+
+        assert env_at_run["FORCE_LOCAL"] == "true"
+        assert env_at_run["EXPLICIT"] == "true"
+
+    def test_mcp_sse_forces_local(self, monkeypatch):
+        """SSE transport should force local routing."""
+        env_at_run = {}
+
+        import basic_memory.cli.commands.mcp as mcp_mod
+
+        def mock_run(*args, **kwargs):
+            env_at_run["FORCE_LOCAL"] = os.environ.get("BASIC_MEMORY_FORCE_LOCAL")
+            env_at_run["EXPLICIT"] = os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING")
+            raise SystemExit(0)
+
+        monkeypatch.setattr(mcp_mod.mcp_server, "run", mock_run)
+        monkeypatch.setattr(mcp_mod, "init_mcp_logging", lambda: None)
+
+        runner.invoke(cli_app, ["mcp", "--transport", "sse"])
+
+        assert env_at_run["FORCE_LOCAL"] == "true"
+        assert env_at_run["EXPLICIT"] == "true"
 
 
 class TestToolCommandsAcceptFlags:
@@ -99,6 +187,7 @@ class TestToolCommandsAcceptFlags:
             ("search-notes", ["test query"]),
             ("recent-activity", []),
             ("read-note", ["test"]),
+            ("edit-note", ["test", "--operation", "append", "--content", "test"]),
             ("build-context", ["memory://test"]),
             ("continue-conversation", []),
         ],
@@ -116,6 +205,7 @@ class TestToolCommandsAcceptFlags:
             ("search-notes", ["test query"]),
             ("recent-activity", []),
             ("read-note", ["test"]),
+            ("edit-note", ["test", "--operation", "append", "--content", "test"]),
             ("build-context", ["memory://test"]),
             ("continue-conversation", []),
         ],
@@ -165,6 +255,16 @@ class TestProjectCommandsAcceptFlags:
         """project move should accept --local flag."""
         result = runner.invoke(cli_app, ["project", "move", "test", "/tmp/dest", "--local"])
         assert "No such option: --local" not in result.output
+
+    def test_project_ls_accepts_local_flag(self, app_config):
+        """project ls should accept --local flag."""
+        result = runner.invoke(cli_app, ["project", "ls", "--name", "test", "--local"])
+        assert "No such option: --local" not in result.output
+
+    def test_project_ls_accepts_cloud_flag(self, app_config):
+        """project ls should accept --cloud flag."""
+        result = runner.invoke(cli_app, ["project", "ls", "--name", "test", "--cloud"])
+        assert "No such option: --cloud" not in result.output
 
 
 class TestStatusCommandAcceptsFlags:

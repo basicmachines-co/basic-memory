@@ -1,5 +1,6 @@
 """Configuration management for basic-memory."""
 
+import importlib.util
 import json
 import os
 from dataclasses import dataclass
@@ -24,11 +25,26 @@ WATCH_STATUS_JSON = "watch-status.json"
 Environment = Literal["test", "dev", "user"]
 
 
+class ProjectMode(str, Enum):
+    """Per-project routing mode."""
+
+    LOCAL = "local"
+    CLOUD = "cloud"
+
+
 class DatabaseBackend(str, Enum):
     """Supported database backends."""
 
     SQLITE = "sqlite"
     POSTGRES = "postgres"
+
+
+def _default_semantic_search_enabled() -> bool:
+    """Enable semantic search by default when required local semantic dependencies exist."""
+    required_modules = ("fastembed", "sqlite_vec")
+    return all(
+        importlib.util.find_spec(module_name) is not None for module_name in required_modules
+    )
 
 
 @dataclass
@@ -37,6 +53,7 @@ class ProjectConfig:
 
     name: str
     home: Path
+    mode: ProjectMode = ProjectMode.LOCAL
 
     @property
     def project(self):
@@ -52,6 +69,9 @@ class CloudProjectConfig(BaseModel):
 
     This tracks the local working directory and sync state for a project
     that is synced with Basic Memory Cloud.
+
+    DEPRECATED: Kept for backward-compatible migration only. New code should
+    use ProjectEntry fields (cloud_sync_path, bisync_initialized, last_sync).
     """
 
     local_path: str = Field(description="Local working directory path for this cloud project")
@@ -63,26 +83,52 @@ class CloudProjectConfig(BaseModel):
     )
 
 
+class ProjectEntry(BaseModel):
+    """Unified project configuration entry.
+
+    Replaces the old triple of projects (Dict[str, str]), project_modes
+    (Dict[str, ProjectMode]), and cloud_projects (Dict[str, CloudProjectConfig])
+    with a single structure per project.
+    """
+
+    path: str = Field(description="Local filesystem path for the project")
+    mode: ProjectMode = Field(
+        default=ProjectMode.LOCAL,
+        description="Routing mode: local (in-process ASGI) or cloud (remote API)",
+    )
+    # Cloud sync state (replaces CloudProjectConfig)
+    cloud_sync_path: Optional[str] = Field(
+        default=None,
+        description="Local working directory for bisync (formerly CloudProjectConfig.local_path)",
+    )
+    bisync_initialized: bool = Field(
+        default=False,
+        description="Whether rclone bisync baseline has been established",
+    )
+    last_sync: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of last successful sync operation",
+    )
+
+
 class BasicMemoryConfig(BaseSettings):
     """Pydantic model for Basic Memory global configuration."""
 
     env: Environment = Field(default="dev", description="Environment name")
 
-    projects: Dict[str, str] = Field(
+    projects: Dict[str, ProjectEntry] = Field(
         default_factory=lambda: {
-            "main": str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
+            "main": ProjectEntry(
+                path=str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
+            )
         }
         if os.getenv("BASIC_MEMORY_HOME")
         else {},
-        description="Mapping of project names to their filesystem paths",
+        description="Mapping of project names to their ProjectEntry configuration",
     )
-    default_project: str = Field(
+    default_project: Optional[str] = Field(
         default="main",
-        description="Name of the default project to use",
-    )
-    default_project_mode: bool = Field(
-        default=False,
-        description="When True, MCP tools automatically use default_project when no project parameter is specified. Enables simplified UX for single-project workflows.",
+        description="Name of the default project to use. When set, acts as fallback when no project parameter is specified. Set to null to disable automatic project resolution.",
     )
 
     # overridden by ~/.basic-memory/config.json
@@ -97,6 +143,40 @@ class BasicMemoryConfig(BaseSettings):
     database_url: Optional[str] = Field(
         default=None,
         description="Database connection URL. For Postgres, use postgresql+asyncpg://user:pass@host:port/db. If not set, SQLite will use default path.",
+    )
+
+    # Semantic search configuration
+    semantic_search_enabled: bool = Field(
+        default_factory=_default_semantic_search_enabled,
+        description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic dependencies (included by default).",
+    )
+    semantic_embedding_provider: str = Field(
+        default="fastembed",
+        description="Embedding provider for local semantic indexing/search.",
+    )
+    semantic_embedding_model: str = Field(
+        default="bge-small-en-v1.5",
+        description="Embedding model identifier used by the local provider.",
+    )
+    semantic_embedding_dimensions: int | None = Field(
+        default=None,
+        description="Embedding vector dimensions. Auto-detected from provider if not set (384 for FastEmbed, 1536 for OpenAI).",
+    )
+    semantic_embedding_batch_size: int = Field(
+        default=64,
+        description="Batch size for embedding generation.",
+        gt=0,
+    )
+    semantic_vector_k: int = Field(
+        default=100,
+        description="Vector candidate count for vector and hybrid retrieval.",
+        gt=0,
+    )
+    semantic_min_similarity: float = Field(
+        default=0.55,
+        description="Minimum similarity score for vector search results. Results below this threshold are filtered out. 0.0 disables filtering.",
+        ge=0.0,
+        le=1.0,
     )
 
     # Database connection pool configuration (Postgres only)
@@ -160,6 +240,16 @@ class BasicMemoryConfig(BaseSettings):
         description="Disable automatic permalink generation in frontmatter. When enabled, new notes won't have permalinks added and sync won't update permalinks. Existing permalinks will still work for reading.",
     )
 
+    ensure_frontmatter_on_sync: bool = Field(
+        default=False,
+        description="Ensure markdown files have frontmatter during sync by adding derived title/type/permalink when missing. When combined with disable_permalinks=True, this setting takes precedence for missing-frontmatter files and still writes permalinks.",
+    )
+
+    permalinks_include_project: bool = Field(
+        default=True,
+        description="When True, generated permalinks are prefixed with the project slug (e.g., 'specs/search'). Existing permalinks remain unchanged unless explicitly updated.",
+    )
+
     skip_initialization_sync: bool = Field(
         default=False,
         description="Skip expensive initialization synchronization. Useful for cloud/stateless deployments where project reconciliation is not needed.",
@@ -211,15 +301,98 @@ class BasicMemoryConfig(BaseSettings):
         description="Basic Memory Cloud host URL",
     )
 
-    cloud_mode: bool = Field(
+    cloud_promo_opt_out: bool = Field(
         default=False,
-        description="Enable cloud mode - all requests go to cloud instead of local (config file value)",
+        description="Disable CLI cloud promo messages when true.",
     )
 
-    cloud_projects: Dict[str, CloudProjectConfig] = Field(
-        default_factory=dict,
-        description="Cloud project sync configuration mapping project names to their local paths and sync state",
+    cloud_promo_first_run_shown: bool = Field(
+        default=False,
+        description="Tracks whether the first-run cloud promo message has been shown.",
     )
+
+    cloud_promo_last_version_shown: Optional[str] = Field(
+        default=None,
+        description="Most recent cloud promo version shown in CLI.",
+    )
+
+    cloud_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for cloud access (bmc_ prefixed). Account-level, not per-project.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_projects(cls, data: Any) -> Any:
+        """Migrate old-format config (Dict[str, str]) to new ProjectEntry format.
+
+        Old format stored projects as three separate dicts:
+          projects:      {"name": "/path"}
+          project_modes: {"name": "cloud"}
+          cloud_projects: {"name": {"local_path": "...", ...}}
+
+        New format unifies them into:
+          projects: {"name": {"path": "/path", "mode": "cloud", ...}}
+
+        Also removes stale keys (default_project_mode, permalinks_include_project)
+        that are no longer part of the config model.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # --- Remove stale keys from old config versions ---
+        data.pop("default_project_mode", None)
+        data.pop("cloud_mode", None)
+
+        projects = data.get("projects", {})
+        if not projects:
+            return data
+
+        # Check if already in new format — peek at first value
+        first_value = next(iter(projects.values()), None)
+        if isinstance(first_value, str):
+            # Old format: {"name": "/path"} → convert
+            project_modes = data.pop("project_modes", {})
+            cloud_projects = data.pop("cloud_projects", {})
+            new_projects: Dict[str, Any] = {}
+            for name, path in projects.items():
+                entry: Dict[str, Any] = {"path": path}
+                if name in project_modes:
+                    entry["mode"] = project_modes[name]
+                if name in cloud_projects:
+                    cp = cloud_projects[name]
+                    if isinstance(cp, dict):
+                        entry["cloud_sync_path"] = cp.get("local_path")
+                        entry["bisync_initialized"] = cp.get("bisync_initialized", False)
+                        entry["last_sync"] = cp.get("last_sync")
+                    else:
+                        # Already a CloudProjectConfig-like object
+                        entry["cloud_sync_path"] = getattr(cp, "local_path", None)
+                        entry["bisync_initialized"] = getattr(cp, "bisync_initialized", False)
+                        entry["last_sync"] = getattr(cp, "last_sync", None)
+                new_projects[name] = entry
+
+            # Pick up cloud_projects entries not already in projects
+            # These are cloud-only projects — path is the cloud permalink,
+            # local_path goes into cloud_sync_path for bisync
+            for name, cp in cloud_projects.items():
+                if name not in new_projects:
+                    if isinstance(cp, dict):
+                        new_projects[name] = {
+                            "path": generate_permalink(name),
+                            "mode": project_modes.get(name, "cloud"),
+                            "cloud_sync_path": cp.get("local_path"),
+                            "bisync_initialized": cp.get("bisync_initialized", False),
+                            "last_sync": cp.get("last_sync"),
+                        }
+
+            data["projects"] = new_projects
+        else:
+            # New format or dict-based — just clean up stale keys
+            data.pop("project_modes", None)
+            data.pop("cloud_projects", None)
+
+        return data
 
     @property
     def is_test_env(self) -> bool:
@@ -238,27 +411,31 @@ class BasicMemoryConfig(BaseSettings):
             or os.getenv("PYTEST_CURRENT_TEST") is not None
         )
 
-    @property
-    def cloud_mode_enabled(self) -> bool:
-        """Check if cloud mode is enabled.
+    def get_project_mode(self, project_name: str) -> ProjectMode:
+        """Get the routing mode for a project.
 
-        Priority:
-        1. BASIC_MEMORY_CLOUD_MODE environment variable
-        2. Config file value (cloud_mode)
+        Returns the per-project mode if set, otherwise LOCAL.
         """
-        env_value = os.environ.get("BASIC_MEMORY_CLOUD_MODE", "").lower()
-        if env_value in ("true", "1", "yes"):
-            return True
-        elif env_value in ("false", "0", "no"):
-            return False
-        # Fall back to config file value
-        return self.cloud_mode
+        entry = self.projects.get(project_name)
+        return entry.mode if entry else ProjectMode.LOCAL
+
+    def set_project_mode(self, project_name: str, mode: ProjectMode) -> None:
+        """Set the routing mode for a project.
+
+        Creates a minimal ProjectEntry if the project doesn't already exist,
+        preserving backward compatibility with code that sets mode before
+        adding a full project entry.
+        """
+        if project_name in self.projects:
+            self.projects[project_name].mode = mode
+        else:
+            self.projects[project_name] = ProjectEntry(path="", mode=mode)
 
     @classmethod
     def for_cloud_tenant(
         cls,
         database_url: str,
-        projects: Optional[Dict[str, str]] = None,
+        projects: Optional[Dict[str, "ProjectEntry"]] = None,
     ) -> "BasicMemoryConfig":
         """Create config for cloud tenant - no config.json, database is source of truth.
 
@@ -280,7 +457,6 @@ class BasicMemoryConfig(BaseSettings):
             database_backend=DatabaseBackend.POSTGRES,
             database_url=database_url,
             projects=projects or {},
-            cloud_mode=True,
             skip_initialization_sync=True,
         )
 
@@ -296,7 +472,7 @@ class BasicMemoryConfig(BaseSettings):
         if name not in self.projects:
             raise ValueError(f"Project '{name}' not found in configuration")
 
-        return Path(self.projects[name])
+        return Path(self.projects[name].path)
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
@@ -306,12 +482,15 @@ class BasicMemoryConfig(BaseSettings):
 
         # Ensure at least one project exists; if none exist then create main
         if not self.projects:  # pragma: no cover
-            self.projects["main"] = str(
-                Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory"))
+            self.projects["main"] = ProjectEntry(
+                path=str(Path(os.getenv("BASIC_MEMORY_HOME", Path.home() / "basic-memory")))
             )
 
         # Ensure default project is valid (i.e. points to an existing project)
-        if self.default_project not in self.projects:  # pragma: no cover
+        # None means "no default" — intentionally left unset
+        if (
+            self.default_project is not None and self.default_project not in self.projects
+        ):  # pragma: no cover
             # Set default to first available project
             self.default_project = next(iter(self.projects.keys()))
 
@@ -321,8 +500,11 @@ class BasicMemoryConfig(BaseSettings):
 
         This is the single database that will store all knowledge data
         across all projects.
+
+        Uses BASIC_MEMORY_CONFIG_DIR when set so each process/worktree can
+        isolate both config and database state.
         """
-        database_path = Path.home() / DATA_DIR_NAME / APP_DATABASE_NAME
+        database_path = self.data_dir_path / APP_DATABASE_NAME
         if not database_path.exists():  # pragma: no cover
             database_path.parent.mkdir(parents=True, exist_ok=True)
             database_path.touch()
@@ -344,7 +526,10 @@ class BasicMemoryConfig(BaseSettings):
     @property
     def project_list(self) -> List[ProjectConfig]:  # pragma: no cover
         """Get all configured projects as ProjectConfig objects."""
-        return [ProjectConfig(name=name, home=Path(path)) for name, path in self.projects.items()]
+        return [
+            ProjectConfig(name=name, home=Path(entry.path), mode=entry.mode)
+            for name, entry in self.projects.items()
+        ]
 
     @model_validator(mode="after")
     def ensure_project_paths_exists(self) -> "BasicMemoryConfig":  # pragma: no cover
@@ -357,8 +542,8 @@ class BasicMemoryConfig(BaseSettings):
         if self.database_backend == DatabaseBackend.POSTGRES:
             return self
 
-        for name, path_value in self.projects.items():
-            path = Path(path_value)
+        for name, entry in self.projects.items():
+            path = Path(entry.path)
             if not path.exists():
                 try:
                     path.mkdir(parents=True)
@@ -368,8 +553,13 @@ class BasicMemoryConfig(BaseSettings):
         return self
 
     @property
-    def data_dir_path(self):
-        return Path.home() / DATA_DIR_NAME
+    def data_dir_path(self) -> Path:
+        """Get app state directory for config and default SQLite database."""
+        if config_dir := os.getenv("BASIC_MEMORY_CONFIG_DIR"):
+            return Path(config_dir)
+
+        home = os.getenv("HOME", Path.home())
+        return Path(home) / DATA_DIR_NAME
 
 
 # Module-level cache for configuration
@@ -419,6 +609,22 @@ class ConfigManager:
             try:
                 file_data = json.loads(self.config_file.read_text(encoding="utf-8"))
 
+                # Detect legacy format before model validators strip stale keys
+                _STALE_KEYS = {
+                    "default_project_mode",
+                    "project_modes",
+                    "cloud_projects",
+                    "cloud_mode",
+                }
+                needs_resave = bool(_STALE_KEYS & file_data.keys())
+
+                # Check if projects dict uses old string-value format
+                projects_raw = file_data.get("projects", {})
+                if projects_raw:
+                    first_val = next(iter(projects_raw.values()), None)
+                    if isinstance(first_val, str):
+                        needs_resave = True
+
                 # First, create config from environment variables (Pydantic will read them)
                 # Then overlay with file data for fields that aren't set via env vars
                 # This ensures env vars take precedence
@@ -440,6 +646,12 @@ class ConfigManager:
                         merged_data[field_name] = env_dict[field_name]
 
                 _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
+
+                # Re-save to normalize legacy config into current format
+                if needs_resave:
+                    logger.info("Migrating config to current format")
+                    save_basic_memory_config(self.config_file, _CONFIG_CACHE)
+
                 return _CONFIG_CACHE
             except Exception as e:  # pragma: no cover
                 logger.exception(f"Failed to load config: {e}")
@@ -458,11 +670,15 @@ class ConfigManager:
 
     @property
     def projects(self) -> Dict[str, str]:
-        """Get all configured projects."""
-        return self.config.projects.copy()
+        """Get all configured projects as name -> path mapping.
+
+        Returns the legacy Dict[str, str] format for backward compatibility
+        with code that expects project name -> filesystem path.
+        """
+        return {name: entry.path for name, entry in self.config.projects.items()}
 
     @property
-    def default_project(self) -> str:
+    def default_project(self) -> Optional[str]:
         """Get the default project name."""
         return self.config.default_project
 
@@ -472,13 +688,10 @@ class ConfigManager:
         if project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
 
-        # Ensure the path exists
-        project_path = Path(path)
-        project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
-
         # Load config, modify it, and save it
+        project_path = Path(path)
         config = self.load_config()
-        config.projects[name] = str(project_path)
+        config.projects[name] = ProjectEntry(path=str(project_path))
         self.save_config(config)
         return ProjectConfig(name=name, home=project_path)
 
@@ -510,12 +723,15 @@ class ConfigManager:
         self.save_config(config)
 
     def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:
-        """Look up a project from the configuration by name or permalink"""
+        """Look up a project from the configuration by name or permalink.
+
+        Returns (project_name, path_string) for backward compatibility.
+        """
         project_permalink = generate_permalink(name)
         app_config = self.config
-        for project_name, path in app_config.projects.items():
+        for project_name, entry in app_config.projects.items():
             if project_permalink == generate_permalink(project_name):
-                return project_name, path
+                return project_name, entry.path
         return None, None
 
 
@@ -550,9 +766,9 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
 
     project_permalink = generate_permalink(actual_project_name)
 
-    for name, path in app_config.projects.items():
+    for name, entry in app_config.projects.items():
         if project_permalink == generate_permalink(name):
-            return ProjectConfig(name=name, home=Path(path))
+            return ProjectConfig(name=name, home=Path(entry.path))
 
     # otherwise raise error
     raise ValueError(f"Project '{actual_project_name}' not found")  # pragma: no cover

@@ -1,11 +1,10 @@
 """Write note tool for Basic Memory MCP server."""
 
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Literal
 
 from loguru import logger
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project, add_project_metadata
+from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
@@ -23,17 +22,21 @@ async def write_note(
     content: str,
     directory: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
+    metadata: dict | None = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict:
     """Write a markdown note to the knowledge base.
 
     Creates or updates a markdown note with semantic observations and relations.
 
     Project Resolution:
-    Server resolves projects in this order: Single Project Mode → project parameter → default project.
-    If project unknown, use list_memory_projects() or recent_activity() first.
+    Server resolves projects using a unified priority chain (same in local and cloud modes):
+    Single Project Mode → project parameter → default project.
+    Uses default project automatically. Specify `project` parameter to target a different project.
 
     The content can include semantic observations and relations using markdown syntax:
 
@@ -67,6 +70,11 @@ async def write_note(
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
         note_type: Type of note to create (stored in frontmatter). Defaults to "note".
                    Can be "guide", "report", "config", "person", etc.
+        metadata: Optional dict of extra frontmatter fields merged into entity_metadata.
+                  Useful for schema notes or any note that needs custom YAML frontmatter
+                  beyond title/type/tags. Nested dicts are supported.
+        output_format: "text" returns the existing markdown summary. "json" returns
+                       machine-readable metadata.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -79,12 +87,7 @@ async def write_note(
         - Session tracking metadata for project awareness
 
     Examples:
-        # Assistant flow when project is unknown
-        # 1. list_memory_projects() -> Ask user which project
-        # 2. User: "Use my-research"
-        # 3. write_note(...) and remember "my-research" for session
-
-        # Create a simple note
+        # Create a simple note (uses default project automatically)
         write_note(
             project="my-research",
             title="Meeting Notes",
@@ -110,17 +113,28 @@ async def write_note(
             content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech"
         )
 
+        # Create a schema note with custom frontmatter via metadata
+        write_note(
+            title="Person",
+            directory="schemas",
+            note_type="schema",
+            content="# Person\\n\\nSchema for person entities.",
+            metadata={
+                "entity": "person",
+                "version": 1,
+                "schema": {"name": "string", "role?": "string"},
+                "settings": {"validation": "warn"},
+            },
+        )
+
     Raises:
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If directory path attempts path traversal
     """
-    async with get_client() as client:
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
-            f"MCP tool call tool=write_note project={project} directory={directory}, title={title}, tags={tags}"
+            f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
         )
-
-        # Get and validate the project (supports optional project parameter)
-        active_project = await get_active_project(client, project, context)
 
         # Normalize "/" to empty string for root directory (must happen before validation)
         if directory == "/":
@@ -134,19 +148,35 @@ async def write_note(
                 directory=directory,
                 project=active_project.name,
             )
+            if output_format == "json":
+                return {
+                    "title": title,
+                    "permalink": None,
+                    "file_path": None,
+                    "checksum": None,
+                    "action": "created",
+                    "error": "SECURITY_VALIDATION_ERROR",
+                }
             return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
 
         # Process tags using the helper function
         tag_list = parse_tags(tags)
-        # Create the entity request
-        metadata = {"tags": tag_list} if tag_list else None
+
+        # Build entity_metadata from optional metadata, then explicit tags on top
+        # Order matters: explicit tags parameter takes precedence over metadata["tags"]
+        entity_metadata = {}
+        if metadata:
+            entity_metadata.update(metadata)
+        if tag_list:
+            entity_metadata["tags"] = tag_list
+
         entity = Entity(
             title=title,
             directory=directory,
             entity_type=note_type,
             content_type="text/markdown",
             content=content,
-            entity_metadata=metadata,
+            entity_metadata=entity_metadata or None,
         )
 
         # Import here to avoid circular import
@@ -228,5 +258,14 @@ async def write_note(
         logger.info(
             f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={result.permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
         )
+        if output_format == "json":
+            return {
+                "title": result.title,
+                "permalink": result.permalink,
+                "file_path": result.file_path,
+                "checksum": result.checksum,
+                "action": action.lower(),
+            }
+
         summary_result = "\n".join(summary)
         return add_project_metadata(summary_result, active_project.name)

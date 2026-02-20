@@ -1,12 +1,11 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import Optional
+from typing import Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project, add_project_metadata
+from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 
 
@@ -132,11 +131,13 @@ async def edit_note(
     operation: str,
     content: str,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     section: Optional[str] = None,
     find_text: Optional[str] = None,
     expected_replacements: int = 1,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str:
+) -> str | dict:
     """Edit an existing markdown note in the knowledge base.
 
     Makes targeted changes to existing notes without rewriting the entire content.
@@ -160,6 +161,8 @@ async def edit_note(
         section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
         find_text: For find_replace operation - the text to find and replace
         expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
+        output_format: "text" returns the existing markdown summary. "json" returns
+            machine-readable edit metadata.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -212,9 +215,7 @@ async def edit_note(
         search_notes() first to find the correct identifier. The tool provides detailed
         error messages with suggestions if operations fail.
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
         # Validate operation
@@ -287,7 +288,7 @@ async def edit_note(
                 for obs in result.observations:
                     categories[obs.category] = categories.get(obs.category, 0) + 1
 
-                summary.append("\\n## Observations")
+                summary.append("\n## Observations")
                 for category, count in sorted(categories.items()):
                     summary.append(f"- {category}: {count}")
 
@@ -298,7 +299,7 @@ async def edit_note(
                 unresolved = sum(1 for r in result.relations if not r.to_id)
                 resolved = len(result.relations) - unresolved
 
-                summary.append("\\n## Relations")
+                summary.append("\n## Relations")
                 summary.append(f"- Resolved: {resolved}")
                 if unresolved:
                     summary.append(f"- Unresolved: {unresolved}")
@@ -313,11 +314,29 @@ async def edit_note(
                 relations_count=len(result.relations),
             )
 
+            if output_format == "json":
+                return {
+                    "title": result.title,
+                    "permalink": result.permalink,
+                    "file_path": result.file_path,
+                    "checksum": result.checksum,
+                    "operation": operation,
+                }
+
             summary_result = "\n".join(summary)
             return add_project_metadata(summary_result, active_project.name)
 
         except Exception as e:
             logger.error(f"Error editing note: {e}")
+            if output_format == "json":
+                return {
+                    "title": None,
+                    "permalink": None,
+                    "file_path": None,
+                    "checksum": None,
+                    "operation": operation,
+                    "error": str(e),
+                }
             return _format_error_response(
                 str(e), operation, identifier, find_text, expected_replacements, active_project.name
             )

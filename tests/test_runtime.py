@@ -29,24 +29,16 @@ class TestResolveRuntimeMode:
     """Tests for resolve_runtime_mode function."""
 
     def test_resolves_to_test_when_test_env(self):
-        """Test environment takes precedence over cloud mode."""
-        mode = resolve_runtime_mode(cloud_mode_enabled=True, is_test_env=True)
+        """Test environment resolves to TEST mode."""
+        mode = resolve_runtime_mode(is_test_env=True)
         assert mode == RuntimeMode.TEST
 
-    def test_resolves_to_cloud_when_enabled(self):
-        """Cloud mode is used when enabled and not in test env."""
-        mode = resolve_runtime_mode(cloud_mode_enabled=True, is_test_env=False)
-        assert mode == RuntimeMode.CLOUD
-
-    def test_resolves_to_local_by_default(self):
-        """Local mode is the default when no other modes apply."""
-        mode = resolve_runtime_mode(cloud_mode_enabled=False, is_test_env=False)
+    def test_resolves_to_local_when_not_test_env(self):
+        """Non-test environments resolve to LOCAL mode."""
+        mode = resolve_runtime_mode(is_test_env=False)
         assert mode == RuntimeMode.LOCAL
 
-    def test_test_env_overrides_cloud_mode(self):
-        """Test environment should override cloud mode."""
-        # When both are enabled, test takes precedence
-        mode = resolve_runtime_mode(cloud_mode_enabled=True, is_test_env=True)
-        assert mode == RuntimeMode.TEST
-        assert mode.is_test is True
-        assert mode.is_cloud is False
+    def test_never_resolves_to_cloud_in_local_app_context(self):
+        """Resolver no longer returns CLOUD for local app composition roots."""
+        mode = resolve_runtime_mode(is_test_env=False)
+        assert mode is not RuntimeMode.CLOUD

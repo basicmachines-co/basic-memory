@@ -107,7 +107,8 @@ def postgres_container(db_backend):
         yield None
         return
 
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    # Use pgvector image so CREATE EXTENSION vector succeeds in search repository
+    with PostgresContainer("pgvector/pgvector:pg16") as postgres:
         yield postgres
 
 
@@ -243,9 +244,7 @@ def app_config(
         env="test",
         projects=projects,
         default_project="test-project",
-        default_project_mode=False,  # Match real-world usage - tools must pass explicit project
         update_permalinks_on_move=True,
-        cloud_mode=False,  # Explicitly disable cloud mode
         sync_changes=False,  # Disable file sync in tests - prevents lifespan from starting blocking task
         database_backend=database_backend,
         database_url=database_url,
@@ -292,10 +291,16 @@ def app(app_config, project_config, engine_factory, test_project, config_manager
     from basic_memory.api.app import app as fastapi_app
 
     app = fastapi_app
+    previous_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_project_config] = lambda: project_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     app.dependency_overrides[get_app_config] = lambda: app_config
-    return app
+    try:
+        yield app
+    finally:
+        # Restore overrides so one test's injected dependencies don't leak into
+        # subsequent tests that use the same global FastAPI app instance.
+        app.dependency_overrides = previous_overrides
 
 
 @pytest_asyncio.fixture
@@ -337,6 +342,9 @@ def mcp_server(config_manager, search_service):
 
     # Import mcp tools to register them
     import basic_memory.mcp.tools  # noqa: F401
+
+    # Import resources to register them
+    import basic_memory.mcp.resources  # noqa: F401
 
     # Import prompts to register them
     import basic_memory.mcp.prompts  # noqa: F401

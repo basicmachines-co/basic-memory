@@ -1,14 +1,22 @@
 """Service for resolving markdown links to permalinks."""
 
-from typing import Optional, Tuple
-
+import uuid as uuid_mod
+from typing import Optional, Tuple, Dict
 
 from loguru import logger
 
-from basic_memory.models import Entity
+from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.project_repository import ProjectRepository
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
+from basic_memory.utils import (
+    build_canonical_permalink,
+    generate_permalink,
+    normalize_project_reference,
+)
 
 
 class LinkResolver:
@@ -26,6 +34,12 @@ class LinkResolver:
         """Initialize with repositories."""
         self.entity_repository = entity_repository
         self.search_service = search_service
+        self._project_repository = ProjectRepository(entity_repository.session_maker)
+        self._app_config: BasicMemoryConfig = ConfigManager().config
+        self._project_permalink: Optional[str] = None
+        self._project_cache_by_identifier: Dict[str, Project] = {}
+        self._entity_repository_cache: Dict[int, EntityRepository] = {}
+        self._search_service_cache: Dict[int, SearchService] = {}
 
     async def resolve_link(
         self,
@@ -47,111 +61,82 @@ class LinkResolver:
 
         # Clean link text and extract any alias
         clean_text, alias = self._normalize_link_text(link_text)
+        explicit_project_reference = "::" in clean_text
+        clean_text = normalize_project_reference(clean_text)
 
-        # --- Path Resolution ---
-        # Note: All paths in Basic Memory are stored as POSIX strings (forward slashes)
-        # for cross-platform compatibility. See entity_repository.py which normalizes
-        # paths using Path().as_posix(). This allows consistent path operations here.
+        # --- External ID Resolution ---
+        # Try external_id first if identifier looks like a UUID.
+        # Canonicalize to lowercase-hyphen form so uppercase or unhyphenated
+        # UUIDs also match the stored external_id values.
+        try:
+            canonical_id = str(uuid_mod.UUID(clean_text))
+            entity = await self.entity_repository.get_by_external_id(canonical_id)
+            if entity:
+                logger.debug(f"Found entity by external_id: {entity.permalink}")
+                return entity
+        except ValueError:
+            pass
 
-        # --- Relative Path Resolution ---
-        # Trigger: source_path is provided AND link contains "/"
-        # Why: Resolve paths like [[nested/deep-note]] relative to source folder first
-        # Outcome: [[nested/deep-note]] from testing/link-test.md → testing/nested/deep-note.md
-        if source_path and "/" in clean_text:
-            source_folder = source_path.rsplit("/", 1)[0] if "/" in source_path else ""
-            if source_folder:
-                # Construct relative path from source folder
-                relative_path = f"{source_folder}/{clean_text}"
+        # Trigger: link uses project namespace syntax (project::note)
+        # Why: treat it as an explicit cross-project reference
+        # Outcome: resolve only within the referenced project scope
+        if explicit_project_reference:
+            project_prefix, remainder = self._split_project_prefix(clean_text)
+            if not project_prefix:
+                return None
 
-                # Try with .md extension
-                if not relative_path.endswith(".md"):
-                    relative_path_md = f"{relative_path}.md"
-                    entity = await self.entity_repository.get_by_file_path(relative_path_md)
-                    if entity:
-                        return entity
+            project_resources = await self._get_project_resources(project_prefix)
+            if not project_resources:
+                return None
 
-                # Try as-is (already has extension or is a permalink)
-                entity = await self.entity_repository.get_by_file_path(relative_path)
-                if entity:
-                    return entity
-
-        # When source_path is provided, use context-aware resolution:
-        # Check both permalink and title matches, prefer closest to source.
-        # Example: [[testing]] from folder/note.md prefers folder/testing.md
-        # over a root testing.md with permalink "testing".
-        if source_path:
-            # Gather all potential matches
-            candidates: list[Entity] = []
-
-            # Check permalink match
-            permalink_entity = await self.entity_repository.get_by_permalink(clean_text)
-            if permalink_entity:
-                candidates.append(permalink_entity)
-
-            # Check title matches
-            title_entities = await self.entity_repository.get_by_title(clean_text)
-            for entity in title_entities:
-                # Avoid duplicates (permalink match might also be in title matches)
-                if entity.id not in [c.id for c in candidates]:
-                    candidates.append(entity)
-
-            if candidates:
-                if len(candidates) == 1:
-                    return candidates[0]
-                else:
-                    # Multiple candidates - pick closest to source
-                    return self._find_closest_entity(candidates, source_path)
-
-        # Standard resolution (no source context): permalink first, then title
-        # 1. Try exact permalink match first (most efficient)
-        entity = await self.entity_repository.get_by_permalink(clean_text)
-        if entity:
-            logger.debug(f"Found exact permalink match: {entity.permalink}")
-            return entity
-
-        # 2. Try exact title match
-        found = await self.entity_repository.get_by_title(clean_text)
-        if found:
-            # Return first match (shortest path) if no source context
-            entity = found[0]
-            logger.debug(f"Found title match: {entity.title}")
-            return entity
-
-        # 3. Try file path
-        found_path = await self.entity_repository.get_by_file_path(clean_text)
-        if found_path:
-            logger.debug(f"Found entity with path: {found_path.file_path}")
-            return found_path
-
-        # 4. Try file path with .md extension if not already present
-        if not clean_text.endswith(".md") and "/" in clean_text:
-            file_path_with_md = f"{clean_text}.md"
-            found_path_md = await self.entity_repository.get_by_file_path(file_path_with_md)
-            if found_path_md:
-                logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
-                return found_path_md
-
-        # In strict mode, don't try fuzzy search - return None if no exact match found
-        if strict:
-            return None
-
-        # 5. Fall back to search for fuzzy matching (only if not in strict mode)
-        if use_search and "*" not in clean_text:
-            results = await self.search_service.search(
-                query=SearchQuery(text=clean_text, entity_types=[SearchItemType.ENTITY]),
+            project, entity_repository, search_service = project_resources
+            return await self._resolve_in_project(
+                entity_repository=entity_repository,
+                search_service=search_service,
+                link_text=remainder,
+                use_search=use_search,
+                strict=strict,
+                source_path=None,
+                project_permalink=project.permalink,
             )
 
-            if results:
-                # Look for best match
-                best_match = min(results, key=lambda x: x.score)  # pyright: ignore
-                logger.trace(
-                    f"Selected best match from {len(results)} results: {best_match.permalink}"
-                )
-                if best_match.permalink:
-                    return await self.entity_repository.get_by_permalink(best_match.permalink)
+        current_project_permalink = await self._get_current_project_permalink()
+        resolved = await self._resolve_in_project(
+            entity_repository=self.entity_repository,
+            search_service=self.search_service,
+            link_text=clean_text,
+            use_search=use_search,
+            strict=strict,
+            source_path=source_path,
+            project_permalink=current_project_permalink,
+        )
+        if resolved:
+            return resolved
 
-        # if we couldn't find anything then return None
-        return None
+        # Trigger: local resolution failed and identifier looks like project/path
+        # Why: allow explicit project path references without namespace syntax
+        # Outcome: attempt resolution in the referenced project if it exists
+        project_prefix, remainder = self._split_project_prefix(clean_text)
+        if not project_prefix:
+            return None
+
+        project_resources = await self._get_project_resources(project_prefix)
+        if not project_resources:
+            return None
+
+        project, entity_repository, search_service = project_resources
+        if project.id == self.entity_repository.project_id:
+            return None
+
+        return await self._resolve_in_project(
+            entity_repository=entity_repository,
+            search_service=search_service,
+            link_text=remainder,
+            use_search=use_search,
+            strict=strict,
+            source_path=None,
+            project_permalink=project.permalink,
+        )
 
     def _normalize_link_text(self, link_text: str) -> Tuple[str, Optional[str]]:
         """Normalize link text and extract alias if present.
@@ -180,6 +165,230 @@ class LinkResolver:
             text = text.strip()
 
         return text, alias
+
+    async def _resolve_in_project(
+        self,
+        *,
+        entity_repository: EntityRepository,
+        search_service: SearchService,
+        link_text: str,
+        use_search: bool,
+        strict: bool,
+        source_path: Optional[str],
+        project_permalink: Optional[str],
+    ) -> Optional[Entity]:
+        """Resolve a link within a specific project scope."""
+        clean_text = link_text
+        include_project = self._include_project_permalinks()
+
+        canonical_permalink: Optional[str] = None
+        legacy_permalink: Optional[str] = None
+        # Trigger: permalinks include project slug and project permalink is known
+        # Why: support globally addressable permalinks while keeping legacy links resolvable
+        # Outcome: include canonical and legacy candidates for resolution
+        if include_project and project_permalink:
+            canonical_permalink = build_canonical_permalink(
+                project_permalink, clean_text, include_project=True
+            )
+            if clean_text.startswith(f"{project_permalink}/"):
+                legacy_candidate = clean_text.removeprefix(f"{project_permalink}/")
+                if legacy_candidate:
+                    legacy_permalink = legacy_candidate
+
+        permalink_candidates = []
+        for candidate in (clean_text, canonical_permalink, legacy_permalink):
+            if candidate and candidate not in permalink_candidates:
+                permalink_candidates.append(candidate)
+
+        # --- Path Resolution ---
+        # Note: All paths in Basic Memory are stored as POSIX strings (forward slashes)
+        # for cross-platform compatibility. See entity_repository.py which normalizes
+        # paths using Path().as_posix(). This allows consistent path operations here.
+
+        # --- Relative Path Resolution ---
+        # Trigger: source_path is provided AND link contains "/"
+        # Why: Resolve paths like [[nested/deep-note]] relative to source folder first
+        # Outcome: [[nested/deep-note]] from testing/link-test.md → testing/nested/deep-note.md
+        if source_path and "/" in clean_text:
+            if not (
+                include_project
+                and project_permalink
+                and clean_text.startswith(f"{project_permalink}/")
+            ):
+                source_folder = source_path.rsplit("/", 1)[0] if "/" in source_path else ""
+                if source_folder:
+                    # Construct relative path from source folder
+                    relative_path = f"{source_folder}/{clean_text}"
+
+                    # Try with .md extension
+                    if not relative_path.endswith(".md"):
+                        relative_path_md = f"{relative_path}.md"
+                        entity = await entity_repository.get_by_file_path(relative_path_md)
+                        if entity:
+                            return entity
+
+                    # Try as-is (already has extension or is a permalink)
+                    entity = await entity_repository.get_by_file_path(relative_path)
+                    if entity:
+                        return entity
+
+        # When source_path is provided, use context-aware resolution:
+        # Check both permalink and title matches, prefer closest to source.
+        # Example: [[testing]] from folder/note.md prefers folder/testing.md
+        # over a root testing.md with permalink "testing".
+        if source_path:
+            # Gather all potential matches
+            candidates: list[Entity] = []
+
+            # Check permalink match
+            for candidate_permalink in permalink_candidates:
+                permalink_entity = await entity_repository.get_by_permalink(candidate_permalink)
+                if permalink_entity and permalink_entity.id not in [c.id for c in candidates]:
+                    candidates.append(permalink_entity)
+
+            # Check title matches
+            title_entities = await entity_repository.get_by_title(clean_text)
+            for entity in title_entities:
+                # Avoid duplicates (permalink match might also be in title matches)
+                if entity.id not in [c.id for c in candidates]:
+                    candidates.append(entity)
+
+            if candidates:
+                if len(candidates) == 1:
+                    return candidates[0]
+                else:
+                    # Multiple candidates - pick closest to source
+                    return self._find_closest_entity(candidates, source_path)
+
+        # Standard resolution (no source context): permalink first, then title
+        # 1. Try exact permalink match first (most efficient)
+        for candidate_permalink in permalink_candidates:
+            entity = await entity_repository.get_by_permalink(candidate_permalink)
+            if entity:
+                logger.debug(f"Found exact permalink match: {entity.permalink}")
+                return entity
+
+        # 2. Try exact title match
+        found = await entity_repository.get_by_title(clean_text)
+        if found:
+            # Return first match (shortest path) if no source context
+            entity = found[0]
+            logger.debug(f"Found title match: {entity.title}")
+            return entity
+
+        # 3. Try file path
+        found_path = await entity_repository.get_by_file_path(clean_text)
+        if found_path:
+            logger.debug(f"Found entity with path: {found_path.file_path}")
+            return found_path
+
+        # 4. Try file path with .md extension if not already present
+        if not clean_text.endswith(".md") and "/" in clean_text:
+            file_path_with_md = f"{clean_text}.md"
+            found_path_md = await entity_repository.get_by_file_path(file_path_with_md)
+            if found_path_md:
+                logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
+                return found_path_md
+
+        # In strict mode, don't try fuzzy search - return None if no exact match found
+        if strict:
+            return None
+
+        # 5. Fall back to search for fuzzy matching (only if not in strict mode)
+        if use_search and "*" not in clean_text:
+            results = await search_service.search(
+                query=SearchQuery(text=clean_text, entity_types=[SearchItemType.ENTITY]),
+            )
+
+            if results:
+                # Look for best match
+                best_match = min(results, key=lambda x: x.score)  # pyright: ignore
+                logger.trace(
+                    f"Selected best match from {len(results)} results: {best_match.permalink}"
+                )
+                if best_match.permalink:
+                    return await entity_repository.get_by_permalink(best_match.permalink)
+
+        # if we couldn't find anything then return None
+        return None
+
+    def _include_project_permalinks(self) -> bool:
+        """Return True when permalinks should include the project slug."""
+        return self._app_config.permalinks_include_project
+
+    async def _get_current_project_permalink(self) -> Optional[str]:
+        """Get and cache the current project's permalink."""
+        if self._project_permalink is not None:
+            return self._project_permalink
+
+        project_id = self.entity_repository.project_id
+        if project_id is None:  # pragma: no cover
+            return None  # pragma: no cover
+
+        project = await self._project_repository.get_by_id(project_id)
+        if project:
+            self._project_permalink = project.permalink
+        return self._project_permalink
+
+    async def _get_project_by_identifier(self, identifier: str) -> Optional[Project]:
+        """Resolve project by name or permalink."""
+        cache_key = identifier.strip().lower()
+        if cache_key in self._project_cache_by_identifier:
+            return self._project_cache_by_identifier[cache_key]
+
+        project = await self._project_repository.get_by_name(identifier)
+        if not project:
+            project = await self._project_repository.get_by_name_case_insensitive(identifier)
+        if not project:
+            project = await self._project_repository.get_by_permalink(
+                generate_permalink(identifier)
+            )
+
+        if project:
+            self._project_cache_by_identifier[cache_key] = project
+        return project
+
+    async def _get_project_resources(
+        self, project_identifier: str
+    ) -> Optional[Tuple[Project, EntityRepository, SearchService]]:
+        """Fetch repositories and services scoped to a project."""
+        project = await self._get_project_by_identifier(project_identifier)
+        if not project:
+            return None
+
+        entity_repository = self._entity_repository_cache.get(project.id)
+        if not entity_repository:
+            entity_repository = EntityRepository(
+                self.entity_repository.session_maker, project_id=project.id
+            )
+            self._entity_repository_cache[project.id] = entity_repository
+
+        search_service = self._search_service_cache.get(project.id)
+        if not search_service:
+            search_repository = create_search_repository(
+                self.entity_repository.session_maker,
+                project_id=project.id,
+                database_backend=self._app_config.database_backend,
+            )
+            search_service = SearchService(
+                search_repository,
+                entity_repository,
+                self.search_service.file_service,
+            )
+            self._search_service_cache[project.id] = search_service
+
+        return project, entity_repository, search_service
+
+    def _split_project_prefix(self, identifier: str) -> Tuple[Optional[str], str]:
+        """Split project prefix from a path-like identifier."""
+        if "/" not in identifier:
+            return None, identifier
+
+        project_prefix, remainder = identifier.split("/", 1)
+        if not project_prefix or not remainder:
+            return None, identifier
+
+        return project_prefix, remainder
 
     def _find_closest_entity(self, entities: list[Entity], source_path: str) -> Entity:
         """Find the entity closest to the source file path.

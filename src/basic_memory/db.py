@@ -43,6 +43,99 @@ if sys.platform == "win32":  # pragma: no cover
 _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
+# Alembic revision that enables one-time automatic embedding backfill.
+SEMANTIC_EMBEDDING_BACKFILL_REVISION = "i2c3d4e5f6g7"
+
+
+async def _load_applied_alembic_revisions(
+    session_maker: async_sessionmaker[AsyncSession],
+) -> set[str]:
+    """Load applied Alembic revisions from alembic_version.
+
+    Returns an empty set when the version table does not exist yet
+    (fresh database before first migration).
+    """
+    try:
+        async with scoped_session(session_maker) as session:
+            result = await session.execute(text("SELECT version_num FROM alembic_version"))
+            return {str(row[0]) for row in result.fetchall() if row[0]}
+    except Exception as exc:
+        error_message = str(exc).lower()
+        if "alembic_version" in error_message and (
+            "no such table" in error_message or "does not exist" in error_message
+        ):
+            return set()
+        raise
+
+
+def _should_run_semantic_embedding_backfill(
+    revisions_before_upgrade: set[str],
+    revisions_after_upgrade: set[str],
+) -> bool:
+    """Check if this migration run newly applied the backfill-trigger revision."""
+    return (
+        SEMANTIC_EMBEDDING_BACKFILL_REVISION in revisions_after_upgrade
+        and SEMANTIC_EMBEDDING_BACKFILL_REVISION not in revisions_before_upgrade
+    )
+
+
+async def _run_semantic_embedding_backfill(
+    app_config: BasicMemoryConfig,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Backfill semantic embeddings for all active projects/entities."""
+    if not app_config.semantic_search_enabled:
+        logger.info("Skipping automatic semantic embedding backfill: semantic search is disabled.")
+        return
+
+    async with scoped_session(session_maker) as session:
+        project_result = await session.execute(
+            text("SELECT id, name FROM project WHERE is_active = :is_active ORDER BY id"),
+            {"is_active": True},
+        )
+        projects = [(int(row[0]), str(row[1])) for row in project_result.fetchall()]
+
+    if not projects:
+        logger.info("Skipping automatic semantic embedding backfill: no active projects found.")
+        return
+
+    repository_class = (
+        PostgresSearchRepository
+        if app_config.database_backend == DatabaseBackend.POSTGRES
+        else SQLiteSearchRepository
+    )
+
+    total_entities = 0
+    for project_id, project_name in projects:
+        async with scoped_session(session_maker) as session:
+            entity_result = await session.execute(
+                text("SELECT id FROM entity WHERE project_id = :project_id ORDER BY id"),
+                {"project_id": project_id},
+            )
+            entity_ids = [int(row[0]) for row in entity_result.fetchall()]
+
+        if not entity_ids:
+            continue
+
+        total_entities += len(entity_ids)
+        logger.info(
+            "Automatic semantic embedding backfill: "
+            f"project={project_name}, entities={len(entity_ids)}"
+        )
+
+        search_repository = repository_class(
+            session_maker,
+            project_id=project_id,
+            app_config=app_config,
+        )
+        for entity_id in entity_ids:
+            await search_repository.sync_entity_vectors(entity_id)
+
+    logger.info(
+        "Automatic semantic embedding backfill complete: "
+        f"projects={len(projects)}, entities={total_entities}"
+    )
+
 
 class DatabaseType(Enum):
     """Types of supported databases."""
@@ -344,24 +437,33 @@ async def engine_session_factory(
 
     global _engine, _session_maker
 
-    # Use the same helper function as production code
-    _engine, _session_maker = _create_engine_and_session(db_path, db_type, config)
+    # Use the same helper function as production code.
+    #
+    # Keep local references so teardown can deterministically dispose the
+    # specific engine created by this context manager, even if other code calls
+    # shutdown_db() and mutates module-level globals mid-test.
+    created_engine, created_session_maker = _create_engine_and_session(db_path, db_type, config)
+    _engine, _session_maker = created_engine, created_session_maker
 
     try:
         # Verify that engine and session maker are initialized
-        if _engine is None:  # pragma: no cover
+        if created_engine is None:  # pragma: no cover
             logger.error("Database engine is None in engine_session_factory")
             raise RuntimeError("Database engine initialization failed")
 
-        if _session_maker is None:  # pragma: no cover
+        if created_session_maker is None:  # pragma: no cover
             logger.error("Session maker is None in engine_session_factory")
             raise RuntimeError("Session maker initialization failed")
 
-        yield _engine, _session_maker
+        yield created_engine, created_session_maker
     finally:
-        if _engine:
-            await _engine.dispose()
+        await created_engine.dispose()
+
+        # Only clear module-level globals if they still point to this context's
+        # engine/session. This avoids clobbering newer globals from other callers.
+        if _engine is created_engine:
             _engine = None
+        if _session_maker is created_session_maker:
             _session_maker = None
 
 
@@ -375,6 +477,23 @@ async def run_migrations(
     """
     logger.info("Running database migrations...")
     try:
+        revisions_before_upgrade: set[str] = set()
+        # Trigger: run_migrations() can be invoked before module-level session maker is set.
+        # Why: we still need reliable before/after revision detection for one-time backfill.
+        # Outcome: create a short-lived session maker when needed, then dispose it immediately.
+        if _session_maker is None:
+            temp_engine, temp_session_maker = _create_engine_and_session(
+                app_config.database_path,
+                database_type,
+                app_config,
+            )
+            try:
+                revisions_before_upgrade = await _load_applied_alembic_revisions(temp_session_maker)
+            finally:
+                await temp_engine.dispose()
+        else:
+            revisions_before_upgrade = await _load_applied_alembic_revisions(_session_maker)
+
         # Get the absolute path to the alembic directory relative to this file
         alembic_dir = Path(__file__).parent / "alembic"
         config = Config()
@@ -413,6 +532,13 @@ async def run_migrations(
             await PostgresSearchRepository(session_maker, 1).init_search_index()
         else:
             await SQLiteSearchRepository(session_maker, 1).init_search_index()
+
+        revisions_after_upgrade = await _load_applied_alembic_revisions(session_maker)
+        if _should_run_semantic_embedding_backfill(
+            revisions_before_upgrade,
+            revisions_after_upgrade,
+        ):
+            await _run_semantic_embedding_backfill(app_config, session_maker)
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise

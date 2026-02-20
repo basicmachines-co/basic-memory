@@ -14,6 +14,7 @@ from basic_memory.schemas.search import SearchQuery
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.search_service import SearchService
 from basic_memory.sync.sync_service import SyncService
+from basic_memory.utils import generate_permalink
 
 
 async def create_test_file(path: Path, content: str = "test content") -> None:
@@ -74,7 +75,8 @@ type: knowledge
     await sync_service.sync(project_config.home)
 
     # Verify forward reference
-    source = await entity_service.get_by_permalink("source")
+    project_prefix = generate_permalink(project_config.name)
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
     assert len(source.relations) == 1
     assert source.relations[0].to_id is None
     assert source.relations[0].to_name == "target-doc"
@@ -98,8 +100,8 @@ Target content
     await sync_service.sync(project_config.home)
 
     # Verify reference is now resolved
-    source = await entity_service.get_by_permalink("source")
-    target = await entity_service.get_by_permalink("target-doc")
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
+    target = await entity_service.get_by_permalink(f"{project_prefix}/target-doc")
     assert len(source.relations) == 1
     assert source.relations[0].to_id == target.id
     assert source.relations[0].to_name == target.title
@@ -144,8 +146,9 @@ Content
     # Sync to create both entities
     await sync_service.sync(project_config.home)
 
-    source = await entity_service.get_by_permalink("source")
-    target = await entity_service.get_by_permalink("target")
+    project_prefix = generate_permalink(project_config.name)
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
+    target = await entity_service.get_by_permalink(f"{project_prefix}/target")
 
     # Create a resolved relation (already exists) that the unresolved one would become.
     resolved_relation = Relation(
@@ -167,7 +170,7 @@ Content
     unresolved_id = unresolved_relation.id
 
     # Verify we have the unresolved relation
-    source = await entity_service.get_by_permalink("source")
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
     unresolved_outgoing = [r for r in source.outgoing_relations if r.to_id is None]
     assert len(unresolved_outgoing) == 1
     assert unresolved_outgoing[0].id == unresolved_id
@@ -186,7 +189,7 @@ Content
     assert len(unresolved) == 0
 
     # Verify only the resolved relation remains
-    source = await entity_service.get_by_permalink("source")
+    source = await entity_service.get_by_permalink(f"{project_prefix}/source")
     assert len(source.outgoing_relations) == 1
     assert source.outgoing_relations[0].to_id == target.id
 
@@ -642,6 +645,7 @@ async def test_permalink_formatting(
     sync_service: SyncService, project_config: ProjectConfig, entity_service: EntityService
 ):
     """Test that permalinks are properly formatted during sync."""
+    project_prefix = generate_permalink(project_config.name)
 
     # Test cases with different filename formats
     test_files = {
@@ -675,8 +679,9 @@ Testing permalink generation.
     for filename, expected_permalink in test_files.items():
         # Find entity for this file
         entity = next(e for e in entities if e.file_path == filename)
-        assert entity.permalink == expected_permalink, (
-            f"File {filename} should have permalink {expected_permalink}"
+        expected_full_permalink = f"{project_prefix}/{expected_permalink}"
+        assert entity.permalink == expected_full_permalink, (
+            f"File {filename} should have permalink {expected_full_permalink}"
         )
 
 
@@ -743,12 +748,13 @@ Testing file timestamps
     await sync_service.sync(project_config.home)
 
     # Check explicit frontmatter dates
-    explicit_entity = await entity_service.get_by_permalink("explicit-dates")
+    project_prefix = generate_permalink(project_config.name)
+    explicit_entity = await entity_service.get_by_permalink(f"{project_prefix}/explicit-dates")
     assert explicit_entity.created_at is not None
     assert explicit_entity.updated_at is not None
 
     # Check file timestamps
-    file_entity = await entity_service.get_by_permalink("file-dates3")
+    file_entity = await entity_service.get_by_permalink(f"{project_prefix}/file-dates3")
     file_stats = file_path.stat()
 
     # Compare using epoch timestamps to handle timezone differences correctly
@@ -793,7 +799,8 @@ Initial content for timestamp test
     await sync_service.sync(project_config.home)
 
     # Get initial entity and timestamps
-    entity_before = await entity_service.get_by_permalink("timestamp-test")
+    project_prefix = generate_permalink(project_config.name)
+    entity_before = await entity_service.get_by_permalink(f"{project_prefix}/timestamp-test")
     initial_updated_at = entity_before.updated_at
 
     # Modify the file content and update mtime to be newer than watermark
@@ -824,7 +831,7 @@ Modified content for timestamp test
     await sync_service.sync(project_config.home)
 
     # Get entity after re-sync
-    entity_after = await entity_service.get_by_permalink("timestamp-test")
+    entity_after = await entity_service.get_by_permalink(f"{project_prefix}/timestamp-test")
 
     # Verify that updated_at changed
     assert entity_after.updated_at != initial_updated_at, (
@@ -938,6 +945,7 @@ async def test_sync_permalink_resolved(
 ):
     """Test that we resolve duplicate permalinks on sync ."""
     project_dir = project_config.home
+    project_prefix = generate_permalink(project_config.name)
 
     # Create initial file
     content = """
@@ -967,13 +975,13 @@ Content for move test
     await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
-    assert "permalink: new/moved-file" in file_content
+    assert f"permalink: {project_prefix}/new/moved-file" in file_content
 
     # Create another that has the same permalink
-    content = """
+    content = f"""
 ---
 type: knowledge
-permalink: new/moved-file
+permalink: {project_prefix}/new/moved-file
 ---
 # Test Move
 Content for move test
@@ -991,7 +999,7 @@ Content for move test
 
     # assert permalink is unique
     file_content, _ = await file_service.read_file(old_path)
-    assert "permalink: new/moved-file-1" in file_content
+    assert f"permalink: {project_prefix}/new/moved-file-1" in file_content
 
 
 @pytest.mark.asyncio
@@ -1108,6 +1116,59 @@ async def test_sync_permalink_not_created_if_no_frontmatter(
     assert "permalink:" not in file_content
 
 
+@pytest.mark.asyncio
+async def test_sync_frontmatter_created_if_missing_when_enabled(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    file_service: FileService,
+    app_config: BasicMemoryConfig,
+):
+    """Sync should add derived frontmatter when configured for missing-frontmatter files."""
+    app_config.ensure_frontmatter_on_sync = True
+
+    project_dir = project_config.home
+    file = project_dir / "one.md"
+    await create_test_file(file, "# One\n")
+
+    await sync_service.sync(project_config.home)
+
+    file_content, _ = await file_service.read_file(file)
+    project_prefix = generate_permalink(project_config.name)
+    assert "title: one" in file_content
+    assert "type: note" in file_content
+    assert f"permalink: {project_prefix}/one" in file_content
+
+    entity = await sync_service.entity_repository.get_by_file_path("one.md")
+    assert entity is not None
+    assert entity.permalink == f"{project_prefix}/one"
+
+
+@pytest.mark.asyncio
+async def test_sync_frontmatter_created_if_missing_overrides_disable_permalinks(
+    sync_service: SyncService,
+    project_config: ProjectConfig,
+    file_service: FileService,
+    app_config: BasicMemoryConfig,
+):
+    """Missing-frontmatter sync path should write permalink even when disable_permalinks is true."""
+    app_config.ensure_frontmatter_on_sync = True
+    app_config.disable_permalinks = True
+
+    project_dir = project_config.home
+    file = project_dir / "override.md"
+    await create_test_file(file, "# Override\n")
+
+    await sync_service.sync(project_config.home)
+
+    file_content, _ = await file_service.read_file(file)
+    project_prefix = generate_permalink(project_config.name)
+    assert f"permalink: {project_prefix}/override" in file_content
+
+    entity = await sync_service.entity_repository.get_by_file_path("override.md")
+    assert entity is not None
+    assert entity.permalink == f"{project_prefix}/override"
+
+
 @pytest.fixture
 def test_config_update_permamlinks_on_move(app_config) -> BasicMemoryConfig:
     """Test configuration using in-memory DB."""
@@ -1124,6 +1185,7 @@ async def test_sync_permalink_updated_on_move(
 ):
     """Test that we update a permalink on a file move if set in config ."""
     project_dir = project_config.home
+    project_prefix = generate_permalink(project_config.name)
 
     # Create initial file
     content = dedent(
@@ -1145,7 +1207,7 @@ async def test_sync_permalink_updated_on_move(
 
     # verify permalink
     old_content, _ = await file_service.read_file(old_path)
-    assert "permalink: old/test-move" in old_content
+    assert f"permalink: {project_prefix}/old/test-move" in old_content
 
     # Move the file
     new_path = project_dir / "new" / "moved_file.md"
@@ -1160,7 +1222,7 @@ async def test_sync_permalink_updated_on_move(
     await sync_service.sync(project_config.home)
 
     file_content, _ = await file_service.read_file(new_path)
-    assert "permalink: new/moved-file" in file_content
+    assert f"permalink: {project_prefix}/new/moved-file" in file_content
 
 
 @pytest.mark.asyncio
@@ -1297,6 +1359,7 @@ async def test_sync_relation_to_non_markdown_file(
 ):
     """Test that sync resolves permalink conflicts on update."""
     project_dir = project_config.home
+    project_prefix = generate_permalink(project_config.name)
 
     content = f"""
 ---
@@ -1321,7 +1384,7 @@ tags: []
 title: a note
 type: note
 tags: []
-permalink: note
+permalink: {project_prefix}/note
 ---
 
 - relates_to [[{test_files["pdf"].name}]]

@@ -5,8 +5,7 @@ from typing import Optional
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
 
 
@@ -18,6 +17,7 @@ async def list_directory(
     depth: int = 1,
     file_name_glob: Optional[str] = None,
     project: Optional[str] = None,
+    workspace: Optional[str] = None,
     context: Context | None = None,
 ) -> str:
     """List directory contents from the knowledge base with optional filtering.
@@ -62,9 +62,7 @@ async def list_directory(
     Raises:
         ToolError: If project doesn't exist or directory path is invalid
     """
-    async with get_client() as client:
-        active_project = await get_active_project(client, project, context)
-
+    async with get_project_client(project, workspace, context) as (client, active_project):
         logger.debug(
             f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
         )

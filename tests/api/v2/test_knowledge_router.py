@@ -171,7 +171,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
     assert isinstance(entity.id, int)
     assert entity.api_version == "v2"
 
-    assert entity.permalink == "test/test-v2-entity"
+    assert entity.permalink == "test-project/test/test-v2-entity"
     assert entity.file_path == "test/TestV2Entity.md"
     assert entity.entity_type == data["entity_type"]
 
@@ -404,6 +404,53 @@ async def test_fast_create_schedules_reindex_task(
     scheduled = task_scheduler_spy[-1]
     assert scheduled["task_name"] == "reindex_entity"
     assert scheduled["payload"]["entity_id"] == created_entity.id
+
+
+@pytest.mark.asyncio
+async def test_non_fast_create_schedules_vector_sync_when_semantic_enabled(
+    client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
+):
+    """Non-fast create should schedule vector sync when semantic mode is enabled."""
+    app_config.semantic_search_enabled = True
+    start_count = len(task_scheduler_spy)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "NonFastSemanticEntity",
+            "directory": "test",
+            "content": "Content for non-fast semantic scheduling",
+        },
+        params={"fast": False},
+    )
+    assert response.status_code == 200
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    assert len(task_scheduler_spy) == start_count + 1
+    scheduled = task_scheduler_spy[-1]
+    assert scheduled["task_name"] == "sync_entity_vectors"
+    assert scheduled["payload"]["entity_id"] == created_entity.id
+
+
+@pytest.mark.asyncio
+async def test_non_fast_create_skips_vector_sync_when_semantic_disabled(
+    client: AsyncClient, v2_project_url, task_scheduler_spy, app_config
+):
+    """Non-fast create should not schedule vector sync when semantic mode is disabled."""
+    app_config.semantic_search_enabled = False
+    start_count = len(task_scheduler_spy)
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "NonFastNoSemanticEntity",
+            "directory": "test",
+            "content": "Content for non-fast without semantic scheduling",
+        },
+        params={"fast": False},
+    )
+    assert response.status_code == 200
+    assert len(task_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio

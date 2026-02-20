@@ -5,7 +5,7 @@ The Basic Memory Cloud CLI provides seamless integration between local and cloud
 ## Overview
 
 The cloud CLI enables you to:
-- **Toggle cloud mode** - All regular `bm` commands work with cloud when enabled
+- **Authenticate cloud access** - OAuth/API key credentials are stored locally for cloud operations
 - **Project-scoped sync** - Each project independently manages its sync configuration
 - **Explicit operations** - Sync only what you want, when you want
 - **Bidirectional sync** - Keep local and cloud in sync with rclone bisync
@@ -17,6 +17,8 @@ Before using Basic Memory Cloud, you need:
 
 - **Active Subscription**: An active Basic Memory Cloud subscription is required to access cloud features
 - **Subscribe**: Visit [https://basicmemory.com/subscribe](https://basicmemory.com/subscribe) to sign up
+- **Optional**: Cloud is optional. Local-first open-source usage continues without cloud.
+- **OSS Discount**: Use code `{{OSS_DISCOUNT_CODE}}` for 20% off for 3 months.
 
 If you attempt to log in without an active subscription, you'll receive a "Subscription Required" error with a link to subscribe.
 
@@ -38,7 +40,7 @@ If you attempt to log in without an active subscription, you'll receive a "Subsc
 
 1. **Cloud-only** - Project exists on cloud, no local copy
 2. **Cloud + Local (synced)** - Project has a local working directory that syncs
-3. **Local-only** - Project exists locally (when cloud mode is disabled)
+3. **Local-only** - Project exists locally and is not routed to cloud
 
 **Example:**
 
@@ -48,9 +50,9 @@ If you attempt to log in without an active subscription, you'll receive a "Subsc
 # - work: wants local sync at ~/work-notes
 # - temp: cloud-only, no local sync needed
 
-bm project add research --local-path ~/Documents/research
-bm project add work --local-path ~/work-notes
-bm project add temp  # No local sync
+bm project add research --cloud --local-path ~/Documents/research
+bm project add work --cloud --local-path ~/work-notes
+bm project add temp --cloud  # No local sync
 
 # Now you can sync individually (after initial --resync):
 bm project bisync --name research
@@ -66,9 +68,9 @@ bm project bisync --name work
 
 ## Quick Start
 
-### 1. Enable Cloud Mode
+### 1. Authenticate Cloud Access
 
-Authenticate and enable cloud mode:
+Authenticate with cloud:
 
 ```bash
 bm cloud login
@@ -76,11 +78,12 @@ bm cloud login
 
 **What this does:**
 1. Opens browser to Basic Memory Cloud authentication page
-2. Stores authentication token in `~/.basic-memory/auth/token`
-3. **Enables cloud mode** - all CLI commands now work against cloud
-4. Validates your subscription status
+2. Stores authentication tokens in `~/.basic-memory/basic-memory-cloud.json`
+3. Validates your subscription status
+4. Leaves routing behavior unchanged (auth only)
 
-**Result:** All `bm project`, `bm tools` commands now work with cloud.
+**Result:** Cloud credentials are available for cloud-routed commands.
+Apply OSS discount code `{{OSS_DISCOUNT_CODE}}` during checkout to receive 20% off for 3 months.
 
 ### 2. Set Up Sync
 
@@ -104,10 +107,10 @@ Create projects with optional local sync paths:
 
 ```bash
 # Create cloud project without local sync
-bm project add research
+bm project add research --cloud
 
 # Create cloud project WITH local sync
-bm project add research --local-path ~/Documents/research
+bm project add research --cloud --local-path ~/Documents/research
 
 # Or configure sync for existing project
 bm project sync-setup research ~/Documents/research
@@ -117,7 +120,7 @@ bm project sync-setup research ~/Documents/research
 
 When you add a project with `--local-path`:
 1. Project created on cloud at `/app/data/research`
-2. Local path stored in config: `cloud_projects.research.local_path = "~/Documents/research"`
+2. Local path stored in config for that project (`cloud_sync_path`)
 3. Local directory created if it doesn't exist
 4. Bisync state directory created at `~/.basic-memory/bisync-state/research/`
 
@@ -179,7 +182,8 @@ bm cloud status
 ```
 
 You should see:
-- `Mode: Cloud (enabled)`
+- `OAuth: token valid` (or missing/expired)
+- `API Key: configured` (or not set)
 - `Cloud instance is healthy`
 - Instructions for project sync commands
 
@@ -187,16 +191,16 @@ You should see:
 
 ### Understanding Project Commands
 
-**Key concept:** When cloud mode is enabled, use regular `bm project` commands (not `bm cloud project`).
+**Key concept:** Use regular `bm project` commands (not `bm cloud project`).
 
 ```bash
-# In cloud mode:
-bm project list              # Lists cloud projects
-bm project add research      # Creates cloud project
+# Local route
+bm project list --local
+bm project add research ~/Documents/research
 
-# In local mode:
-bm project list              # Lists local projects
-bm project add research ~/Documents/research  # Creates local project
+# Cloud route
+bm project list --cloud
+bm project add research --cloud
 ```
 
 ### Creating Projects
@@ -204,7 +208,7 @@ bm project add research ~/Documents/research  # Creates local project
 **Use case 1: Cloud-only project (no local sync)**
 
 ```bash
-bm project add temp-notes
+bm project add temp-notes --cloud
 ```
 
 **What this does:**
@@ -217,7 +221,7 @@ bm project add temp-notes
 **Use case 2: Cloud project with local sync**
 
 ```bash
-bm project add research --local-path ~/Documents/research
+bm project add research --cloud --local-path ~/Documents/research
 ```
 
 **What this does:**
@@ -251,11 +255,35 @@ bm project list
 ```
 
 **What you see:**
-- All projects in cloud (when cloud mode enabled)
+- Local projects always
+- Cloud projects when credentials are available
 - Default project marked
-- Project paths shown
+- Route-related metadata (for example, local/cloud presence and sync info)
 
-**Future:** Will show sync status (synced/not synced, last sync time).
+Example shape (single row for dual-presence projects):
+
+```text
+Name   Path            Local Path           Cloud Path   CLI Default   MCP (stdio)
+main   /basic-memory   ~/basic-memory       /basic-memory   local       local
+specs  /specs          ~/dev/specs          /specs          cloud       local
+```
+
+### When a Project Exists in Both Local and Cloud
+
+Use routing flags to disambiguate command targets:
+
+```bash
+# Force local target for this command
+bm project info main --local
+bm project ls --name main --local
+
+# Force cloud target for this command
+bm project info main --cloud
+bm project ls --name main --cloud
+```
+
+Default behavior for no-project, no-flag commands is local.
+For MCP stdio, routing is always local.
 
 ## File Synchronization
 
@@ -363,24 +391,28 @@ bm project bisync --name research --dry-run
 
 **Result:** Safe preview of sync operations.
 
-### Advanced: List Remote Files
+### Advanced: List Project Files by Route
 
-**Use case:** See what files exist on cloud without syncing.
+**Use case:** Inspect local or cloud project files explicitly.
 
 ```bash
-# List all files in project
+# List local project files (default target when no route flag is given)
 bm project ls --name research
+bm project ls --name research --local
+
+# List cloud project files
+bm project ls --name research --cloud
 
 # List files in subdirectory
-bm project ls --name research --path subfolder
+bm project ls --name research --cloud --path subfolder
 ```
 
 **What happens:**
-1. Connects to cloud via rclone
-2. Lists files in remote project path
+1. Resolves route from flags (or local default when no route is given)
+2. Lists files for the chosen project instance
 3. No files transferred
 
-**Result:** See cloud file listing.
+**Result:** See file listing for the target route.
 
 ## Multiple Projects
 
@@ -390,9 +422,9 @@ bm project ls --name research --path subfolder
 
 ```bash
 # Setup multiple projects
-bm project add research --local-path ~/Documents/research
-bm project add work --local-path ~/work-notes
-bm project add personal --local-path ~/personal
+bm project add research --cloud --local-path ~/Documents/research
+bm project add work --cloud --local-path ~/work-notes
+bm project add personal --cloud --local-path ~/personal
 
 # Establish baselines
 bm project bisync --name research --resync
@@ -417,12 +449,12 @@ bm project bisync --all  # Coming soon
 
 ```bash
 # Projects with sync
-bm project add research --local-path ~/Documents/research
-bm project add work --local-path ~/work
+bm project add research --cloud --local-path ~/Documents/research
+bm project add work --cloud --local-path ~/work
 
 # Cloud-only projects
-bm project add archive
-bm project add temp-notes
+bm project add archive --cloud
+bm project add temp-notes --cloud
 
 # Sync only the configured ones
 bm project bisync --name research
@@ -433,20 +465,101 @@ bm project bisync --name work
 
 **Result:** Fine-grained control over what syncs.
 
-## Disable Cloud Mode
+## Per-Project Cloud Routing (API Key)
 
-Return to local mode:
+Route individual projects through cloud using an API key. This lets you keep some projects local while others route through cloud.
+
+### Setting Up API Key Auth
+
+**Option A: Create a key in the web app, then save it locally:**
+
+```bash
+bm cloud set-key bmc_abc123...
+```
+
+**Option B: Create a key via CLI (requires OAuth login first):**
+
+```bash
+bm cloud login                     # One-time OAuth login
+bm cloud create-key "my-laptop"    # Creates key and saves it locally
+```
+
+The API key is account-level — it grants access to all your cloud projects. It's stored in `~/.basic-memory/config.json` as `cloud_api_key`.
+
+### Setting Project Modes
+
+```bash
+# Route a project through cloud
+bm project set-cloud research
+
+# Revert to local mode
+bm project set-local research
+
+# View project modes
+bm project list
+```
+
+**What happens:**
+- `set-cloud`: validates the API key exists, then sets the project mode to `cloud` in config
+- `set-local`: reverts the project to local mode (removes the mode entry from config)
+- MCP tools and CLI commands for that project will route to `cloud_host/proxy` with the API key as Bearer token
+
+### How It Works
+
+When an MCP tool or CLI command runs for a cloud-mode project:
+
+1. `get_client(project_name="research")` checks the project's mode in config
+2. If mode is `cloud`, creates an HTTP client pointed at `cloud_host/proxy` with `Authorization: Bearer bmc_...`
+3. If mode is `local` (default), uses the in-process ASGI transport as usual
+
+**Routing priority** (highest to lowest):
+1. Factory injection (cloud app, tests)
+2. Explicit route override (`--local` / `--cloud`)
+3. Per-project cloud mode (API key)
+4. Local ASGI transport (default)
+
+Route override environment variables:
+- `BASIC_MEMORY_FORCE_LOCAL=true`
+- `BASIC_MEMORY_FORCE_CLOUD=true`
+- `BASIC_MEMORY_EXPLICIT_ROUTING=true`
+
+No-project, no-flag CLI commands default to local routing.
+
+### Configuration Example
+
+```json
+{
+  "projects": {
+    "personal": "/Users/me/notes",
+    "research": "/Users/me/research"
+  },
+  "project_modes": {
+    "research": "cloud"
+  },
+  "cloud_api_key": "bmc_abc123...",
+  "cloud_host": "https://cloud.basicmemory.com",
+  "default_project": "personal"
+}
+```
+
+In this example, `personal` stays local and `research` routes through cloud. Projects not listed in `project_modes` default to local.
+
+### Sync Behavior
+
+Cloud-mode projects are automatically skipped during local file sync (background sync and file watching). Their files live on the cloud instance, not locally.
+
+## OAuth Logout
 
 ```bash
 bm cloud logout
 ```
 
 **What this does:**
-1. Disables cloud mode in config
-2. All commands now work locally
-3. Auth token remains (can re-enable with login)
+1. Removes stored OAuth token(s)
+2. Does not change per-project route configuration
+3. Does not change command routing defaults
 
-**Result:** All `bm` commands work with local projects again.
+**Result:** OAuth session is cleared. API-key-based routing still works if `cloud_api_key` is configured.
 
 ## Filter Configuration
 
@@ -653,12 +766,20 @@ If instance is down, wait a few minutes and retry.
 
 ## Command Reference
 
-### Cloud Mode Management
+### Cloud Authentication
 
 ```bash
-bm cloud login              # Authenticate and enable cloud mode
-bm cloud logout             # Disable cloud mode
-bm cloud status             # Check cloud mode and instance health
+bm cloud login              # Authenticate and store OAuth credentials
+bm cloud logout             # Remove stored OAuth credentials
+bm cloud status             # Check auth state and instance health
+bm cloud promo --off        # Disable CLI cloud promo notices
+```
+
+### API Key Management
+
+```bash
+bm cloud set-key <key>      # Save a cloud API key (bmc_ prefixed)
+bm cloud create-key <name>  # Create API key via cloud API (requires OAuth login)
 ```
 
 ### Setup
@@ -669,14 +790,20 @@ bm cloud setup              # Install rclone and configure credentials
 
 ### Project Management
 
-When cloud mode is enabled:
-
 ```bash
-bm project list                           # List cloud projects
-bm project add <name>                     # Create cloud project (no sync)
-bm project add <name> --local-path <path> # Create with local sync
+bm project list --local                   # Local project list
+bm project list --cloud                   # Cloud project list
+bm project add <name> --cloud             # Create cloud project (no sync)
+bm project add <name> --cloud --local-path <path> # Create with local sync
 bm project sync-setup <name> <path>       # Add sync to existing project
 bm project rm <name>                      # Delete project
+```
+
+### Per-Project Routing
+
+```bash
+bm project set-cloud <name>  # Route project through cloud (requires API key)
+bm project set-local <name>  # Revert project to local mode
 ```
 
 ### File Synchronization
@@ -697,18 +824,20 @@ bm project bisync --name <project> --verbose
 bm project check --name <project>
 bm project check --name <project> --one-way
 
-# List remote files
-bm project ls --name <project>
-bm project ls --name <project> --path <subpath>
+# List project files by route
+bm project ls --name <project>          # Default target: local
+bm project ls --name <project> --local
+bm project ls --name <project> --cloud
+bm project ls --name <project> --cloud --path <subpath>
 ```
 
 ## Summary
 
 **Basic Memory Cloud uses project-scoped sync:**
 
-1. **Enable cloud mode** - `bm cloud login`
+1. **Authenticate cloud access** - `bm cloud login`
 2. **Install rclone** - `bm cloud setup`
-3. **Add projects with sync** - `bm project add research --local-path ~/Documents/research`
+3. **Add projects with sync** - `bm project add research --cloud --local-path ~/Documents/research`
 4. **Preview first sync** - `bm project bisync --name research --resync --dry-run`
 5. **Establish baseline** - `bm project bisync --name research --resync`
 6. **Daily workflow** - `bm project bisync --name research`

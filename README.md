@@ -9,9 +9,9 @@
 
 ## 🚀 Basic Memory Cloud is Live!
 
-- **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile - seamlessly synced across all your AI tools (Claude, ChatGPT, Gemini, Claude Code, and Codex) 
-- **Early Supporter Pricing:** Early users get 25% off forever. 
-The open source project continues as always. Cloud just makes it work everywhere.
+- **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile.
+- **Cloud is optional.** The local-first open-source workflow continues as always.
+- **OSS discount:** use code `{{OSS_DISCOUNT_CODE}}` for 20% off for 3 months.
 
 [Sign up now →](https://basicmemory.com)
 
@@ -344,52 +344,94 @@ basic-memory sync --watch
 3. Cloud features (optional, requires subscription):
 
 ```bash
-# Authenticate with cloud
+# Authenticate with cloud (stores OAuth token locally)
 basic-memory cloud login
 
-# Bidirectional sync with cloud
-basic-memory cloud sync
+# (Optional) install/configure rclone for file sync commands
+basic-memory cloud setup
 
-# Verify cloud integrity
-basic-memory cloud check
-
-# Mount cloud storage
-basic-memory cloud mount
+# Check cloud auth + health
+basic-memory cloud status
 ```
 
-**Routing Flags** (for users with cloud subscriptions):
+**Per-Project Cloud Routing** (API key based):
 
-When cloud mode is enabled, CLI commands communicate with the cloud API by default. Use routing flags to override this:
+Individual projects can be routed through the cloud while others stay local. This uses an API key for routed
+project calls:
 
 ```bash
-# Force local routing (useful for local MCP server while cloud mode is enabled)
-basic-memory status --local
-basic-memory project list --local
+# Save an API key (create one in the web app or via CLI)
+basic-memory cloud set-key bmc_abc123...
+# Or create one via CLI (requires OAuth login first)
+basic-memory cloud create-key "my-laptop"
 
-# Force cloud routing (when cloud mode is disabled but you want cloud access)
-basic-memory status --cloud
-basic-memory project info my-project --cloud
+# Set a project to route through cloud
+basic-memory project set-cloud research
+
+# Revert a project to local mode
+basic-memory project set-local research
+
+# List projects and route metadata
+basic-memory project list
 ```
 
-The local MCP server (`basic-memory mcp`) automatically uses local routing, so you can use both local Claude Desktop and cloud-based clients simultaneously.
+`basic-memory cloud login` / `basic-memory cloud logout` are authentication commands. They do not change default CLI
+routing behavior.
+
+**Routing Flags**:
+
+Use routing flags to disambiguate command targets:
+
+```bash
+# Force local routing for this command
+basic-memory status --local
+basic-memory project list --local
+basic-memory project ls --name main --local
+
+# Force cloud routing for this command
+basic-memory status --cloud
+basic-memory project info my-project --cloud
+basic-memory project ls --name main --cloud
+```
+
+No-flag behavior defaults to local when no project context is present.
+
+The local MCP server routes per transport: `--transport stdio` honors per-project routing
+(local or cloud), while `--transport streamable-http` and `--transport sse` always route locally.
+
+**CLI Note Editing (`tool edit-note`):**
+
+```bash
+# Append content
+basic-memory tool edit-note project-plan --operation append --content $'\n## Next Steps\n- Finalize rollout'
+
+# Find/replace with replacement count validation
+basic-memory tool edit-note docs/api --operation find_replace --find-text "v0.14.0" --content "v0.15.0" --expected-replacements 2
+
+# Replace a section body
+basic-memory tool edit-note docs/setup --operation replace_section --section "## Installation" --content $'Updated install steps\n- Run just install'
+
+# JSON metadata output for integrations
+basic-memory tool edit-note docs/setup --operation append --content $'\n- Added note' --format json
+```
 
 4. In Claude Desktop, the LLM can now use these tools:
 
 **Content Management:**
 ```
-write_note(title, content, folder, tags) - Create or update notes
-read_note(identifier, page, page_size) - Read notes by title or permalink
+write_note(title, content, folder, tags, output_format="text"|"json") - Create or update notes
+read_note(identifier, page, page_size, output_format="text"|"json") - Read notes by title or permalink
 read_content(path) - Read raw file content (text, images, binaries)
 view_note(identifier) - View notes as formatted artifacts
-edit_note(identifier, operation, content) - Edit notes incrementally
-move_note(identifier, destination_path) - Move notes with database consistency
-delete_note(identifier) - Delete notes from knowledge base
+edit_note(identifier, operation, content, output_format="text"|"json") - Edit notes incrementally
+move_note(identifier, destination_path, output_format="text"|"json") - Move notes with database consistency
+delete_note(identifier, output_format="text"|"json") - Delete notes from knowledge base
 ```
 
 **Knowledge Graph Navigation:**
 ```
-build_context(url, depth, timeframe) - Navigate knowledge graph via memory:// URLs
-recent_activity(type, depth, timeframe) - Find recently updated information
+build_context(url, depth, timeframe, output_format="json"|"text") - Navigate knowledge graph via memory:// URLs
+recent_activity(type, depth, timeframe, output_format="text"|"json") - Find recently updated information
 list_directory(dir_name, depth) - Browse directory contents with filtering
 ```
 
@@ -402,10 +444,19 @@ search_by_metadata(filters, limit, offset, project) - Structured frontmatter sea
 
 **Project Management:**
 ```
-list_memory_projects() - List all available projects
-create_memory_project(project_name, project_path) - Create new projects
+list_memory_projects(output_format="text"|"json") - List all available projects
+create_memory_project(project_name, project_path, output_format="text"|"json") - Create new projects
 get_current_project() - Show current project stats
 sync_status() - Check synchronization status
+```
+
+`output_format` defaults to `"text"` for these tools, preserving current human-readable responses.
+`build_context` defaults to `"json"` and can be switched to `"text"` when compact markdown output is preferred.
+
+**Cloud Discovery (opt-in):**
+```
+cloud_info() - Show optional Cloud overview and setup guidance
+release_notes() - Show latest release notes
 ```
 
 **Visualization:**
@@ -451,7 +502,9 @@ Basic Memory uses [Loguru](https://github.com/Delgan/loguru) for logging. The lo
 |----------|---------|-------------|
 | `BASIC_MEMORY_LOG_LEVEL` | `INFO` | Log level: DEBUG, INFO, WARNING, ERROR |
 | `BASIC_MEMORY_CLOUD_MODE` | `false` | When `true`, API logs to stdout with structured context |
-| `BASIC_MEMORY_FORCE_LOCAL` | `false` | When `true`, forces local API routing (ignores cloud mode) |
+| `BASIC_MEMORY_FORCE_LOCAL` | `false` | When `true`, forces local API routing |
+| `BASIC_MEMORY_FORCE_CLOUD` | `false` | When `true`, forces cloud API routing |
+| `BASIC_MEMORY_EXPLICIT_ROUTING` | `false` | When `true`, marks route selection as explicit (`--local`/`--cloud`) |
 | `BASIC_MEMORY_ENV` | `dev` | Set to `test` for test mode (stderr only) |
 
 ### Examples

@@ -6,7 +6,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 
 from loguru import logger
@@ -20,8 +20,18 @@ from basic_memory.schemas import (
     ProjectStatistics,
     SystemStatus,
 )
-from basic_memory.config import WATCH_STATUS_JSON, ConfigManager, get_project_config, ProjectConfig
+from basic_memory.config import (
+    DatabaseBackend,
+    WATCH_STATUS_JSON,
+    ConfigManager,
+    ProjectEntry,
+    get_project_config,
+    ProjectConfig,
+)
 from basic_memory.utils import generate_permalink
+
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.services.file_service import FileService
 
 
 class ProjectService:
@@ -29,10 +39,13 @@ class ProjectService:
 
     repository: ProjectRepository
 
-    def __init__(self, repository: ProjectRepository):
+    def __init__(
+        self, repository: ProjectRepository, file_service: Optional["FileService"] = None
+    ):
         """Initialize the project service."""
         super().__init__()
         self.repository = repository
+        self.file_service = file_service
 
     @property
     def config_manager(self) -> ConfigManager:
@@ -62,20 +75,20 @@ class ProjectService:
         return self.config_manager.projects
 
     @property
-    def default_project(self) -> str:
+    def default_project(self) -> Optional[str]:
         """Get the name of the default project.
 
         Returns:
-            The name of the default project
+            The name of the default project, or None if not set
         """
         return self.config_manager.default_project
 
     @property
-    def current_project(self) -> str:
+    def current_project(self) -> Optional[str]:
         """Get the name of the currently active project.
 
         Returns:
-            The name of the current project
+            The name of the current project, or None if not set
         """
         return os.environ.get("BASIC_MEMORY_PROJECT", self.config_manager.default_project)
 
@@ -198,9 +211,19 @@ class ProjectService:
                         f"Projects cannot share directory trees."
                     )
 
-        if not self.config_manager.config.cloud_mode:
-            # First add to config file (this will validate the project doesn't exist)
-            self.config_manager.add_project(name, resolved_path)
+        # Ensure the project directory exists on disk.
+        # Trigger: project_root not set means local filesystem mode (not S3/cloud)
+        # Why: FileService (or future S3FileService) provides cloud-compatible directory creation;
+        #      direct Path.mkdir() bypasses this abstraction
+        # Outcome: directory exists before config/DB entries are written
+        if not self.config_manager.config.project_root:
+            if self.file_service is None:
+                raise ValueError("file_service is required for local project directory creation")
+            await self.file_service.ensure_directory(Path(resolved_path))
+
+        # First add to config file (this validates project uniqueness and keeps
+        # config + database aligned for all backends).
+        self.config_manager.add_project(name, resolved_path)
 
         # Then add to database
         project_data = {
@@ -245,7 +268,7 @@ class ProjectService:
         # In cloud mode: database is source of truth
         # In local mode: also check config file
         is_default = project.is_default
-        if not self.config_manager.config.cloud_mode:
+        if self.config_manager.config.database_backend != DatabaseBackend.POSTGRES:
             is_default = is_default or name == self.config_manager.config.default_project
         if is_default:
             raise ValueError(f"Cannot remove the default project '{name}'")  # pragma: no cover
@@ -300,9 +323,8 @@ class ProjectService:
         # Update database
         await self.repository.set_as_default(project.id)
 
-        # Update config file only in local mode (cloud mode uses database only)
-        if not self.config_manager.config.cloud_mode:
-            self.config_manager.set_default_project(name)
+        # Keep config and database default project in sync for all backends.
+        self.config_manager.set_default_project(name)
 
         logger.info(f"Project '{name}' set as default in configuration and database")
 
@@ -340,7 +362,9 @@ class ProjectService:
             # No default project - set the config default as default
             # This is defensive code for edge cases where no default exists
             config_default = self.config_manager.default_project  # pragma: no cover
-            config_project = await self.repository.get_by_name(config_default)  # pragma: no cover
+            config_project = (
+                await self.repository.get_by_name(config_default) if config_default else None
+            )  # pragma: no cover
             if config_project:  # pragma: no cover
                 await self.repository.set_as_default(config_project.id)  # pragma: no cover
                 logger.info(
@@ -364,11 +388,12 @@ class ProjectService:
         db_projects_by_permalink = {p.permalink: p for p in db_projects}
 
         # Get all projects from configuration and normalize names if needed
-        config_projects = self.config_manager.projects.copy()
-        updated_config = {}
+        # Use .config property (not load_config()) so tests can patch ConfigManager.config
+        config = self.config_manager.config
+        updated_config: Dict[str, ProjectEntry] = {}
         config_updated = False
 
-        for name, path in config_projects.items():
+        for name, entry in config.projects.items():
             # Generate normalized name (what the database expects)
             normalized_name = generate_permalink(name)
 
@@ -376,25 +401,24 @@ class ProjectService:
                 logger.info(f"Normalizing project name in config: '{name}' -> '{normalized_name}'")
                 config_updated = True
 
-            updated_config[normalized_name] = path
+            updated_config[normalized_name] = entry
 
         # Update the configuration if any changes were made
         if config_updated:
-            config = self.config_manager.load_config()
             config.projects = updated_config
             self.config_manager.save_config(config)
             logger.info("Config updated with normalized project names")
 
-        # Use the normalized config for further processing
-        config_projects = updated_config
+        # Use the normalized config for further processing — keys are now project names
+        config_project_names = updated_config
 
         # Add projects that exist in config but not in DB
-        for name, path in config_projects.items():
+        for name, entry in config_project_names.items():
             if name not in db_projects_by_permalink:
                 logger.info(f"Adding project '{name}' to database")
                 project_data = {
                     "name": name,
-                    "path": path,
+                    "path": entry.path,
                     "permalink": generate_permalink(name),
                     "is_active": True,
                     # Don't set is_default here - let the enforcement logic handle it
@@ -405,7 +429,7 @@ class ProjectService:
         # Config is the source of truth - if a project was deleted from config,
         # it should be deleted from DB too (fixes issue #193)
         for name, project in db_projects_by_permalink.items():
-            if name not in config_projects:
+            if name not in config_project_names:
                 logger.info(
                     f"Removing project '{name}' from database (deleted from config, source of truth)"
                 )
@@ -451,13 +475,19 @@ class ProjectService:
         if name not in self.config_manager.projects:
             raise ValueError(f"Project '{name}' not found in configuration")
 
-        # Create the new directory if it doesn't exist
-        Path(resolved_path).mkdir(parents=True, exist_ok=True)
+        # Create the new directory if it doesn't exist (skip in cloud mode where storage is S3)
+        # Trigger: project_root not set means local filesystem mode
+        # Why: FileService (or future S3FileService) provides cloud-compatible directory creation
+        # Outcome: destination directory exists before config/DB are updated
+        if not self.config_manager.config.project_root:
+            if self.file_service is None:
+                raise ValueError("file_service is required for local project directory creation")
+            await self.file_service.ensure_directory(Path(resolved_path))
 
         # Update in configuration
         config = self.config_manager.load_config()
-        old_path = config.projects[name]
-        config.projects[name] = resolved_path
+        old_path = config.projects[name].path
+        config.projects[name].path = resolved_path
         self.config_manager.save_config(config)
 
         # Update in database using robust lookup
@@ -468,7 +498,7 @@ class ProjectService:
         else:
             logger.error(f"Project '{name}' exists in config but not in database")
             # Restore the old path in config since DB update failed
-            config.projects[name] = old_path
+            config.projects[name].path = old_path
             self.config_manager.save_config(config)
             raise ValueError(f"Project '{name}' not found in database")
 
@@ -504,7 +534,7 @@ class ProjectService:
 
             # Update in config
             config = self.config_manager.load_config()
-            config.projects[name] = resolved_path
+            config.projects[name].path = resolved_path
             self.config_manager.save_config(config)
 
             # Update in database

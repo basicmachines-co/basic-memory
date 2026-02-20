@@ -2,6 +2,7 @@
 
 import pytest
 from textwrap import dedent
+from types import SimpleNamespace
 
 from basic_memory.markdown.entity_parser import EntityParser
 
@@ -385,3 +386,36 @@ async def test_frontmatter_roundtrip_preserves_user_metadata(tmp_path):
     assert "metadata:" not in output, "Should not have 'metadata:' key in output"
     assert "citekey: authorTitleYear2024" in output, "User's citekey should be preserved"
     assert "type: litnote" in output, "User's type should be preserved"
+
+
+@pytest.mark.asyncio
+async def test_schema_to_markdown_empty_metadata_no_metadata_key():
+    """Regression test: schema_to_markdown with entity_metadata={} must not emit 'metadata:' in YAML.
+
+    The bug was that an empty entity_metadata dict would still call post.metadata.update({}),
+    which is harmless, but prior versions could produce a spurious 'metadata: {}' key via
+    incorrect Post() construction. This test ensures the guard (`if entity_metadata:`) prevents
+    that — an empty dict is falsy and should skip the update entirely.
+    """
+    from basic_memory.markdown.utils import schema_to_markdown
+    from basic_memory.file_utils import dump_frontmatter
+
+    schema = SimpleNamespace(
+        title="Empty Metadata Test",
+        entity_type="note",
+        permalink="empty-metadata-test",
+        content="# Empty Metadata Test\n\nSome content.",
+        entity_metadata={},
+    )
+
+    post = await schema_to_markdown(schema)
+    output = dump_frontmatter(post)
+
+    # The YAML output should NOT contain a 'metadata:' key
+    assert "metadata:" not in output, (
+        f"Empty entity_metadata should not produce 'metadata:' in YAML output.\nGot:\n{output}"
+    )
+    # Should still have the expected frontmatter fields
+    assert "title: Empty Metadata Test" in output
+    assert "type: note" in output
+    assert "permalink: empty-metadata-test" in output

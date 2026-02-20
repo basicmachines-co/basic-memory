@@ -113,7 +113,7 @@ async def test_build_context_nonexistent_urls_return_empty_results(mcp_server, a
             assert len(result.content) == 1
             response = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
             assert '"results":[]' in response  # Empty results
-            assert '"total_results":0' in response  # Zero count
+            assert '"primary_count":0' in response  # Zero count
             assert '"metadata"' in response  # But should have metadata
 
 
@@ -183,6 +183,6 @@ async def test_build_context_pattern_matching_works(mcp_server, app, test_projec
         response = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
         # Should find the pattern matches but not the other note
-        assert '"total_results":2' in response or '"primary_count":2' in response
+        assert '"primary_count":2' in response
         assert "Pattern Test" in response
         assert "Other Note" not in response

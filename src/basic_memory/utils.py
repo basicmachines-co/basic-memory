@@ -7,7 +7,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, Union, runtime_checkable, List
+from typing import Protocol, Union, runtime_checkable, List, Optional
 
 from loguru import logger
 from unidecode import unidecode
@@ -200,6 +200,49 @@ def generate_permalink(file_path: Union[Path, str, PathLike], split_extension: b
         return_val += extension  # pragma: no cover
 
     return return_val
+
+
+def normalize_project_reference(identifier: str) -> str:
+    """Normalize project-prefixed references.
+
+    Converts project namespace syntax ("project::note") to path syntax ("project/note").
+    Leaves non-namespaced identifiers unchanged.
+    """
+    if "::" not in identifier:
+        return identifier
+
+    project, remainder = identifier.split("::", 1)
+    remainder = remainder.lstrip("/")
+    return f"{project}/{remainder}"
+
+
+def build_canonical_permalink(
+    project_permalink: Optional[str],
+    file_path: Union[Path, str, PathLike],
+    include_project: bool = True,
+) -> str:
+    """Build a canonical permalink, optionally prefixed with project slug.
+
+    Args:
+        project_permalink: URL-friendly project identifier (slug). If None, no prefix is added.
+        file_path: Original file path or permalink-like string.
+        include_project: When True, prefix with project slug.
+
+    Returns:
+        Canonical permalink string.
+    """
+    normalized_path = generate_permalink(file_path)
+
+    if not include_project or not project_permalink:
+        return normalized_path
+
+    normalized_project = generate_permalink(project_permalink)
+    if normalized_path == normalized_project or normalized_path.startswith(
+        f"{normalized_project}/"
+    ):
+        return normalized_path
+
+    return f"{normalized_project}/{normalized_path}"
 
 
 def setup_logging(
@@ -445,17 +488,18 @@ def ensure_timezone_aware(dt: datetime, cloud_mode: bool | None = None) -> datet
 
     Args:
         dt: The datetime to ensure is timezone-aware
-        cloud_mode: Optional explicit cloud_mode setting. If None, loads from config.
+        cloud_mode: Optional explicit cloud_mode setting. If None, inferred from
+            configured database backend (Postgres => UTC semantics).
 
     Returns:
         A timezone-aware datetime
     """
     if dt.tzinfo is None:
-        # Determine cloud_mode: use explicit parameter if provided, otherwise load from config
+        # Determine cloud_mode: use explicit parameter if provided, otherwise infer from config.
         if cloud_mode is None:
-            from basic_memory.config import ConfigManager
+            from basic_memory.config import ConfigManager, DatabaseBackend
 
-            cloud_mode = ConfigManager().config.cloud_mode_enabled
+            cloud_mode = ConfigManager().config.database_backend == DatabaseBackend.POSTGRES
 
         if cloud_mode:
             # Cloud/PostgreSQL mode: naive datetimes from asyncpg are already UTC

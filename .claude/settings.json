@@ -1,5 +1,3 @@
 {
-  "enabledPlugins": {
-    "basic-memory@basicmachines": true
-  }
+  "enabledPlugins": {}
 }

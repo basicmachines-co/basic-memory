@@ -1,25 +1,99 @@
 import os
-from contextlib import asynccontextmanager, AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import AsyncIterator, Callable, Optional
 
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
 from basic_memory.api.app import app as fastapi_app
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, ProjectMode
 
 
 def _force_local_mode() -> bool:
-    """Check if local mode is forced via environment variable.
-
-    This allows commands like `bm mcp` to force local routing even when
-    cloud_mode_enabled is True in config. The local MCP server should
-    always talk to the local API, not the cloud proxy.
-
-    Returns:
-        True if BASIC_MEMORY_FORCE_LOCAL is set to a truthy value
-    """
+    """Check if local mode is forced via environment variable."""
     return os.environ.get("BASIC_MEMORY_FORCE_LOCAL", "").lower() in ("true", "1", "yes")
+
+
+def _force_cloud_mode() -> bool:
+    """Check if cloud mode is forced via environment variable."""
+    return os.environ.get("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes")
+
+
+def _explicit_routing() -> bool:
+    """Check if CLI --local/--cloud flag was explicitly passed."""
+    return os.environ.get("BASIC_MEMORY_EXPLICIT_ROUTING", "").lower() in ("true", "1", "yes")
+
+
+def _build_timeout() -> Timeout:
+    """Create a standard timeout config used across all clients."""
+    return Timeout(
+        connect=10.0,
+        read=30.0,
+        write=30.0,
+        pool=30.0,
+    )
+
+
+def _asgi_client(timeout: Timeout) -> AsyncClient:
+    """Create a local ASGI client."""
+    return AsyncClient(
+        transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
+    )
+
+
+async def _resolve_cloud_token(config) -> str:
+    """Resolve cloud token with API key preferred, OAuth fallback."""
+    token = config.cloud_api_key
+    if token:
+        return token
+
+    from basic_memory.cli.auth import CLIAuth
+
+    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+    token = await auth.get_valid_token()
+    if token:
+        return token
+
+    raise RuntimeError(
+        "Cloud routing requested but no credentials found. "
+        "Run 'bm cloud set-key <key>' or 'bm cloud login' first."
+    )
+
+
+@asynccontextmanager
+async def _cloud_client(
+    config,
+    timeout: Timeout,
+    workspace: Optional[str] = None,
+) -> AsyncIterator[AsyncClient]:
+    """Create a cloud proxy client with resolved credentials."""
+    token = await _resolve_cloud_token(config)
+    proxy_base_url = f"{config.cloud_host}/proxy"
+    headers = {"Authorization": f"Bearer {token}"}
+    if workspace:
+        headers["X-Workspace-ID"] = workspace
+    logger.info(f"Creating HTTP client for cloud proxy at: {proxy_base_url}")
+    async with AsyncClient(
+        base_url=proxy_base_url,
+        headers=headers,
+        timeout=timeout,
+    ) as client:
+        yield client
+
+
+@asynccontextmanager
+async def get_cloud_control_plane_client() -> AsyncIterator[AsyncClient]:
+    """Create a control-plane cloud client for endpoints outside /proxy."""
+    config = ConfigManager().config
+    timeout = _build_timeout()
+    token = await _resolve_cloud_token(config)
+    logger.info(f"Creating HTTP client for cloud control plane at: {config.cloud_host}")
+    async with AsyncClient(
+        base_url=config.cloud_host,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout,
+    ) as client:
+        yield client
 
 
 # Optional factory override for dependency injection
@@ -27,143 +101,90 @@ _client_factory: Optional[Callable[[], AbstractAsyncContextManager[AsyncClient]]
 
 
 def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncClient]]) -> None:
-    """Override the default client factory (for cloud app, testing, etc).
-
-    Args:
-        factory: An async context manager that yields an AsyncClient
-
-    Example:
-        @asynccontextmanager
-        async def custom_client_factory():
-            async with AsyncClient(...) as client:
-                yield client
-
-        set_client_factory(custom_client_factory)
-    """
+    """Override the default client factory (for cloud app, testing, etc)."""
     global _client_factory
     _client_factory = factory
 
 
 @asynccontextmanager
-async def get_client() -> AsyncIterator[AsyncClient]:
+async def get_client(
+    project_name: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> AsyncIterator[AsyncClient]:
     """Get an AsyncClient as a context manager.
 
-    This function provides proper resource management for HTTP clients,
-    ensuring connections are closed after use. It supports three modes:
-
-    1. **Factory injection** (cloud app, tests):
-       If a custom factory is set via set_client_factory(), use that.
-
-    2. **CLI cloud mode**:
-       When cloud_mode_enabled is True, create HTTP client with auth
-       token from CLIAuth for requests to cloud proxy endpoint.
-
-    3. **Local mode** (default):
-       Use ASGI transport for in-process requests to local FastAPI app.
-
-    Usage:
-        async with get_client() as client:
-            response = await client.get("/path")
-
-    Yields:
-        AsyncClient: Configured HTTP client for the current mode
-
-    Raises:
-        RuntimeError: If cloud mode is enabled but user is not authenticated
+    Routing priority:
+    1. Factory injection.
+    2. Explicit routing flags (--local/--cloud).
+    3. Per-project mode routing when project_name is provided.
+    4. Local ASGI transport by default.
     """
     if _client_factory:
-        # Use injected factory (cloud app, tests)
         async with _client_factory() as client:
             yield client
-    else:
-        # Default: create based on config
-        config = ConfigManager().config
-        timeout = Timeout(
-            connect=10.0,  # 10 seconds for connection
-            read=30.0,  # 30 seconds for reading response
-            write=30.0,  # 30 seconds for writing request
-            pool=30.0,  # 30 seconds for connection pool
-        )
+        return
 
-        # Trigger: BASIC_MEMORY_FORCE_LOCAL env var is set
-        # Why: allows local MCP server and CLI commands to route locally
-        #      even when cloud_mode_enabled is True
-        # Outcome: uses ASGI transport for in-process local API calls
+    config = ConfigManager().config
+    timeout = _build_timeout()
+
+    # --- Explicit routing override ---
+    # Trigger: user passed --local/--cloud.
+    # Why: command-level override should be deterministic and bypass project mode.
+    # Outcome: route strictly based on explicit flag.
+    if _explicit_routing():
         if _force_local_mode():
-            logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-            ) as client:
+            logger.info("Explicit local routing enabled - using ASGI client")
+            async with _asgi_client(timeout) as client:
                 yield client
-        elif config.cloud_mode_enabled:
-            # CLI cloud mode: inject auth when creating client
-            from basic_memory.cli.auth import CLIAuth
+            return
 
-            auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-            token = await auth.get_valid_token()
+        if _force_cloud_mode():
+            logger.info("Explicit cloud routing enabled - using cloud proxy client")
+            async with _cloud_client(config, timeout, workspace=workspace) as client:
+                yield client
+            return
 
-            if not token:
+    # --- Per-project routing ---
+    # Trigger: project_name provided without explicit routing override.
+    # Why: project mode is the source of truth for project-scoped commands.
+    # Outcome: route via project.mode (CLOUD/LOCAL).
+    if project_name is not None and not _explicit_routing():
+        project_mode = config.get_project_mode(project_name)
+        if project_mode == ProjectMode.CLOUD:
+            logger.info(f"Project '{project_name}' is cloud mode - using cloud proxy client")
+            try:
+                async with _cloud_client(config, timeout, workspace=workspace) as client:
+                    yield client
+            except RuntimeError as exc:
                 raise RuntimeError(
-                    "Cloud mode enabled but not authenticated. "
-                    "Run 'basic-memory cloud login' first."
-                )
+                    f"Project '{project_name}' is set to cloud mode but no credentials found. "
+                    "Run 'bm cloud set-key <key>' or 'bm cloud login' first."
+                ) from exc
+            return
 
-            # Auth header set ONCE at client creation
-            proxy_base_url = f"{config.cloud_host}/proxy"
-            logger.info(f"Creating HTTP client for cloud proxy at: {proxy_base_url}")
-            async with AsyncClient(
-                base_url=proxy_base_url,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=timeout,
-            ) as client:
-                yield client
-        else:
-            # Local mode: ASGI transport for in-process calls
-            # Note: ASGI transport does NOT trigger FastAPI lifespan, so no special handling needed
-            logger.info("Creating ASGI client for local Basic Memory API")
-            async with AsyncClient(
-                transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-            ) as client:
-                yield client
+        logger.info(f"Project '{project_name}' is local mode - using ASGI client")
+        async with _asgi_client(timeout) as client:
+            yield client
+        return
+
+    # --- Default fallback ---
+    logger.info("Default routing - using ASGI client for local Basic Memory API")
+    async with _asgi_client(timeout) as client:
+        yield client
 
 
 def create_client() -> AsyncClient:
-    """Create an HTTP client based on configuration.
+    """Create an HTTP client based on explicit routing flags.
 
     DEPRECATED: Use get_client() context manager instead for proper resource management.
-
-    This function is kept for backward compatibility but will be removed in a future version.
-    The returned client should be closed manually by calling await client.aclose().
-
-    Returns:
-        AsyncClient configured for either local ASGI or remote proxy
     """
-    config_manager = ConfigManager()
-    config = config_manager.config
+    timeout = _build_timeout()
 
-    # Configure timeout for longer operations like write_note
-    # Default httpx timeout is 5 seconds which is too short for file operations
-    timeout = Timeout(
-        connect=10.0,  # 10 seconds for connection
-        read=30.0,  # 30 seconds for reading response
-        write=30.0,  # 30 seconds for writing request
-        pool=30.0,  # 30 seconds for connection pool
-    )
-
-    # Check force local first (for local MCP server and CLI --local flag)
-    if _force_local_mode():
-        logger.info("Force local mode enabled - using ASGI client for local Basic Memory API")
-        return AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-        )
-    elif config.cloud_mode_enabled:
-        # Use HTTP transport to proxy endpoint
-        proxy_base_url = f"{config.cloud_host}/proxy"
-        logger.info(f"Creating HTTP client for proxy at: {proxy_base_url}")
-        return AsyncClient(base_url=proxy_base_url, timeout=timeout)
-    else:
-        # Default: use ASGI transport for local API (development mode)
+    if _force_local_mode() or not _force_cloud_mode():
         logger.info("Creating ASGI client for local Basic Memory API")
-        return AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test", timeout=timeout
-        )
+        return _asgi_client(timeout)
+
+    logger.info("Creating HTTP client for cloud proxy (legacy create_client path)")
+    config = ConfigManager().config
+    proxy_base_url = f"{config.cloud_host}/proxy"
+    return AsyncClient(base_url=proxy_base_url, timeout=timeout)

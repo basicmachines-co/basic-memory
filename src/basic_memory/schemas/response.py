@@ -195,6 +195,7 @@ class EntityResponse(SQLAlchemyModel):
     entity_metadata: Optional[Dict] = None
     checksum: Optional[str] = None
     content_type: ContentType
+    external_id: Optional[str] = None
     observations: List[ObservationResponse] = []
     relations: List[RelationResponse] = []
     created_at: datetime

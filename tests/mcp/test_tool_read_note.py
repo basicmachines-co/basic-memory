@@ -5,7 +5,6 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.mcp.tools import write_note, read_note
-from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItemType
 from basic_memory.utils import normalize_newlines
 
 
@@ -43,11 +42,11 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
     direct_identifier = memory_url_path("Fallback Title Note")
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
-        async def resolve_entity(self, identifier: str) -> int:
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
                 raise RuntimeError("force direct lookup failure")
-            return await super().resolve_entity(identifier)
+            return await super().resolve_entity(identifier, strict=strict)
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
 
@@ -68,34 +67,34 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 
     async def fake_search_notes_fn(*, query, search_type, **kwargs):
         if search_type == "title":
-            return SearchResponse(results=[], current_page=1, page_size=10)
+            return {"results": [], "current_page": 1, "page_size": 10}
 
-        return SearchResponse(
-            results=[
-                SearchResult(
-                    title="Related One",
-                    permalink="docs/related-one",
-                    content="",
-                    type=SearchItemType.ENTITY,
-                    score=1.0,
-                    file_path="docs/related-one.md",
-                ),
-                SearchResult(
-                    title="Related Two",
-                    permalink="docs/related-two",
-                    content="",
-                    type=SearchItemType.ENTITY,
-                    score=0.9,
-                    file_path="docs/related-two.md",
-                ),
+        return {
+            "results": [
+                {
+                    "title": "Related One",
+                    "permalink": "docs/related-one",
+                    "content": "",
+                    "type": "entity",
+                    "score": 1.0,
+                    "file_path": "docs/related-one.md",
+                },
+                {
+                    "title": "Related Two",
+                    "permalink": "docs/related-two",
+                    "content": "",
+                    "type": "entity",
+                    "score": 0.9,
+                    "file_path": "docs/related-two.md",
+                },
             ],
-            current_page=1,
-            page_size=10,
-        )
+            "current_page": 1,
+            "page_size": 10,
+        }
 
     # Ensure direct resolution doesn't short-circuit the fallback logic.
     class FailingKnowledgeClient(OriginalKnowledgeClient):
-        async def resolve_entity(self, identifier: str) -> int:
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
             raise RuntimeError("force fallback")
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
@@ -105,6 +104,55 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
     assert "I couldn't find an exact match" in result
     assert "## 1. Related One" in result
     assert "## 2. Related Two" in result
+
+
+@pytest.mark.asyncio
+async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, app, test_project):
+    """Do not fetch note content when title-search returns only fuzzy matches."""
+    await write_note.fn(
+        project=test_project.name,
+        title="Existing Note",
+        directory="test",
+        content="existing note content",
+    )
+
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    OriginalKnowledgeClient = clients_mod.KnowledgeClient
+
+    class StrictFailingKnowledgeClient(OriginalKnowledgeClient):
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> int:
+            if strict:
+                raise RuntimeError("force strict direct lookup failure")
+            return await super().resolve_entity(identifier, strict=strict)
+
+    async def fake_search_notes_fn(*, query, search_type, **kwargs):
+        if search_type == "title":
+            return {
+                "results": [
+                    {
+                        "title": "Existing Note",
+                        "permalink": "test/existing-note",
+                        "content": "",
+                        "type": "entity",
+                        "score": 1.0,
+                        "file_path": "test/Existing Note.md",
+                    }
+                ],
+                "current_page": 1,
+                "page_size": 10,
+            }
+        return {"results": [], "current_page": 1, "page_size": 10}
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", StrictFailingKnowledgeClient)
+    monkeypatch.setattr(read_note_module.search_notes, "fn", fake_search_notes_fn)
+
+    result = await read_note.fn("Missing Exact Title", project=test_project.name)
+    assert "Note Not Found" in result
+    assert "Missing Exact Title" in result
+    assert "existing note content" not in result
 
 
 @pytest.mark.asyncio
@@ -119,7 +167,7 @@ async def test_note_unicode_content(app, test_project):
     assert "# Created note" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Unicode Test.md" in result
-    assert "permalink: test/unicode-test" in result
+    assert f"permalink: {test_project.name}/test/unicode-test" in result
     assert "checksum:" in result  # Checksum exists but may be "unknown"
 
     # Read back should preserve unicode
@@ -199,6 +247,21 @@ async def test_read_note_memory_url(app, test_project):
     memory_url = "memory://test/memory-url-test"
     content = await read_note.fn(memory_url, project=test_project.name)
     assert "Testing memory:// URL handling" in content
+
+
+@pytest.mark.asyncio
+async def test_read_note_memory_url_with_project_prefix(app, test_project):
+    """Test reading a note using a memory:// URL with explicit project prefix."""
+    await write_note.fn(
+        project=test_project.name,
+        title="Project Prefixed Memory URL Test",
+        directory="test",
+        content="Testing memory:// URL handling with project prefix",
+    )
+
+    memory_url = f"memory://{test_project.name}/test/project-prefixed-memory-url-test"
+    content = await read_note.fn(memory_url)
+    assert "Testing memory:// URL handling with project prefix" in content
 
 
 class TestReadNoteSecurityValidation:

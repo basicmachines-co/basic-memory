@@ -2,9 +2,10 @@
 
 import json
 import sys
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
 import typer
+import yaml
 from loguru import logger
 from rich import print as rprint
 
@@ -12,9 +13,8 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import KnowledgeClient, ResourceClient
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas.base import Entity, TimeFrame
 from basic_memory.schemas.memory import GraphContext, MemoryUrl, memory_url_path
@@ -24,10 +24,8 @@ from basic_memory.schemas.search import SearchItemType
 from basic_memory.mcp.prompts.continue_conversation import (
     continue_conversation as mcp_continue_conversation,
 )
-from basic_memory.mcp.prompts.recent_activity import (
-    recent_activity_prompt as recent_activity_prompt,
-)
 from basic_memory.mcp.tools import build_context as mcp_build_context
+from basic_memory.mcp.tools import edit_note as mcp_edit_note
 from basic_memory.mcp.tools import read_note as mcp_read_note
 from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
 from basic_memory.mcp.tools import search_notes as mcp_search
@@ -36,6 +34,60 @@ from basic_memory.mcp.tools import write_note as mcp_write_note
 tool_app = typer.Typer()
 app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 
+VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
+
+
+# --- Frontmatter helpers ---
+
+
+def _parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]:
+    """Parse and strip an opening YAML frontmatter block if valid.
+
+    Returns a tuple of (body_content_or_original, parsed_frontmatter_or_none).
+
+    Behavior:
+    - Only parses frontmatter if the first line is an opening '---' delimiter.
+    - Requires a closing '---' delimiter.
+    - Accepts mapping YAML only; malformed or non-mapping YAML is ignored.
+    - Supports UTF-8 BOM at document start.
+    """
+    if not content:
+        return content, None
+
+    original_content = content
+    if content.startswith("\ufeff"):
+        content = content[1:]
+
+    lines = content.splitlines(keepends=True)
+    if not lines:
+        return original_content, None
+
+    if lines[0].rstrip("\r\n").strip() != "---":
+        return original_content, None
+
+    closing_index = None
+    for index in range(1, len(lines)):
+        if lines[index].rstrip("\r\n").strip() == "---":
+            closing_index = index
+            break
+
+    if closing_index is None:
+        return original_content, None
+
+    frontmatter_text = "".join(lines[1:closing_index])
+    try:
+        parsed = yaml.safe_load(frontmatter_text) if frontmatter_text else {}
+    except yaml.YAMLError:
+        return original_content, None
+
+    if parsed is None:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        return original_content, None
+
+    body_content = "".join(lines[closing_index + 1 :])
+    return body_content, parsed
+
 
 # --- JSON output helpers ---
 # These async functions bypass the MCP tool (which returns formatted strings)
@@ -43,15 +95,26 @@ app.add_typer(tool_app, name="tool", help="Access to MCP tools via CLI")
 
 
 async def _write_note_json(
-    title: str, content: str, folder: str, project_name: Optional[str], tags: Optional[List[str]]
+    title: str,
+    content: str,
+    folder: str,
+    project_name: Optional[str],
+    workspace: Optional[str],
+    tags: Optional[List[str]],
 ) -> dict:
     """Write a note and return structured JSON metadata."""
     # Use the MCP tool to create/update the entity (handles create-or-update logic)
-    await mcp_write_note.fn(title, content, folder, project_name, tags)
+    await mcp_write_note.fn(
+        title=title,
+        content=content,
+        directory=folder,
+        project=project_name,
+        workspace=workspace,
+        tags=tags,
+    )
 
     # Resolve the entity to get metadata back
-    async with get_client() as client:
-        active_project = await get_active_project(client, project_name)
+    async with get_project_client(project_name, workspace) as (client, active_project):
         knowledge_client = KnowledgeClient(client, active_project.external_id)
 
         entity = Entity(title=title, directory=folder)
@@ -69,11 +132,14 @@ async def _write_note_json(
 
 
 async def _read_note_json(
-    identifier: str, project_name: Optional[str], page: int, page_size: int
+    identifier: str,
+    project_name: Optional[str],
+    workspace: Optional[str],
+    page: int,
+    page_size: int,
 ) -> dict:
     """Read a note and return structured JSON with content and metadata."""
-    async with get_client() as client:
-        active_project = await get_active_project(client, project_name)
+    async with get_project_client(project_name, workspace) as (client, active_project):
         knowledge_client = KnowledgeClient(client, active_project.external_id)
         resource_client = ResourceClient(client, active_project.external_id)
 
@@ -90,12 +156,18 @@ async def _read_note_json(
             from basic_memory.mcp.tools.search import search_notes as mcp_search_tool
 
             title_results = await mcp_search_tool.fn(
-                query=identifier, search_type="title", project=project_name
+                query=identifier,
+                search_type="title",
+                project=project_name,
+                workspace=workspace,
+                output_format="json",
             )
-            if title_results and hasattr(title_results, "results") and title_results.results:
-                result = title_results.results[0]
-                if result.permalink:
-                    entity_id = await knowledge_client.resolve_entity(result.permalink)
+            results = title_results.get("results", []) if isinstance(title_results, dict) else []
+            if results:
+                result = results[0]
+                permalink = result.get("permalink")
+                if permalink:
+                    entity_id = await knowledge_client.resolve_entity(permalink)
 
         if entity_id is None:
             raise ValueError(f"Could not find note matching: {identifier}")
@@ -111,16 +183,72 @@ async def _read_note_json(
         }
 
 
+async def _edit_note_json(
+    identifier: str,
+    operation: str,
+    content: str,
+    project_name: Optional[str],
+    workspace: Optional[str],
+    section: Optional[str],
+    find_text: Optional[str],
+    expected_replacements: int,
+) -> dict:
+    """Edit a note and return structured JSON metadata."""
+    async with get_project_client(project_name, workspace) as (client, active_project):
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+        entity_id = await knowledge_client.resolve_entity(identifier)
+
+        edit_data: dict[str, Any] = {
+            "operation": operation,
+            "content": content,
+            "expected_replacements": expected_replacements,
+        }
+        if section:
+            edit_data["section"] = section
+        if find_text:
+            edit_data["find_text"] = find_text
+
+        result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
+        return {
+            "title": result.title,
+            "permalink": result.permalink,
+            "file_path": result.file_path,
+            "operation": operation,
+            "checksum": result.checksum,
+        }
+
+
+def _validate_edit_note_args(
+    operation: str, find_text: Optional[str], section: Optional[str]
+) -> None:
+    """Validate operation-specific required arguments for edit-note."""
+    if operation not in VALID_EDIT_OPERATIONS:
+        raise ValueError(
+            f"Invalid operation '{operation}'. Must be one of: {', '.join(VALID_EDIT_OPERATIONS)}"
+        )
+    if operation == "find_replace" and not find_text:
+        raise ValueError("find_text parameter is required for find_replace operation")
+    if operation == "replace_section" and not section:
+        raise ValueError("section parameter is required for replace_section operation")
+
+
+def _is_edit_note_failure_response(result: str) -> bool:
+    """Check whether the MCP edit_note text response indicates a failed edit."""
+    return result.lstrip().startswith("# Edit Failed")
+
+
 async def _recent_activity_json(
     type: Optional[List[SearchItemType]],
     depth: Optional[int],
     timeframe: Optional[TimeFrame],
     project_name: Optional[str] = None,
+    workspace: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
 ) -> list:
     """Get recent activity and return structured JSON list."""
-    async with get_client() as client:
+    async with get_project_client(project_name, workspace) as (client, active_project):
         # Build query params matching the MCP tool's logic
         params: dict = {"page": page, "page_size": page_size, "max_related": 10}
         if depth:
@@ -130,7 +258,6 @@ async def _recent_activity_json(
         if type:
             params["type"] = [t.value for t in type]
 
-        active_project = await get_active_project(client, project_name)
         response = await call_get(
             client,
             f"/v2/projects/{active_project.external_id}/memory/recent",
@@ -163,6 +290,10 @@ def write_note(
         typer.Option(
             help="The project to write to. If not provided, the default project will be used."
         ),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
     ] = None,
     content: Annotated[
         Optional[str],
@@ -251,12 +382,19 @@ def write_note(
         with force_routing(local=local, cloud=cloud):
             if format == "json":
                 result = run_with_cleanup(
-                    _write_note_json(title, content, folder, project_name, tags)
+                    _write_note_json(title, content, folder, project_name, workspace, tags)
                 )
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
                 note = run_with_cleanup(
-                    mcp_write_note.fn(title, content, folder, project_name, tags)
+                    mcp_write_note.fn(
+                        title=title,
+                        content=content,
+                        directory=folder,
+                        project=project_name,
+                        workspace=workspace,
+                        tags=tags,
+                    )
                 )
                 rprint(note)
     except ValueError as e:
@@ -278,9 +416,21 @@ def read_note(
             help="The project to use for the note. If not provided, the default project will be used."
         ),
     ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
     page: int = 1,
     page_size: int = 10,
     format: str = typer.Option("text", "--format", help="Output format: text or json"),
+    strip_frontmatter: bool = typer.Option(
+        False,
+        "--strip-frontmatter",
+        help=(
+            "Strip opening YAML frontmatter from content. "
+            "JSON output includes parsed frontmatter under 'frontmatter'."
+        ),
+    ),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -290,6 +440,7 @@ def read_note(
 
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
+    Use --strip-frontmatter to return body-only markdown content.
     """
     try:
         validate_routing_flags(local, cloud)
@@ -309,11 +460,25 @@ def read_note(
         with force_routing(local=local, cloud=cloud):
             if format == "json":
                 result = run_with_cleanup(
-                    _read_note_json(identifier, project_name, page, page_size)
+                    _read_note_json(identifier, project_name, workspace, page, page_size)
                 )
+                stripped_content, parsed_frontmatter = _parse_opening_frontmatter(result["content"])
+                result["frontmatter"] = parsed_frontmatter
+                if strip_frontmatter:
+                    result["content"] = stripped_content
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
-                note = run_with_cleanup(mcp_read_note.fn(identifier, project_name, page, page_size))
+                note = run_with_cleanup(
+                    mcp_read_note.fn(
+                        identifier=identifier,
+                        project=project_name,
+                        workspace=workspace,
+                        page=page,
+                        page_size=page_size,
+                    )
+                )
+                if strip_frontmatter:
+                    note, _ = _parse_opening_frontmatter(note)
                 rprint(note)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -326,11 +491,110 @@ def read_note(
 
 
 @tool_app.command()
+def edit_note(
+    identifier: str,
+    operation: Annotated[str, typer.Option("--operation", help="Edit operation to apply")],
+    content: Annotated[str, typer.Option("--content", help="Content for the edit operation")],
+    project: Annotated[
+        Optional[str],
+        typer.Option(
+            help="The project to edit. If not provided, the default project will be used."
+        ),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    find_text: Annotated[
+        Optional[str], typer.Option("--find-text", help="Text to find for find_replace operation")
+    ] = None,
+    section: Annotated[
+        Optional[str],
+        typer.Option("--section", help="Section heading for replace_section operation"),
+    ] = None,
+    expected_replacements: int = typer.Option(
+        1,
+        "--expected-replacements",
+        help="Expected replacement count for find_replace operation",
+    ),
+    format: str = typer.Option("text", "--format", help="Output format: text or json"),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Edit an existing markdown note using append/prepend/find_replace/replace_section.
+
+    Use --local to force local routing when cloud mode is enabled.
+    Use --cloud to force cloud routing when cloud mode is disabled.
+    """
+    try:
+        validate_routing_flags(local, cloud)
+        _validate_edit_note_args(operation, find_text, section)
+
+        # look for the project in the config
+        config_manager = ConfigManager()
+        project_name = None
+        if project is not None:
+            project_name, _ = config_manager.get_project(project)
+            if not project_name:
+                typer.echo(f"No project found named: {project}", err=True)
+                raise typer.Exit(1)
+
+        # use the project name, or the default from the config
+        project_name = project_name or config_manager.default_project
+
+        with force_routing(local=local, cloud=cloud):
+            if format == "json":
+                result = run_with_cleanup(
+                    _edit_note_json(
+                        identifier=identifier,
+                        operation=operation,
+                        content=content,
+                        project_name=project_name,
+                        workspace=workspace,
+                        section=section,
+                        find_text=find_text,
+                        expected_replacements=expected_replacements,
+                    )
+                )
+                print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+            else:
+                result = run_with_cleanup(
+                    mcp_edit_note.fn(
+                        identifier=identifier,
+                        operation=operation,
+                        content=content,
+                        project=project_name,
+                        workspace=workspace,
+                        section=section,
+                        find_text=find_text,
+                        expected_replacements=expected_replacements,
+                    )
+                )
+                rprint(result)
+                if _is_edit_note_failure_response(result):
+                    raise typer.Exit(1)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during edit_note: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command()
 def build_context(
     url: MemoryUrl,
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
     ] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
@@ -364,19 +628,23 @@ def build_context(
         project_name = project_name or config_manager.default_project
 
         with force_routing(local=local, cloud=cloud):
-            context = run_with_cleanup(
+            result = run_with_cleanup(
                 mcp_build_context.fn(
                     project=project_name,
+                    workspace=workspace,
                     url=url,
                     depth=depth,
                     timeframe=timeframe,
                     page=page,
                     page_size=page_size,
                     max_related=max_related,
+                    output_format="text" if format == "text" else "json",
                 )
             )
-        context_dict = context.model_dump(exclude_none=True)
-        print(json.dumps(context_dict, indent=2, ensure_ascii=True, default=str))
+        if format == "json":
+            print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+        else:
+            print(result)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -393,6 +661,10 @@ def recent_activity(
     project: Annotated[
         Optional[str],
         typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
     ] = None,
     depth: Optional[int] = 1,
     timeframe: Optional[TimeFrame] = "7d",
@@ -427,7 +699,15 @@ def recent_activity(
         with force_routing(local=local, cloud=cloud):
             if format == "json":
                 result = run_with_cleanup(
-                    _recent_activity_json(type, depth, timeframe, project_name, page, page_size)
+                    _recent_activity_json(
+                        type=type,
+                        depth=depth,
+                        timeframe=timeframe,
+                        project_name=project_name,
+                        workspace=workspace,
+                        page=page,
+                        page_size=page_size,
+                    )
                 )
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
@@ -437,6 +717,7 @@ def recent_activity(
                         depth=depth,
                         timeframe=timeframe,
                         project=project_name,
+                        workspace=workspace,
                     )
                 )
                 # The tool returns a formatted string directly
@@ -459,11 +740,17 @@ def search_notes(
     ] = "",
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
+    vector: Annotated[bool, typer.Option("--vector", help="Use vector retrieval")] = False,
+    hybrid: Annotated[bool, typer.Option("--hybrid", help="Use hybrid retrieval")] = False,
     project: Annotated[
         Optional[str],
         typer.Option(
             help="The project to use for the note. If not provided, the default project will be used."
         ),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
     ] = None,
     after_date: Annotated[
         Optional[str],
@@ -480,6 +767,13 @@ def search_notes(
     note_types: Annotated[
         Optional[List[str]],
         typer.Option("--type", help="Filter by frontmatter type (repeatable)"),
+    ] = None,
+    entity_types: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--entity-type",
+            help="Filter by search item type: entity, observation, relation (repeatable)",
+        ),
     ] = None,
     meta: Annotated[
         Optional[List[str]],
@@ -516,9 +810,10 @@ def search_notes(
         # use the project name, or the default from the config
         project_name = project_name or config_manager.default_project
 
-        if permalink and title:  # pragma: no cover
+        mode_flags = [permalink, title, vector, hybrid]
+        if sum(1 for enabled in mode_flags if enabled) > 1:  # pragma: no cover
             typer.echo(
-                "Use either --permalink or --title, not both. Exiting.",
+                "Use only one mode flag: --permalink, --title, --vector, or --hybrid. Exiting.",
                 err=True,
             )
             raise typer.Exit(1)
@@ -552,30 +847,40 @@ def search_notes(
         if not metadata_filters:
             metadata_filters = None
 
-        # set search type
-        search_type = "text"
+        # set search type (None delegates to MCP tool default selection)
+        search_type: str | None = None
         if permalink:
             search_type = "permalink"
             if query and "*" in query:
                 search_type = "permalink"
         if title:
             search_type = "title"
+        if vector:
+            search_type = "vector"
+        if hybrid:
+            search_type = "hybrid"
 
         with force_routing(local=local, cloud=cloud):
             results = run_with_cleanup(
                 mcp_search.fn(
-                    query or "",
-                    project_name,
+                    query=query or "",
+                    project=project_name,
+                    workspace=workspace,
                     search_type=search_type,
                     page=page,
                     after_date=after_date,
                     page_size=page_size,
                     types=note_types,
+                    entity_types=entity_types,
                     metadata_filters=metadata_filters,
                     tags=tags,
                     status=status,
                 )
             )
+        if isinstance(results, str):
+            print(results)
+            raise typer.Exit(1)
+
         results_dict = results.model_dump(exclude_none=True)
         print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:
@@ -623,22 +928,3 @@ def continue_conversation(
             typer.echo(f"Error continuing conversation: {e}", err=True)
             raise typer.Exit(1)
         raise
-
-
-# @tool_app.command(name="show-recent-activity")
-# def show_recent_activity(
-#     timeframe: Annotated[
-#         str, typer.Option(help="How far back to look for activity")
-#     ] = "7d",
-# ):
-#     """Prompt to show recent activity."""
-#     try:
-#         # Prompt functions return formatted strings directly
-#         session = asyncio.run(recent_activity_prompt(timeframe=timeframe))
-#         rprint(session)
-#     except Exception as e:  # pragma: no cover
-#         if not isinstance(e, typer.Exit):
-#             logger.exception("Error continuing conversation", e)
-#             typer.echo(f"Error continuing conversation: {e}", err=True)
-#             raise typer.Exit(1)
-#         raise

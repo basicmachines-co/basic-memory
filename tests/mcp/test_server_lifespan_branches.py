@@ -5,10 +5,9 @@ from basic_memory.mcp.server import lifespan, mcp
 
 
 @pytest.mark.asyncio
-async def test_mcp_lifespan_sync_disabled_branch(config_manager, monkeypatch):
+async def test_mcp_lifespan_sync_disabled_branch(config_manager):
     cfg = config_manager.load_config()
     cfg.sync_changes = False
-    cfg.cloud_mode = False
     config_manager.save_config(cfg)
 
     async with lifespan(mcp):
@@ -16,10 +15,9 @@ async def test_mcp_lifespan_sync_disabled_branch(config_manager, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mcp_lifespan_cloud_mode_branch(config_manager):
+async def test_mcp_lifespan_sync_enabled_branch(config_manager):
     cfg = config_manager.load_config()
     cfg.sync_changes = True
-    cfg.cloud_mode = True
     config_manager.save_config(cfg)
 
     async with lifespan(mcp):

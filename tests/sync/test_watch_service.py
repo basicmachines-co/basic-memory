@@ -494,7 +494,9 @@ async def test_handle_changes_skips_deleted_project(
 
     # Also add to config
     config = project_service.config_manager.load_config()
-    config.projects["other-project"] = other_project_path
+    from basic_memory.config import ProjectEntry
+
+    config.projects["other-project"] = ProjectEntry(path=other_project_path)
     config.default_project = "other-project"
     project_service.config_manager.save_config(config)
 

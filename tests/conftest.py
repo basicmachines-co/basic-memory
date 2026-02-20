@@ -78,7 +78,8 @@ def postgres_container(db_backend):
         yield None
         return
 
-    with PostgresContainer("postgres:16-alpine") as postgres:
+    # Use pgvector image so CREATE EXTENSION vector succeeds in search repository
+    with PostgresContainer("pgvector/pgvector:pg16") as postgres:
         yield postgres
 
 
@@ -421,9 +422,17 @@ async def search_repository(session_maker, test_project: Project, app_config: Ba
     from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 
     if app_config.database_backend == DatabaseBackend.POSTGRES:
-        return PostgresSearchRepository(session_maker, project_id=test_project.id)
+        return PostgresSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+        )
     else:
-        return SQLiteSearchRepository(session_maker, project_id=test_project.id)
+        return SQLiteSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+        )
 
 
 @pytest_asyncio.fixture
@@ -457,9 +466,10 @@ async def sample_entity(entity_repository: EntityRepository) -> Entity:
 @pytest_asyncio.fixture
 async def project_service(
     project_repository: ProjectRepository,
+    file_service: FileService,
 ) -> ProjectService:
-    """Create ProjectService with repository."""
-    return ProjectService(repository=project_repository)
+    """Create ProjectService with repository and file service for directory operations."""
+    return ProjectService(repository=project_repository, file_service=file_service)
 
 
 @pytest_asyncio.fixture

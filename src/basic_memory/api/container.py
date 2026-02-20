@@ -47,7 +47,6 @@ class ApiContainer:
         """
         config = ConfigManager().config
         mode = resolve_runtime_mode(
-            cloud_mode_enabled=config.cloud_mode_enabled,
             is_test_env=config.is_test_env,
         )
         return cls(config=config, mode=mode)

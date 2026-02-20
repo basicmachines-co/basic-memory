@@ -29,7 +29,7 @@ async def test_edit_note_append_operation(client, test_project):
     assert "Edited note (append)" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: test/Test Note.md" in result
-    assert "permalink: test/test-note" in result
+    assert f"permalink: {test_project.name}/test/test-note" in result
     assert "Added 3 lines to end of note" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
@@ -57,7 +57,7 @@ async def test_edit_note_prepend_operation(client, test_project):
     assert "Edited note (prepend)" in result
     assert f"project: {test_project.name}" in result
     assert "file_path: meetings/Meeting Notes.md" in result
-    assert "permalink: meetings/meeting-notes" in result
+    assert f"permalink: {test_project.name}/meetings/meeting-notes" in result
     assert "Added 3 lines to beginning of note" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
@@ -439,7 +439,7 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     )
 
     assert isinstance(first_result, str)
-    assert "permalink: test/test-note" in first_result
+    assert f"permalink: {test_project.name}/test/test-note" in first_result
 
     # Perform another edit - this should preserve the permalink even if the
     # file doesn't have a permalink in its frontmatter
@@ -453,6 +453,6 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     assert isinstance(second_result, str)
     assert "Edited note (append)" in second_result
     assert f"project: {test_project.name}" in second_result
-    assert "permalink: test/test-note" in second_result
+    assert f"permalink: {test_project.name}/test/test-note" in second_result
     assert f"[Session: Using project '{test_project.name}']" in second_result
     # The edit should succeed without validation errors

@@ -18,7 +18,7 @@ Each entrypoint uses a **composition root** pattern to manage configuration and 
 A composition root is the single place in an application where dependencies are wired together. In Basic Memory, each entrypoint has its own composition root that:
 
 1. Reads configuration from `ConfigManager`
-2. Resolves runtime mode (cloud/local/test)
+2. Resolves runtime mode (local/test)
 3. Creates and provides dependencies to downstream code
 
 **Key principle**: Only composition roots read global configuration. All other modules receive configuration explicitly.
@@ -52,10 +52,7 @@ class Container:
     def create(cls) -> "Container":
         """Create container by reading ConfigManager."""
         config = ConfigManager().config
-        mode = resolve_runtime_mode(
-            cloud_mode_enabled=config.cloud_mode_enabled,
-            is_test_env=config.is_test_env,
-        )
+        mode = resolve_runtime_mode(is_test_env=config.is_test_env)
         return cls(config=config, mode=mode)
 
     @property
@@ -99,16 +96,19 @@ class RuntimeMode(Enum):
         return self == RuntimeMode.TEST
 ```
 
-Resolution follows this precedence: **TEST > CLOUD > LOCAL**
+Resolution follows this precedence in local app flows: **TEST > LOCAL**
 
 ```python
-def resolve_runtime_mode(cloud_mode_enabled: bool, is_test_env: bool) -> RuntimeMode:
+def resolve_runtime_mode(is_test_env: bool) -> RuntimeMode:
     if is_test_env:
         return RuntimeMode.TEST
-    if cloud_mode_enabled:
-        return RuntimeMode.CLOUD
     return RuntimeMode.LOCAL
 ```
+
+**Note**: `RuntimeMode` determines global behavior (e.g., whether to start file sync).
+Per-project routing is orthogonal: individual projects can be set to `cloud` mode via `ProjectMode`,
+which affects client routing in `get_client(project_name=...)` without changing global runtime mode.
+`RuntimeMode.CLOUD` may remain for compatibility, but standard local runtime resolution does not select it.
 
 ## Dependencies Package
 
@@ -221,9 +221,7 @@ async def search_notes(
     tags: list[str] | None = None,
     status: str | None = None,
 ) -> SearchResponse:
-    async with get_client() as client:
-        active_project = await get_active_project(client, project)
-
+    async with get_project_client(project, context) as (client, active_project):
         # Import client inside function to avoid circular imports
         from basic_memory.mcp.clients import SearchClient
         from basic_memory.schemas.search import SearchQuery
@@ -236,6 +234,25 @@ async def search_notes(
         )
         search_client = SearchClient(client, active_project.external_id)
         return await search_client.search(search_query.model_dump())
+```
+
+### Per-Project Client Routing
+
+`get_project_client()` from `mcp/project_context.py` is an async context manager that:
+1. Resolves the project name from config (no network call)
+2. Creates the correctly-routed client based on the project's mode (local ASGI or cloud HTTP with API key)
+3. Validates the project via the API
+4. Yields `(client, active_project)` tuple
+
+This solves the bootstrap problem: you need the project name to choose the right client (local vs cloud), but you need the client to validate the project exists.
+
+```python
+from basic_memory.mcp.project_context import get_project_client
+
+async with get_project_client(project, context) as (client, active_project):
+    # client is routed based on project's mode (local or cloud)
+    # active_project is validated via the API
+    ...
 ```
 
 ## Sync Coordination

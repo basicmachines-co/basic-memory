@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased
+
+### Features
+
+- Add `--strip-frontmatter` to `basic-memory tool read-note`
+  - Default behavior is unchanged: `content` still includes raw markdown with frontmatter.
+  - With `--strip-frontmatter`, both text and JSON modes return body-only markdown content.
+  - JSON output now includes an additive `frontmatter` field with parsed YAML metadata (or `null`
+    when no valid opening frontmatter block exists).
+
+## v0.18.5 (2026-02-13)
+
+### Bug Fixes
+
+- Strip NUL bytes from content before PostgreSQL search indexing
+  ([`ec9b2c4`](https://github.com/basicmachines-co/basic-memory/commit/ec9b2c4))
+
 ## v0.18.4 (2026-02-12)
 
 ### Bug Fixes
