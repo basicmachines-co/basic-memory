@@ -43,7 +43,7 @@ class FileService:
     def __init__(
         self,
         base_path: Path,
-        markdown_processor: MarkdownProcessor,
+        markdown_processor: Optional[MarkdownProcessor] = None,
         max_concurrent_files: int = 10,
         app_config: Optional["BasicMemoryConfig"] = None,
     ):
@@ -78,6 +78,10 @@ class FileService:
             Raw content string without metadata sections
         """
         logger.debug(f"Reading entity content, entity_id={entity.id}, permalink={entity.permalink}")
+
+        # markdown_processor is required for entity content reads — fail fast if not configured
+        if self.markdown_processor is None:
+            raise ValueError("markdown_processor is required for read_entity_content")
 
         file_path = self.get_entity_path(entity)
         markdown = await self.markdown_processor.read_file(file_path)

@@ -343,7 +343,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             pass
 
         try:
-            import sqlite_vec
+            import sqlite_vec  # type: ignore[import-not-found]
         except ImportError as exc:
             raise SemanticDependenciesMissingError(
                 "sqlite-vec package is missing. "

@@ -688,11 +688,8 @@ class ConfigManager:
         if project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
 
-        # Ensure the path exists
-        project_path = Path(path)
-        project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
-
         # Load config, modify it, and save it
+        project_path = Path(path)
         config = self.load_config()
         config.projects[name] = ProjectEntry(path=str(project_path))
         self.save_config(config)

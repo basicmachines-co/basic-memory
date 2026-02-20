@@ -178,6 +178,9 @@ class ProjectItem(BaseModel):
     name: str
     path: str
     is_default: bool = False
+    # Optional metadata injected by cloud hosting layer (not stored in DB)
+    display_name: Optional[str] = None
+    is_private: bool = False
 
     @property
     def permalink(self) -> str:  # pragma: no cover

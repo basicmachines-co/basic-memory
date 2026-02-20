@@ -511,6 +511,106 @@ class TestTimeframeParsing:
         assert time_diff < 3600, f"'today' and '1d' should be similar times, diff: {time_diff}s"
 
 
+class TestProjectItemSchema:
+    """Test ProjectItem schema with optional cloud-injected fields."""
+
+    def test_project_item_defaults(self):
+        """ProjectItem has sensible defaults for cloud-injected fields."""
+        from basic_memory.schemas.project_info import ProjectItem
+
+        project = ProjectItem(
+            id=1,
+            external_id="00000000-0000-0000-0000-000000000001",
+            name="main",
+            path="/tmp/main",
+        )
+        assert project.display_name is None
+        assert project.is_private is False
+        assert project.is_default is False
+
+    def test_project_item_with_display_name(self):
+        """ProjectItem accepts display_name from cloud proxy enrichment."""
+        from basic_memory.schemas.project_info import ProjectItem
+
+        project = ProjectItem(
+            id=1,
+            external_id="00000000-0000-0000-0000-000000000001",
+            name="private-fb83af23",
+            path="/tmp/private",
+            display_name="My Notes",
+            is_private=True,
+        )
+        assert project.display_name == "My Notes"
+        assert project.is_private is True
+        assert project.name == "private-fb83af23"
+
+    def test_project_item_deserialization_from_json(self):
+        """ProjectItem correctly deserializes display_name and is_private from JSON.
+
+        This is the actual path: the cloud proxy enriches the JSON response from
+        basic-memory API, and the MCP tools deserialize it back into ProjectItem.
+        """
+        from basic_memory.schemas.project_info import ProjectItem
+
+        json_data = {
+            "id": 1,
+            "external_id": "00000000-0000-0000-0000-000000000001",
+            "name": "private-fb83af23",
+            "path": "/tmp/private",
+            "is_default": False,
+            "display_name": "My Notes",
+            "is_private": True,
+        }
+        project = ProjectItem.model_validate(json_data)
+        assert project.display_name == "My Notes"
+        assert project.is_private is True
+
+    def test_project_item_deserialization_without_cloud_fields(self):
+        """ProjectItem works when cloud fields are absent (non-cloud usage)."""
+        from basic_memory.schemas.project_info import ProjectItem
+
+        json_data = {
+            "id": 1,
+            "external_id": "00000000-0000-0000-0000-000000000001",
+            "name": "main",
+            "path": "/tmp/main",
+            "is_default": True,
+        }
+        project = ProjectItem.model_validate(json_data)
+        assert project.display_name is None
+        assert project.is_private is False
+
+    def test_project_list_with_mixed_projects(self):
+        """ProjectList can contain a mix of regular and private projects."""
+        from basic_memory.schemas.project_info import ProjectItem, ProjectList
+
+        projects = ProjectList(
+            projects=[
+                ProjectItem(
+                    id=1,
+                    external_id="00000000-0000-0000-0000-000000000001",
+                    name="main",
+                    path="/tmp/main",
+                    is_default=True,
+                ),
+                ProjectItem(
+                    id=2,
+                    external_id="00000000-0000-0000-0000-000000000002",
+                    name="private-fb83af23",
+                    path="/tmp/private",
+                    display_name="My Notes",
+                    is_private=True,
+                ),
+            ],
+            default_project="main",
+        )
+        assert len(projects.projects) == 2
+        assert projects.projects[0].display_name is None
+        assert projects.projects[0].is_private is False
+        assert projects.projects[1].display_name == "My Notes"
+        assert projects.projects[1].is_private is True
+
+
 class TestObservationContentLength:
     """Test observation content length validation matches DB schema."""
 
