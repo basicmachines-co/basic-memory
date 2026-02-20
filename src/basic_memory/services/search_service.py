@@ -411,7 +411,7 @@ class SearchService:
                 id=entity.id,
                 entity_id=entity.id,
                 type=SearchItemType.ENTITY.value,
-                title=entity.title,
+                title=_strip_nul(entity.title),
                 permalink=entity.permalink,  # Required for Postgres NOT NULL constraint
                 file_path=entity.file_path,
                 metadata={
@@ -493,7 +493,7 @@ class SearchService:
             SearchIndexRow(
                 id=entity.id,
                 type=SearchItemType.ENTITY.value,
-                title=entity.title,
+                title=_strip_nul(entity.title),
                 content_stems=entity_content_stems,
                 content_snippet=content_snippet,
                 permalink=entity.permalink,
@@ -529,7 +529,7 @@ class SearchService:
                 SearchIndexRow(
                     id=obs.id,
                     type=SearchItemType.OBSERVATION.value,
-                    title=f"{obs.category}: {obs.content[:100]}...",
+                    title=_strip_nul(f"{obs.category}: {obs.content[:100]}..."),
                     content_stems=obs_content_stems,
                     content_snippet=_strip_nul(obs.content),
                     permalink=obs_permalink,
@@ -548,7 +548,7 @@ class SearchService:
         # Add relation rows (only outgoing relations defined in this file)
         for rel in entity.outgoing_relations:
             # Create descriptive title showing the relationship
-            relation_title = (
+            relation_title = _strip_nul(
                 f"{rel.from_entity.title} → {rel.to_entity.title}"
                 if rel.to_entity
                 else f"{rel.from_entity.title}"

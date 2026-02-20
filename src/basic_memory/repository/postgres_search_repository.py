@@ -101,6 +101,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             # Serialize JSON for raw SQL
             insert_data = search_index_row.to_insert(serialize_json=True)
             insert_data["project_id"] = self.project_id
+            insert_data = _strip_nul_from_row(insert_data)
 
             # Use upsert to handle race conditions during parallel indexing
             # ON CONFLICT (permalink, project_id) matches the partial unique index

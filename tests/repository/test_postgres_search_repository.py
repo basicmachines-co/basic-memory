@@ -240,6 +240,57 @@ async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
         await repo.search(permalink="docs/anything")
 
 
+@pytest.mark.asyncio
+async def test_bulk_index_items_strips_nul_bytes(session_maker, test_project):
+    """NUL bytes in content must not cause CharacterNotInRepertoireError on INSERT."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=test_project.id,
+        id=99,
+        title="hello\x00world",
+        content_stems="some\x00stems",
+        content_snippet="snippet\x00here",
+        permalink="test/nul-row",
+        file_path="test/nul.md",
+        type="entity",
+        metadata={"entity_type": "note"},
+        created_at=now,
+        updated_at=now,
+    )
+    # Should not raise CharacterNotInRepertoireError
+    await repo.bulk_index_items([row])
+    results = await repo.search(permalink="test/nul-row")
+    assert len(results) == 1
+    assert "\x00" not in (results[0].content_snippet or "")
+    assert "\x00" not in (results[0].title or "")
+
+
+@pytest.mark.asyncio
+async def test_index_item_strips_nul_bytes(session_maker, test_project):
+    """NUL bytes in single-item index_item path must not cause CharacterNotInRepertoireError."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=test_project.id,
+        id=98,
+        title="single\x00item",
+        content_stems="nul\x00stems",
+        content_snippet="nul\x00snippet",
+        permalink="test/nul-single",
+        file_path="test/nul-single.md",
+        type="entity",
+        metadata={"entity_type": "note"},
+        created_at=now,
+        updated_at=now,
+    )
+    await repo.index_item(row)
+    results = await repo.search(permalink="test/nul-single")
+    assert len(results) == 1
+    assert "\x00" not in (results[0].content_snippet or "")
+    assert "\x00" not in (results[0].title or "")
+
+
 def test_strip_nul_from_row():
     """_strip_nul_from_row strips NUL bytes from string values, leaves non-strings alone."""
     row = {
