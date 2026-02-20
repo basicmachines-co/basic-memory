@@ -1133,12 +1133,15 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
 
     rclone preallocation on virtual filesystems (e.g. Google Drive File Stream)
     can pad files with \\x00 bytes, causing PostgreSQL CharacterNotInRepertoireError.
+
+    Note: NUL bytes arrive via file content read from disk, not from the database.
+    Postgres rejects \\x00 in text columns at the ORM level, so we only test
+    the content path (passed to index_entity) rather than observation creation.
     """
-    from basic_memory.repository import EntityRepository, ObservationRepository
+    from basic_memory.repository import EntityRepository
     from basic_memory.repository.search_repository import SearchRepository
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
-    obs_repo = ObservationRepository(session_maker, project_id=test_project.id)
 
     entity_data = {
         "title": "NUL Test Entity",
@@ -1152,14 +1155,9 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
         "updated_at": datetime.now(),
     }
     entity = await entity_repo.create(entity_data)
-
-    # Add observation with NUL bytes
-    await obs_repo.create(
-        {"entity_id": entity.id, "category": "note", "content": "obs with\x00nul bytes"}
-    )
     entity = await entity_repo.get_by_permalink("test/nul-test")
 
-    # Index with NUL-containing content
+    # Index with NUL-containing content (simulates rclone-preallocated file)
     nul_content = "# NUL Test\x00\x00\nSome content\x00here"
     await search_service.index_entity(entity, content=nul_content)
 
