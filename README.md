@@ -396,7 +396,8 @@ basic-memory project ls --name main --cloud
 
 No-flag behavior defaults to local when no project context is present.
 
-The local MCP server (`basic-memory mcp`) always uses local routing (including `--transport stdio`).
+The local MCP server routes per transport: `--transport stdio` honors per-project routing
+(local or cloud), while `--transport streamable-http` and `--transport sse` always route locally.
 
 **CLI Note Editing (`tool edit-note`):**
 

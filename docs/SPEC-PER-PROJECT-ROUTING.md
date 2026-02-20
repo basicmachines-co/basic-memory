@@ -10,7 +10,7 @@ This document is the canonical contract for local/cloud routing behavior in CLI,
 ## Goals
 
 1. Remove global `cloud_mode` from runtime/routing semantics.
-2. Keep MCP stdio local-only and predictable.
+2. Keep MCP HTTP/SSE local-only; let stdio honor per-project routing.
 3. Make CLI routing explicit and easy to reason about.
 4. Support projects that exist in both local and cloud without ambiguity.
 
@@ -79,13 +79,25 @@ When explicit routing is active, project mode does not override the selected rou
   - reports auth state (API key, OAuth token validity)
   - runs health checks only when credentials are available
 
-## MCP Stdio Local Guarantee
+## MCP Transport Routing
 
-`bm mcp --transport stdio` always routes locally.
+### Stdio (default)
 
-The command sets explicit local routing (`BASIC_MEMORY_FORCE_LOCAL=true` and
-`BASIC_MEMORY_EXPLICIT_ROUTING=true`) before starting the server. This prevents cloud routing for stdio MCP,
-even if the selected project has `mode: cloud`.
+`bm mcp --transport stdio` uses natural per-project routing.
+
+- Local-mode projects route through the in-process ASGI transport.
+- Cloud-mode projects route to the cloud proxy with Bearer auth (API key).
+- No explicit routing env vars are injected by the CLI command.
+- Externally-set env vars are honored (e.g. `BASIC_MEMORY_FORCE_CLOUD=true` for cloud deployments).
+- Users who need all projects forced local can set `BASIC_MEMORY_FORCE_LOCAL=true` externally.
+
+### HTTP and SSE Transports
+
+`bm mcp --transport streamable-http` and `bm mcp --transport sse` always route locally.
+
+These transports set explicit local routing (`BASIC_MEMORY_FORCE_LOCAL=true` and
+`BASIC_MEMORY_EXPLICIT_ROUTING=true`) before starting the server. This prevents cloud
+routing regardless of project mode, since HTTP/SSE serve as local API endpoints.
 
 ## Project List UX for Dual Presence
 
@@ -130,6 +142,6 @@ Runtime mode is no longer a cloud/local routing switch for local app flows.
 3. `--local/--cloud` always override per-project mode for that command.
 4. No-project + no-flags commands route local by default.
 5. `bm cloud login/logout` do not toggle routing behavior.
-6. `bm mcp` remains local-only in stdio mode.
+6. `bm mcp` stdio routes per-project mode; HTTP/SSE remain local-forced.
 7. `bm project list` communicates dual local/cloud presence without ambiguity.
 8. `bm project ls` output identifies route target explicitly.

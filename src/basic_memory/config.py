@@ -42,7 +42,9 @@ class DatabaseBackend(str, Enum):
 def _default_semantic_search_enabled() -> bool:
     """Enable semantic search by default when required local semantic dependencies exist."""
     required_modules = ("fastembed", "sqlite_vec")
-    return all(importlib.util.find_spec(module_name) is not None for module_name in required_modules)
+    return all(
+        importlib.util.find_spec(module_name) is not None for module_name in required_modules
+    )
 
 
 @dataclass

@@ -25,6 +25,7 @@ import basic_memory
 # Configuration — read from environment so nothing is hard-coded in source
 # ---------------------------------------------------------------------------
 
+
 def _umami_host() -> Optional[str]:
     return os.getenv("BASIC_MEMORY_UMAMI_HOST", "").strip() or None
 
