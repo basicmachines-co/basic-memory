@@ -511,3 +511,45 @@ def test_supports_create_empty_src_dirs_false_for_unknown_version():
 
 def test_min_rclone_version_constant():
     assert MIN_RCLONE_VERSION_EMPTY_DIRS == (1, 64, 0)
+
+
+def test_project_sync_includes_no_preallocate_flag(tmp_path):
+    """Sync command includes --local-no-preallocate to prevent NUL byte padding."""
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    project = SyncProject(name="research", path="/research", local_sync_path="/tmp/research")
+
+    project_sync(
+        project,
+        "my-bucket",
+        run=runner,
+        is_installed=lambda: True,
+        filter_path=filter_path,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--local-no-preallocate" in cmd
+
+
+def test_project_bisync_includes_no_preallocate_flag(tmp_path):
+    """Bisync command includes --local-no-preallocate to prevent NUL byte padding."""
+    runner = _Runner(returncode=0)
+    filter_path = _write_filter_file(tmp_path)
+    state_path = tmp_path / "state"
+    project = SyncProject(
+        name="research", path="app/data/research", local_sync_path="/tmp/research"
+    )
+
+    project_bisync(
+        project,
+        "my-bucket",
+        run=runner,
+        is_installed=lambda: True,
+        version=(1, 64, 2),
+        filter_path=filter_path,
+        state_path=state_path,
+        is_initialized=lambda _name: True,
+    )
+
+    cmd, _ = runner.calls[0]
+    assert "--local-no-preallocate" in cmd

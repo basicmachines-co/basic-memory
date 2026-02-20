@@ -8,7 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.postgres_search_repository import (
+    PostgresSearchRepository,
+    _strip_nul_from_row,
+)
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchItemType
 
@@ -197,3 +200,22 @@ async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
         # Use a non-text query so the generated SQL doesn't include to_tsquery(),
         # ensuring we hit the generic "re-raise other db errors" branch.
         await repo.search(permalink="docs/anything")
+
+
+def test_strip_nul_from_row():
+    """_strip_nul_from_row strips NUL bytes from string values, leaves non-strings alone."""
+    row = {
+        "title": "hello\x00world",
+        "content_stems": "some\x00content\x00here",
+        "content_snippet": "clean",
+        "id": 42,
+        "metadata": None,
+        "created_at": datetime(2024, 1, 1),
+    }
+    result = _strip_nul_from_row(row)
+    assert result["title"] == "helloworld"
+    assert result["content_stems"] == "somecontenthere"
+    assert result["content_snippet"] == "clean"
+    assert result["id"] == 42
+    assert result["metadata"] is None
+    assert result["created_at"] == datetime(2024, 1, 1)

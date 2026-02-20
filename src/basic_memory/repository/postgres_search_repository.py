@@ -19,6 +19,15 @@ from basic_memory.repository.metadata_filters import (
 from basic_memory.schemas.search import SearchItemType
 
 
+def _strip_nul_from_row(row_data: dict) -> dict:
+    """Strip NUL bytes from all string values in a row dict.
+
+    Secondary defense: PostgreSQL text columns cannot store \\x00.
+    Primary sanitization happens in SearchService.index_entity_markdown().
+    """
+    return {k: v.replace("\x00", "") if isinstance(v, str) else v for k, v in row_data.items()}
+
+
 class PostgresSearchRepository(SearchRepositoryBase):
     """PostgreSQL tsvector implementation of search repository.
 
@@ -489,7 +498,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             for row in search_index_rows:
                 insert_data = row.to_insert(serialize_json=True)
                 insert_data["project_id"] = self.project_id
-                insert_data_list.append(insert_data)
+                insert_data_list.append(_strip_nul_from_row(insert_data))
 
             # Use upsert to handle race conditions during parallel indexing
             # ON CONFLICT (permalink, project_id) matches the partial unique index

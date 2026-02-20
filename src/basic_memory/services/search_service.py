@@ -22,6 +22,15 @@ from basic_memory.services import FileService
 MAX_CONTENT_STEMS_SIZE = 6000
 
 
+def _strip_nul(value: str) -> str:
+    """Strip NUL bytes that PostgreSQL text columns cannot store.
+
+    rclone preallocation on virtual filesystems (e.g. Google Drive File Stream)
+    can pad files with \\x00 bytes. See: rclone/rclone#6801
+    """
+    return value.replace("\x00", "")
+
+
 def _mtime_to_datetime(entity: Entity) -> datetime:
     """Convert entity mtime (file modification time) to datetime.
 
@@ -297,7 +306,7 @@ class SearchService:
             content = await self.file_service.read_entity_content(entity)
         if content:
             content_stems.append(content)
-            content_snippet = f"{content[:250]}"
+            content_snippet = _strip_nul(content[:250])
 
         if entity.permalink:
             content_stems.extend(self._generate_variants(entity.permalink))
@@ -309,7 +318,7 @@ class SearchService:
         if entity_tags:
             content_stems.extend(entity_tags)
 
-        entity_content_stems = "\n".join(p for p in content_stems if p and p.strip())
+        entity_content_stems = _strip_nul("\n".join(p for p in content_stems if p and p.strip()))
 
         # Truncate to stay under Postgres's 8KB index row limit
         if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
@@ -346,8 +355,8 @@ class SearchService:
             seen_permalinks.add(obs_permalink)
 
             # Index with parent entity's file path since that's where it's defined
-            obs_content_stems = "\n".join(
-                p for p in self._generate_variants(obs.content) if p and p.strip()
+            obs_content_stems = _strip_nul(
+                "\n".join(p for p in self._generate_variants(obs.content) if p and p.strip())
             )
             # Truncate to stay under Postgres's 8KB index row limit
             if len(obs_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
@@ -358,7 +367,7 @@ class SearchService:
                     type=SearchItemType.OBSERVATION.value,
                     title=f"{obs.category}: {obs.content[:100]}...",
                     content_stems=obs_content_stems,
-                    content_snippet=obs.content,
+                    content_snippet=_strip_nul(obs.content),
                     permalink=obs_permalink,
                     file_path=entity.file_path,
                     category=obs.category,
@@ -381,8 +390,8 @@ class SearchService:
                 else f"{rel.from_entity.title}"
             )
 
-            rel_content_stems = "\n".join(
-                p for p in self._generate_variants(relation_title) if p and p.strip()
+            rel_content_stems = _strip_nul(
+                "\n".join(p for p in self._generate_variants(relation_title) if p and p.strip())
             )
             rows_to_index.append(
                 SearchIndexRow(
