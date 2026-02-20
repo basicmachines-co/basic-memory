@@ -601,11 +601,14 @@ class TestPlatformNativePathSeparators:
             nonexistent_path = str(temp_path / "nonexistent" / "project")
             config_manager.add_project("test-project", nonexistent_path)
 
-            # Verify project was added to config without creating the directory
+            # Check directory does NOT exist right after add_project(),
+            # before load_config() which triggers the model validator
+            assert not Path(nonexistent_path).exists()
+
+            # Verify project was persisted in config
             config = config_manager.load_config()
             assert "test-project" in config.projects
             assert config.projects["test-project"].path == nonexistent_path
-            assert not Path(nonexistent_path).exists()
 
     def test_model_post_init_uses_platform_native_separators(self, config_home, monkeypatch):
         """Test that model_post_init uses platform-native separators."""
