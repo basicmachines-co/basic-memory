@@ -1,7 +1,6 @@
 """Tests for CLI analytics module."""
 
 import json
-import threading
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -128,6 +127,7 @@ class TestTrack:
 
         with patch("basic_memory.cli.analytics.urllib.request.urlopen", fake_urlopen):
             with patch("basic_memory.cli.analytics.threading.Thread") as mock_thread:
+
                 def run_target(target, daemon):
                     target()  # Should not raise
                     return MagicMock()
