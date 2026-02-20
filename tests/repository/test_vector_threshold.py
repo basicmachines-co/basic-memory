@@ -61,6 +61,9 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"  # pragma: no cover
 
+    def _distance_to_similarity(self, distance: float) -> float:
+        return 1.0 / (1.0 + max(distance, 0.0))
+
 
 def _make_vector_rows(scores: list[float]) -> list[dict]:
     """Build fake vector query rows with controlled distances.

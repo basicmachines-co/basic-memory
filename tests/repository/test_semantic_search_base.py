@@ -85,6 +85,9 @@ class _ConcreteRepo(SearchRepositoryBase):
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"
 
+    def _distance_to_similarity(self, distance: float) -> float:
+        return 1.0 / (1.0 + max(distance, 0.0))
+
 
 # --- _compose_row_source_text ---
 
