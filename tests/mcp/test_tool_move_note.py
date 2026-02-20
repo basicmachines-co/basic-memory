@@ -911,3 +911,223 @@ class TestMoveNoteSecurityValidation:
             assert isinstance(result, str)
             # Should NOT contain security error message
             assert "Security Validation Error" not in result
+
+
+class TestMoveNoteDestinationFolder:
+    """Test the destination_folder parameter for move_note."""
+
+    @pytest.mark.asyncio
+    async def test_move_note_with_destination_folder(self, client, test_project):
+        """Test moving a note using destination_folder preserves the original filename."""
+        await write_note.fn(
+            project=test_project.name,
+            title="Folder Move Test",
+            directory="source",
+            content="# Folder Move Test\nContent for folder move.",
+        )
+
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="source/folder-move-test",
+            destination_folder="archive",
+        )
+
+        assert isinstance(result, str)
+        assert "✅ Note moved successfully" in result
+
+        # Verify note exists at archive/Folder Move Test.md (original filename preserved)
+        content = await read_note.fn("archive/folder-move-test", project=test_project.name)
+        assert "# Folder Move Test" in content
+        assert "Content for folder move" in content
+
+    @pytest.mark.asyncio
+    async def test_move_note_with_nested_destination_folder(self, client, test_project):
+        """Test moving a note into a nested folder structure."""
+        await write_note.fn(
+            project=test_project.name,
+            title="Nested Folder Test",
+            directory="source",
+            content="# Nested Folder Test\nNested folder content.",
+        )
+
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="source/nested-folder-test",
+            destination_folder="archive/2025/q1",
+        )
+
+        assert isinstance(result, str)
+        assert "✅ Note moved successfully" in result
+
+        content = await read_note.fn(
+            "archive/2025/q1/nested-folder-test", project=test_project.name
+        )
+        assert "# Nested Folder Test" in content
+
+    @pytest.mark.asyncio
+    async def test_move_note_destination_folder_strips_slashes(self, client, test_project):
+        """Test that leading/trailing slashes are stripped from destination_folder."""
+        await write_note.fn(
+            project=test_project.name,
+            title="Slash Strip Test",
+            directory="source",
+            content="# Slash Strip Test\nSlash stripping content.",
+        )
+
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="source/slash-strip-test",
+            destination_folder="/archive/notes/",
+        )
+
+        assert isinstance(result, str)
+        assert "✅ Note moved successfully" in result
+
+        content = await read_note.fn("archive/notes/slash-strip-test", project=test_project.name)
+        assert "# Slash Strip Test" in content
+
+    @pytest.mark.asyncio
+    async def test_move_note_both_params_error(self, client, test_project):
+        """Test that providing both destination_path and destination_folder is an error."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="some-note",
+            destination_path="target/note.md",
+            destination_folder="target",
+        )
+
+        assert isinstance(result, str)
+        assert "# Move Failed - Invalid Parameters" in result
+        assert "Cannot specify both" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_both_params_error_json(self, client, test_project):
+        """Test JSON output when both destination_path and destination_folder are provided."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="some-note",
+            destination_path="target/note.md",
+            destination_folder="target",
+            output_format="json",
+        )
+
+        assert isinstance(result, dict)
+        assert result["moved"] is False
+        assert result["error"] == "MUTUALLY_EXCLUSIVE_PARAMS"
+
+    @pytest.mark.asyncio
+    async def test_move_note_neither_param_error(self, client, test_project):
+        """Test that providing neither destination_path nor destination_folder is an error."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="some-note",
+        )
+
+        assert isinstance(result, str)
+        assert "# Move Failed - Missing Destination" in result
+        assert "Either destination_path or destination_folder must be provided" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_neither_param_error_json(self, client, test_project):
+        """Test JSON output when neither param is provided."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="some-note",
+            output_format="json",
+        )
+
+        assert isinstance(result, dict)
+        assert result["moved"] is False
+        assert result["error"] == "MISSING_DESTINATION"
+
+    @pytest.mark.asyncio
+    async def test_move_note_destination_folder_with_is_directory_error(self, client, test_project):
+        """Test that destination_folder is rejected for directory moves."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="some-dir",
+            destination_folder="archive",
+            is_directory=True,
+        )
+
+        assert isinstance(result, str)
+        assert "# Move Failed - Invalid Parameters" in result
+        assert "only supported for single-file moves" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_destination_folder_with_is_directory_error_json(
+        self, client, test_project
+    ):
+        """Test JSON output when destination_folder is used with is_directory."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="some-dir",
+            destination_folder="archive",
+            is_directory=True,
+            output_format="json",
+        )
+
+        assert isinstance(result, dict)
+        assert result["moved"] is False
+        assert result["error"] == "DESTINATION_FOLDER_NOT_FOR_DIRECTORIES"
+
+    @pytest.mark.asyncio
+    async def test_move_note_destination_folder_nonexistent_note(self, client, test_project):
+        """Test destination_folder with a note that doesn't exist."""
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="nonexistent/note",
+            destination_folder="archive",
+        )
+
+        assert isinstance(result, str)
+        assert "# Move Failed" in result
+
+    @pytest.mark.asyncio
+    async def test_move_note_destination_folder_json_output(self, client, test_project):
+        """Test JSON output for successful destination_folder move."""
+        await write_note.fn(
+            project=test_project.name,
+            title="JSON Folder Test",
+            directory="source",
+            content="# JSON Folder Test\nJSON folder content.",
+        )
+
+        result = await move_note.fn(
+            project=test_project.name,
+            identifier="source/json-folder-test",
+            destination_folder="archive",
+            output_format="json",
+        )
+
+        assert isinstance(result, dict)
+        assert result["moved"] is True
+        assert result["source"] == "source/json-folder-test"
+        assert "archive" in result["destination"]
+        assert result["file_path"] is not None
+
+    @pytest.mark.asyncio
+    async def test_move_note_destination_folder_path_traversal(self, client, test_project):
+        """Test that path traversal via destination_folder is blocked."""
+        await write_note.fn(
+            project=test_project.name,
+            title="Traversal Test",
+            directory="source",
+            content="# Traversal Test\nSecurity test content.",
+        )
+
+        attack_folders = [
+            "../../../etc",
+            "../../.ssh",
+            "notes/../../../root",
+        ]
+
+        for attack_folder in attack_folders:
+            result = await move_note.fn(
+                project=test_project.name,
+                identifier="source/traversal-test",
+                destination_folder=attack_folder,
+            )
+
+            assert isinstance(result, str)
+            assert "Security Validation Error" in result

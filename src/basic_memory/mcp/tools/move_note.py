@@ -1,5 +1,6 @@
 """Move note tool for Basic Memory MCP server."""
 
+from pathlib import Path, PureWindowsPath
 from textwrap import dedent
 from typing import Optional, Literal
 
@@ -345,7 +346,8 @@ delete_note("{identifier}")
 )
 async def move_note(
     identifier: str,
-    destination_path: str,
+    destination_path: str = "",
+    destination_folder: Optional[str] = None,
     is_directory: bool = False,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
@@ -365,6 +367,9 @@ async def move_note(
                    Use search_notes() or list_directory() first to find the correct path if uncertain.
         destination_path: For files: new path relative to project root (e.g., "work/meetings/note.md")
                          For directories: new directory path (e.g., "archive/docs")
+                         Mutually exclusive with destination_folder.
+        destination_folder: Move the note into this folder, preserving the original filename.
+                           Mutually exclusive with destination_path. Only for single-file moves.
         is_directory: If True, moves an entire directory and all its contents.
                      When True, identifier and destination_path should be directory paths
                      (without file extensions). Defaults to False.
@@ -384,6 +389,9 @@ async def move_note(
 
         # Move by exact permalink
         move_note("my-note-permalink", "archive/old-notes/my-note.md")
+
+        # Move note to archive folder (filename preserved automatically)
+        move_note("my-note", destination_folder="archive")
 
         # Move with complex path structure
         move_note("experiments/ml-results", "archive/2025/ml-experiments.md")
@@ -415,6 +423,57 @@ async def move_note(
     - Re-indexes the entity for search
     - Maintains all observations and relations
     """
+    # --- Parameter Validation ---
+    # Trigger: both destination_path and destination_folder provided
+    # Why: they are mutually exclusive — one specifies full path, the other just the folder
+    # Outcome: early error before any entity resolution or API calls
+    if destination_folder and destination_path:
+        error_msg = (
+            "Cannot specify both destination_path and destination_folder. Use one or the other."
+        )
+        if output_format == "json":
+            return {
+                "moved": False,
+                "title": None,
+                "permalink": None,
+                "file_path": None,
+                "source": identifier,
+                "destination": None,
+                "error": "MUTUALLY_EXCLUSIVE_PARAMS",
+            }
+        return f"# Move Failed - Invalid Parameters\n\n{error_msg}"
+
+    if not destination_folder and not destination_path:
+        error_msg = "Either destination_path or destination_folder must be provided."
+        if output_format == "json":
+            return {
+                "moved": False,
+                "title": None,
+                "permalink": None,
+                "file_path": None,
+                "source": identifier,
+                "destination": None,
+                "error": "MISSING_DESTINATION",
+            }
+        return f"# Move Failed - Missing Destination\n\n{error_msg}"
+
+    # Trigger: destination_folder used with is_directory=True
+    # Why: destination_folder preserves a single file's name — meaningless for directory moves
+    if destination_folder and is_directory:
+        error_msg = (
+            "destination_folder is only supported for single-file moves, not directory moves."
+        )
+        if output_format == "json":
+            return {
+                "moved": False,
+                "title": None,
+                "permalink": None,
+                "file_path": None,
+                "source": identifier,
+                "destination": None,
+                "error": "DESTINATION_FOLDER_NOT_FOR_DIRECTORIES",
+            }
+        return f"# Move Failed - Invalid Parameters\n\n{error_msg}"
     async with get_project_client(project, workspace, context) as (client, active_project):
         logger.debug(
             f"Moving {'directory' if is_directory else 'note'}: {identifier} to {destination_path} in project: {active_project.name}"
@@ -588,6 +647,66 @@ move_note("path/to/file.md", "{destination_path}/file.md")
         except Exception as e:
             # If we can't fetch source metadata, continue with extension defaults.
             logger.debug(f"Could not fetch source entity for extension check: {e}")
+
+        # --- Resolve destination_folder into destination_path ---
+        # Trigger: caller passed destination_folder instead of destination_path
+        # Why: extract the original filename from the resolved entity so callers
+        #      don't need a separate read_note round-trip
+        # Outcome: destination_path is set to folder/original-filename.ext
+        if destination_folder is not None:
+            if source_entity is None:
+                error_msg = (
+                    f"Could not resolve source entity '{identifier}' to extract filename "
+                    f"for destination_folder. Use destination_path with an explicit filename instead."
+                )
+                if output_format == "json":
+                    return {
+                        "moved": False,
+                        "title": None,
+                        "permalink": None,
+                        "file_path": None,
+                        "source": identifier,
+                        "destination": None,
+                        "error": "ENTITY_RESOLUTION_FAILED",
+                    }
+                return f"# Move Failed - Entity Resolution Failed\n\n{error_msg}"
+
+            source_filename = Path(source_entity.file_path).name
+            # Normalize backslashes to forward slashes for Windows compatibility,
+            # then strip leading/trailing separators
+            folder = PureWindowsPath(destination_folder).as_posix().strip("/")
+            destination_path = f"{folder}/{source_filename}" if folder else source_filename
+
+            # Validate resolved path to prevent path traversal via destination_folder
+            if not validate_project_path(destination_path, project_path):
+                logger.warning(
+                    "Attempted path traversal attack blocked via destination_folder",
+                    destination_folder=destination_folder,
+                    project=active_project.name,
+                )
+                if output_format == "json":
+                    return {
+                        "moved": False,
+                        "title": None,
+                        "permalink": None,
+                        "file_path": None,
+                        "source": identifier,
+                        "destination": destination_path,
+                        "error": "SECURITY_VALIDATION_ERROR",
+                    }
+                return f"""# Move Failed - Security Validation Error
+
+The destination folder '{destination_folder}' is not allowed - paths must stay within project boundaries.
+
+## Valid folder examples:
+- `notes`
+- `projects/2025`
+- `archive/old-notes`
+
+## Try again with a safe folder:
+```
+move_note("{identifier}", destination_folder="notes")
+```"""
 
         # Validate that destination path includes a file extension
         if "." not in destination_path or not destination_path.split(".")[-1]:
