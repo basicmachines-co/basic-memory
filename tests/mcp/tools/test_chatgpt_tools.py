@@ -67,6 +67,25 @@ async def test_search_with_error_response(monkeypatch, client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_search_uses_dynamic_default_search_type(monkeypatch, client, test_project):
+    """ChatGPT adapter should not hardcode search_type so search_notes can pick defaults."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    captured_kwargs: dict = {}
+
+    async def fake_search_notes_fn(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {"results": []}
+
+    monkeypatch.setattr(chatgpt_tools.search_notes, "fn", fake_search_notes_fn)
+
+    result = await chatgpt_tools.search.fn("default search mode query")
+
+    assert isinstance(result, list)
+    assert "search_type" not in captured_kwargs
+
+
+@pytest.mark.asyncio
 async def test_fetch_successful_document(client, test_project):
     """Test fetch with successful document retrieval."""
     await write_note.fn(
