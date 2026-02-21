@@ -184,13 +184,15 @@ async def fetch(
         config = ConfigManager().config
         default_project = config.default_project
 
-        # Call underlying read_note function
-        content = await read_note(
-            identifier=id,
-            project=default_project,  # Use default project for ChatGPT
-            page=1,
-            page_size=10,  # Default pagination
-            context=context,
+        # Call underlying read_note function (default output_format="text" returns str)
+        content = str(
+            await read_note(
+                identifier=id,
+                project=default_project,  # Use default project for ChatGPT
+                page=1,
+                page_size=10,  # Default pagination
+                context=context,
+            )
         )
 
         # Format the document for ChatGPT

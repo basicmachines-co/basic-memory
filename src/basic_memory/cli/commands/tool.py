@@ -468,13 +468,15 @@ def read_note(
                     result["content"] = stripped_content
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
-                note = run_with_cleanup(
-                    mcp_read_note(
-                        identifier=identifier,
-                        project=project_name,
-                        workspace=workspace,
-                        page=page,
-                        page_size=page_size,
+                note = str(
+                    run_with_cleanup(
+                        mcp_read_note(
+                            identifier=identifier,
+                            project=project_name,
+                            workspace=workspace,
+                            page=page,
+                            page_size=page_size,
+                        )
                     )
                 )
                 if strip_frontmatter:
@@ -560,16 +562,18 @@ def edit_note(
                 )
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
-                result = run_with_cleanup(
-                    mcp_edit_note(
-                        identifier=identifier,
-                        operation=operation,
-                        content=content,
-                        project=project_name,
-                        workspace=workspace,
-                        section=section,
-                        find_text=find_text,
-                        expected_replacements=expected_replacements,
+                result = str(
+                    run_with_cleanup(
+                        mcp_edit_note(
+                            identifier=identifier,
+                            operation=operation,
+                            content=content,
+                            project=project_name,
+                            workspace=workspace,
+                            section=section,
+                            find_text=find_text,
+                            expected_replacements=expected_replacements,
+                        )
                     )
                 )
                 rprint(result)
@@ -713,9 +717,9 @@ def recent_activity(
             else:
                 result = run_with_cleanup(
                     mcp_recent_activity(
-                        type=type,  # pyright: ignore [reportArgumentType]
-                        depth=depth,
-                        timeframe=timeframe,
+                        type=type,  # pyright: ignore[reportArgumentType]
+                        depth=depth if depth is not None else 1,
+                        timeframe=timeframe if timeframe is not None else "7d",
                         project=project_name,
                         workspace=workspace,
                     )
@@ -867,6 +871,7 @@ def search_notes(
                     project=project_name,
                     workspace=workspace,
                     search_type=search_type,
+                    output_format="json",
                     page=page,
                     after_date=after_date,
                     page_size=page_size,
@@ -881,8 +886,7 @@ def search_notes(
             print(results)
             raise typer.Exit(1)
 
-        results_dict = results.model_dump(exclude_none=True)
-        print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
+        print(json.dumps(results, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
