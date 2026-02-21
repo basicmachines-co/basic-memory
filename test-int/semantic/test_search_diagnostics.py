@@ -18,6 +18,7 @@ from semantic.conftest import (
     SearchCombo,
     create_search_service,
     _create_fastembed_provider,
+    skip_if_needed,
 )
 
 
@@ -134,6 +135,7 @@ async def test_similarity_score_spread(sqlite_engine_factory, tmp_path):
     If the top relevant result and the worst irrelevant result have similar scores,
     the similarity formula is too compressed to be useful.
     """
+    skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider
@@ -189,6 +191,7 @@ async def test_observation_noise_vs_entity(sqlite_engine_factory, tmp_path):
     A common issue: observations like "Dark cocoa powder gives richer flavor"
     can match broadly because they lack parent context.
     """
+    skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider
@@ -244,6 +247,7 @@ async def test_rrf_fusion_preserves_strong_vector_match(sqlite_engine_factory, t
     This is the core claim of issue #577 — that RRF dilutes strong vector scores.
     Let's verify with a controlled corpus.
     """
+    skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider
@@ -307,9 +311,12 @@ async def test_rrf_fusion_preserves_strong_vector_match(sqlite_engine_factory, t
 async def test_similarity_formula_analysis(sqlite_engine_factory, tmp_path):
     """Analyze the raw distance-to-similarity mapping for real queries.
 
-    The current formula: similarity = 1 / (1 + distance)
-    This test dumps raw distances so we can evaluate alternative formulas.
+    Production formulas are backend-specific:
+    - SQLite: similarity = max(0, 1 - L2²/2) for normalized embeddings
+    - Postgres: similarity = max(0, 1 - cosine_distance)
+    This test compares old and new mappings for diagnostics.
     """
+    skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider
@@ -353,6 +360,7 @@ async def test_similarity_formula_analysis(sqlite_engine_factory, tmp_path):
 @pytest.mark.benchmark
 async def test_min_similarity_filters_noise(sqlite_engine_factory, tmp_path):
     """Verify that min_similarity actually removes low-quality matches."""
+    skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider
@@ -419,6 +427,7 @@ async def test_min_similarity_filters_noise(sqlite_engine_factory, tmp_path):
 @pytest.mark.benchmark
 async def test_chunking_produces_reasonable_chunks(sqlite_engine_factory, tmp_path):
     """Verify that the chunking logic produces chunks with enough context."""
+    skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
     service = await create_search_service(
         sqlite_engine_factory, DIAG_COMBO, tmp_path, embedding_provider=provider

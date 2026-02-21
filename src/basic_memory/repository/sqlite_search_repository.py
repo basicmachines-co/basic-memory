@@ -58,6 +58,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._vector_dimensions = 384
 
         if self._semantic_enabled and self._embedding_provider is None:
+            # Constraint: SQLite maps L2 distance to cosine similarity via 1 - L2²/2.
+            # This conversion is correct only for unit-normalized embeddings.
+            # Provider implementations must return normalized vectors.
             self._embedding_provider = create_embedding_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
