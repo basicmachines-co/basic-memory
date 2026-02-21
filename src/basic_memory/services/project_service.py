@@ -39,9 +39,7 @@ class ProjectService:
 
     repository: ProjectRepository
 
-    def __init__(
-        self, repository: ProjectRepository, file_service: Optional["FileService"] = None
-    ):
+    def __init__(self, repository: ProjectRepository, file_service: Optional["FileService"] = None):
         """Initialize the project service."""
         super().__init__()
         self.repository = repository
@@ -574,19 +572,24 @@ class ProjectService:
             raise ValueError("Repository is required for get_project_info")
 
         # Use specified project or fall back to config project
-        project_name = project_name or self.config.project
-        # Get project path from configuration
-        name, project_path = self.config_manager.get_project(project_name)
-        if not name:  # pragma: no cover
-            raise ValueError(f"Project '{project_name}' not found in configuration")
-
-        assert project_path is not None
-        project_permalink = generate_permalink(project_name)
+        requested_project_name = project_name or self.config.project
+        project_permalink = generate_permalink(requested_project_name)
 
         # Get project from database to get project_id
         db_project = await self.repository.get_by_permalink(project_permalink)
         if not db_project:  # pragma: no cover
-            raise ValueError(f"Project '{project_name}' not found in database")
+            raise ValueError(f"Project '{requested_project_name}' not found in database")
+
+        # Trigger: cloud-only projects may exist in DB but not in local config.
+        # Why: cloud routing should not require local config entries for project info.
+        # Outcome: prefer config path when available, otherwise use DB path.
+        config_name, config_path = self.config_manager.get_project(db_project.name)
+        if config_name and config_path:
+            resolved_project_name = config_name
+            resolved_project_path = config_path
+        else:
+            resolved_project_name = db_project.name
+            resolved_project_path = db_project.path
 
         # Get statistics for the specified project
         statistics = await self.get_statistics(db_project.id)
@@ -603,24 +606,45 @@ class ProjectService:
 
         # Get default project info
         default_project = self.config_manager.default_project
+        if default_project is None:
+            for project in db_projects:
+                if project.is_default:
+                    default_project = project.name
+                    break
 
         # Convert config projects to include database info
         enhanced_projects = {}
-        for name, path in self.config_manager.projects.items():
-            config_permalink = generate_permalink(name)
-            db_project = db_projects_by_permalink.get(config_permalink)
-            enhanced_projects[name] = {
-                "path": path,
-                "active": db_project.is_active if db_project else True,
-                "id": db_project.id if db_project else None,
-                "is_default": (name == default_project),
-                "permalink": db_project.permalink if db_project else name.lower().replace(" ", "-"),
+        for config_project_name, config_project_path in self.config_manager.projects.items():
+            config_permalink = generate_permalink(config_project_name)
+            config_db_project = db_projects_by_permalink.get(config_permalink)
+            enhanced_projects[config_project_name] = {
+                "path": config_project_path,
+                "active": config_db_project.is_active if config_db_project else True,
+                "id": config_db_project.id if config_db_project else None,
+                "is_default": (config_project_name == default_project),
+                "permalink": (
+                    config_db_project.permalink
+                    if config_db_project
+                    else config_project_name.lower().replace(" ", "-")
+                ),
+            }
+
+        # Include active DB projects that are not present in local config (cloud-only).
+        for active_db_project in db_projects:
+            if active_db_project.name in enhanced_projects:
+                continue
+            enhanced_projects[active_db_project.name] = {
+                "path": active_db_project.path,
+                "active": active_db_project.is_active,
+                "id": active_db_project.id,
+                "is_default": bool(active_db_project.is_default),
+                "permalink": active_db_project.permalink,
             }
 
         # Construct the response
         return ProjectInfoResponse(
-            project_name=project_name,
-            project_path=project_path,
+            project_name=resolved_project_name,
+            project_path=resolved_project_path,
             available_projects=enhanced_projects,
             default_project=default_project,
             statistics=statistics,

@@ -97,5 +97,19 @@ async def get_project_info(project: str):
             response = await call_get(client, f"/v2/projects/{project_item.external_id}/info")
             return ProjectInfoResponse.model_validate(response.json())
     except (ToolError, ValueError) as e:
-        console.print(f"[red]Sync failed: {e}[/red]")
+        error_text = str(e)
+        if "internal proxy error" in error_text.lower() and "not found in configuration" in (
+            error_text.lower()
+        ):
+            console.print(
+                "[red]Project info failed: cloud returned an internal configuration error for "
+                "this project.[/red]"
+            )
+            console.print(
+                "[yellow]This is a cloud backend issue for detailed info lookups. "
+                "Use `bm project list --cloud` for project metadata until the service is updated."
+                "[/yellow]"
+            )
+        else:
+            console.print(f"[red]Project info failed: {e}[/red]")
         raise typer.Exit(1)

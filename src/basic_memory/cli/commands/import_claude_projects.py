@@ -44,7 +44,7 @@ def import_projects(
     2. Store docs in a docs/ subdirectory
     3. Place prompt template in project root
 
-    After importing, run 'basic-memory sync' to index the new files.
+    After importing, run 'bm reindex --search' to index the new files.
     """
     config = get_project_config()
     try:
@@ -83,7 +83,7 @@ def import_projects(
             )
         )
 
-        console.print("\nRun 'basic-memory sync' to index the new files.")
+        console.print("\nRun 'bm reindex --search' to index the new files.")
 
     except Exception as e:
         logger.error("Import failed")

@@ -151,7 +151,7 @@ def setup() -> None:
     """Set up cloud sync by installing rclone and configuring credentials.
 
     After setup, use project commands for syncing:
-      bm project add <name> <path> --local-path ~/projects/<name>
+      bm project add <name> --cloud --local-path ~/projects/<name>
       bm project bisync --name <name> --resync  # First time
       bm project bisync --name <name>            # Subsequent syncs
     """
@@ -183,7 +183,7 @@ def setup() -> None:
         console.print("\n[bold green]Cloud setup completed successfully![/bold green]")
         console.print("\n[bold]Next steps:[/bold]")
         console.print("1. Add a project with local sync path:")
-        console.print("   bm project add research --local-path ~/Documents/research")
+        console.print("   bm project add research --cloud --local-path ~/Documents/research")
         console.print("\n   Or configure sync for an existing project:")
         console.print("   bm project sync-setup research ~/Documents/research")
         console.print("\n2. Preview the initial sync (recommended):")

@@ -298,7 +298,7 @@ def write_note(
     content: Annotated[
         Optional[str],
         typer.Option(
-            help="The content of the note. If not provided, content will be read from stdin. This allows piping content from other commands, e.g.: cat file.md | basic-memory tools write-note"
+            help="The content of the note. If not provided, content will be read from stdin. This allows piping content from other commands, e.g.: cat file.md | bm tool write-note"
         ),
     ] = None,
     tags: Annotated[
@@ -322,13 +322,13 @@ def write_note(
     Examples:
 
     # Using content parameter
-    basic-memory tools write-note --title "My Note" --folder "notes" --content "Note content"
+    bm tool write-note --title "My Note" --folder "notes" --content "Note content"
 
     # Using stdin pipe
-    echo "# My Note Content" | basic-memory tools write-note --title "My Note" --folder "notes"
+    echo "# My Note Content" | bm tool write-note --title "My Note" --folder "notes"
 
     # Using heredoc
-    cat << EOF | basic-memory tools write-note --title "My Note" --folder "notes"
+    cat << EOF | bm tool write-note --title "My Note" --folder "notes"
     # My Document
 
     This is my document content.
@@ -338,10 +338,10 @@ def write_note(
     EOF
 
     # Reading from a file
-    cat document.md | basic-memory tools write-note --title "Document" --folder "docs"
+    cat document.md | bm tool write-note --title "Document" --folder "docs"
 
     # Force local routing in cloud mode
-    basic-memory tools write-note --title "My Note" --folder "notes" --content "..." --local
+    bm tool write-note --title "My Note" --folder "notes" --content "..." --local
     """
     try:
         validate_routing_flags(local, cloud)

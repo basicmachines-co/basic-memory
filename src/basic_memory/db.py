@@ -476,13 +476,14 @@ async def run_migrations(
     so it's safe to call this multiple times - it will only run pending migrations.
     """
     logger.info("Running database migrations...")
+    temp_engine: AsyncEngine | None = None
     try:
         revisions_before_upgrade: set[str] = set()
         # Trigger: run_migrations() can be invoked before module-level session maker is set.
         # Why: we still need reliable before/after revision detection for one-time backfill.
         # Outcome: create a short-lived session maker when needed, then dispose it immediately.
         if _session_maker is None:
-            temp_engine, temp_session_maker = _create_engine_and_session(
+            precheck_engine, temp_session_maker = _create_engine_and_session(
                 app_config.database_path,
                 database_type,
                 app_config,
@@ -490,7 +491,7 @@ async def run_migrations(
             try:
                 revisions_before_upgrade = await _load_applied_alembic_revisions(temp_session_maker)
             finally:
-                await temp_engine.dispose()
+                await precheck_engine.dispose()
         else:
             revisions_before_upgrade = await _load_applied_alembic_revisions(_session_maker)
 
@@ -517,7 +518,9 @@ async def run_migrations(
 
         # Get session maker - ensure we don't trigger recursive migration calls
         if _session_maker is None:
-            _, session_maker = _create_engine_and_session(app_config.database_path, database_type)
+            temp_engine, session_maker = _create_engine_and_session(
+                app_config.database_path, database_type, app_config
+            )
         else:
             session_maker = _session_maker
 
@@ -542,3 +545,11 @@ async def run_migrations(
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise
+    finally:
+        # Trigger: run_migrations() created a temporary engine while module-level
+        # session maker was not initialized.
+        # Why: temporary aiosqlite worker threads can outlive CLI command execution
+        # and block process shutdown if the engine is not disposed.
+        # Outcome: always dispose temporary engines after migration work completes.
+        if temp_engine is not None:
+            await temp_engine.dispose()

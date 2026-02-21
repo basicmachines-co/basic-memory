@@ -13,6 +13,7 @@ from basic_memory.cli.commands.cloud.cloud_utils import (
     sync_project,
 )
 from basic_memory.cli.commands.cloud.upload import upload_path
+from basic_memory.mcp.async_client import get_cloud_control_plane_client
 
 console = Console()
 
@@ -86,7 +87,7 @@ def upload(
                 console.print(
                     f"[red]Project '{project}' does not exist.[/red]\n"
                     f"[yellow]Options:[/yellow]\n"
-                    f"  1. Create it first: bm project add {project}\n"
+                    f"  1. Create it first: bm project add {project} --cloud\n"
                     f"  2. Use --create-project flag to create automatically"
                 )
                 raise typer.Exit(1)
@@ -100,7 +101,12 @@ def upload(
             console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
 
         success = await upload_path(
-            path, project, verbose=verbose, use_gitignore=not no_gitignore, dry_run=dry_run
+            path,
+            project,
+            verbose=verbose,
+            use_gitignore=not no_gitignore,
+            dry_run=dry_run,
+            client_cm_factory=get_cloud_control_plane_client,
         )
         if not success:
             console.print("[red]Upload failed[/red]")
