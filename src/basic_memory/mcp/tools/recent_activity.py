@@ -111,6 +111,15 @@ async def recent_activity(
         - For focused queries, consider using build_context with a specific URI
         - Max timeframe is 1 year in the past
     """
+    # Validate pagination arguments before they reach the API layer,
+    # where negative offset would cause a database error.
+    if page < 1:
+        raise ValueError(f"page must be >= 1, got {page}")
+    if page_size < 1:
+        raise ValueError(f"page_size must be >= 1, got {page_size}")
+    if page_size > 100:
+        raise ValueError(f"page_size must be <= 100, got {page_size}")
+
     # Build common parameters for API calls
     params: dict = {
         "page": page,

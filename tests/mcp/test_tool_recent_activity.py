@@ -493,6 +493,25 @@ async def test_recent_activity_pagination_params(client, test_project, test_grap
     assert "Recent Activity:" in result
 
 
+@pytest.mark.asyncio
+async def test_recent_activity_pagination_validation():
+    """Invalid page/page_size values should raise clear ValueError messages."""
+    with pytest.raises(ValueError, match="page must be >= 1, got 0"):
+        await recent_activity.fn(page=0)
+
+    with pytest.raises(ValueError, match="page must be >= 1, got -1"):
+        await recent_activity.fn(page=-1)
+
+    with pytest.raises(ValueError, match="page_size must be >= 1, got 0"):
+        await recent_activity.fn(page_size=0)
+
+    with pytest.raises(ValueError, match="page_size must be >= 1, got -5"):
+        await recent_activity.fn(page_size=-5)
+
+    with pytest.raises(ValueError, match="page_size must be <= 100, got 999"):
+        await recent_activity.fn(page_size=999)
+
+
 def test_format_project_output_has_more_pagination_guidance():
     """When has_more is True, activity summary should show pagination guidance."""
     import importlib
