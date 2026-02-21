@@ -58,6 +58,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._vector_dimensions = 384
 
         if self._semantic_enabled and self._embedding_provider is None:
+            # Constraint: SQLite maps L2 distance to cosine similarity via 1 - L2²/2.
+            # This conversion is correct only for unit-normalized embeddings.
+            # Provider implementations must return normalized vectors.
             self._embedding_provider = create_embedding_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions
@@ -542,6 +545,14 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
     async def _update_timestamp_sql(self) -> str:
         return "CURRENT_TIMESTAMP"  # pragma: no cover
+
+    def _distance_to_similarity(self, distance: float) -> float:
+        """Convert L2 distance to cosine similarity for normalized embeddings.
+
+        sqlite-vec vec0 returns Euclidean (L2) distance by default.
+        For unit-normalized vectors: L2² = 2·(1 - cos_sim), so cos_sim = 1 - L2²/2.
+        """
+        return max(0.0, 1.0 - (distance * distance) / 2.0)
 
     def _orphan_detection_sql(self) -> str:
         """SQLite sqlite-vec uses rowid-based embedding table."""

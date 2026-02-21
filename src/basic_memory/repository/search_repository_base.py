@@ -204,6 +204,16 @@ class SearchRepositoryBase(ABC):
         """Return the SQL expression for current timestamp in the backend."""
         pass  # pragma: no cover
 
+    @abstractmethod
+    def _distance_to_similarity(self, distance: float) -> float:
+        """Convert a backend-specific vector distance to cosine similarity in [0, 1].
+
+        Backend-specific implementations:
+        - SQLite (vec0): L2/Euclidean distance → cosine similarity via 1 - d²/2
+        - Postgres (pgvector <=>): Cosine distance → cosine similarity via 1 - d
+        """
+        pass  # pragma: no cover
+
     # ------------------------------------------------------------------
     # Shared index / delete operations
     # ------------------------------------------------------------------
@@ -866,7 +876,7 @@ class SearchRepositoryBase(ABC):
         for row in vector_rows:
             chunk_key = row.get("chunk_key", "")
             distance = float(row["best_distance"])
-            similarity = 1.0 / (1.0 + max(distance, 0.0))
+            similarity = self._distance_to_similarity(distance)
             try:
                 _, si_id = self._parse_chunk_key(chunk_key)
             except (ValueError, IndexError):
