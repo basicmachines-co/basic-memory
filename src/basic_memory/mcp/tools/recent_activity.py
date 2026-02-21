@@ -1,6 +1,7 @@
 """Recent activity tool for Basic Memory MCP server."""
 
 from datetime import timezone
+from pathlib import PurePosixPath
 from typing import List, Union, Optional, Literal
 
 from loguru import logger
@@ -332,9 +333,9 @@ async def _get_project_activity(
                     last_activity = current_time
 
         # Extract folder from file_path
-        if hasattr(result.primary_result, "file_path") and result.primary_result.file_path:
-            folder = "/".join(result.primary_result.file_path.split("/")[:-1])
-            if folder:
+        if result.primary_result.file_path:
+            folder = str(PurePosixPath(result.primary_result.file_path).parent)
+            if folder and folder != ".":
                 active_folders.add(folder)
 
     return ProjectActivity(
@@ -359,9 +360,7 @@ def _extract_recent_rows(
             "title": primary.title,
             "permalink": primary.permalink,
             "file_path": primary.file_path,
-            "created_at": (
-                primary.created_at.isoformat() if getattr(primary, "created_at", None) else None
-            ),
+            "created_at": primary.created_at.isoformat() if primary.created_at else None,
         }
         if project_name is not None:
             row["project"] = project_name
@@ -385,7 +384,7 @@ def _format_discovery_output(
         # Get latest activity from most active project
         if most_active.activity.results:
             latest = most_active.activity.results[0].primary_result
-            title = latest.title if hasattr(latest, "title") and latest.title else "Recent activity"
+            title = latest.title or "Recent activity"
             # Format relative time
             time_str = (
                 _format_relative_time(latest.created_at) if latest.created_at else "unknown time"
@@ -414,9 +413,7 @@ def _format_discovery_output(
     for name, activity in projects_activity.items():
         if activity.item_count > 0:
             for result in activity.activity.results[:3]:  # Top 3 from each active project
-                if result.primary_result.type == "entity" and hasattr(
-                    result.primary_result, "title"
-                ):
+                if result.primary_result.type == "entity":
                     title = result.primary_result.title
                     # Look for status indicators in titles
                     if any(word in title.lower() for word in ["complete", "fix", "test", "spec"]):
@@ -470,12 +467,12 @@ def _format_project_output(
     if entities:
         lines.append(f"\n**📄 Recent Notes & Documents ({len(entities)}):**")
         for entity in entities[:5]:  # Show top 5
-            title = entity.title if hasattr(entity, "title") and entity.title else "Untitled"
-            # Get folder from file_path if available
+            title = entity.title or "Untitled"
+            # Get folder from file_path
             folder = ""
-            if hasattr(entity, "file_path") and entity.file_path:
-                folder_path = "/".join(entity.file_path.split("/")[:-1])
-                if folder_path:
+            if entity.file_path:
+                folder_path = str(PurePosixPath(entity.file_path).parent)
+                if folder_path and folder_path != ".":
                     folder = f" ({folder_path})"
             lines.append(f"  • {title}{folder}")
 
@@ -485,9 +482,7 @@ def _format_project_output(
         # Group by category
         by_category = {}
         for obs in observations[:10]:  # Limit to recent ones
-            category = (
-                getattr(obs, "category", "general") if hasattr(obs, "category") else "general"
-            )
+            category = obs.category
             if category not in by_category:
                 by_category[category] = []
             by_category[category].append(obs)
@@ -495,11 +490,7 @@ def _format_project_output(
         for category, obs_list in list(by_category.items())[:5]:  # Show top 5 categories
             lines.append(f"  **{category}:** {len(obs_list)} items")
             for obs in obs_list[:2]:  # Show 2 examples per category
-                content = (
-                    getattr(obs, "content", "No content")
-                    if hasattr(obs, "content")
-                    else "No content"
-                )
+                content = obs.content
                 # Truncate at word boundary
                 if len(content) > 80:
                     content = _truncate_at_word(content, 80)
@@ -509,15 +500,9 @@ def _format_project_output(
     if relations:
         lines.append(f"\n**🔗 Recent Connections ({len(relations)}):**")
         for rel in relations[:5]:  # Show top 5
-            rel_type = (
-                getattr(rel, "relation_type", "relates_to")
-                if hasattr(rel, "relation_type")
-                else "relates_to"
-            )
-            from_entity = (
-                getattr(rel, "from_entity", "Unknown") if hasattr(rel, "from_entity") else "Unknown"
-            )
-            to_entity = getattr(rel, "to_entity", None) if hasattr(rel, "to_entity") else None
+            rel_type = rel.relation_type
+            from_entity = rel.from_entity or "Unknown"
+            to_entity = rel.to_entity
 
             # Format as WikiLinks to show they're readable notes
             from_link = f"[[{from_entity}]]" if from_entity != "Unknown" else from_entity
