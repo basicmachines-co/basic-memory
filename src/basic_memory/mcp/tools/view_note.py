@@ -12,6 +12,7 @@ from basic_memory.mcp.tools.read_note import read_note
 
 @mcp.tool(
     description="View a note as a formatted artifact for better readability.",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def view_note(
     identifier: str,
@@ -57,14 +58,16 @@ async def view_note(
     """
     logger.info(f"Viewing note: {identifier} in project: {project}")
 
-    # Call the existing read_note logic
-    content = await read_note.fn(
-        identifier=identifier,
-        project=project,
-        workspace=workspace,
-        page=page,
-        page_size=page_size,
-        context=context,
+    # Call the existing read_note logic (default output_format="text" returns str)
+    content = str(
+        await read_note(
+            identifier=identifier,
+            project=project,
+            workspace=workspace,
+            page=page,
+            page_size=page_size,
+            context=context,
+        )
     )
 
     # Check if this is an error message (note not found)

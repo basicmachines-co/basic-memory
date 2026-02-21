@@ -37,7 +37,7 @@ async def test_recent_activity_timeframe_formats(client, test_project, test_grap
     # Test each valid timeframe with project-specific mode
     for timeframe in valid_timeframes:
         try:
-            result = await recent_activity.fn(
+            result = await recent_activity(
                 project=test_project.name,
                 type=["entity"],
                 timeframe=timeframe,
@@ -52,7 +52,7 @@ async def test_recent_activity_timeframe_formats(client, test_project, test_grap
     # Test invalid timeframes should raise ValidationError
     for timeframe in invalid_timeframes:
         with pytest.raises(ToolError):
-            await recent_activity.fn(project=test_project.name, timeframe=timeframe)
+            await recent_activity(project=test_project.name, timeframe=timeframe)
 
 
 @pytest.mark.asyncio
@@ -60,28 +60,28 @@ async def test_recent_activity_type_filters(client, test_project, test_graph):
     """Test that recent_activity correctly filters by types."""
 
     # Test single string type
-    result = await recent_activity.fn(project=test_project.name, type=SearchItemType.ENTITY)
+    result = await recent_activity(project=test_project.name, type=SearchItemType.ENTITY)
     assert result is not None
     assert isinstance(result, str)
     assert "Recent Activity:" in result
     assert "Recent Notes & Documents" in result
 
     # Test single string type
-    result = await recent_activity.fn(project=test_project.name, type="entity")
+    result = await recent_activity(project=test_project.name, type="entity")
     assert result is not None
     assert isinstance(result, str)
     assert "Recent Activity:" in result
     assert "Recent Notes & Documents" in result
 
     # Test single type
-    result = await recent_activity.fn(project=test_project.name, type=["entity"])
+    result = await recent_activity(project=test_project.name, type=["entity"])
     assert result is not None
     assert isinstance(result, str)
     assert "Recent Activity:" in result
     assert "Recent Notes & Documents" in result
 
     # Test multiple types
-    result = await recent_activity.fn(project=test_project.name, type=["entity", "observation"])
+    result = await recent_activity(project=test_project.name, type=["entity", "observation"])
     assert result is not None
     assert isinstance(result, str)
     assert "Recent Activity:" in result
@@ -89,7 +89,7 @@ async def test_recent_activity_type_filters(client, test_project, test_graph):
     assert "Recent Notes & Documents" in result or "Recent Observations" in result
 
     # Test multiple types
-    result = await recent_activity.fn(
+    result = await recent_activity(
         project=test_project.name, type=[SearchItemType.ENTITY, SearchItemType.OBSERVATION]
     )
     assert result is not None
@@ -99,7 +99,7 @@ async def test_recent_activity_type_filters(client, test_project, test_graph):
     assert "Recent Notes & Documents" in result or "Recent Observations" in result
 
     # Test all types
-    result = await recent_activity.fn(
+    result = await recent_activity(
         project=test_project.name, type=["entity", "observation", "relation"]
     )
     assert result is not None
@@ -114,14 +114,14 @@ async def test_recent_activity_type_invalid(client, test_project, test_graph):
 
     # Test single invalid string type
     with pytest.raises(ValueError) as e:
-        await recent_activity.fn(project=test_project.name, type="note")
+        await recent_activity(project=test_project.name, type="note")
     assert (
         str(e.value) == "Invalid type: note. Valid types are: ['entity', 'observation', 'relation']"
     )
 
     # Test invalid string array type
     with pytest.raises(ValueError) as e:
-        await recent_activity.fn(project=test_project.name, type=["note"])
+        await recent_activity(project=test_project.name, type=["note"])
     assert (
         str(e.value) == "Invalid type: note. Valid types are: ['entity', 'observation', 'relation']"
     )
@@ -136,7 +136,7 @@ async def test_recent_activity_discovery_mode(client, test_project, test_graph, 
     config_manager.save_config(cfg)
 
     # Test discovery mode (no project parameter)
-    result = await recent_activity.fn()
+    result = await recent_activity()
     assert result is not None
     assert isinstance(result, str)
 
@@ -159,7 +159,7 @@ async def test_recent_activity_discovery_mode_no_activity(client, test_project, 
     cfg.default_project = None
     config_manager.save_config(cfg)
 
-    result = await recent_activity.fn()
+    result = await recent_activity()
     assert "Recent Activity Summary" in result
     assert "No recent activity found in any project." in result
 
@@ -178,17 +178,17 @@ async def test_recent_activity_discovery_mode_multiple_active_projects(
 
     second_root = tmp_path_factory.mktemp("second-project-home")
 
-    result = await create_memory_project.fn(
+    result = await create_memory_project(
         project_name="second-project",
         project_path=str(second_root),
         set_default=False,
     )
     assert result.startswith("✓")
 
-    await write_note.fn(project=test_project.name, title="One", directory="notes", content="one")
-    await write_note.fn(project="second-project", title="Two", directory="notes", content="two")
+    await write_note(project=test_project.name, title="One", directory="notes", content="one")
+    await write_note(project="second-project", title="Two", directory="notes", content="two")
 
-    out = await recent_activity.fn()
+    out = await recent_activity()
     assert "Recent Activity Summary" in out
     assert "or would you prefer a different project" in out
 
@@ -438,7 +438,7 @@ async def test_recent_activity_entity_only_default(client, test_project, test_gr
     test_graph creates entities with observations and relations, so if all types
     were returned we'd see observation/relation rows in the JSON output.
     """
-    json_result = await recent_activity.fn(project=test_project.name, output_format="json")
+    json_result = await recent_activity(project=test_project.name, output_format="json")
     assert isinstance(json_result, list)
     assert len(json_result) > 0
     # Every item should be an entity — no observations or relations
@@ -452,7 +452,7 @@ async def test_recent_activity_explicit_types_returns_requested_types(
 ):
     """Explicitly requesting observation/relation types should return those types."""
     # Request observations only
-    obs_result = await recent_activity.fn(
+    obs_result = await recent_activity(
         project=test_project.name, type=["observation"], output_format="json"
     )
     assert isinstance(obs_result, list)
@@ -460,7 +460,7 @@ async def test_recent_activity_explicit_types_returns_requested_types(
         assert item["type"] == "observation", f"Expected observation type, got type={item['type']}"
 
     # Request relations only
-    rel_result = await recent_activity.fn(
+    rel_result = await recent_activity(
         project=test_project.name, type=["relation"], output_format="json"
     )
     assert isinstance(rel_result, list)
@@ -468,7 +468,7 @@ async def test_recent_activity_explicit_types_returns_requested_types(
         assert item["type"] == "relation", f"Expected relation type, got type={item['type']}"
 
     # Request all types explicitly
-    all_result = await recent_activity.fn(
+    all_result = await recent_activity(
         project=test_project.name,
         type=["entity", "observation", "relation"],
         output_format="json",
@@ -483,7 +483,7 @@ async def test_recent_activity_explicit_types_returns_requested_types(
 @pytest.mark.asyncio
 async def test_recent_activity_pagination_params(client, test_project, test_graph):
     """Test that page and page_size params are forwarded correctly."""
-    result = await recent_activity.fn(
+    result = await recent_activity(
         project=test_project.name,
         type=["entity"],
         page=1,
@@ -497,19 +497,19 @@ async def test_recent_activity_pagination_params(client, test_project, test_grap
 async def test_recent_activity_pagination_validation():
     """Invalid page/page_size values should raise clear ValueError messages."""
     with pytest.raises(ValueError, match="page must be >= 1, got 0"):
-        await recent_activity.fn(page=0)
+        await recent_activity(page=0)
 
     with pytest.raises(ValueError, match="page must be >= 1, got -1"):
-        await recent_activity.fn(page=-1)
+        await recent_activity(page=-1)
 
     with pytest.raises(ValueError, match="page_size must be >= 1, got 0"):
-        await recent_activity.fn(page_size=0)
+        await recent_activity(page_size=0)
 
     with pytest.raises(ValueError, match="page_size must be >= 1, got -5"):
-        await recent_activity.fn(page_size=-5)
+        await recent_activity(page_size=-5)
 
     with pytest.raises(ValueError, match="page_size must be <= 100, got 999"):
-        await recent_activity.fn(page_size=999)
+        await recent_activity(page_size=999)
 
 
 def test_format_project_output_has_more_pagination_guidance():

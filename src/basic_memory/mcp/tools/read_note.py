@@ -59,6 +59,7 @@ def _parse_opening_frontmatter(content: str) -> tuple[str, dict | None]:
     description="Read a markdown note by title or permalink.",
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def read_note(
     identifier: str,
@@ -228,7 +229,7 @@ async def read_note(
 
         # Fallback 1: Try title search via API
         logger.info(f"Search title for: {identifier}")
-        title_results = await search_notes.fn(
+        title_results = await search_notes(
             query=identifier,
             search_type="title",
             project=active_project.name,
@@ -280,7 +281,7 @@ async def read_note(
 
         # Fallback 2: Text search as a last resort
         logger.info(f"Title search failed, trying text search for: {identifier}")
-        text_results = await search_notes.fn(
+        text_results = await search_notes(
             query=identifier,
             search_type="text",
             project=active_project.name,

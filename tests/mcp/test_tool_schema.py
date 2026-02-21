@@ -77,7 +77,7 @@ async def test_schema_validate_by_type(app, test_project, sync_service):
     # Sync so the database picks up the files
     await sync_service.sync(project_path)
 
-    result = await schema_validate.fn(
+    result = await schema_validate(
         note_type="person",
         project=test_project.name,
     )
@@ -100,7 +100,7 @@ async def test_schema_validate_by_identifier(app, test_project, sync_service):
 
     await sync_service.sync(project_path)
 
-    result = await schema_validate.fn(
+    result = await schema_validate(
         identifier="people/alice",
         project=test_project.name,
     )
@@ -123,7 +123,7 @@ async def test_schema_infer(app, test_project, sync_service):
 
     await sync_service.sync(project_path)
 
-    result = await schema_infer.fn(
+    result = await schema_infer(
         note_type="person",
         project=test_project.name,
     )
@@ -162,7 +162,7 @@ permalink: people/dave
 
     await sync_service.sync(project_path)
 
-    result = await schema_diff.fn(
+    result = await schema_diff(
         note_type="person",
         project=test_project.name,
     )
@@ -191,7 +191,7 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, sync_s
         )
 
     # 2. Create the schema note via write_note with metadata
-    await write_note.fn(
+    await write_note(
         title="Person",
         directory="schemas",
         note_type="schema",
@@ -209,7 +209,7 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, sync_s
     await sync_service.sync(project_path)
 
     # 4. Validate — schema_validate should find the schema and validate person notes
-    result = await schema_validate.fn(
+    result = await schema_validate(
         note_type="person",
         project=test_project.name,
     )
@@ -274,7 +274,7 @@ permalink: employees/{name.lower()}
     await sync_service.sync(project_path)
 
     # Validate — must find "Employee Schema" via entity_metadata['entity'] == "employee"
-    result = await schema_validate.fn(
+    result = await schema_validate(
         note_type="employee",
         project=test_project.name,
     )
@@ -323,7 +323,7 @@ permalink: things/{name}
 
     await sync_service.sync(project_path)
 
-    result = await schema_infer.fn(
+    result = await schema_infer(
         note_type="widget",
         project=test_project.name,
     )
@@ -341,7 +341,7 @@ permalink: things/{name}
 @pytest.mark.asyncio
 async def test_schema_validate_no_notes_returns_guidance(app, test_project, sync_service):
     """When no notes of the requested type exist, return guidance on creating notes."""
-    result = await schema_validate.fn(
+    result = await schema_validate(
         note_type="employee",
         project=test_project.name,
     )
@@ -369,7 +369,7 @@ async def test_schema_validate_no_schema_returns_guidance(app, test_project, syn
 
     await sync_service.sync(project_path)
 
-    result = await schema_validate.fn(
+    result = await schema_validate(
         note_type="person",
         project=test_project.name,
     )
@@ -396,7 +396,7 @@ async def test_schema_diff_no_schema_returns_guidance(app, test_project, sync_se
 
     await sync_service.sync(project_path)
 
-    result = await schema_diff.fn(
+    result = await schema_diff(
         note_type="person",
         project=test_project.name,
     )
@@ -418,7 +418,7 @@ async def test_schema_validate_error_returns_guidance(app, test_project):
     mock_validate = AsyncMock(side_effect=RuntimeError("connection lost"))
 
     with patch("basic_memory.mcp.clients.schema.SchemaClient.validate", mock_validate):
-        result = await schema_validate.fn(
+        result = await schema_validate(
             note_type="person",
             project=test_project.name,
         )
@@ -434,7 +434,7 @@ async def test_schema_infer_error_returns_guidance(app, test_project):
     mock_infer = AsyncMock(side_effect=RuntimeError("db unavailable"))
 
     with patch("basic_memory.mcp.clients.schema.SchemaClient.infer", mock_infer):
-        result = await schema_infer.fn(
+        result = await schema_infer(
             note_type="person",
             project=test_project.name,
         )
@@ -450,7 +450,7 @@ async def test_schema_diff_error_returns_guidance(app, test_project):
     mock_diff = AsyncMock(side_effect=RuntimeError("network error"))
 
     with patch("basic_memory.mcp.clients.schema.SchemaClient.diff", mock_diff):
-        result = await schema_diff.fn(
+        result = await schema_diff(
             note_type="person",
             project=test_project.name,
         )

@@ -10,7 +10,7 @@ from basic_memory.mcp.tools import build_context
 @pytest.mark.asyncio
 async def test_get_basic_discussion_context(client, test_graph, test_project):
     """Test getting basic discussion context returns slimmed JSON dict."""
-    result = await build_context.fn(project=test_project.name, url="memory://test/root")
+    result = await build_context(project=test_project.name, url="memory://test/root")
 
     assert isinstance(result, dict)
     assert len(result["results"]) == 1
@@ -43,7 +43,7 @@ async def test_get_basic_discussion_context(client, test_graph, test_project):
 @pytest.mark.asyncio
 async def test_get_discussion_context_pattern(client, test_graph, test_project):
     """Test getting context with pattern matching."""
-    result = await build_context.fn(project=test_project.name, url="memory://test/*", depth=1)
+    result = await build_context(project=test_project.name, url="memory://test/*", depth=1)
 
     assert isinstance(result, dict)
     assert len(result["results"]) > 1  # Should match multiple test/* paths
@@ -58,14 +58,14 @@ async def test_get_discussion_context_pattern(client, test_graph, test_project):
 async def test_get_discussion_context_timeframe(client, test_graph, test_project):
     """Test timeframe parameter filtering."""
     # Get recent context
-    recent = await build_context.fn(
+    recent = await build_context(
         project=test_project.name,
         url="memory://test/root",
         timeframe="1d",
     )
 
     # Get older context
-    older = await build_context.fn(
+    older = await build_context(
         project=test_project.name,
         url="memory://test/root",
         timeframe="30d",
@@ -85,7 +85,7 @@ async def test_get_discussion_context_timeframe(client, test_graph, test_project
 @pytest.mark.asyncio
 async def test_get_discussion_context_not_found(client, test_project):
     """Test handling of non-existent URIs."""
-    result = await build_context.fn(project=test_project.name, url="memory://test/does-not-exist")
+    result = await build_context(project=test_project.name, url="memory://test/does-not-exist")
 
     assert isinstance(result, dict)
     assert len(result["results"]) == 0
@@ -114,7 +114,7 @@ async def test_build_context_timeframe_formats(client, test_graph, test_project)
     # Test each valid timeframe
     for timeframe in valid_timeframes:
         try:
-            result = await build_context.fn(
+            result = await build_context(
                 project=test_project.name,
                 url=test_url,
                 timeframe=timeframe,
@@ -129,7 +129,7 @@ async def test_build_context_timeframe_formats(client, test_graph, test_project)
     # Test invalid timeframes should raise ValidationError
     for timeframe in invalid_timeframes:
         with pytest.raises(ToolError):
-            await build_context.fn(project=test_project.name, url=test_url, timeframe=timeframe)
+            await build_context(project=test_project.name, url=test_url, timeframe=timeframe)
 
 
 @pytest.mark.asyncio
@@ -139,7 +139,7 @@ async def test_build_context_string_depth_parameter(client, test_graph, test_pro
 
     # Test valid string depth parameter — should convert to int
     try:
-        result = await build_context.fn(url=test_url, depth="2", project=test_project.name)
+        result = await build_context(url=test_url, depth="2", project=test_project.name)
         assert isinstance(result["metadata"]["depth"], int)
         assert result["metadata"]["depth"] == 2
     except ToolError:
@@ -148,13 +148,13 @@ async def test_build_context_string_depth_parameter(client, test_graph, test_pro
 
     # Test invalid string depth parameter - should raise ToolError
     with pytest.raises(ToolError):
-        await build_context.fn(test_url, depth="invalid", project=test_project.name)
+        await build_context(test_url, depth="invalid", project=test_project.name)
 
 
 @pytest.mark.asyncio
 async def test_build_context_text_format(client, test_graph, test_project):
     """Test that output_format='text' returns compact text."""
-    result = await build_context.fn(
+    result = await build_context(
         project=test_project.name,
         url="memory://test/root",
         output_format="text",
@@ -173,7 +173,7 @@ async def test_build_context_text_format(client, test_graph, test_project):
 @pytest.mark.asyncio
 async def test_build_context_markdown_pattern(client, test_graph, test_project):
     """Test markdown format with pattern matching (multiple results)."""
-    result = await build_context.fn(
+    result = await build_context(
         project=test_project.name,
         url="memory://test/*",
         output_format="text",
@@ -190,7 +190,7 @@ async def test_build_context_markdown_pattern(client, test_graph, test_project):
 @pytest.mark.asyncio
 async def test_build_context_markdown_not_found(client, test_project):
     """Test markdown format for non-existent URIs."""
-    result = await build_context.fn(
+    result = await build_context(
         project=test_project.name,
         url="memory://test/does-not-exist",
         output_format="text",

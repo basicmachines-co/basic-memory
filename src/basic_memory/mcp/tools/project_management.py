@@ -14,7 +14,10 @@ from basic_memory.schemas.project_info import ProjectInfoRequest
 from basic_memory.utils import generate_permalink
 
 
-@mcp.tool("list_memory_projects")
+@mcp.tool(
+    "list_memory_projects",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
+)
 async def list_memory_projects(
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
@@ -77,7 +80,10 @@ async def list_memory_projects(
         return result
 
 
-@mcp.tool("create_memory_project")
+@mcp.tool(
+    "create_memory_project",
+    annotations={"destructiveHint": False, "openWorldHint": False},
+)
 async def create_memory_project(
     project_name: str,
     project_path: str,
@@ -193,7 +199,9 @@ async def create_memory_project(
         return result
 
 
-@mcp.tool()
+@mcp.tool(
+    annotations={"destructiveHint": True, "openWorldHint": False},
+)
 async def delete_project(project_name: str, context: Context | None = None) -> str:
     """Delete a Basic Memory project.
 

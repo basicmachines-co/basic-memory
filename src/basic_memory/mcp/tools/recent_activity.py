@@ -35,6 +35,7 @@ from basic_memory.schemas.search import SearchItemType
     - "3 weeks ago"
     Or standard formats like "7d"
     """,
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def recent_activity(
     type: Union[str, List[str]] = "",

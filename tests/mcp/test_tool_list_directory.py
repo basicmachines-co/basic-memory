@@ -9,7 +9,7 @@ from basic_memory.mcp.tools.write_note import write_note
 @pytest.mark.asyncio
 async def test_list_directory_empty(client, test_project):
     """Test listing directory when no entities exist."""
-    result = await list_directory.fn(project=test_project.name)
+    result = await list_directory(project=test_project.name)
 
     assert isinstance(result, str)
     assert "No files found in directory '/'" in result
@@ -26,7 +26,7 @@ async def test_list_directory_with_test_graph(client, test_graph, test_project):
     # /test/Root.md
 
     # List root directory
-    result = await list_directory.fn(project=test_project.name)
+    result = await list_directory(project=test_project.name)
 
     assert isinstance(result, str)
     assert "Contents of '/' (depth 1):" in result
@@ -38,7 +38,7 @@ async def test_list_directory_with_test_graph(client, test_graph, test_project):
 async def test_list_directory_specific_path(client, test_graph, test_project):
     """Test listing specific directory path."""
     # List the test directory
-    result = await list_directory.fn(project=test_project.name, dir_name="/test")
+    result = await list_directory(project=test_project.name, dir_name="/test")
 
     assert isinstance(result, str)
     assert "Contents of '/test' (depth 1):" in result
@@ -54,7 +54,7 @@ async def test_list_directory_specific_path(client, test_graph, test_project):
 async def test_list_directory_with_glob_filter(client, test_graph, test_project):
     """Test listing directory with glob filtering."""
     # Filter for files containing "Connected"
-    result = await list_directory.fn(
+    result = await list_directory(
         project=test_project.name, dir_name="/test", file_name_glob="*Connected*"
     )
 
@@ -72,7 +72,7 @@ async def test_list_directory_with_glob_filter(client, test_graph, test_project)
 @pytest.mark.asyncio
 async def test_list_directory_with_markdown_filter(client, test_graph, test_project):
     """Test listing directory with markdown file filter."""
-    result = await list_directory.fn(
+    result = await list_directory(
         project=test_project.name, dir_name="/test", file_name_glob="*.md"
     )
 
@@ -91,7 +91,7 @@ async def test_list_directory_with_markdown_filter(client, test_graph, test_proj
 async def test_list_directory_with_depth_control(client, test_graph, test_project):
     """Test listing directory with depth control."""
     # Depth 1: should return only the test directory
-    result_depth_1 = await list_directory.fn(project=test_project.name, dir_name="/", depth=1)
+    result_depth_1 = await list_directory(project=test_project.name, dir_name="/", depth=1)
 
     assert isinstance(result_depth_1, str)
     assert "Contents of '/' (depth 1):" in result_depth_1
@@ -99,7 +99,7 @@ async def test_list_directory_with_depth_control(client, test_graph, test_projec
     assert "Total: 1 items (1 directory)" in result_depth_1
 
     # Depth 2: should return directory + its files
-    result_depth_2 = await list_directory.fn(project=test_project.name, dir_name="/", depth=2)
+    result_depth_2 = await list_directory(project=test_project.name, dir_name="/", depth=2)
 
     assert isinstance(result_depth_2, str)
     assert "Contents of '/' (depth 2):" in result_depth_2
@@ -115,7 +115,7 @@ async def test_list_directory_with_depth_control(client, test_graph, test_projec
 @pytest.mark.asyncio
 async def test_list_directory_nonexistent_path(client, test_graph, test_project):
     """Test listing nonexistent directory."""
-    result = await list_directory.fn(project=test_project.name, dir_name="/nonexistent")
+    result = await list_directory(project=test_project.name, dir_name="/nonexistent")
 
     assert isinstance(result, str)
     assert "No files found in directory '/nonexistent'" in result
@@ -124,7 +124,7 @@ async def test_list_directory_nonexistent_path(client, test_graph, test_project)
 @pytest.mark.asyncio
 async def test_list_directory_glob_no_matches(client, test_graph, test_project):
     """Test listing directory with glob that matches nothing."""
-    result = await list_directory.fn(
+    result = await list_directory(
         project=test_project.name, dir_name="/test", file_name_glob="*.xyz"
     )
 
@@ -136,7 +136,7 @@ async def test_list_directory_glob_no_matches(client, test_graph, test_project):
 async def test_list_directory_with_created_notes(client, test_project):
     """Test listing directory with dynamically created notes."""
     # Create some test notes
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Project Planning",
         directory="projects",
@@ -144,7 +144,7 @@ async def test_list_directory_with_created_notes(client, test_project):
         tags=["planning", "project"],
     )
 
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Meeting Notes",
         directory="projects",
@@ -152,7 +152,7 @@ async def test_list_directory_with_created_notes(client, test_project):
         tags=["meeting", "notes"],
     )
 
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Research Document",
         directory="research",
@@ -161,7 +161,7 @@ async def test_list_directory_with_created_notes(client, test_project):
     )
 
     # List root directory
-    result_root = await list_directory.fn(project=test_project.name)
+    result_root = await list_directory(project=test_project.name)
 
     assert isinstance(result_root, str)
     assert "Contents of '/' (depth 1):" in result_root
@@ -170,7 +170,7 @@ async def test_list_directory_with_created_notes(client, test_project):
     assert "Total: 2 items (2 directories)" in result_root
 
     # List projects directory
-    result_projects = await list_directory.fn(project=test_project.name, dir_name="/projects")
+    result_projects = await list_directory(project=test_project.name, dir_name="/projects")
 
     assert isinstance(result_projects, str)
     assert "Contents of '/projects' (depth 1):" in result_projects
@@ -179,7 +179,7 @@ async def test_list_directory_with_created_notes(client, test_project):
     assert "Total: 2 items (2 files)" in result_projects
 
     # Test glob filter for "Meeting"
-    result_meeting = await list_directory.fn(
+    result_meeting = await list_directory(
         project=test_project.name, dir_name="/projects", file_name_glob="*Meeting*"
     )
 
@@ -197,7 +197,7 @@ async def test_list_directory_path_normalization(client, test_graph, test_projec
     paths_to_test = ["/test", "test", "/test/", "test/"]
 
     for path in paths_to_test:
-        result = await list_directory.fn(project=test_project.name, dir_name=path)
+        result = await list_directory(project=test_project.name, dir_name=path)
         # All should return the same number of items
         assert "Total: 5 items (5 files)" in result
         assert "📄 Connected Entity 1.md" in result
@@ -206,7 +206,7 @@ async def test_list_directory_path_normalization(client, test_graph, test_projec
 @pytest.mark.asyncio
 async def test_list_directory_shows_file_metadata(client, test_graph, test_project):
     """Test that file metadata is displayed correctly."""
-    result = await list_directory.fn(project=test_project.name, dir_name="/test")
+    result = await list_directory(project=test_project.name, dir_name="/test")
 
     assert isinstance(result, str)
     # Should show file names

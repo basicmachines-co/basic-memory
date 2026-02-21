@@ -15,10 +15,10 @@ class _ContextState:
     def __init__(self):
         self._state: dict[str, object] = {}
 
-    def get_state(self, key: str):
+    async def get_state(self, key: str):
         return self._state.get(key)
 
-    def set_state(self, key: str, value: object) -> None:
+    async def set_state(self, key: str, value: object, **kwargs) -> None:
         self._state[key] = value
 
 
@@ -142,7 +142,7 @@ async def test_workspace_auto_selects_single_and_caches(monkeypatch):
 
     resolved = await resolve_workspace_parameter(context=context)
     assert resolved.tenant_id == only_workspace.tenant_id
-    assert context.get_state("active_workspace") == only_workspace
+    assert await context.get_state("active_workspace") == only_workspace.model_dump()
 
 
 @pytest.mark.asyncio
@@ -251,7 +251,7 @@ async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
         role="owner",
     )
     context = _ContextState()
-    context.set_state("active_workspace", cached_workspace)
+    await context.set_state("active_workspace", cached_workspace.model_dump())
 
     async def fail_if_called(context=None):  # pragma: no cover
         raise AssertionError("Workspace fetch should not run when cache is available")

@@ -6,7 +6,10 @@ from basic_memory.mcp.project_context import get_available_workspaces
 from basic_memory.mcp.server import mcp
 
 
-@mcp.tool(description="List available cloud workspaces (tenant_id, type, role, and name).")
+@mcp.tool(
+    description="List available cloud workspaces (tenant_id, type, role, and name).",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
+)
 async def list_workspaces(context: Context | None = None) -> str:
     """List workspaces available to the current cloud user."""
     workspaces = await get_available_workspaces(context=context)

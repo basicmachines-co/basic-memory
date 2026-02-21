@@ -15,7 +15,7 @@ async def test_continue_conversation_with_topic(client, test_graph):
     # We can use the test_graph fixture which already has relevant content
 
     # Call the function with a topic that should match existing content
-    result = await continue_conversation.fn(topic="Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await continue_conversation(topic="Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check that the result contains expected content
     assert "Continuing conversation on: Root" in result  # pyright: ignore [reportOperatorIssue]
@@ -27,7 +27,7 @@ async def test_continue_conversation_with_topic(client, test_graph):
 async def test_continue_conversation_with_recent_activity(client, test_graph):
     """Test continue_conversation with no topic, using recent activity."""
     # Call the function without a topic
-    result = await continue_conversation.fn(timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await continue_conversation(timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check that the result contains expected content for recent activity
     assert "Continuing conversation on: Recent Activity" in result  # pyright: ignore [reportOperatorIssue]
@@ -40,7 +40,7 @@ async def test_continue_conversation_with_recent_activity(client, test_graph):
 async def test_continue_conversation_no_results(client):
     """Test continue_conversation when no results are found."""
     # Call with a non-existent topic
-    result = await continue_conversation.fn(topic="NonExistentTopic", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await continue_conversation(topic="NonExistentTopic", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response indicates no results found
     assert "Continuing conversation on: NonExistentTopic" in result  # pyright: ignore [reportOperatorIssue]
@@ -51,7 +51,7 @@ async def test_continue_conversation_no_results(client):
 async def test_continue_conversation_creates_structured_suggestions(client, test_graph):
     """Test that continue_conversation generates structured tool usage suggestions."""
     # Call the function with a topic that should match existing content
-    result = await continue_conversation.fn(topic="Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await continue_conversation(topic="Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Verify the response includes clear tool usage instructions
     assert "start by executing one of the suggested commands" in result.lower()  # pyright: ignore [reportAttributeAccessIssue]
@@ -69,7 +69,7 @@ async def test_continue_conversation_creates_structured_suggestions(client, test
 async def test_search_prompt_with_results(client, test_graph):
     """Test search_prompt with a query that returns results."""
     # Call the function with a query that should match existing content
-    result = await search_prompt.fn("Root")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await search_prompt("Root")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response contains expected content
     assert 'Search Results for: "Root"' in result  # pyright: ignore [reportOperatorIssue]
@@ -82,7 +82,7 @@ async def test_search_prompt_with_results(client, test_graph):
 async def test_search_prompt_with_timeframe(client, test_graph):
     """Test search_prompt with a timeframe."""
     # Call the function with a query and timeframe
-    result = await search_prompt.fn("Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await search_prompt("Root", timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response includes timeframe information
     assert 'Search Results for: "Root" (after 7d)' in result  # pyright: ignore [reportOperatorIssue]
@@ -93,7 +93,7 @@ async def test_search_prompt_with_timeframe(client, test_graph):
 async def test_search_prompt_no_results(client):
     """Test search_prompt when no results are found."""
     # Call with a query that won't match anything
-    result = await search_prompt.fn("XYZ123NonExistentQuery")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await search_prompt("XYZ123NonExistentQuery")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response indicates no results found
     assert 'Search Results for: "XYZ123NonExistentQuery"' in result  # pyright: ignore [reportOperatorIssue]
@@ -151,7 +151,7 @@ def test_prompt_context_with_file_path_no_permalink():
 async def test_recent_activity_prompt_discovery_mode(client, test_project, test_graph):
     """Test recent_activity_prompt in discovery mode (no project)."""
     # Call the function in discovery mode
-    result = await recent_activity_prompt.fn(timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await recent_activity_prompt(timeframe="1w")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response contains expected discovery mode content
     assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
@@ -164,7 +164,7 @@ async def test_recent_activity_prompt_discovery_mode(client, test_project, test_
 async def test_recent_activity_prompt_project_specific(client, test_project, test_graph):
     """Test recent_activity_prompt in project-specific mode."""
     # Call the function with a specific project
-    result = await recent_activity_prompt.fn(timeframe="1w", project=test_project.name)  # pyright: ignore [reportGeneralTypeIssues]
+    result = await recent_activity_prompt(timeframe="1w", project=test_project.name)  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response contains expected project-specific content
     assert "Recent Activity Context" in result  # pyright: ignore [reportOperatorIssue]
@@ -177,7 +177,7 @@ async def test_recent_activity_prompt_project_specific(client, test_project, tes
 async def test_recent_activity_prompt_with_custom_timeframe(client, test_project, test_graph):
     """Test recent_activity_prompt with custom timeframe."""
     # Call the function with a custom timeframe in discovery mode
-    result = await recent_activity_prompt.fn(timeframe="1d")  # pyright: ignore [reportGeneralTypeIssues]
+    result = await recent_activity_prompt(timeframe="1d")  # pyright: ignore [reportGeneralTypeIssues]
 
     # Check the response includes the custom timeframe
     assert "1d" in result  # pyright: ignore [reportOperatorIssue]

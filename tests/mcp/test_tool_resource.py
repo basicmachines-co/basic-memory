@@ -25,7 +25,7 @@ async def test_read_file_text_file(app, synced_files, test_project):
     - Include correct metadata
     """
     # First create a text file via notes
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Text Resource",
         directory="test",
@@ -35,7 +35,7 @@ async def test_read_file_text_file(app, synced_files, test_project):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_content.fn("test/text-resource", project=test_project.name)
+    response = await read_content("test/text-resource", project=test_project.name)
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -53,7 +53,7 @@ async def test_read_content_file_path(app, synced_files, test_project):
     - Include correct metadata
     """
     # First create a text file via notes
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Text Resource",
         directory="test",
@@ -63,7 +63,7 @@ async def test_read_content_file_path(app, synced_files, test_project):
     assert result is not None
 
     # Now read it as a resource
-    response = await read_content.fn("test/Text Resource.md", project=test_project.name)
+    response = await read_content("test/Text Resource.md", project=test_project.name)
 
     assert response["type"] == "text"
     assert "This is a test text resource" in response["text"]
@@ -84,7 +84,7 @@ async def test_read_file_image_file(app, synced_files, test_project):
     image_path = synced_files["image"].name
 
     # Read it as a resource
-    response = await read_content.fn(image_path, project=test_project.name)
+    response = await read_content(image_path, project=test_project.name)
 
     assert response["type"] == "image"
     assert response["source"]["type"] == "base64"
@@ -112,7 +112,7 @@ async def test_read_file_pdf_file(app, synced_files, test_project):
     pdf_path = synced_files["pdf"].name
 
     # Read it as a resource
-    response = await read_content.fn(pdf_path, project=test_project.name)
+    response = await read_content(pdf_path, project=test_project.name)
 
     assert response["type"] == "document"
     assert response["source"]["type"] == "base64"
@@ -128,14 +128,14 @@ async def test_read_file_pdf_file(app, synced_files, test_project):
 async def test_read_file_not_found(app, test_project):
     """Test trying to read a non-existent"""
     with pytest.raises(ToolError, match="Resource not found"):
-        await read_content.fn("does-not-exist", project=test_project.name)
+        await read_content("does-not-exist", project=test_project.name)
 
 
 @pytest.mark.asyncio
 async def test_read_file_memory_url(app, synced_files, test_project):
     """Test reading a resource using a memory:// URL."""
     # Create a text file via notes
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Memory URL Test",
         directory="test",
@@ -144,7 +144,7 @@ async def test_read_file_memory_url(app, synced_files, test_project):
 
     # Read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    response = await read_content.fn(memory_url, project=test_project.name)
+    response = await read_content(memory_url, project=test_project.name)
 
     assert response["type"] == "text"
     assert "Testing memory:// URL handling for resources" in response["text"]
@@ -153,7 +153,7 @@ async def test_read_file_memory_url(app, synced_files, test_project):
 @pytest.mark.asyncio
 async def test_read_file_memory_url_with_project_prefix(app, synced_files, test_project):
     """Test reading a resource using a memory:// URL with explicit project prefix."""
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Project Prefixed Resource URL Test",
         directory="test",
@@ -161,7 +161,7 @@ async def test_read_file_memory_url_with_project_prefix(app, synced_files, test_
     )
 
     memory_url = f"memory://{test_project.name}/test/project-prefixed-resource-url-test"
-    response = await read_content.fn(memory_url)
+    response = await read_content(memory_url)
 
     assert response["type"] == "text"
     assert "Testing memory:// URL handling for resources with project prefix" in response["text"]
@@ -225,7 +225,7 @@ async def test_image_conversion(app, synced_files, test_project):
     image_path = synced_files["image"].name
 
     # Test reading the resource
-    response = await read_content.fn(image_path, project=test_project.name)
+    response = await read_content(image_path, project=test_project.name)
 
     assert response["type"] == "image"
     assert response["source"]["media_type"] == "image/jpeg"

@@ -13,7 +13,7 @@ from basic_memory.schemas.search import SearchItemType, SearchResponse
 async def test_search_text(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -23,7 +23,7 @@ async def test_search_text(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(project=test_project.name, query="searchable")
+    response = await search_notes(project=test_project.name, query="searchable")
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -41,7 +41,7 @@ async def test_search_text(client, test_project):
 async def test_search_title(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -51,7 +51,7 @@ async def test_search_title(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(
+    response = await search_notes(
         project=test_project.name, query="Search Note", search_type="title"
     )
 
@@ -71,7 +71,7 @@ async def test_search_title(client, test_project):
 async def test_search_permalink(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -81,7 +81,7 @@ async def test_search_permalink(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(
+    response = await search_notes(
         project=test_project.name,
         query=f"{test_project.name}/test/test-search-note",
         search_type="permalink",
@@ -103,7 +103,7 @@ async def test_search_permalink(client, test_project):
 async def test_search_permalink_match(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -113,7 +113,7 @@ async def test_search_permalink_match(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(
+    response = await search_notes(
         project=test_project.name,
         query=f"{test_project.name}/test/test-search-*",
         search_type="permalink",
@@ -134,7 +134,7 @@ async def test_search_permalink_match(client, test_project):
 @pytest.mark.asyncio
 async def test_search_memory_url_with_project_prefix(client, test_project):
     """Test searching with a memory:// URL that includes the project prefix."""
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Memory URL Search Note",
         directory="test",
@@ -142,9 +142,7 @@ async def test_search_memory_url_with_project_prefix(client, test_project):
     )
     assert result
 
-    response = await search_notes.fn(
-        query=f"memory://{test_project.name}/test/memory-url-search-note"
-    )
+    response = await search_notes(query=f"memory://{test_project.name}/test/memory-url-search-note")
 
     if isinstance(response, SearchResponse):
         assert len(response.results) > 0
@@ -160,7 +158,7 @@ async def test_search_memory_url_with_project_prefix(client, test_project):
 async def test_search_pagination(client, test_project):
     """Test basic search functionality."""
     # Create a test note
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Test Search Note",
         directory="test",
@@ -170,7 +168,7 @@ async def test_search_pagination(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes.fn(
+    response = await search_notes(
         project=test_project.name, query="searchable", page=1, page_size=1
     )
 
@@ -190,7 +188,7 @@ async def test_search_pagination(client, test_project):
 async def test_search_with_type_filter(client, test_project):
     """Test search with entity type filter."""
     # Create test content
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Entity Type Test",
         directory="test",
@@ -198,7 +196,7 @@ async def test_search_with_type_filter(client, test_project):
     )
 
     # Search with type filter
-    response = await search_notes.fn(project=test_project.name, query="type", types=["note"])
+    response = await search_notes(project=test_project.name, query="type", types=["note"])
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -213,7 +211,7 @@ async def test_search_with_type_filter(client, test_project):
 async def test_search_with_entity_type_filter(client, test_project):
     """Test search with entity type filter."""
     # Create test content
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Entity Type Test",
         directory="test",
@@ -221,9 +219,7 @@ async def test_search_with_entity_type_filter(client, test_project):
     )
 
     # Search with entity type filter
-    response = await search_notes.fn(
-        project=test_project.name, query="type", entity_types=["entity"]
-    )
+    response = await search_notes(project=test_project.name, query="type", entity_types=["entity"])
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -238,7 +234,7 @@ async def test_search_with_entity_type_filter(client, test_project):
 async def test_search_with_date_filter(client, test_project):
     """Test search with date filter."""
     # Create test content
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Recent Note",
         directory="test",
@@ -247,7 +243,7 @@ async def test_search_with_date_filter(client, test_project):
 
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
-    response = await search_notes.fn(
+    response = await search_notes(
         project=test_project.name, query="recent", after_date=one_hour_ago.isoformat()
     )
 
@@ -385,7 +381,7 @@ class TestSearchToolErrorHandling:
         # Patch at the clients module level where the import happens
         monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-        result = await search_mod.search_notes.fn(project="test-project", query="test query")
+        result = await search_mod.search_notes(project="test-project", query="test query")
         assert isinstance(result, str)
         assert "# Search Failed - Invalid Syntax" in result
 
@@ -423,7 +419,7 @@ class TestSearchToolErrorHandling:
         # Patch at the clients module level where the import happens
         monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-        result = await search_mod.search_notes.fn(project="test-project", query="test query")
+        result = await search_mod.search_notes(project="test-project", query="test query")
         assert isinstance(result, str)
         assert "# Search Failed - Access Error" in result
 
@@ -466,7 +462,7 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
     monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    result = await search_mod.search_notes.fn(
+    result = await search_mod.search_notes(
         project="test-project",
         query="semantic lookup",
         search_type=search_type,
@@ -517,7 +513,7 @@ async def test_search_notes_passes_metadata_filters(monkeypatch):
     monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test",
         metadata_filters={"status": "active"},
@@ -564,7 +560,7 @@ async def test_search_by_metadata_basic(monkeypatch):
     monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    result = await search_by_metadata.fn(
+    result = await search_by_metadata(
         filters={"status": "in-progress"},
         project="test-project",
         limit=10,
@@ -581,7 +577,7 @@ async def test_search_by_metadata_limit_zero():
     """search_by_metadata rejects limit <= 0 with error string."""
     from basic_memory.mcp.tools.search import search_by_metadata
 
-    result = await search_by_metadata.fn(
+    result = await search_by_metadata(
         filters={"status": "active"},
         limit=0,
     )
@@ -635,7 +631,7 @@ async def test_search_by_metadata_offset_within_page(monkeypatch):
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
     # offset=2, limit=5 → page=1, offset_within_page=2
-    result = await search_by_metadata.fn(
+    result = await search_by_metadata(
         filters={"status": "active"},
         project="test-project",
         limit=5,
@@ -675,7 +671,7 @@ async def test_search_by_metadata_error_handling(monkeypatch):
     monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    result = await search_by_metadata.fn(
+    result = await search_by_metadata(
         filters={"status": "active"},
         project="test-project",
     )
@@ -716,7 +712,7 @@ async def test_search_notes_invalid_search_type_returns_error(monkeypatch):
     monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    result = await search_mod.search_notes.fn(
+    result = await search_mod.search_notes(
         project="test-project",
         query="test query",
         search_type="bogus",
@@ -763,7 +759,7 @@ async def test_search_notes_passes_min_similarity(monkeypatch):
     monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test",
         search_type="vector",
@@ -825,7 +821,7 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
 
     monkeypatch.setattr(search_mod, "get_container", lambda: StubContainer())
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test query",
     )
@@ -886,7 +882,7 @@ async def test_search_notes_defaults_to_fts_when_semantic_disabled(monkeypatch):
 
     monkeypatch.setattr(search_mod, "get_container", lambda: StubContainer())
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test query",
     )
@@ -946,7 +942,7 @@ async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkey
 
     monkeypatch.setattr(search_mod, "get_container", lambda: StubContainer())
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test query",
         search_type="text",
@@ -1006,7 +1002,7 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
         )(),
     )
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test query",
     )
@@ -1067,7 +1063,7 @@ async def test_search_notes_defaults_to_fts_when_container_not_initialized_and_s
         )(),
     )
 
-    await search_mod.search_notes.fn(
+    await search_mod.search_notes(
         project="test-project",
         query="test query",
     )

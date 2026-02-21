@@ -146,7 +146,10 @@ delete_note("{project}", "correct-identifier-from-search")
 If the note should be deleted but the operation keeps failing, send a message to support@basicmemory.com."""
 
 
-@mcp.tool(description="Delete a note or directory by title, permalink, or path")
+@mcp.tool(
+    description="Delete a note or directory by title, permalink, or path",
+    annotations={"destructiveHint": True, "openWorldHint": False},
+)
 async def delete_note(
     identifier: str,
     is_directory: bool = False,

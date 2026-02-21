@@ -104,7 +104,7 @@ async def _write_note_json(
 ) -> dict:
     """Write a note and return structured JSON metadata."""
     # Use the MCP tool to create/update the entity (handles create-or-update logic)
-    await mcp_write_note.fn(
+    await mcp_write_note(
         title=title,
         content=content,
         directory=folder,
@@ -155,7 +155,7 @@ async def _read_note_json(
         if entity_id is None:
             from basic_memory.mcp.tools.search import search_notes as mcp_search_tool
 
-            title_results = await mcp_search_tool.fn(
+            title_results = await mcp_search_tool(
                 query=identifier,
                 search_type="title",
                 project=project_name,
@@ -387,7 +387,7 @@ def write_note(
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
                 note = run_with_cleanup(
-                    mcp_write_note.fn(
+                    mcp_write_note(
                         title=title,
                         content=content,
                         directory=folder,
@@ -468,13 +468,15 @@ def read_note(
                     result["content"] = stripped_content
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
-                note = run_with_cleanup(
-                    mcp_read_note.fn(
-                        identifier=identifier,
-                        project=project_name,
-                        workspace=workspace,
-                        page=page,
-                        page_size=page_size,
+                note = str(
+                    run_with_cleanup(
+                        mcp_read_note(
+                            identifier=identifier,
+                            project=project_name,
+                            workspace=workspace,
+                            page=page,
+                            page_size=page_size,
+                        )
                     )
                 )
                 if strip_frontmatter:
@@ -560,16 +562,18 @@ def edit_note(
                 )
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
-                result = run_with_cleanup(
-                    mcp_edit_note.fn(
-                        identifier=identifier,
-                        operation=operation,
-                        content=content,
-                        project=project_name,
-                        workspace=workspace,
-                        section=section,
-                        find_text=find_text,
-                        expected_replacements=expected_replacements,
+                result = str(
+                    run_with_cleanup(
+                        mcp_edit_note(
+                            identifier=identifier,
+                            operation=operation,
+                            content=content,
+                            project=project_name,
+                            workspace=workspace,
+                            section=section,
+                            find_text=find_text,
+                            expected_replacements=expected_replacements,
+                        )
                     )
                 )
                 rprint(result)
@@ -629,7 +633,7 @@ def build_context(
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
-                mcp_build_context.fn(
+                mcp_build_context(
                     project=project_name,
                     workspace=workspace,
                     url=url,
@@ -712,10 +716,10 @@ def recent_activity(
                 print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
             else:
                 result = run_with_cleanup(
-                    mcp_recent_activity.fn(
-                        type=type,  # pyright: ignore [reportArgumentType]
-                        depth=depth,
-                        timeframe=timeframe,
+                    mcp_recent_activity(
+                        type=type,  # pyright: ignore[reportArgumentType]
+                        depth=depth if depth is not None else 1,
+                        timeframe=timeframe if timeframe is not None else "7d",
                         project=project_name,
                         workspace=workspace,
                     )
@@ -862,11 +866,12 @@ def search_notes(
 
         with force_routing(local=local, cloud=cloud):
             results = run_with_cleanup(
-                mcp_search.fn(
+                mcp_search(
                     query=query or "",
                     project=project_name,
                     workspace=workspace,
                     search_type=search_type,
+                    output_format="json",
                     page=page,
                     after_date=after_date,
                     page_size=page_size,
@@ -881,8 +886,7 @@ def search_notes(
             print(results)
             raise typer.Exit(1)
 
-        results_dict = results.model_dump(exclude_none=True)
-        print(json.dumps(results_dict, indent=2, ensure_ascii=True, default=str))
+        print(json.dumps(results, indent=2, ensure_ascii=True, default=str))
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -916,7 +920,7 @@ def continue_conversation(
         with force_routing(local=local, cloud=cloud):
             # Prompt functions return formatted strings directly
             session = run_with_cleanup(
-                mcp_continue_conversation.fn(topic=topic, timeframe=timeframe)  # type: ignore[arg-type]
+                mcp_continue_conversation(topic=topic, timeframe=timeframe)  # type: ignore[arg-type]
             )
         rprint(session)
     except ValueError as e:

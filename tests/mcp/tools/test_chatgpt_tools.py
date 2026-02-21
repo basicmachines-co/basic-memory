@@ -10,13 +10,13 @@ from basic_memory.schemas.search import SearchResponse, SearchResult, SearchItem
 @pytest.mark.asyncio
 async def test_search_successful_results(client, test_project):
     """Test search with successful results returns proper MCP content array format."""
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Test Document 1",
         directory="docs",
         content="# Test Document 1\n\nThis is test content for document 1",
     )
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Test Document 2",
         directory="docs",
@@ -25,7 +25,7 @@ async def test_search_successful_results(client, test_project):
 
     from basic_memory.mcp.tools.chatgpt_tools import search
 
-    result = await search.fn("test content")
+    result = await search("test content")
 
     # Verify MCP content array format
     assert isinstance(result, list)
@@ -52,9 +52,9 @@ async def test_search_with_error_response(monkeypatch, client, test_project):
     async def fake_search_notes_fn(*args, **kwargs):
         return error_message
 
-    monkeypatch.setattr(chatgpt_tools.search_notes, "fn", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
 
-    result = await chatgpt_tools.search.fn("invalid query")
+    result = await chatgpt_tools.search("invalid query")
 
     assert isinstance(result, list)
     assert len(result) == 1
@@ -77,9 +77,9 @@ async def test_search_uses_dynamic_default_search_type(monkeypatch, client, test
         captured_kwargs.update(kwargs)
         return {"results": []}
 
-    monkeypatch.setattr(chatgpt_tools.search_notes, "fn", fake_search_notes_fn)
+    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
 
-    result = await chatgpt_tools.search.fn("default search mode query")
+    result = await chatgpt_tools.search("default search mode query")
 
     assert isinstance(result, list)
     assert "search_type" not in captured_kwargs
@@ -88,7 +88,7 @@ async def test_search_uses_dynamic_default_search_type(monkeypatch, client, test
 @pytest.mark.asyncio
 async def test_fetch_successful_document(client, test_project):
     """Test fetch with successful document retrieval."""
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Test Document",
         directory="docs",
@@ -97,7 +97,7 @@ async def test_fetch_successful_document(client, test_project):
 
     from basic_memory.mcp.tools.chatgpt_tools import fetch
 
-    result = await fetch.fn("docs/test-document")
+    result = await fetch("docs/test-document")
 
     assert isinstance(result, list)
     assert len(result) == 1
@@ -116,7 +116,7 @@ async def test_fetch_document_not_found(client, test_project):
     """Test fetch when document is not found."""
     from basic_memory.mcp.tools.chatgpt_tools import fetch
 
-    result = await fetch.fn("nonexistent-doc")
+    result = await fetch("nonexistent-doc")
 
     assert isinstance(result, list)
     assert len(result) == 1
@@ -208,9 +208,9 @@ async def test_search_internal_exception_returns_error_payload(monkeypatch, clie
     async def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chatgpt_tools.search_notes, "fn", boom)
+    monkeypatch.setattr(chatgpt_tools, "search_notes", boom)
 
-    result = await chatgpt_tools.search.fn("anything")
+    result = await chatgpt_tools.search("anything")
     assert isinstance(result, list)
     content = json.loads(result[0]["text"])
     assert content["error"] == "Internal search error"
@@ -225,9 +225,9 @@ async def test_fetch_internal_exception_returns_error_payload(monkeypatch, clien
     async def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(chatgpt_tools.read_note, "fn", boom)
+    monkeypatch.setattr(chatgpt_tools, "read_note", boom)
 
-    result = await chatgpt_tools.fetch.fn("docs/test")
+    result = await chatgpt_tools.fetch("docs/test")
     assert isinstance(result, list)
     content = json.loads(result[0]["text"])
     assert content["id"] == "docs/test"

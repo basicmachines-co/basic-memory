@@ -92,7 +92,10 @@ def _format_document_for_chatgpt(
     }
 
 
-@mcp.tool(description="Search for content across the knowledge base")
+@mcp.tool(
+    description="Search for content across the knowledge base",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
+)
 async def search(
     query: str,
     context: Context | None = None,
@@ -115,7 +118,7 @@ async def search(
         default_project = config.default_project
 
         # Call underlying search_notes with sensible defaults for ChatGPT
-        results = await search_notes.fn(
+        results = await search_notes(
             query=query,
             project=default_project,  # Use default project for ChatGPT
             page=1,
@@ -156,7 +159,10 @@ async def search(
         return [{"type": "text", "text": json.dumps(error_results, ensure_ascii=False)}]
 
 
-@mcp.tool(description="Fetch the full contents of a search result document")
+@mcp.tool(
+    description="Fetch the full contents of a search result document",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
+)
 async def fetch(
     id: str,
     context: Context | None = None,
@@ -178,13 +184,15 @@ async def fetch(
         config = ConfigManager().config
         default_project = config.default_project
 
-        # Call underlying read_note function
-        content = await read_note.fn(
-            identifier=id,
-            project=default_project,  # Use default project for ChatGPT
-            page=1,
-            page_size=10,  # Default pagination
-            context=context,
+        # Call underlying read_note function (default output_format="text" returns str)
+        content = str(
+            await read_note(
+                identifier=id,
+                project=default_project,  # Use default project for ChatGPT
+                page=1,
+                page_size=10,  # Default pagination
+                context=context,
+            )
         )
 
         # Format the document for ChatGPT

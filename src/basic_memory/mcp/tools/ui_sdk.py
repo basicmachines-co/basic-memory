@@ -20,6 +20,7 @@ def _text_block(message: str) -> List[ContentBlock]:
 @mcp.tool(
     description="Search notes and return an embedded MCP-UI resource (raw HTML).",
     output_schema=None,
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def search_notes_ui(
     query: str,
@@ -36,7 +37,7 @@ async def search_notes_ui(
     context: Context | None = None,
 ) -> List[ContentBlock]:
     """Return a search results UI as an embedded MCP-UI resource."""
-    result = await search_notes.fn(
+    result = await search_notes(
         query=query,
         project=project,
         page=page,
@@ -82,6 +83,7 @@ async def search_notes_ui(
 @mcp.tool(
     description="Read a note and return an embedded MCP-UI resource (raw HTML).",
     output_schema=None,
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def read_note_ui(
     identifier: str,
@@ -91,7 +93,7 @@ async def read_note_ui(
     context: Context | None = None,
 ) -> List[ContentBlock]:
     """Return a note preview UI as an embedded MCP-UI resource."""
-    content = await read_note.fn(
+    content = await read_note(
         identifier=identifier,
         project=project,
         page=page,

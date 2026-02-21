@@ -11,6 +11,7 @@ from basic_memory.mcp.server import mcp
 
 @mcp.tool(
     description="List directory contents with filtering and depth control.",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def list_directory(
     dir_name: str = "/",

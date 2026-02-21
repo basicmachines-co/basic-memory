@@ -10,10 +10,10 @@ class _ContextState:
     def __init__(self):
         self._state: dict[str, object] = {}
 
-    def get_state(self, key: str):
+    async def get_state(self, key: str):
         return self._state.get(key)
 
-    def set_state(self, key: str, value: object) -> None:
+    async def set_state(self, key: str, value: object, **kwargs) -> None:
         self._state[key] = value
 
 
@@ -40,7 +40,7 @@ async def test_list_workspaces_formats_workspace_rows(monkeypatch):
         fake_get_available_workspaces,
     )
 
-    result = await list_workspaces.fn()
+    result = await list_workspaces()
     assert "# Available Workspaces (2)" in result
     assert "Personal (type=personal, role=owner" in result
     assert "Team (type=organization, role=editor" in result
@@ -56,7 +56,7 @@ async def test_list_workspaces_handles_empty_list(monkeypatch):
         fake_get_available_workspaces,
     )
 
-    result = await list_workspaces.fn()
+    result = await list_workspaces()
     assert "# No Workspaces Available" in result
 
 
@@ -71,7 +71,7 @@ async def test_list_workspaces_oauth_error_bubbles_up(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="Workspace discovery requires OAuth login"):
-        await list_workspaces.fn()
+        await list_workspaces()
 
 
 @pytest.mark.asyncio
@@ -87,11 +87,11 @@ async def test_list_workspaces_uses_context_cache_path(monkeypatch):
 
     async def fake_get_available_workspaces(context=None):
         assert context is not None
-        cached = context.get_state("available_workspaces")
+        cached = await context.get_state("available_workspaces")
         if cached:
             return cached
         call_count["fetches"] += 1
-        context.set_state("available_workspaces", [workspace])
+        await context.set_state("available_workspaces", [workspace])
         return [workspace]
 
     monkeypatch.setattr(
@@ -99,8 +99,8 @@ async def test_list_workspaces_uses_context_cache_path(monkeypatch):
         fake_get_available_workspaces,
     )
 
-    first = await list_workspaces.fn(context=context)
-    second = await list_workspaces.fn(context=context)
+    first = await list_workspaces(context=context)
+    second = await list_workspaces(context=context)
 
     assert "# Available Workspaces (1)" in first
     assert "# Available Workspaces (1)" in second

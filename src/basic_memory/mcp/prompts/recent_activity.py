@@ -46,7 +46,7 @@ async def recent_activity_prompt(
     logger.info(f"Getting recent activity, timeframe: {timeframe}, project: {project}")
 
     # Call the tool function - it returns a well-formatted string
-    activity_summary = await recent_activity.fn(project=project, timeframe=timeframe)
+    activity_summary = await recent_activity(project=project, timeframe=timeframe)
 
     # Build the prompt response
     # The tool already returns formatted markdown, so we use it directly

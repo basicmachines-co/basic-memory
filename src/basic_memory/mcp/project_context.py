@@ -99,11 +99,9 @@ def _workspace_choices(workspaces: list[WorkspaceInfo]) -> str:
 async def get_available_workspaces(context: Optional[Context] = None) -> list[WorkspaceInfo]:
     """Load available cloud workspaces for the current authenticated user."""
     if context:
-        cached_workspaces = context.get_state("available_workspaces")
-        if isinstance(cached_workspaces, list) and all(
-            isinstance(item, WorkspaceInfo) for item in cached_workspaces
-        ):
-            return cached_workspaces
+        cached_raw = await context.get_state("available_workspaces")
+        if isinstance(cached_raw, list):
+            return [WorkspaceInfo.model_validate(item) for item in cached_raw]
 
     from basic_memory.mcp.async_client import get_cloud_control_plane_client
     from basic_memory.mcp.tools.utils import call_get
@@ -113,7 +111,10 @@ async def get_available_workspaces(context: Optional[Context] = None) -> list[Wo
         workspace_list = WorkspaceListResponse.model_validate(response.json())
 
     if context:
-        context.set_state("available_workspaces", workspace_list.workspaces)
+        await context.set_state(
+            "available_workspaces",
+            [ws.model_dump() for ws in workspace_list.workspaces],
+        )
 
     return workspace_list.workspaces
 
@@ -124,12 +125,12 @@ async def resolve_workspace_parameter(
 ) -> WorkspaceInfo:
     """Resolve workspace using explicit input, session cache, and cloud discovery."""
     if context:
-        cached_workspace = context.get_state("active_workspace")
-        if isinstance(cached_workspace, WorkspaceInfo) and (
-            workspace is None or _workspace_matches_identifier(cached_workspace, workspace)
-        ):
-            logger.debug(f"Using cached workspace from context: {cached_workspace.tenant_id}")
-            return cached_workspace
+        cached_raw = await context.get_state("active_workspace")
+        if isinstance(cached_raw, dict):
+            cached_workspace = WorkspaceInfo.model_validate(cached_raw)
+            if workspace is None or _workspace_matches_identifier(cached_workspace, workspace):
+                logger.debug(f"Using cached workspace from context: {cached_workspace.tenant_id}")
+                return cached_workspace
 
     workspaces = await get_available_workspaces(context=context)
     if not workspaces:
@@ -164,7 +165,7 @@ async def resolve_workspace_parameter(
         )
 
     if context:
-        context.set_state("active_workspace", selected_workspace)
+        await context.set_state("active_workspace", selected_workspace.model_dump())
         logger.debug(f"Cached workspace in context: {selected_workspace.tenant_id}")
 
     return selected_workspace
@@ -206,10 +207,12 @@ async def get_active_project(
 
     # Check if already cached in context
     if context:
-        cached_project = context.get_state("active_project")
-        if cached_project and cached_project.name == project:
-            logger.debug(f"Using cached project from context: {project}")
-            return cached_project
+        cached_raw = await context.get_state("active_project")
+        if isinstance(cached_raw, dict):
+            cached_project = ProjectItem.model_validate(cached_raw)
+            if cached_project.name == project:
+                logger.debug(f"Using cached project from context: {project}")
+                return cached_project
 
     # Validate project exists by calling API
     logger.debug(f"Validating project: {project}")
@@ -230,7 +233,7 @@ async def get_active_project(
 
     # Cache in context if available
     if context:
-        context.set_state("active_project", active_project)
+        await context.set_state("active_project", active_project.model_dump())
         logger.debug(f"Cached project in context: {project}")
 
     logger.debug(f"Validated project: {active_project.name}")
@@ -307,7 +310,7 @@ async def resolve_project_and_path(
                 is_default=resolved.is_default,
             )
             if context:
-                context.set_state("active_project", active_project)
+                await context.set_state("active_project", active_project.model_dump())
 
             resolved_path = f"{resolved.permalink}/{remainder}" if include_project else remainder
             return active_project, resolved_path, True

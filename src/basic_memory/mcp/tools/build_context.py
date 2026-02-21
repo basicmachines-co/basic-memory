@@ -192,6 +192,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     - "json" (default): Slimmed JSON with redundant fields removed
     - "text": Compact markdown text for LLM consumption
     """,
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def build_context(
     url: MemoryUrl,
