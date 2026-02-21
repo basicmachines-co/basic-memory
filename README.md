@@ -572,12 +572,18 @@ Tests use pytest markers for selective execution:
 just install          # Install with dev dependencies
 just lint             # Run linting checks
 just typecheck        # Run type checking
+just typecheck-ty     # Run ty type checking (incremental supplement to pyright)
 just format           # Format code with ruff
 just fast-check       # Fast local loop (fix/format/typecheck + testmon + smoke)
 just doctor           # Local consistency check (temp config)
 just check            # Run all quality checks
 just migration "msg"  # Create database migration
 ```
+
+**Type Checking Strategy:**
+- `just typecheck` (Pyright) remains the primary, blocking type checker.
+- `just typecheck-ty` (Astral `ty`) is available as a supplemental checker while rules are adopted incrementally.
+- We recommend running both locally while reducing `ty` diagnostics over time.
 
 **Local Consistency Check:**
 ```bash
