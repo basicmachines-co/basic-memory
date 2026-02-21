@@ -119,7 +119,7 @@ def validate_note(
     # Trigger: schema has frontmatter_fields and caller provided frontmatter dict
     # Why: settings.frontmatter rules validate metadata keys like tags, status
     # Outcome: frontmatter fields produce the same FieldResult/warning/error as content fields
-    if frontmatter and schema.frontmatter_fields:
+    if frontmatter is not None and schema.frontmatter_fields:
         for fm_field in schema.frontmatter_fields:
             field_result = _validate_frontmatter_field(fm_field, frontmatter)
             result.field_results.append(field_result)

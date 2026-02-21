@@ -360,6 +360,23 @@ class TestValidateFrontmatterFields:
         assert result.passed is True
         assert result.field_results == []
 
+    def test_empty_frontmatter_dict_validates_missing_keys(self):
+        """frontmatter={} is a valid input — required keys should be flagged missing."""
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={})
+        assert result.field_results[0].status == "missing"
+        assert len(result.warnings) == 1
+        assert "status" in result.warnings[0]
+
+    def test_empty_frontmatter_dict_strict_fails(self):
+        """frontmatter={} in strict mode should produce errors for required keys."""
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field], validation_mode="strict")
+        result = validate_note("test-note", schema, [], [], frontmatter={})
+        assert result.passed is False
+        assert len(result.errors) == 1
+
     def test_empty_frontmatter_fields_skips_validation(self):
         schema = self._make_fm_schema([])
         result = validate_note("test-note", schema, [], [], frontmatter={"status": "draft"})
