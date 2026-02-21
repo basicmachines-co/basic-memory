@@ -10,12 +10,19 @@
   - JSON output now includes an additive `frontmatter` field with parsed YAML metadata (or `null`
     when no valid opening frontmatter block exists).
 
-## v0.18.3 (2026-02-12)
+## v0.18.5 (2026-02-13)
+
+### Bug Fixes
+
+- Strip NUL bytes from content before PostgreSQL search indexing
+  ([`ec9b2c4`](https://github.com/basicmachines-co/basic-memory/commit/ec9b2c4))
+
+## v0.18.4 (2026-02-12)
 
 ### Bug Fixes
 
 - Use global `--header` flag for Tigris consistency on all rclone transactions
-  ([`7fcf587`](https://github.com/basicmachines-co/basic-memory/commit/7fcf587))
+  ([`0eae0e1`](https://github.com/basicmachines-co/basic-memory/commit/0eae0e1))
   - `--header-download` / `--header-upload` only apply to GET/PUT requests, missing S3
     ListObjectsV2 calls that bisync issues first. Non-US users saw stale edge-cached metadata.
   - `--header` applies to ALL HTTP transactions (list, download, upload), fixing bisync for

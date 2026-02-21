@@ -580,6 +580,36 @@ class TestPlatformNativePathSeparators:
                 assert "/" in saved_path
                 assert saved_path == str(project_path)
 
+    def test_add_project_never_creates_directory(self):
+        """Test that ConfigManager.add_project() is pure config management — no mkdir.
+
+        Directory creation is delegated to ProjectService via FileService, which
+        supports both local and cloud (S3) backends.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            initial_config = BasicMemoryConfig(projects={})
+            config_manager.save_config(initial_config)
+
+            # Use a path that does not exist — ConfigManager should not create it
+            nonexistent_path = str(temp_path / "nonexistent" / "project")
+            config_manager.add_project("test-project", nonexistent_path)
+
+            # Check directory does NOT exist right after add_project(),
+            # before load_config() which triggers the model validator
+            assert not Path(nonexistent_path).exists()
+
+            # Verify project was persisted in config
+            config = config_manager.load_config()
+            assert "test-project" in config.projects
+            assert config.projects["test-project"].path == nonexistent_path
+
     def test_model_post_init_uses_platform_native_separators(self, config_home, monkeypatch):
         """Test that model_post_init uses platform-native separators."""
         import platform
@@ -603,10 +633,25 @@ class TestPlatformNativePathSeparators:
 class TestSemanticSearchConfig:
     """Test semantic search configuration options."""
 
-    def test_semantic_search_enabled_defaults_to_true_when_fastembed_is_available(
+    def test_semantic_search_enabled_defaults_to_true_when_semantic_modules_are_available(
         self, monkeypatch
     ):
-        """Semantic search defaults on when fastembed is importable."""
+        """Semantic search defaults on when fastembed and sqlite_vec are importable."""
+        import basic_memory.config as config_module
+
+        monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
+        monkeypatch.setattr(
+            config_module.importlib.util,
+            "find_spec",
+            lambda name: object() if name in {"fastembed", "sqlite_vec"} else None,
+        )
+        config = BasicMemoryConfig()
+        assert config.semantic_search_enabled is True
+
+    def test_semantic_search_enabled_defaults_to_false_when_any_semantic_module_is_unavailable(
+        self, monkeypatch
+    ):
+        """Semantic search defaults off when required semantic modules are missing."""
         import basic_memory.config as config_module
 
         monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
@@ -615,17 +660,6 @@ class TestSemanticSearchConfig:
             "find_spec",
             lambda name: object() if name == "fastembed" else None,
         )
-        config = BasicMemoryConfig()
-        assert config.semantic_search_enabled is True
-
-    def test_semantic_search_enabled_defaults_to_false_when_fastembed_is_unavailable(
-        self, monkeypatch
-    ):
-        """Semantic search defaults off when fastembed is not importable."""
-        import basic_memory.config as config_module
-
-        monkeypatch.delenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", raising=False)
-        monkeypatch.setattr(config_module.importlib.util, "find_spec", lambda name: None)
         config = BasicMemoryConfig()
         assert config.semantic_search_enabled is False
 

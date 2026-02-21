@@ -466,9 +466,10 @@ async def sample_entity(entity_repository: EntityRepository) -> Entity:
 @pytest_asyncio.fixture
 async def project_service(
     project_repository: ProjectRepository,
+    file_service: FileService,
 ) -> ProjectService:
-    """Create ProjectService with repository."""
-    return ProjectService(repository=project_repository)
+    """Create ProjectService with repository and file service for directory operations."""
+    return ProjectService(repository=project_repository, file_service=file_service)
 
 
 @pytest_asyncio.fixture

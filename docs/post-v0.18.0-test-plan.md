@@ -79,7 +79,7 @@ These are the most important post-`v0.18.0` feature modules currently under-cove
 ### Acceptance criteria
 
 - `search_type=text|vector|hybrid` returns expected ranked results on canonical semantic corpus.
-- Missing semantic extras fail fast with actionable install guidance.
+- Missing semantic dependencies fail fast with actionable install guidance.
 - Reindex and provider/model changes produce valid vectors without dimension mismatch.
 - SQLite and Postgres produce equivalent behavior for semantic modes on the same dataset.
 - Generated-column migration path is valid on SQLite environments in use.
@@ -180,7 +180,7 @@ Key finding: **FastEmbed (384-d local ONNX) matches or exceeds OpenAI (1536-d) q
 ### Existing coverage anchor points
 
 - `tests/mcp/test_tool_contracts.py`
-- `test-int/mcp/test_output_format_ascii_integration.py`
+- `test-int/mcp/test_output_format_json_integration.py`
 - `test-int/mcp/test_ui_sdk_integration.py`
 
 ### Gaps to close — DONE
@@ -288,7 +288,7 @@ Run after automated tests pass.
 - Routing: verify success/failure paths with and without API key.
 - Permalink routing: read/write/search notes across projects with colliding titles.
 - Permalink routing: verify memory URL routing correctness.
-- UI/TUI: call `search_notes` and `read_note` with UI variants and `output_format=ascii|ansi`.
+- UI/TUI: call `search_notes` and `read_note` with UI variants and `output_format=text|json`.
 - UI/TUI: verify payload/resource format and metadata completeness.
 
 ## Implementation Backlog (Ordered)

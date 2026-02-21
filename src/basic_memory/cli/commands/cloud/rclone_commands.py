@@ -223,6 +223,9 @@ def project_sync(
         *TIGRIS_CONSISTENCY_HEADERS,
         "--filter-from",
         str(filter_path),
+        # Prevent NUL byte padding on virtual filesystems (e.g. Google Drive File Stream)
+        # See: rclone/rclone#6801
+        "--local-no-preallocate",
     ]
 
     if verbose:
@@ -299,6 +302,9 @@ def project_bisync(
         str(filter_path),
         "--workdir",
         str(state_path),
+        # Prevent NUL byte padding on virtual filesystems (e.g. Google Drive File Stream)
+        # See: rclone/rclone#6801
+        "--local-no-preallocate",
     ]
 
     # Add --create-empty-src-dirs if rclone version supports it (v1.64+)

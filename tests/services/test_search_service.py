@@ -8,6 +8,7 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
+from basic_memory.services.search_service import _strip_nul
 
 
 @pytest.mark.asyncio
@@ -1114,6 +1115,60 @@ async def test_index_entity_multiple_categories_same_content(
     # Search for the shared content - should find both observations
     results = await search_service.search(SearchQuery(text="Shared content"))
     assert len(results) >= 2
+
+
+# Tests for NUL byte stripping
+
+
+def test_strip_nul_removes_nul_bytes():
+    """_strip_nul removes \\x00 from strings."""
+    assert _strip_nul("hello\x00world") == "helloworld"
+    assert _strip_nul("\x00\x00\x00") == ""
+    assert _strip_nul("clean string") == "clean string"
+
+
+@pytest.mark.asyncio
+async def test_index_entity_markdown_strips_nul_bytes(search_service, session_maker, test_project):
+    """Content with NUL bytes should be stripped before indexing.
+
+    rclone preallocation on virtual filesystems (e.g. Google Drive File Stream)
+    can pad files with \\x00 bytes, causing PostgreSQL CharacterNotInRepertoireError.
+
+    Note: NUL bytes arrive via file content read from disk, not from the database.
+    Postgres rejects \\x00 in text columns at the ORM level, so we only test
+    the content path (passed to index_entity) rather than observation creation.
+    """
+    from basic_memory.repository import EntityRepository
+    from basic_memory.repository.search_repository import SearchRepository
+
+    entity_repo = EntityRepository(session_maker, project_id=test_project.id)
+
+    entity_data = {
+        "title": "NUL Test Entity",
+        "entity_type": "note",
+        "entity_metadata": {},
+        "content_type": "text/markdown",
+        "file_path": "test/nul-test.md",
+        "permalink": "test/nul-test",
+        "project_id": test_project.id,
+        "created_at": datetime.now(),
+        "updated_at": datetime.now(),
+    }
+    entity = await entity_repo.create(entity_data)
+    entity = await entity_repo.get_by_permalink("test/nul-test")
+
+    # Index with NUL-containing content (simulates rclone-preallocated file)
+    nul_content = "# NUL Test\x00\x00\nSome content\x00here"
+    await search_service.index_entity(entity, content=nul_content)
+
+    # Verify no NUL bytes in stored search index rows
+    search_repo: SearchRepository = search_service.repository
+    results = await search_repo.search(permalink_match="test/nul-test*")
+    for row in results:
+        if row.content_snippet:
+            assert "\x00" not in row.content_snippet, (
+                f"NUL found in content_snippet for {row.permalink}"
+            )
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ This module provides service-layer dependencies:
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Annotated, Any, Callable, Coroutine, Mapping, Protocol
 
 from fastapi import Depends
@@ -549,9 +550,15 @@ TaskSchedulerDep = Annotated[TaskScheduler, Depends(get_task_scheduler)]
 
 async def get_project_service(
     project_repository: ProjectRepositoryDep,
+    app_config: AppConfigDep,
 ) -> ProjectService:
-    """Create ProjectService with repository."""
-    return ProjectService(repository=project_repository)
+    """Create ProjectService with repository and a system-level FileService for directory operations."""
+    # A system-level FileService for project directory creation (no project-specific base_path needed).
+    # ensure_directory() accepts absolute paths and ignores base_path for those, so Path.home() is safe.
+    entity_parser = EntityParser(Path.home())
+    markdown_processor = MarkdownProcessor(entity_parser, app_config=app_config)
+    file_service = FileService(Path.home(), markdown_processor, app_config=app_config)
+    return ProjectService(repository=project_repository, file_service=file_service)
 
 
 ProjectServiceDep = Annotated[ProjectService, Depends(get_project_service)]

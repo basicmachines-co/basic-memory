@@ -1,26 +1,70 @@
 name: Tests
 
+concurrency:
+  group: bm-ci-${{ github.workflow }}-${{ github.repository }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  # pull_request_target runs on the BASE of the PR, not the merge result.
-  # It has write permissions and access to secrets.
-  # It's useful for PRs from forks or automated PRs but requires careful use for security reasons.
-  # See: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
-  pull_request_target:
-    branches: [ "main" ]
 
 jobs:
-  test-sqlite:
-    name: Test SQLite (${{ matrix.os }}, Python ${{ matrix.python-version }})
+  static-checks:
+    name: Static Checks (Python 3.12)
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - uses: extractions/setup-just@v3
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev]"
+
+      - name: Run type checks
+        run: |
+          just typecheck
+
+      - name: Run linting
+        run: |
+          just lint
+
+  test-sqlite-unit:
+    name: Test SQLite Unit (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 30
+    needs: [static-checks]
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: [ "3.12", "3.13", "3.14" ]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -46,24 +90,63 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,semantic]"
+          uv pip install -e ".[dev]"
 
-      - name: Run type checks
+      - name: Run tests (SQLite Unit)
         run: |
-          just typecheck
+          just test-unit-sqlite
 
-      - name: Run linting
+  test-sqlite-integration:
+    name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    timeout-minutes: 45
+    needs: [static-checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.12"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install uv
         run: |
-          just lint
+          pip install uv
 
-      - name: Run tests (SQLite)
+      - uses: extractions/setup-just@v3
+
+      - name: Create virtual env
         run: |
-          uv pip install pytest pytest-cov
-          just test-sqlite
+          uv venv
 
-  test-postgres:
-    name: Test Postgres (Python ${{ matrix.python-version }})
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev]"
+
+      - name: Run tests (SQLite Integration)
+        run: |
+          just test-int-sqlite
+
+  test-postgres-unit:
+    name: Test Postgres Unit (Python ${{ matrix.python-version }})
     timeout-minutes: 30
+    needs: [static-checks]
     strategy:
       fail-fast: false
       matrix:
@@ -95,16 +178,57 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,semantic]"
+          uv pip install -e ".[dev]"
 
-      - name: Run tests (Postgres via testcontainers)
+      - name: Run tests (Postgres Unit)
         run: |
-          uv pip install pytest pytest-cov
-          just test-postgres
+          just test-unit-postgres
+
+  test-postgres-integration:
+    name: Test Postgres Integration (Python ${{ matrix.python-version }})
+    timeout-minutes: 45
+    needs: [static-checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.12", "3.13", "3.14" ]
+    runs-on: ubuntu-latest
+
+    # Note: No services section needed - testcontainers handles Postgres in Docker
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - uses: extractions/setup-just@v3
+
+      - name: Create virtual env
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        run: |
+          uv pip install -e ".[dev]"
+
+      - name: Run tests (Postgres Integration)
+        run: |
+          just test-int-postgres
 
   test-semantic:
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
+    needs: [static-checks]
     runs-on: ubuntu-latest
 
     steps:
@@ -130,16 +254,23 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,semantic]"
+          uv pip install -e ".[dev]"
 
       - name: Run tests (Semantic)
         run: |
-          uv pip install pytest pytest-cov
           just test-semantic
 
   coverage:
     name: Coverage Summary (combined, Python 3.12)
-    timeout-minutes: 30
+    timeout-minutes: 60
+    needs:
+      - static-checks
+      - test-sqlite-unit
+      - test-sqlite-integration
+      - test-postgres-unit
+      - test-postgres-integration
+      - test-semantic
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -165,11 +296,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,semantic]"
+          uv pip install -e ".[dev]"
 
       - name: Run combined coverage (SQLite + Postgres)
         run: |
-          uv pip install pytest pytest-cov
           just coverage
 
       - name: Add coverage report to job summary

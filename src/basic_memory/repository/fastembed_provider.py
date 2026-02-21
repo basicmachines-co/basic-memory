@@ -9,7 +9,7 @@ from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 if TYPE_CHECKING:
-    from fastembed import TextEmbedding  # pragma: no cover
+    from fastembed import TextEmbedding  # type: ignore[import-not-found]  # pragma: no cover
 
 
 class FastEmbedEmbeddingProvider(EmbeddingProvider):
@@ -42,13 +42,14 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
 
             def _create_model() -> "TextEmbedding":
                 try:
-                    from fastembed import TextEmbedding
+                    from fastembed import TextEmbedding  # type: ignore[import-not-found]
                 except (
                     ImportError
                 ) as exc:  # pragma: no cover - exercised via tests with monkeypatch
                     raise SemanticDependenciesMissingError(
                         "fastembed package is missing. "
-                        "Install semantic extras: pip install 'basic-memory[semantic]'"
+                        "Install/update basic-memory to include semantic dependencies: "
+                        "pip install -U basic-memory"
                     ) from exc
                 resolved_model_name = self._MODEL_ALIASES.get(self.model_name, self.model_name)
                 return TextEmbedding(model_name=resolved_model_name)

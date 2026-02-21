@@ -151,6 +151,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "dateparser" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "fastembed" },
     { name = "fastmcp" },
     { name = "greenlet" },
     { name = "httpx" },
@@ -161,6 +162,7 @@ dependencies = [
     { name = "mdformat-frontmatter" },
     { name = "mdformat-gfm" },
     { name = "nest-asyncio" },
+    { name = "openai" },
     { name = "pillow" },
     { name = "psycopg" },
     { name = "pybars3" },
@@ -176,16 +178,10 @@ dependencies = [
     { name = "rich" },
     { name = "sniffio" },
     { name = "sqlalchemy" },
+    { name = "sqlite-vec" },
     { name = "typer" },
     { name = "unidecode" },
     { name = "watchfiles" },
-]
-
-[package.optional-dependencies]
-semantic = [
-    { name = "fastembed" },
-    { name = "openai" },
-    { name = "sqlite-vec" },
 ]
 
 [package.dev-dependencies]
@@ -214,7 +210,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "dateparser", specifier = ">=1.2.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.8" },
-    { name = "fastembed", marker = "extra == 'semantic'", specifier = ">=0.7.4" },
+    { name = "fastembed", specifier = ">=0.7.4" },
     { name = "fastmcp", specifier = "==2.12.3" },
     { name = "greenlet", specifier = ">=3.1.1" },
     { name = "httpx", specifier = ">=0.28.0" },
@@ -225,7 +221,7 @@ requires-dist = [
     { name = "mdformat-frontmatter", specifier = ">=2.0.8" },
     { name = "mdformat-gfm", specifier = ">=0.3.7" },
     { name = "nest-asyncio", specifier = ">=1.6.0" },
-    { name = "openai", marker = "extra == 'semantic'", specifier = ">=1.100.2" },
+    { name = "openai", specifier = ">=1.100.2" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "psycopg", specifier = "==3.3.1" },
     { name = "pybars3", specifier = ">=0.9.7" },
@@ -241,12 +237,11 @@ requires-dist = [
     { name = "rich", specifier = ">=13.9.4" },
     { name = "sniffio", specifier = ">=1.3.1" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
-    { name = "sqlite-vec", marker = "extra == 'semantic'", specifier = ">=0.1.6" },
+    { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "typer", specifier = ">=0.9.0" },
     { name = "unidecode", specifier = ">=1.3.8" },
     { name = "watchfiles", specifier = ">=1.0.4" },
 ]
-provides-extras = ["semantic"]
 
 [package.metadata.requires-dev]
 dev = [

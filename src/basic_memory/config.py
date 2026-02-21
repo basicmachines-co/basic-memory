@@ -40,8 +40,11 @@ class DatabaseBackend(str, Enum):
 
 
 def _default_semantic_search_enabled() -> bool:
-    """Enable semantic search by default when semantic extras are installed."""
-    return importlib.util.find_spec("fastembed") is not None
+    """Enable semantic search by default when required local semantic dependencies exist."""
+    required_modules = ("fastembed", "sqlite_vec")
+    return all(
+        importlib.util.find_spec(module_name) is not None for module_name in required_modules
+    )
 
 
 @dataclass
@@ -145,7 +148,7 @@ class BasicMemoryConfig(BaseSettings):
     # Semantic search configuration
     semantic_search_enabled: bool = Field(
         default_factory=_default_semantic_search_enabled,
-        description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic extras.",
+        description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic dependencies (included by default).",
     )
     semantic_embedding_provider: str = Field(
         default="fastembed",
@@ -685,11 +688,8 @@ class ConfigManager:
         if project_name:  # pragma: no cover
             raise ValueError(f"Project '{name}' already exists")
 
-        # Ensure the path exists
-        project_path = Path(path)
-        project_path.mkdir(parents=True, exist_ok=True)  # pragma: no cover
-
         # Load config, modify it, and save it
+        project_path = Path(path)
         config = self.load_config()
         config.projects[name] = ProjectEntry(path=str(project_path))
         self.save_config(config)

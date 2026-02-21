@@ -13,22 +13,41 @@ from fastmcp import Context
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.schemas.search import SearchResponse
 from basic_memory.config import ConfigManager
+from basic_memory.schemas.search import SearchResponse, SearchResult
 
 
-def _format_search_results_for_chatgpt(results: SearchResponse) -> List[Dict[str, Any]]:
+def _format_search_results_for_chatgpt(
+    results: SearchResponse | list[SearchResult] | list[dict[str, Any]] | dict[str, Any],
+) -> List[Dict[str, Any]]:
     """Format search results according to ChatGPT's expected schema.
 
     Returns a list of result objects with id, title, and url fields.
     """
+    if isinstance(results, SearchResponse):
+        raw_results: list[SearchResult] | list[dict[str, Any]] = results.results
+    elif isinstance(results, dict):
+        nested_results = results.get("results")
+        raw_results = nested_results if isinstance(nested_results, list) else []
+    else:
+        raw_results = results
+
     formatted_results = []
 
-    for result in results.results:
+    for result in raw_results:
+        if isinstance(result, SearchResult):
+            title = result.title
+            permalink = result.permalink
+        elif isinstance(result, dict):
+            title = result.get("title")
+            permalink = result.get("permalink")
+        else:
+            raise TypeError(f"Unexpected result type: {type(result).__name__}")
+
         formatted_result = {
-            "id": result.permalink or f"doc-{len(formatted_results)}",
-            "title": result.title if result.title and result.title.strip() else "Untitled",
-            "url": result.permalink or "",
+            "id": permalink or f"doc-{len(formatted_results)}",
+            "title": title if isinstance(title, str) and title.strip() else "Untitled",
+            "url": permalink or "",
         }
         formatted_results.append(formatted_result)
 
@@ -101,7 +120,7 @@ async def search(
             project=default_project,  # Use default project for ChatGPT
             page=1,
             page_size=10,  # Reasonable default for ChatGPT consumption
-            search_type="text",  # Default to full-text search
+            output_format="json",
             context=context,
         )
 
@@ -115,10 +134,11 @@ async def search(
             }
         else:
             # Format successful results for ChatGPT
-            formatted_results = _format_search_results_for_chatgpt(results)
+            raw_results = results.get("results", []) if isinstance(results, dict) else []
+            formatted_results = _format_search_results_for_chatgpt(raw_results)
             search_results = {
                 "results": formatted_results,
-                "total_count": len(results.results),  # Use actual count from results
+                "total_count": len(raw_results),  # Use actual count from results
                 "query": query,
             }
             logger.info(f"Search completed: {len(formatted_results)} results returned")

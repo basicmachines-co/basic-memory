@@ -83,18 +83,26 @@ Manual check:
 
 ---
 
-### 2) ASCII / ANSI TUI Output
+### 2) Text / JSON Output Modes
 
 Tools:
-- `search_notes(output_format="ascii" | "ansi")`
-- `read_note(output_format="ascii" | "ansi")`
+- `search_notes(output_format="text" | "json")`
+- `read_note(output_format="text" | "json")`
+- `write_note(output_format="text" | "json")`
+- `edit_note(output_format="text" | "json")`
+- `recent_activity(output_format="text" | "json")`
+- `list_memory_projects(output_format="text" | "json")`
+- `create_memory_project(output_format="text" | "json")`
+- `delete_note(output_format="text" | "json")`
+- `move_note(output_format="text" | "json")`
+- `build_context(output_format="json" | "text")`
 
 Expect:
-- ASCII table for search, header + content preview for note.
-- ANSI variants include color escape codes.
+- `text` mode preserves existing human-readable responses.
+- `json` mode returns structured dict/list payloads for machine-readable clients.
 
 Automated:
-- `uv run pytest test-int/mcp/test_output_format_ascii_integration.py`
+- `uv run pytest test-int/mcp/test_output_format_json_integration.py`
 
 ---
 
@@ -125,6 +133,6 @@ Fill in after running:
 
 - Tool‑UI (React): __
 - MCP‑UI SDK (embedded): __
-- ASCII/ANSI: __
+- Text/JSON modes: __
 
 Decision + rationale: __

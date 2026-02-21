@@ -2,7 +2,7 @@
 
 # Install dependencies
 install:
-    uv sync --extra semantic
+    uv sync
     @echo ""
     @echo "💡 Remember to activate the virtual environment by running: source .venv/bin/activate"
 
