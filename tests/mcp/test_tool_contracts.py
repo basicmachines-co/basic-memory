@@ -42,6 +42,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     "move_note": [
         "identifier",
         "destination_path",
+        "destination_folder",
         "is_directory",
         "project",
         "workspace",
