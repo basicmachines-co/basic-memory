@@ -73,6 +73,7 @@ authors to learn.
 | `field?(array): EntityType` | Multiple `field` relations | `- authored [[Book]]` (×N) |
 | `tags` | Frontmatter `tags` array | `tags: [startups, essays]` |
 | `field?(enum): [values]` | Observation `[field] value` where value ∈ set | `- [status] active` |
+| `settings.frontmatter` field | Frontmatter key presence/value | `tags: [python, ai]` |
 
 ### Key Insight
 
@@ -99,6 +100,9 @@ schema:
   expertise?(array): string, areas of knowledge
 settings:
   validation: warn    # warn | strict | off
+  frontmatter:
+    tags?(array): string, note categories
+    status?(enum): [draft, review, published]
 ---
 
 # Person
@@ -229,6 +233,32 @@ $ bm schema validate people/ada-lovelace.md
 
 "Unmatched" items are informational — observations and relations the schema doesn't cover.
 They're valid. Schemas are a subset, not a straitjacket.
+
+### Frontmatter Validation
+
+Schema notes can declare validation rules for frontmatter keys under `settings.frontmatter`
+using the same Picoschema syntax as the `schema` block:
+
+```yaml
+settings:
+  validation: warn
+  frontmatter:
+    tags?(array): string
+    status?(enum): [draft, review, published]
+```
+
+- Frontmatter rules use the same Picoschema key syntax (`?` for optional, `(enum)`, `(array)`)
+- Only available on schema notes (inline schemas skip frontmatter validation)
+- Checks key presence (required vs optional) and enum value membership
+- Unmatched frontmatter keys not in the schema are silently ignored
+- Missing required frontmatter keys produce a warning (or error in strict mode)
+
+Example output for a missing required frontmatter key:
+
+```
+⚠ Person schema validation:
+  - Missing required frontmatter key: status
+```
 
 ### Batch Validation
 

@@ -253,3 +253,45 @@ class TestParseSchemaNote:
         }
         result = parse_schema_note(frontmatter)
         assert result.validation_mode == "warn"
+
+    def test_settings_frontmatter_parsed_into_frontmatter_fields(self):
+        frontmatter = {
+            "entity": "Person",
+            "schema": {"name": "string"},
+            "settings": {
+                "validation": "warn",
+                "frontmatter": {
+                    "tags?(array)": "string",
+                    "status?(enum)": ["draft", "published"],
+                },
+            },
+        }
+        result = parse_schema_note(frontmatter)
+        assert len(result.frontmatter_fields) == 2
+        names = {f.name for f in result.frontmatter_fields}
+        assert "tags" in names
+        assert "status" in names
+        # Verify types are parsed correctly
+        tags_field = next(f for f in result.frontmatter_fields if f.name == "tags")
+        assert tags_field.is_array is True
+        assert tags_field.required is False
+        status_field = next(f for f in result.frontmatter_fields if f.name == "status")
+        assert status_field.is_enum is True
+        assert status_field.enum_values == ["draft", "published"]
+
+    def test_no_settings_frontmatter_defaults_to_empty(self):
+        frontmatter = {
+            "entity": "Person",
+            "schema": {"name": "string"},
+        }
+        result = parse_schema_note(frontmatter)
+        assert result.frontmatter_fields == []
+
+    def test_non_dict_settings_frontmatter_defaults_to_empty(self):
+        frontmatter = {
+            "entity": "Person",
+            "schema": {"name": "string"},
+            "settings": {"validation": "warn", "frontmatter": "not-a-dict"},
+        }
+        result = parse_schema_note(frontmatter)
+        assert result.frontmatter_fields == []

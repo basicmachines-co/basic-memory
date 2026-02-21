@@ -64,6 +64,7 @@ class SchemaDefinition:
     version: int                 # Schema version
     fields: list[SchemaField]    # Parsed fields
     validation_mode: str         # "warn" | "strict" | "off"
+    frontmatter_fields: list[SchemaField]  # From settings.frontmatter (default: [])
 
 
 def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
@@ -145,14 +146,16 @@ class ValidationResult:
 async def validate_note(
     note: Note,
     schema: SchemaDefinition,
+    frontmatter: dict | None = None,
 ) -> ValidationResult:
     """Validate a note against a schema definition.
 
     Mapping rules:
-    - field: string       → observation [field] exists
-    - field?(array): type → multiple [field] observations
-    - field?: EntityType  → relation 'field [[...]]' exists
-    - field?(enum): [v]   → observation [field] value ∈ enum values
+    - field: string              → observation [field] exists
+    - field?(array): type        → multiple [field] observations
+    - field?: EntityType         → relation 'field [[...]]' exists
+    - field?(enum): [v]          → observation [field] value ∈ enum values
+    - settings.frontmatter field → frontmatter key presence/value
     """
 ```
 

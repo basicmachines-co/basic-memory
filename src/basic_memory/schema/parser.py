@@ -49,6 +49,7 @@ class SchemaDefinition:
     version: int  # Schema version
     fields: list[SchemaField]  # Parsed fields
     validation_mode: str  # "warn" | "strict" | "off"
+    frontmatter_fields: list[SchemaField] = field(default_factory=list)  # From settings.frontmatter
 
 
 # --- Built-in scalar types ---
@@ -228,9 +229,19 @@ def parse_schema_note(frontmatter: dict) -> SchemaDefinition:
 
     fields = parse_picoschema(schema_dict)
 
+    # --- Frontmatter validation rules ---
+    # Trigger: settings.frontmatter is a dict of Picoschema field declarations
+    # Why: allows schema notes to validate frontmatter keys (tags, status, etc.)
+    # Outcome: frontmatter_fields populated using same parser as schema fields
+    frontmatter_dict = settings.get("frontmatter") if isinstance(settings, dict) else None
+    frontmatter_fields = (
+        parse_picoschema(frontmatter_dict) if isinstance(frontmatter_dict, dict) else []
+    )
+
     return SchemaDefinition(
         entity=entity,
         version=version,
         fields=fields,
         validation_mode=validation_mode,
+        frontmatter_fields=frontmatter_fields,
     )

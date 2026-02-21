@@ -245,6 +245,162 @@ class TestValidateUnmatched:
 # --- Result metadata ---
 
 
+# --- Frontmatter field validation ---
+
+
+class TestValidateFrontmatterFields:
+    def _make_fm_schema(
+        self,
+        frontmatter_fields: list[SchemaField],
+        validation_mode: str = "warn",
+    ) -> SchemaDefinition:
+        return SchemaDefinition(
+            entity="TestEntity",
+            version=1,
+            fields=[],
+            validation_mode=validation_mode,
+            frontmatter_fields=frontmatter_fields,
+        )
+
+    def test_required_frontmatter_key_present(self):
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={"status": "draft"})
+        assert result.passed is True
+        assert result.field_results[0].status == "present"
+        assert result.field_results[0].values == ["draft"]
+        assert result.warnings == []
+
+    def test_required_frontmatter_key_missing_warn(self):
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={"tags": ["a"]})
+        assert result.passed is True
+        assert result.field_results[0].status == "missing"
+        assert len(result.warnings) == 1
+        assert "status" in result.warnings[0]
+
+    def test_required_frontmatter_key_missing_strict(self):
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field], validation_mode="strict")
+        result = validate_note("test-note", schema, [], [], frontmatter={"tags": ["a"]})
+        assert result.passed is False
+        assert len(result.errors) == 1
+        assert "status" in result.errors[0]
+
+    def test_optional_frontmatter_key_missing_silent(self):
+        fm_field = SchemaField(name="status", type="string", required=False)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={"other": "val"})
+        assert result.passed is True
+        assert result.field_results[0].status == "missing"
+        assert result.warnings == []
+        assert result.errors == []
+
+    def test_enum_frontmatter_valid_value(self):
+        fm_field = SchemaField(
+            name="status",
+            type="enum",
+            required=True,
+            is_enum=True,
+            enum_values=["draft", "published"],
+        )
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={"status": "draft"})
+        assert result.passed is True
+        assert result.field_results[0].status == "present"
+        assert result.field_results[0].values == ["draft"]
+
+    def test_enum_frontmatter_invalid_value_warn(self):
+        fm_field = SchemaField(
+            name="status",
+            type="enum",
+            required=True,
+            is_enum=True,
+            enum_values=["draft", "published"],
+        )
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={"status": "archived"})
+        assert result.passed is True
+        assert result.field_results[0].status == "enum_mismatch"
+        assert "archived" in result.field_results[0].message
+        assert len(result.warnings) == 1
+
+    def test_enum_frontmatter_invalid_value_strict(self):
+        fm_field = SchemaField(
+            name="status",
+            type="enum",
+            required=True,
+            is_enum=True,
+            enum_values=["draft", "published"],
+        )
+        schema = self._make_fm_schema([fm_field], validation_mode="strict")
+        result = validate_note("test-note", schema, [], [], frontmatter={"status": "archived"})
+        assert result.passed is False
+        assert len(result.errors) == 1
+
+    def test_array_frontmatter_field(self):
+        fm_field = SchemaField(name="tags", type="string", required=False, is_array=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note(
+            "test-note",
+            schema,
+            [],
+            [],
+            frontmatter={"tags": ["python", "ai"]},
+        )
+        assert result.passed is True
+        assert result.field_results[0].status == "present"
+        assert result.field_results[0].values == ["python", "ai"]
+
+    def test_frontmatter_none_skips_validation(self):
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter=None)
+        assert result.passed is True
+        assert result.field_results == []
+
+    def test_empty_frontmatter_dict_validates_missing_keys(self):
+        """frontmatter={} is a valid input — required keys should be flagged missing."""
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note("test-note", schema, [], [], frontmatter={})
+        assert result.field_results[0].status == "missing"
+        assert len(result.warnings) == 1
+        assert "status" in result.warnings[0]
+
+    def test_empty_frontmatter_dict_strict_fails(self):
+        """frontmatter={} in strict mode should produce errors for required keys."""
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field], validation_mode="strict")
+        result = validate_note("test-note", schema, [], [], frontmatter={})
+        assert result.passed is False
+        assert len(result.errors) == 1
+
+    def test_empty_frontmatter_fields_skips_validation(self):
+        schema = self._make_fm_schema([])
+        result = validate_note("test-note", schema, [], [], frontmatter={"status": "draft"})
+        assert result.passed is True
+        assert result.field_results == []
+
+    def test_extra_frontmatter_keys_ignored(self):
+        fm_field = SchemaField(name="status", type="string", required=True)
+        schema = self._make_fm_schema([fm_field])
+        result = validate_note(
+            "test-note",
+            schema,
+            [],
+            [],
+            frontmatter={"status": "draft", "extra_key": "value", "another": 42},
+        )
+        assert result.passed is True
+        assert len(result.field_results) == 1
+        assert result.field_results[0].field.name == "status"
+
+
+# --- Result metadata ---
+
+
 class TestValidateResultMetadata:
     def test_note_identifier_in_result(self):
         schema = _make_schema([])
