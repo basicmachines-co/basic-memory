@@ -250,6 +250,7 @@ Error searching for '{query}': {error_message}
     description="Search across all content in the knowledge base with advanced syntax support.",
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def search_notes(
     query: str,
@@ -514,6 +515,7 @@ async def search_notes(
 
 @mcp.tool(
     description="Search entities by structured frontmatter metadata.",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def search_by_metadata(
     filters: Dict[str, Any],

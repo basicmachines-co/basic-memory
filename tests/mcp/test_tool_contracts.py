@@ -134,9 +134,8 @@ TOOL_FUNCTIONS: dict[str, object] = {
 
 
 def _signature_params(tool_obj: object) -> list[str]:
-    fn = tool_obj.fn
     params = []
-    for param in inspect.signature(fn).parameters.values():
+    for param in inspect.signature(tool_obj).parameters.values():
         if param.name == "context":
             continue
         params.append(param.name)

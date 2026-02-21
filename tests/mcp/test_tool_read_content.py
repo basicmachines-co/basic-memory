@@ -25,7 +25,7 @@ async def test_read_content_blocks_path_traversal_unix(client, test_project):
     ]
 
     for attack_path in attack_paths:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
         assert attack_path in result["error"]
@@ -44,7 +44,7 @@ async def test_read_content_blocks_path_traversal_windows(client, test_project):
     ]
 
     for attack_path in attack_paths:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
         assert attack_path in result["error"]
@@ -65,7 +65,7 @@ async def test_read_content_blocks_absolute_paths(client, test_project):
     ]
 
     for attack_path in attack_paths:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
         assert attack_path in result["error"]
@@ -85,7 +85,7 @@ async def test_read_content_blocks_home_directory_access(client, test_project):
     ]
 
     for attack_path in attack_paths:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
         assert attack_path in result["error"]
@@ -101,7 +101,7 @@ async def test_read_content_blocks_memory_url_attacks(client, test_project):
     ]
 
     for attack_path in attack_paths:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
 
@@ -115,7 +115,7 @@ async def test_read_content_unicode_path_attacks(client, test_project):
     ]
 
     for attack_path in unicode_attacks:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
 
@@ -123,7 +123,7 @@ async def test_read_content_unicode_path_attacks(client, test_project):
 @pytest.mark.asyncio
 async def test_read_content_very_long_attack_path(client, test_project):
     long_attack = "../" * 1000 + "etc/passwd"
-    result = await read_content.fn(project=test_project.name, path=long_attack)
+    result = await read_content(project=test_project.name, path=long_attack)
     assert result["type"] == "error"
     assert "paths must stay within project boundaries" in result["error"]
 
@@ -138,21 +138,21 @@ async def test_read_content_case_variations_attacks(client, test_project):
     ]
 
     for attack_path in case_attacks:
-        result = await read_content.fn(project=test_project.name, path=attack_path)
+        result = await read_content(project=test_project.name, path=attack_path)
         assert result["type"] == "error"
         assert "paths must stay within project boundaries" in result["error"]
 
 
 @pytest.mark.asyncio
 async def test_read_content_allows_safe_path_integration(client, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Meeting",
         directory="notes",
         content="This is a safe note for read_content()",
     )
 
-    result = await read_content.fn(project=test_project.name, path="notes/meeting")
+    result = await read_content(project=test_project.name, path="notes/meeting")
     assert result["type"] == "text"
     assert "safe note" in result["text"]
 
@@ -160,7 +160,7 @@ async def test_read_content_allows_safe_path_integration(client, test_project):
 @pytest.mark.asyncio
 async def test_read_content_empty_path_does_not_trigger_security_error(client, test_project):
     try:
-        result = await read_content.fn(project=test_project.name, path="")
+        result = await read_content(project=test_project.name, path="")
         if isinstance(result, dict) and result.get("type") == "error":
             assert "paths must stay within project boundaries" not in result.get("error", "")
     except ToolError:

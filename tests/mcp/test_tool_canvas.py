@@ -34,7 +34,7 @@ async def test_create_canvas(app, project_config, test_project):
     folder = "visualizations"
 
     # Execute
-    result = await canvas.fn(
+    result = await canvas(
         project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
@@ -73,7 +73,7 @@ async def test_create_canvas_with_extension(app, project_config, test_project):
     folder = "visualizations"
 
     # Execute
-    result = await canvas.fn(
+    result = await canvas(
         project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
@@ -109,9 +109,7 @@ async def test_update_existing_canvas(app, project_config, test_project):
     folder = "visualizations"
 
     # Create initial canvas
-    await canvas.fn(
-        project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
-    )
+    await canvas(project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder)
 
     # Verify file exists
     file_path = Path(project_config.home) / folder / f"{title}.canvas"
@@ -134,7 +132,7 @@ async def test_update_existing_canvas(app, project_config, test_project):
     ]
 
     # Execute update
-    result = await canvas.fn(
+    result = await canvas(
         project=test_project.name,
         nodes=updated_nodes,
         edges=updated_edges,
@@ -171,7 +169,7 @@ async def test_create_canvas_with_nested_folders(app, project_config, test_proje
     folder = "visualizations/nested/folders"  # Deep path
 
     # Execute
-    result = await canvas.fn(
+    result = await canvas(
         project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 
@@ -256,7 +254,7 @@ async def test_create_canvas_complex_content(app, project_config, test_project):
     test_file_path.write_text("# Test File\nThis is referenced by the canvas")
 
     # Execute
-    result = await canvas.fn(
+    result = await canvas(
         project=test_project.name, nodes=nodes, edges=edges, title=title, directory=folder
     )
 

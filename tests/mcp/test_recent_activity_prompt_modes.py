@@ -28,9 +28,9 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
     async def fake_fn(**_kwargs):
         return tool_output
 
-    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity.fn", fake_fn)
+    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity", fake_fn)
 
-    out = await recent_activity_prompt.fn(timeframe="7d", project=None)  # pyright: ignore[reportGeneralTypeIssues]
+    out = await recent_activity_prompt(timeframe="7d", project=None)  # pyright: ignore[reportGeneralTypeIssues]
 
     # Should contain the tool output
     assert "Recent Activity Summary (7d)" in out
@@ -59,9 +59,9 @@ async def test_recent_activity_prompt_project_mode(monkeypatch):
     async def fake_fn(**_kwargs):
         return tool_output
 
-    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity.fn", fake_fn)
+    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity", fake_fn)
 
-    out = await recent_activity_prompt.fn(timeframe="1d", project="my-project")  # pyright: ignore[reportGeneralTypeIssues]
+    out = await recent_activity_prompt(timeframe="1d", project="my-project")  # pyright: ignore[reportGeneralTypeIssues]
 
     # Should contain the tool output
     assert "Recent Activity: my-project" in out
@@ -82,9 +82,9 @@ async def test_recent_activity_prompt_passes_correct_params(monkeypatch):
         captured_kwargs.update(kwargs)
         return "## Recent Activity"
 
-    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity.fn", fake_fn)
+    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity", fake_fn)
 
-    await recent_activity_prompt.fn(timeframe="2d", project="test-proj")  # pyright: ignore[reportGeneralTypeIssues]
+    await recent_activity_prompt(timeframe="2d", project="test-proj")  # pyright: ignore[reportGeneralTypeIssues]
 
     assert captured_kwargs["timeframe"] == "2d"
     assert captured_kwargs["project"] == "test-proj"
@@ -100,9 +100,9 @@ async def test_recent_activity_prompt_defaults_timeframe(monkeypatch):
         captured_kwargs.update(kwargs)
         return "## Recent Activity"
 
-    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity.fn", fake_fn)
+    monkeypatch.setattr("basic_memory.mcp.prompts.recent_activity.recent_activity", fake_fn)
 
-    await recent_activity_prompt.fn(timeframe=None, project=None)  # pyright: ignore[reportGeneralTypeIssues]
+    await recent_activity_prompt(timeframe=None, project=None)  # pyright: ignore[reportGeneralTypeIssues]
 
     assert captured_kwargs["timeframe"] == "7d"
     assert captured_kwargs["project"] is None

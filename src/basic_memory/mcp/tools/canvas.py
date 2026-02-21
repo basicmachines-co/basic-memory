@@ -16,6 +16,7 @@ from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 
 @mcp.tool(
     description="Create an Obsidian canvas file to visualize concepts and connections.",
+    annotations={"destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def canvas(
     nodes: List[Dict[str, Any]],

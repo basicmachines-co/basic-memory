@@ -71,6 +71,7 @@ def _no_schema_guidance(note_type: str, tool_name: str) -> str:
 
 @mcp.tool(
     description="Validate notes against their Picoschema definitions.",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def schema_validate(
     note_type: Optional[str] = None,
@@ -166,6 +167,7 @@ async def schema_validate(
 
 @mcp.tool(
     description="Analyze existing notes and suggest a Picoschema definition.",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def schema_infer(
     note_type: str,
@@ -267,6 +269,7 @@ async def schema_infer(
 
 @mcp.tool(
     description="Detect drift between a schema definition and actual note usage.",
+    annotations={"readOnlyHint": True, "openWorldHint": False},
 )
 async def schema_diff(
     note_type: str,

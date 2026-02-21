@@ -62,7 +62,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     - Data loss occurs without user warning
     """
     # Step 1: Create first note "Node A"
-    result_a = await write_note.fn(
+    result_a = await write_note(
         project=test_project.name,
         title="Node A",
         directory="edge-cases",
@@ -74,12 +74,12 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     assert f"permalink: {test_project.name}/edge-cases/node-a" in result_a
 
     # Verify Node A content via read
-    content_a = await read_note.fn("edge-cases/node-a", project=test_project.name)
+    content_a = await read_note("edge-cases/node-a", project=test_project.name)
     assert "Node A" in content_a
     assert "Original content for Node A" in content_a
 
     # Step 2: Create second note "Node B" (should be independent)
-    result_b = await write_note.fn(
+    result_b = await write_note(
         project=test_project.name,
         title="Node B",
         directory="edge-cases",
@@ -91,7 +91,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     assert f"permalink: {test_project.name}/edge-cases/node-b" in result_b
 
     # Step 3: Create third note "Node C" (this is where the bug occurs)
-    result_c = await write_note.fn(
+    result_c = await write_note(
         project=test_project.name,
         title="Node C",
         directory="edge-cases",
@@ -104,7 +104,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
 
     # CRITICAL CHECK: Verify Node A still has its original content
     # This is where the bug manifests - Node A.md gets overwritten with Node C content
-    content_a_after = await read_note.fn("edge-cases/node-a", project=test_project.name)
+    content_a_after = await read_note("edge-cases/node-a", project=test_project.name)
     assert "Node A" in content_a_after, "Node A title should still be 'Node A'"
     assert "Original content for Node A" in content_a_after, (
         "Node A file should NOT be overwritten by Node C creation"
@@ -112,7 +112,7 @@ async def test_permalink_collision_should_not_overwrite_different_file(app, test
     assert "Content for Node C" not in content_a_after, "Node A should NOT contain Node C's content"
 
     # Verify Node C has its own content
-    content_c = await read_note.fn("edge-cases/node-c", project=test_project.name)
+    content_c = await read_note("edge-cases/node-c", project=test_project.name)
     assert "Node C" in content_c
     assert "Content for Node C" in content_c
     assert "Original content for Node A" not in content_c, (
@@ -163,7 +163,7 @@ async def test_notes_with_similar_titles_maintain_separate_files(app, test_proje
     created_permalinks = []
 
     for title, folder in titles_and_folders:
-        result = await write_note.fn(
+        result = await write_note(
             project=test_project.name,
             title=title,
             directory=folder,
@@ -179,7 +179,7 @@ async def test_notes_with_similar_titles_maintain_separate_files(app, test_proje
                 break
 
         # Verify each note can be read back with its own content
-        content = await read_note.fn(permalink, project=test_project.name)
+        content = await read_note(permalink, project=test_project.name)
         assert f"Unique content for {title}" in content, (
             f"Note with title '{title}' should maintain its unique content"
         )
@@ -208,7 +208,7 @@ async def test_sequential_note_creation_preserves_all_files(app, test_project):
 
     # Create all notes
     for title, content in notes_data:
-        result = await write_note.fn(
+        result = await write_note(
             project=test_project.name,
             title=title,
             directory="sequence-test",
@@ -220,7 +220,7 @@ async def test_sequential_note_creation_preserves_all_files(app, test_project):
     for title, expected_content in notes_data:
         # Normalize title to permalink format
         permalink = f"sequence-test/{title.lower()}"
-        content = await read_note.fn(permalink, project=test_project.name)
+        content = await read_note(permalink, project=test_project.name)
 
         assert title in content, f"Note '{title}' should still have its title"
         assert expected_content.split("\n\n")[1] in content, (

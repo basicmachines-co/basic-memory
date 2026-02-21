@@ -22,7 +22,7 @@ from basic_memory.mcp.tools import (
 
 @pytest.mark.asyncio
 async def test_write_note_text_and_json_modes(app, test_project):
-    text_result = await write_note.fn(
+    text_result = await write_note(
         project=test_project.name,
         title="Mode Write Note",
         directory="mode-tests",
@@ -32,7 +32,7 @@ async def test_write_note_text_and_json_modes(app, test_project):
     assert isinstance(text_result, str)
     assert "note" in text_result.lower()
 
-    json_result = await write_note.fn(
+    json_result = await write_note(
         project=test_project.name,
         title="Mode Write Note",
         directory="mode-tests",
@@ -49,14 +49,14 @@ async def test_write_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_read_note_text_and_json_modes(app, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Read Note",
         directory="mode-tests",
         content="# Mode Read Note\n\nbody",
     )
 
-    text_result = await read_note.fn(
+    text_result = await read_note(
         identifier="mode-tests/mode-read-note",
         project=test_project.name,
         output_format="text",
@@ -64,7 +64,7 @@ async def test_read_note_text_and_json_modes(app, test_project):
     assert isinstance(text_result, str)
     assert "Mode Read Note" in text_result
 
-    json_result = await read_note.fn(
+    json_result = await read_note(
         identifier="mode-tests/mode-read-note",
         project=test_project.name,
         output_format="json",
@@ -76,7 +76,7 @@ async def test_read_note_text_and_json_modes(app, test_project):
     assert isinstance(json_result["content"], str)
     assert "frontmatter" in json_result
 
-    missing_json = await read_note.fn(
+    missing_json = await read_note(
         identifier="mode-tests/missing-note",
         project=test_project.name,
         output_format="json",
@@ -89,14 +89,14 @@ async def test_read_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_edit_note_text_and_json_modes(app, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Edit Note",
         directory="mode-tests",
         content="# Mode Edit Note\n\nstart",
     )
 
-    text_result = await edit_note.fn(
+    text_result = await edit_note(
         identifier="mode-tests/mode-edit-note",
         operation="append",
         content="\n\ntext-append",
@@ -106,7 +106,7 @@ async def test_edit_note_text_and_json_modes(app, test_project):
     assert isinstance(text_result, str)
     assert "Edited note" in text_result
 
-    json_result = await edit_note.fn(
+    json_result = await edit_note(
         identifier="mode-tests/mode-edit-note",
         operation="append",
         content="\n\njson-append",
@@ -123,14 +123,14 @@ async def test_edit_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_recent_activity_text_and_json_modes(app, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Activity Note",
         directory="mode-tests",
         content="# Mode Activity Note\n\nactivity",
     )
 
-    text_result = await recent_activity.fn(
+    text_result = await recent_activity(
         project=test_project.name,
         timeframe="7d",
         output_format="text",
@@ -138,7 +138,7 @@ async def test_recent_activity_text_and_json_modes(app, test_project):
     assert isinstance(text_result, str)
     assert "Recent Activity" in text_result
 
-    json_result = await recent_activity.fn(
+    json_result = await recent_activity(
         project=test_project.name,
         timeframe="7d",
         output_format="json",
@@ -151,7 +151,7 @@ async def test_recent_activity_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_recent_activity_json_preserves_relation_and_observation_types(app, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Activity Type Source",
         directory="mode-tests",
@@ -161,14 +161,14 @@ async def test_recent_activity_json_preserves_relation_and_observation_types(app
             "- links_to [[Activity Type Target]]"
         ),
     )
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Activity Type Target",
         directory="mode-tests",
         content="# Activity Type Target",
     )
 
-    relation_json = await recent_activity.fn(
+    relation_json = await recent_activity(
         project=test_project.name,
         type="relation",
         timeframe="7d",
@@ -180,7 +180,7 @@ async def test_recent_activity_json_preserves_relation_and_observation_types(app
     for item in relation_json:
         assert set(["type", "title", "permalink", "file_path", "created_at"]).issubset(item.keys())
 
-    observation_json = await recent_activity.fn(
+    observation_json = await recent_activity(
         project=test_project.name,
         type="observation",
         timeframe="7d",
@@ -195,11 +195,11 @@ async def test_recent_activity_json_preserves_relation_and_observation_types(app
 
 @pytest.mark.asyncio
 async def test_list_and_create_project_text_and_json_modes(app, test_project, tmp_path):
-    list_text = await list_memory_projects.fn(output_format="text")
+    list_text = await list_memory_projects(output_format="text")
     assert isinstance(list_text, str)
     assert test_project.name in list_text
 
-    list_json = await list_memory_projects.fn(output_format="json")
+    list_json = await list_memory_projects(output_format="json")
     assert isinstance(list_json, dict)
     assert "projects" in list_json
     assert any(project["name"] == test_project.name for project in list_json["projects"])
@@ -207,7 +207,7 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     project_name = "mode-create-project"
     project_path = str(tmp_path.parent / (tmp_path.name + "-projects") / "mode-create-project")
 
-    create_text = await create_memory_project.fn(
+    create_text = await create_memory_project(
         project_name=project_name,
         project_path=project_path,
         output_format="text",
@@ -215,7 +215,7 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     assert isinstance(create_text, str)
     assert "mode-create-project" in create_text
 
-    create_json_again = await create_memory_project.fn(
+    create_json_again = await create_memory_project(
         project_name=project_name,
         project_path=project_path,
         output_format="json",
@@ -231,14 +231,14 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
     default_project_path = str(
         tmp_path.parent / (tmp_path.name + "-projects") / "mode-default-project"
     )
-    await create_memory_project.fn(
+    await create_memory_project(
         project_name=default_project_name,
         project_path=default_project_path,
         set_default=True,
         output_format="text",
     )
 
-    default_text_again = await create_memory_project.fn(
+    default_text_again = await create_memory_project(
         project_name=default_project_name,
         project_path=default_project_path,
         output_format="text",
@@ -249,28 +249,28 @@ async def test_list_and_create_project_text_and_json_modes(app, test_project, tm
 
 @pytest.mark.asyncio
 async def test_delete_note_text_and_json_modes(app, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Delete Text",
         directory="mode-tests",
         content="# Mode Delete Text",
     )
 
-    text_delete = await delete_note.fn(
+    text_delete = await delete_note(
         identifier="mode-tests/mode-delete-text",
         project=test_project.name,
         output_format="text",
     )
     assert text_delete is True
 
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Delete Json",
         directory="mode-tests",
         content="# Mode Delete Json",
     )
 
-    json_delete = await delete_note.fn(
+    json_delete = await delete_note(
         identifier="mode-tests/mode-delete-json",
         project=test_project.name,
         output_format="json",
@@ -291,7 +291,7 @@ async def test_delete_directory_json_mode_returns_structured_error_on_failure(
 
     monkeypatch.setattr(KnowledgeClient, "delete_directory", mock_delete_directory)
 
-    json_delete = await delete_note.fn(
+    json_delete = await delete_note(
         identifier="mode-tests",
         is_directory=True,
         project=test_project.name,
@@ -306,14 +306,14 @@ async def test_delete_directory_json_mode_returns_structured_error_on_failure(
 
 @pytest.mark.asyncio
 async def test_move_note_text_and_json_modes(app, test_project):
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Move Text",
         directory="mode-tests",
         content="# Mode Move Text",
     )
 
-    text_move = await move_note.fn(
+    text_move = await move_note(
         identifier="mode-tests/mode-move-text",
         destination_path="mode-tests/moved/mode-move-text.md",
         project=test_project.name,
@@ -322,14 +322,14 @@ async def test_move_note_text_and_json_modes(app, test_project):
     assert isinstance(text_move, str)
     assert "moved" in text_move.lower()
 
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Mode Move Json",
         directory="mode-tests",
         content="# Mode Move Json",
     )
 
-    json_move = await move_note.fn(
+    json_move = await move_note(
         identifier="mode-tests/mode-move-json",
         destination_path="mode-tests/moved/mode-move-json.md",
         project=test_project.name,
@@ -346,14 +346,14 @@ async def test_move_note_text_and_json_modes(app, test_project):
 
 @pytest.mark.asyncio
 async def test_build_context_json_default_and_text_mode(client, test_graph, test_project):
-    json_result = await build_context.fn(
+    json_result = await build_context(
         project=test_project.name,
         url="memory://test/root",
     )
     assert isinstance(json_result, dict)
     assert "results" in json_result
 
-    text_result = await build_context.fn(
+    text_result = await build_context(
         project=test_project.name,
         url="memory://test/root",
         output_format="text",

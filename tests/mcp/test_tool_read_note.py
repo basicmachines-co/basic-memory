@@ -12,7 +12,7 @@ from basic_memory.utils import normalize_newlines
 async def test_read_note_by_title(app, test_project):
     """Test reading a note by its title."""
     # First create a note
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Special Note",
         directory="test",
@@ -20,14 +20,14 @@ async def test_read_note_by_title(app, test_project):
     )
 
     # Should be able to read it by title
-    content = await read_note.fn("Special Note", project=test_project.name)
+    content = await read_note("Special Note", project=test_project.name)
     assert "Note content here" in content
 
 
 @pytest.mark.asyncio
 async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch, app, test_project):
     """Force direct resolve to fail so we exercise the title-search + fetch fallback path."""
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Fallback Title Note",
         directory="test",
@@ -50,7 +50,7 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
 
-    content = await read_note.fn("Fallback Title Note", project=test_project.name)
+    content = await read_note("Fallback Title Note", project=test_project.name)
     assert "fallback content" in content
 
 
@@ -98,9 +98,9 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
             raise RuntimeError("force fallback")
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
-    monkeypatch.setattr(read_note_module.search_notes, "fn", fake_search_notes_fn)
+    monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
 
-    result = await read_note.fn("missing-note", project=test_project.name)
+    result = await read_note("missing-note", project=test_project.name)
     assert "I couldn't find an exact match" in result
     assert "## 1. Related One" in result
     assert "## 2. Related Two" in result
@@ -109,7 +109,7 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 @pytest.mark.asyncio
 async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, app, test_project):
     """Do not fetch note content when title-search returns only fuzzy matches."""
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Existing Note",
         directory="test",
@@ -147,9 +147,9 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
         return {"results": [], "current_page": 1, "page_size": 10}
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", StrictFailingKnowledgeClient)
-    monkeypatch.setattr(read_note_module.search_notes, "fn", fake_search_notes_fn)
+    monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
 
-    result = await read_note.fn("Missing Exact Title", project=test_project.name)
+    result = await read_note("Missing Exact Title", project=test_project.name)
     assert "Note Not Found" in result
     assert "Missing Exact Title" in result
     assert "existing note content" not in result
@@ -159,7 +159,7 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
 async def test_note_unicode_content(app, test_project):
     """Test handling of unicode content in"""
     content = "# Test 🚀\nThis note has emoji 🎉 and unicode ♠♣♥♦"
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name, title="Unicode Test", directory="test", content=content
     )
 
@@ -171,7 +171,7 @@ async def test_note_unicode_content(app, test_project):
     assert "checksum:" in result  # Checksum exists but may be "unknown"
 
     # Read back should preserve unicode
-    result = await read_note.fn("test/unicode-test", project=test_project.name)
+    result = await read_note("test/unicode-test", project=test_project.name)
     assert normalize_newlines(content) in result
 
 
@@ -186,13 +186,13 @@ async def test_multiple_notes(app, test_project):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note.fn(
+        await write_note(
             project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
     # Should be able to read each one individually
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(permalink, project=test_project.name)
+        note = await read_note(permalink, project=test_project.name)
         assert content in note
 
     # Note: v2 API does not support glob patterns in read_note
@@ -211,14 +211,14 @@ async def test_multiple_notes_pagination(app, test_project):
     ]
 
     for _, title, folder, content, tags in notes_data:
-        await write_note.fn(
+        await write_note(
             project=test_project.name, title=title, directory=folder, content=content, tags=tags
         )
 
     # Should be able to read each one individually with pagination
     # Note: pagination now applies to single note content, not multiple notes
     for permalink, title, folder, content, _ in notes_data:
-        note = await read_note.fn(permalink, page=1, page_size=10, project=test_project.name)
+        note = await read_note(permalink, page=1, page_size=10, project=test_project.name)
         assert content in note
 
     # Note: v2 API does not support glob patterns in read_note
@@ -235,7 +235,7 @@ async def test_read_note_memory_url(app, test_project):
     - Return the note content
     """
     # First create a note
-    result = await write_note.fn(
+    result = await write_note(
         project=test_project.name,
         title="Memory URL Test",
         directory="test",
@@ -245,14 +245,14 @@ async def test_read_note_memory_url(app, test_project):
 
     # Should be able to read it with a memory:// URL
     memory_url = "memory://test/memory-url-test"
-    content = await read_note.fn(memory_url, project=test_project.name)
+    content = await read_note(memory_url, project=test_project.name)
     assert "Testing memory:// URL handling" in content
 
 
 @pytest.mark.asyncio
 async def test_read_note_memory_url_with_project_prefix(app, test_project):
     """Test reading a note using a memory:// URL with explicit project prefix."""
-    await write_note.fn(
+    await write_note(
         project=test_project.name,
         title="Project Prefixed Memory URL Test",
         directory="test",
@@ -260,7 +260,7 @@ async def test_read_note_memory_url_with_project_prefix(app, test_project):
     )
 
     memory_url = f"memory://{test_project.name}/test/project-prefixed-memory-url-test"
-    content = await read_note.fn(memory_url)
+    content = await read_note(memory_url)
     assert "Testing memory:// URL handling with project prefix" in content
 
 
@@ -282,7 +282,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(attack_identifier, project=test_project.name)
+            result = await read_note(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -304,7 +304,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(attack_identifier, project=test_project.name)
+            result = await read_note(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -328,7 +328,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -351,7 +351,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -372,7 +372,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -392,7 +392,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for attack_identifier in attack_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=attack_identifier)
+            result = await read_note(project=test_project.name, identifier=attack_identifier)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -414,7 +414,7 @@ class TestReadNoteSecurityValidation:
         ]
 
         for safe_identifier in safe_identifiers:
-            result = await read_note.fn(project=test_project.name, identifier=safe_identifier)
+            result = await read_note(project=test_project.name, identifier=safe_identifier)
 
             assert isinstance(result, str)
             # Should not contain security error message
@@ -428,7 +428,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_allows_legitimate_titles(self, app, test_project):
         """Test that legitimate note titles work normally."""
         # Create a test note first
-        await write_note.fn(
+        await write_note(
             project=test_project.name,
             title="Security Test Note",
             directory="security-tests",
@@ -436,7 +436,7 @@ class TestReadNoteSecurityValidation:
         )
 
         # Test reading by title (should work)
-        result = await read_note.fn("Security Test Note", project=test_project.name)
+        result = await read_note("Security Test Note", project=test_project.name)
 
         assert isinstance(result, str)
         # Should not be a security error
@@ -447,7 +447,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_empty_identifier_security(self, app, test_project):
         """Test that empty identifier is handled securely."""
         # Empty identifier should be allowed (may return search results or error, but not security error)
-        result = await read_note.fn(identifier="", project=test_project.name)
+        result = await read_note(identifier="", project=test_project.name)
 
         assert isinstance(result, str)
         # Empty identifier should not trigger security error
@@ -457,7 +457,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_security_with_all_parameters(self, app, test_project):
         """Test security validation works with all read_note parameters."""
         # Test that security validation is applied even when all other parameters are provided
-        result = await read_note.fn(
+        result = await read_note(
             project=test_project.name,
             identifier="../../../etc/malicious",
             page=1,
@@ -473,7 +473,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_security_logging(self, app, caplog, test_project):
         """Test that security violations are properly logged."""
         # Attempt path traversal attack
-        result = await read_note.fn(identifier="../../../etc/passwd", project=test_project.name)
+        result = await read_note(identifier="../../../etc/passwd", project=test_project.name)
 
         assert "# Error" in result
         assert "paths must stay within project boundaries" in result
@@ -486,7 +486,7 @@ class TestReadNoteSecurityValidation:
     async def test_read_note_preserves_functionality_with_security(self, app, test_project):
         """Test that security validation doesn't break normal note reading functionality."""
         # Create a note with complex content to ensure security validation doesn't interfere
-        await write_note.fn(
+        await write_note(
             project=test_project.name,
             title="Full Feature Security Test Note",
             directory="security-tests",
@@ -510,7 +510,7 @@ class TestReadNoteSecurityValidation:
         )
 
         # Test reading by permalink
-        result = await read_note.fn(
+        result = await read_note(
             "security-tests/full-feature-security-test-note", project=test_project.name
         )
 
@@ -534,7 +534,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in unicode_attack_identifiers:
-            result = await read_note.fn(attack_identifier, project=test_project.name)
+            result = await read_note(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -546,7 +546,7 @@ class TestReadNoteSecurityEdgeCases:
         # Create a very long path traversal attack
         long_attack_identifier = "../" * 1000 + "etc/malicious"
 
-        result = await read_note.fn(long_attack_identifier, project=test_project.name)
+        result = await read_note(long_attack_identifier, project=test_project.name)
 
         assert isinstance(result, str)
         assert "# Error" in result
@@ -564,7 +564,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in case_attack_identifiers:
-            result = await read_note.fn(attack_identifier, project=test_project.name)
+            result = await read_note(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             assert "# Error" in result
@@ -582,7 +582,7 @@ class TestReadNoteSecurityEdgeCases:
         ]
 
         for attack_identifier in whitespace_attack_identifiers:
-            result = await read_note.fn(attack_identifier, project=test_project.name)
+            result = await read_note(attack_identifier, project=test_project.name)
 
             assert isinstance(result, str)
             # The attack should still be blocked even with whitespace

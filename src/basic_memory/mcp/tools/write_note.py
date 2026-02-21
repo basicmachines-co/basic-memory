@@ -16,6 +16,7 @@ TagType = Union[List[str], str, None]
 
 @mcp.tool(
     description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
+    annotations={"destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def write_note(
     title: str,
