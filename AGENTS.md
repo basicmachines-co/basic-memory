@@ -31,6 +31,7 @@ See the [README.md](README.md) file for a project overview.
 - Run benchmarks: `pytest test-int/test_sync_performance_benchmark.py -v -m "benchmark and not slow"`
 - Lint: `just lint` or `ruff check . --fix`
 - Type check: `just typecheck` or `uv run pyright`
+- Type check (supplemental): `just typecheck-ty` or `uv run ty check src/`
 - Format: `just format` or `uv run ruff format .`
 - Run all code checks: `just check` (runs lint, format, typecheck, test)
 - Create db migration: `just migration "Your migration message"`
