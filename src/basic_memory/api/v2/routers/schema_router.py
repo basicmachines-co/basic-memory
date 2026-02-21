@@ -115,6 +115,7 @@ async def validate_schema(
                 schema_def,
                 _entity_observations(entity),
                 _entity_relations(entity),
+                frontmatter=frontmatter,
             )
             results.append(_to_note_validation_response(result))
 
@@ -149,6 +150,7 @@ async def validate_schema(
                 schema_def,
                 _entity_observations(entity),
                 _entity_relations(entity),
+                frontmatter=frontmatter,
             )
             results.append(_to_note_validation_response(result))
 

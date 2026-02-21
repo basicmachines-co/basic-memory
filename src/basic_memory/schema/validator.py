@@ -56,6 +56,7 @@ def validate_note(
     schema: SchemaDefinition,
     observations: list[ObservationData],
     relations: list[RelationData],
+    frontmatter: dict | None = None,
 ) -> ValidationResult:
     """Validate a note against a schema definition.
 
@@ -64,6 +65,7 @@ def validate_note(
         schema: The resolved SchemaDefinition to validate against.
         observations: List of ObservationData from the note's observations.
         relations: List of RelationData from the note's relations.
+        frontmatter: The note's frontmatter dict for settings.frontmatter validation.
 
     Returns:
         A ValidationResult with per-field results, unmatched items, and warnings/errors.
@@ -112,6 +114,33 @@ def validate_note(
                 result.passed = False
             else:
                 result.warnings.append(msg)
+
+    # --- Validate frontmatter fields ---
+    # Trigger: schema has frontmatter_fields and caller provided frontmatter dict
+    # Why: settings.frontmatter rules validate metadata keys like tags, status
+    # Outcome: frontmatter fields produce the same FieldResult/warning/error as content fields
+    if frontmatter and schema.frontmatter_fields:
+        for fm_field in schema.frontmatter_fields:
+            field_result = _validate_frontmatter_field(fm_field, frontmatter)
+            result.field_results.append(field_result)
+
+            if field_result.status == "missing" and fm_field.required:
+                msg = f"Missing required frontmatter key: {fm_field.name}"
+                if schema.validation_mode == "strict":
+                    result.errors.append(msg)
+                    result.passed = False
+                else:
+                    result.warnings.append(msg)
+
+            elif field_result.status == "enum_mismatch":
+                msg = field_result.message or (
+                    f"Frontmatter key '{fm_field.name}' has invalid enum value"
+                )
+                if schema.validation_mode == "strict":
+                    result.errors.append(msg)
+                    result.passed = False
+                else:
+                    result.warnings.append(msg)
 
     # --- Collect unmatched observations ---
     for category, values in obs_by_category.items():
@@ -224,6 +253,61 @@ def _validate_enum_field(
         field=schema_field,
         status="present",
         values=values,
+    )
+
+
+# --- Frontmatter Field Validation ---
+
+
+def _validate_frontmatter_field(
+    schema_field: SchemaField,
+    frontmatter: dict,
+) -> FieldResult:
+    """Validate a single frontmatter key against a schema field declaration.
+
+    Checks presence and, for enum fields, value membership. Array fields
+    collect all list items as string values.
+    """
+    value = frontmatter.get(schema_field.name)
+
+    if value is None:
+        return FieldResult(
+            field=schema_field,
+            status="missing",
+            message=f"Missing frontmatter key: {schema_field.name}",
+        )
+
+    # --- Enum validation ---
+    if schema_field.is_enum:
+        str_value = str(value)
+        if str_value not in schema_field.enum_values:
+            allowed = ", ".join(schema_field.enum_values)
+            return FieldResult(
+                field=schema_field,
+                status="enum_mismatch",
+                values=[str_value],
+                message=f"Frontmatter key '{schema_field.name}' has invalid value: "
+                f"{str_value} (allowed: {allowed})",
+            )
+        return FieldResult(
+            field=schema_field,
+            status="present",
+            values=[str_value],
+        )
+
+    # --- Array / list values ---
+    if isinstance(value, list):
+        return FieldResult(
+            field=schema_field,
+            status="present",
+            values=[str(v) for v in value],
+        )
+
+    # --- Scalar values ---
+    return FieldResult(
+        field=schema_field,
+        status="present",
+        values=[str(value)],
     )
 
 

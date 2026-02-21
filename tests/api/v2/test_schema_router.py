@@ -364,6 +364,201 @@ async def test_validate_total_entities_without_schema(
     assert data["results"] == []
 
 
+# --- Frontmatter Validation Tests ---
+
+
+@pytest.mark.asyncio
+async def test_validate_with_frontmatter_rules_passes(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Validate a note whose frontmatter matches settings.frontmatter rules."""
+    # Schema note with frontmatter validation rules
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Person Schema FM",
+            directory="schemas",
+            entity_type="schema",
+            entity_metadata={
+                "entity": "person_fm",
+                "schema": {"name": "string"},
+                "settings": {
+                    "validation": "warn",
+                    "frontmatter": {
+                        "tags?(array)": "string",
+                        "status?(enum)": ["draft", "published"],
+                    },
+                },
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Schema with frontmatter rules
+            """),
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    # Note with matching frontmatter
+    note_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Grace",
+            directory="people",
+            entity_type="person_fm",
+            entity_metadata={
+                "tags": ["engineer", "python"],
+                "status": "published",
+            },
+            content=dedent("""\
+                ## Observations
+                - [name] Grace Hopper
+            """),
+        )
+    )
+    await search_service.index_entity(note_entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": note_entity.permalink},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_notes"] == 1
+    result = data["results"][0]
+    assert result["passed"] is True
+    assert result["warnings"] == []
+    # Should have field results for "name" (observation) + "tags" + "status" (frontmatter)
+    field_names = [fr["field_name"] for fr in result["field_results"]]
+    assert "tags" in field_names
+    assert "status" in field_names
+
+
+@pytest.mark.asyncio
+async def test_validate_frontmatter_missing_required_key_warns(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Missing required frontmatter key produces a warning."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Person Schema FM2",
+            directory="schemas",
+            entity_type="schema",
+            entity_metadata={
+                "entity": "person_fm2",
+                "schema": {"name": "string"},
+                "settings": {
+                    "validation": "warn",
+                    "frontmatter": {
+                        "status": "string",  # required
+                    },
+                },
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Schema requiring status frontmatter
+            """),
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    # Note without the required "status" frontmatter key
+    note_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Hank",
+            directory="people",
+            entity_type="person_fm2",
+            content=dedent("""\
+                ## Observations
+                - [name] Hank Pym
+            """),
+        )
+    )
+    await search_service.index_entity(note_entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": note_entity.permalink},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    result = data["results"][0]
+    assert result["passed"] is True
+    assert any("status" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_validate_frontmatter_enum_mismatch_warns(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Frontmatter enum mismatch produces a warning."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Person Schema FM3",
+            directory="schemas",
+            entity_type="schema",
+            entity_metadata={
+                "entity": "person_fm3",
+                "schema": {"name": "string"},
+                "settings": {
+                    "validation": "warn",
+                    "frontmatter": {
+                        "status?(enum)": ["draft", "published"],
+                    },
+                },
+            },
+            content=dedent("""\
+                ## Observations
+                - [note] Schema with enum frontmatter
+            """),
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    # Note with invalid enum value in frontmatter
+    note_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Iris",
+            directory="people",
+            entity_type="person_fm3",
+            entity_metadata={
+                "status": "archived",  # not in [draft, published]
+            },
+            content=dedent("""\
+                ## Observations
+                - [name] Iris West
+            """),
+        )
+    )
+    await search_service.index_entity(note_entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": note_entity.permalink},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    result = data["results"][0]
+    assert result["passed"] is True
+    # Should have a warning about the enum mismatch
+    assert any("status" in w for w in result["warnings"])
+    # The field result should show enum_mismatch
+    status_fr = next(fr for fr in result["field_results"] if fr["field_name"] == "status")
+    assert status_fr["status"] == "enum_mismatch"
+
+
 # --- Diff Endpoint Tests ---
 
 
