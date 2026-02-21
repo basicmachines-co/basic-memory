@@ -618,6 +618,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         # --- FTS mode (SQLite-specific) ---
         conditions = []
+        match_conditions = []
         params = {}
         order_by_clause = ""
         from_clause = "search_index"
@@ -632,7 +633,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 # Use _prepare_search_term to handle both Boolean and non-Boolean queries
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
-                conditions.append(
+                match_conditions.append(
                     "(search_index.title MATCH :text OR search_index.content_stems MATCH :text)"
                 )
 
@@ -640,7 +641,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         if title:
             title_text = self._prepare_search_term(title.strip(), is_prefix=False)
             params["title_text"] = title_text
-            conditions.append("search_index.title MATCH :title_text")
+            match_conditions.append("search_index.title MATCH :title_text")
 
         # Handle permalink exact search
         if permalink:
@@ -663,7 +664,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 else:
                     permalink_text = self._prepare_search_term(permalink_text, is_prefix=False)
                     params["permalink"] = permalink_text
-                    conditions.append("search_index.permalink MATCH :permalink")
+                    match_conditions.append("search_index.permalink MATCH :permalink")
 
         # Handle entity type filter
         if search_item_types:
@@ -766,6 +767,18 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                         operator = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}[filt.op]
                         conditions.append(f"{compare_expr} {operator} :{value_param}")
                     continue
+
+        # Trigger: SQLite FTS MATCH predicates combined with JOINs can fail with
+        # "unable to use function MATCH in the requested context".
+        # Why: MATCH needs to run in an FTS-valid context.
+        # Outcome: evaluate MATCH clauses in an FTS subquery and filter outer rows by rowid.
+        if metadata_filters and match_conditions:
+            match_where = " AND ".join(match_conditions)
+            conditions.append(
+                f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_where})"
+            )
+        else:
+            conditions.extend(match_conditions)
 
         # Always filter by project_id
         params["project_id"] = self.project_id

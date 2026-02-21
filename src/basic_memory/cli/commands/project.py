@@ -1149,6 +1149,8 @@ def display_project_info(
             )
             console.print(f"\nTimestamp: [cyan]{current_time.strftime('%Y-%m-%d %H:%M:%S')}[/cyan]")
 
+    except typer.Exit:
+        raise
     except Exception as e:  # pragma: no cover
         typer.echo(f"Error getting project info: {e}", err=True)
         raise typer.Exit(1)

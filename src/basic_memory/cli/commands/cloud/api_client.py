@@ -52,7 +52,7 @@ async def get_authenticated_headers(auth: CLIAuth | None = None) -> dict[str, st
     auth_obj = auth or CLIAuth(client_id=client_id, authkit_domain=domain)
     token = await auth_obj.get_valid_token()
     if not token:
-        console.print("[red]Not authenticated. Please run 'basic-memory cloud login' first.[/red]")
+        console.print("[red]Not authenticated. Please run 'bm cloud login' first.[/red]")
         raise typer.Exit(1)
 
     return {"Authorization": f"Bearer {token}"}

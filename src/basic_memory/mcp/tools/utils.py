@@ -23,6 +23,8 @@ from httpx._types import (
 from loguru import logger
 from mcp.server.fastmcp.exceptions import ToolError
 
+from basic_memory.config import ConfigManager
+
 
 def get_error_message(
     status_code: int, url: URL | str, method: str, msg: Optional[str] = None
@@ -72,6 +74,65 @@ def get_error_message(
     # Fallback for any other status code
     else:  # pragma: no cover
         return f"HTTP error {status_code}: {method} request to '{path}' failed"
+
+
+def _extract_response_data(response: Response) -> typing.Any:
+    """Safely decode response payload for error reporting."""
+    try:
+        return response.json()
+    except Exception:
+        return None
+
+
+def _response_detail_text(response_data: typing.Any) -> str | None:
+    """Extract textual error detail from API payloads."""
+    if isinstance(response_data, dict):
+        detail = response_data.get("detail")
+        if isinstance(detail, str):
+            return detail
+        if isinstance(detail, dict):
+            nested_message = detail.get("message")
+            if isinstance(nested_message, str):
+                return nested_message
+            return str(detail)
+        if detail is not None:
+            return str(detail)
+    return None
+
+
+def _has_configured_cloud_api_key() -> bool:
+    """Check whether a cloud API key is currently configured."""
+    try:
+        return bool(ConfigManager().config.cloud_api_key)
+    except Exception:
+        return False
+
+
+def _resolve_error_message(
+    status_code: int, url: URL | str, method: str, response_data: typing.Any
+) -> str:
+    """Resolve a user-facing error message with cloud auth remediation when relevant."""
+    detail_text = _response_detail_text(response_data)
+
+    if status_code == 401 and _has_configured_cloud_api_key():
+        detail_lower = detail_text.lower() if detail_text else ""
+        if (
+            "invalid jwt" in detail_lower
+            or "invalid token" in detail_lower
+            or "authentication required" in detail_lower
+            or not detail_lower
+        ):
+            return (
+                "Authentication failed: the configured cloud API key was rejected by the server. "
+                "Basic Memory prioritizes cloud_api_key over OAuth for cloud routing. "
+                "Fix by running `bm cloud set-key <valid-key>` "
+                "or remove `cloud_api_key` and use `bm cloud login`."
+            )
+
+    if detail_text:
+        return detail_text
+
+    return get_error_message(status_code, url, method)
 
 
 async def call_get(
@@ -125,12 +186,8 @@ async def call_get(
 
         # Handle different status codes differently
         status_code = response.status_code
-        # get the message if available
-        response_data = response.json()
-        if isinstance(response_data, dict) and "detail" in response_data:
-            error_message = response_data["detail"]
-        else:
-            error_message = get_error_message(status_code, url, "PUT")
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(status_code, url, "GET", response_data)
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -215,12 +272,8 @@ async def call_put(
         # Handle different status codes differently
         status_code = response.status_code
 
-        # get the message if available
-        response_data = response.json()
-        if isinstance(response_data, dict) and "detail" in response_data:
-            error_message = response_data["detail"]  # pragma: no cover
-        else:
-            error_message = get_error_message(status_code, url, "PUT")
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(status_code, url, "PUT", response_data)
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -304,15 +357,8 @@ async def call_patch(
         # Handle different status codes differently
         status_code = response.status_code
 
-        # Try to extract specific error message from response body
-        try:
-            response_data = response.json()
-            if isinstance(response_data, dict) and "detail" in response_data:
-                error_message = response_data["detail"]
-            else:
-                error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
-        except Exception:  # pragma: no cover
-            error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(status_code, url, "PATCH", response_data)
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -332,15 +378,8 @@ async def call_patch(
     except HTTPStatusError as e:
         status_code = e.response.status_code
 
-        # Try to extract specific error message from response body
-        try:
-            response_data = e.response.json()
-            if isinstance(response_data, dict) and "detail" in response_data:
-                error_message = response_data["detail"]
-            else:
-                error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
-        except Exception:  # pragma: no cover
-            error_message = get_error_message(status_code, url, "PATCH")  # pragma: no cover
+        response_data = _extract_response_data(e.response)
+        error_message = _resolve_error_message(status_code, url, "PATCH", response_data)
 
         raise ToolError(error_message) from e
 
@@ -409,12 +448,8 @@ async def call_post(
 
         # Handle different status codes differently
         status_code = response.status_code
-        # get the message if available
-        response_data = response.json()
-        if isinstance(response_data, dict) and "detail" in response_data:
-            error_message = response_data["detail"]
-        else:
-            error_message = get_error_message(status_code, url, "POST")
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(status_code, url, "POST", response_data)
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -518,12 +553,8 @@ async def call_delete(
 
         # Handle different status codes differently
         status_code = response.status_code
-        # get the message if available
-        response_data = response.json()
-        if isinstance(response_data, dict) and "detail" in response_data:
-            error_message = response_data["detail"]  # pragma: no cover
-        else:
-            error_message = get_error_message(status_code, url, "DELETE")
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(status_code, url, "DELETE", response_data)
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
