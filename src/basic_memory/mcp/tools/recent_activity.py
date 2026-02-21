@@ -39,6 +39,8 @@ async def recent_activity(
     type: Union[str, List[str]] = "",
     depth: int = 1,
     timeframe: TimeFrame = "7d",
+    page: int = 1,
+    page_size: int = 10,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
@@ -70,8 +72,11 @@ async def recent_activity(
             - "observation" or ["observation"] for notes and observations
             Multiple types can be combined: ["entity", "relation"]
             Case-insensitive: "ENTITY" and "entity" are treated the same.
-            Default is an empty string, which returns all types.
+            Default is entity-only. Specify other types explicitly to include
+            observations and relations.
         depth: How many relation hops to traverse (1-3 recommended)
+        page: Page number for pagination (default 1)
+        page_size: Number of items per page (default 10)
         timeframe: Time window to search. Supports natural language:
             - Relative: "2 days ago", "last week", "yesterday"
             - Points in time: "2024-01-01", "January 1st"
@@ -108,8 +113,8 @@ async def recent_activity(
     """
     # Build common parameters for API calls
     params: dict = {
-        "page": 1,
-        "page_size": 10,
+        "page": page,
+        "page_size": page_size,
         "max_related": 10,
     }
     if depth:
@@ -138,6 +143,12 @@ async def recent_activity(
 
         # Add validated types to params
         params["type"] = [t.value for t in validated_types]  # pyright: ignore
+
+    # Default to entity-only when no explicit type was provided.
+    # This prevents a single well-connected entity from filling the page
+    # with its observations and relations.
+    if "type" not in params:
+        params["type"] = [SearchItemType.ENTITY.value]
 
     # Resolve project parameter using the three-tier hierarchy
     # allow_discovery=True enables Discovery Mode, so a project is not required
@@ -271,7 +282,7 @@ async def recent_activity(
                 return _extract_recent_rows(activity_data)
 
             # Format project-specific mode output
-            return _format_project_output(resolved_project, activity_data, timeframe, type)
+            return _format_project_output(resolved_project, activity_data, timeframe, type, page)
 
 
 async def _get_project_activity(
@@ -424,6 +435,7 @@ def _format_project_output(
     activity_data: GraphContext,
     timeframe: str,
     type_filter: Union[str, List[str]],
+    page: int = 1,
 ) -> str:
     """Format project-specific mode output as human-readable text."""
     lines = [f"## Recent Activity: {project_name} ({timeframe})"]
@@ -504,12 +516,15 @@ def _format_project_output(
 
             lines.append(f"  • {from_link} → {rel_type} → {to_link}")
 
-    # Activity summary
+    # Activity summary with pagination guidance
     total = len(activity_data.results)
-    lines.append(f"\n**Activity Summary:** {total} items found")
-    if hasattr(activity_data, "metadata") and activity_data.metadata:
-        if hasattr(activity_data.metadata, "total_results"):
-            lines.append(f"Total available: {activity_data.metadata.total_results}")
+    if activity_data.has_more:
+        lines.append(
+            f"\n**Activity Summary:** Showing {total} items (page {page}). "
+            f"Use page={page + 1} to see more."
+        )
+    else:
+        lines.append(f"\n**Activity Summary:** {total} items found.")
 
     return "\n".join(lines)
 

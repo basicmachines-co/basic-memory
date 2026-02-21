@@ -47,21 +47,28 @@ async def search(
     Returns:
         SearchResponse with paginated search results
     """
-    limit = page_size
     offset = (page - 1) * page_size
+    # Fetch one extra item to detect whether more pages exist (N+1 trick)
+    fetch_limit = page_size + 1
     try:
-        results = await search_service.search(query, limit=limit, offset=offset)
+        results = await search_service.search(query, limit=fetch_limit, offset=offset)
     except SemanticSearchDisabledError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SemanticDependenciesMissingError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    has_more = len(results) > page_size
+    if has_more:
+        results = results[:page_size]
+
     search_results = await to_search_results(entity_service, results)
     return SearchResponse(
         results=search_results,
         current_page=page,
         page_size=page_size,
+        has_more=has_more,
     )
 
 

@@ -39,9 +39,7 @@ class ProjectService:
 
     repository: ProjectRepository
 
-    def __init__(
-        self, repository: ProjectRepository, file_service: Optional["FileService"] = None
-    ):
+    def __init__(self, repository: ProjectRepository, file_service: Optional["FileService"] = None):
         """Initialize the project service."""
         super().__init__()
         self.repository = repository

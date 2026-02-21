@@ -238,6 +238,7 @@ class GraphContext(BaseModel):
 
     page: Optional[int] = None
     page_size: Optional[int] = None
+    has_more: bool = False
 
 
 class ActivityStats(BaseModel):

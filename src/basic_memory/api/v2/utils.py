@@ -146,6 +146,7 @@ async def to_graph_context(
         metadata=metadata,
         page=page,
         page_size=page_size,
+        has_more=context_result.metadata.has_more,
     )
 
 
