@@ -57,6 +57,7 @@ class ContextMetadata:
     related_count: int = 0
     total_observations: int = 0
     total_relations: int = 0
+    has_more: bool = False
 
 
 @dataclass
@@ -102,6 +103,9 @@ class ContextService:
             f"Building context for URI: '{memory_url}' depth: '{depth}' since: '{since}' limit: '{limit}' offset: '{offset}'  max_related: '{max_related}'"
         )
 
+        # Fetch one extra item to detect whether more pages exist (N+1 trick)
+        fetch_limit = limit + 1
+
         normalized_path: Optional[str] = None
         if memory_url:
             path = memory_url_path(memory_url)
@@ -118,20 +122,25 @@ class ContextService:
                 normalized_path = "*".join(normalized_parts)
                 logger.debug(f"Pattern search for '{normalized_path}'")
                 primary = await self.search_repository.search(
-                    permalink_match=normalized_path, limit=limit, offset=offset
+                    permalink_match=normalized_path, limit=fetch_limit, offset=offset
                 )
             else:
                 # For exact paths, normalize the whole thing
                 normalized_path = generate_permalink(path, split_extension=False)
                 logger.debug(f"Direct lookup for '{normalized_path}'")
                 primary = await self.search_repository.search(
-                    permalink=normalized_path, limit=limit, offset=offset
+                    permalink=normalized_path, limit=fetch_limit, offset=offset
                 )
         else:
             logger.debug(f"Build context for '{types}'")
             primary = await self.search_repository.search(
-                search_item_types=types, after_date=since, limit=limit, offset=offset
+                search_item_types=types, after_date=since, limit=fetch_limit, offset=offset
             )
+
+        # Trim to requested limit and set has_more flag
+        has_more = len(primary) > limit
+        if has_more:
+            primary = primary[:limit]
 
         # Get type_id pairs for traversal
 
@@ -171,6 +180,7 @@ class ContextService:
             related_count=len(related),
             total_observations=sum(len(obs) for obs in observations_by_entity.values()),
             total_relations=sum(1 for r in related if r.type == SearchItemType.RELATION),
+            has_more=has_more,
         )
 
         # Build context results list directly with ContextResultItem objects

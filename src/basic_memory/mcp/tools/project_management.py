@@ -65,9 +65,7 @@ async def list_memory_projects(
         result = "Available projects:\n"
         for project in project_list.projects:
             label = (
-                f"{project.display_name} ({project.name})"
-                if project.display_name
-                else project.name
+                f"{project.display_name} ({project.name})" if project.display_name else project.name
             )
             result += f"• {label}\n"
 

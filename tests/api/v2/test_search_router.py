@@ -361,3 +361,70 @@ async def test_search_router_returns_400_for_invalid_vector_query(
 
     assert response.status_code == 400
     assert "Vector retrieval requires a text query" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_search_has_more_when_more_results_exist(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_repository,
+    search_service,
+    file_service,
+):
+    """has_more should be True when there are more results beyond the current page."""
+    # Create enough entities to exceed a small page_size
+    for i in range(4):
+        entity_data = {
+            "title": f"HasMore Entity {i}",
+            "entity_type": "note",
+            "content_type": "text/markdown",
+            "file_path": f"hasmore_{i}.md",
+            "checksum": f"hasmore{i}",
+        }
+        await create_test_entity(
+            test_project, entity_data, entity_repository, search_service, file_service
+        )
+
+    # Request page_size=2 — with 4 entities, has_more should be True
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"text": "HasMore Entity"},
+        params={"page": 1, "page_size": 2},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "has_more" in data
+    assert data["has_more"] is True
+    assert len(data["results"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_has_more_false_on_last_page(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_repository,
+    search_service,
+    file_service,
+):
+    """has_more should be False when all results fit on the current page."""
+    entity_data = {
+        "title": "Solo Search Entity",
+        "entity_type": "note",
+        "content_type": "text/markdown",
+        "file_path": "solo_search.md",
+        "checksum": "solo123",
+    }
+    await create_test_entity(
+        test_project, entity_data, entity_repository, search_service, file_service
+    )
+
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"text": "Solo Search Entity"},
+        params={"page": 1, "page_size": 10},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["has_more"] is False
