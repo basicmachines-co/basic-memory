@@ -7,7 +7,7 @@ from basic_memory.cli.app import app
 from basic_memory.schemas.cloud import WorkspaceInfo
 
 # Importing registers workspace commands on the shared app instance.
-import basic_memory.cli.commands.workspace as workspace_cmd  # noqa: F401
+import basic_memory.cli.commands.cloud.workspace as workspace_cmd  # noqa: F401
 
 
 @pytest.fixture

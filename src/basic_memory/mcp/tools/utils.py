@@ -125,7 +125,7 @@ def _resolve_error_message(
             return (
                 "Authentication failed: the configured cloud API key was rejected by the server. "
                 "Basic Memory prioritizes cloud_api_key over OAuth for cloud routing. "
-                "Fix by running `bm cloud set-key <valid-key>` "
+                "Fix by running `bm cloud api-key save <valid-key>` "
                 "or remove `cloud_api_key` and use `bm cloud login`."
             )
 

@@ -10,7 +10,7 @@ from typing import Any, Dict, Literal, Optional, List, Tuple
 from enum import Enum
 
 from loguru import logger
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from basic_memory.utils import setup_logging, generate_permalink
@@ -97,9 +97,10 @@ class ProjectEntry(BaseModel):
         description="Routing mode: local (in-process ASGI) or cloud (remote API)",
     )
     # Cloud sync state (replaces CloudProjectConfig)
-    cloud_sync_path: Optional[str] = Field(
+    local_sync_path: Optional[str] = Field(
         default=None,
-        description="Local working directory for bisync (formerly CloudProjectConfig.local_path)",
+        description="Local working directory for bisync",
+        validation_alias=AliasChoices("local_sync_path", "cloud_sync_path"),
     )
     bisync_initialized: bool = Field(
         default=False,
@@ -362,26 +363,27 @@ class BasicMemoryConfig(BaseSettings):
                 if name in cloud_projects:
                     cp = cloud_projects[name]
                     if isinstance(cp, dict):
-                        entry["cloud_sync_path"] = cp.get("local_path")
+                        entry["local_sync_path"] = cp.get("local_path")
                         entry["bisync_initialized"] = cp.get("bisync_initialized", False)
                         entry["last_sync"] = cp.get("last_sync")
                     else:
                         # Already a CloudProjectConfig-like object
-                        entry["cloud_sync_path"] = getattr(cp, "local_path", None)
+                        entry["local_sync_path"] = getattr(cp, "local_path", None)
                         entry["bisync_initialized"] = getattr(cp, "bisync_initialized", False)
                         entry["last_sync"] = getattr(cp, "last_sync", None)
                 new_projects[name] = entry
 
             # Pick up cloud_projects entries not already in projects
-            # These are cloud-only projects — path is the cloud permalink,
-            # local_path goes into cloud_sync_path for bisync
+            # These are cloud-only projects — path should be the local working
+            # directory (if one exists), local_path goes into local_sync_path for bisync
             for name, cp in cloud_projects.items():
                 if name not in new_projects:
                     if isinstance(cp, dict):
+                        local_path = cp.get("local_path", "")
                         new_projects[name] = {
-                            "path": generate_permalink(name),
+                            "path": local_path or "",
                             "mode": project_modes.get(name, "cloud"),
-                            "cloud_sync_path": cp.get("local_path"),
+                            "local_sync_path": local_path,
                             "bisync_initialized": cp.get("bisync_initialized", False),
                             "last_sync": cp.get("last_sync"),
                         }

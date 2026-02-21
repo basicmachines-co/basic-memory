@@ -8,8 +8,6 @@ from . import (
     project,
     format,
     schema,
-    watch,
-    workspace,
 )
 
 __all__ = [
@@ -25,6 +23,4 @@ __all__ = [
     "project",
     "format",
     "schema",
-    "watch",
-    "workspace",
 ]

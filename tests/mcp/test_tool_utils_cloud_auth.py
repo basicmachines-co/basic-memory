@@ -52,5 +52,5 @@ async def test_call_post_401_with_cloud_key_shows_actionable_remediation(config_
 
     message = str(exc.value)
     assert "configured cloud API key was rejected" in message
-    assert "bm cloud set-key <valid-key>" in message
+    assert "bm cloud api-key save <valid-key>" in message
     assert "cloud_api_key" in message

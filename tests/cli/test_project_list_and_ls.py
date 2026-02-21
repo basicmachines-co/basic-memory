@@ -64,7 +64,7 @@ def test_project_list_shows_local_cloud_presence_and_routes(
                 "beta": {
                     "path": beta_local_sync,
                     "mode": "cloud",
-                    "cloud_sync_path": beta_local_sync,
+                    "local_sync_path": beta_local_sync,
                 },
             },
             "default_project": "alpha",
@@ -140,10 +140,10 @@ def test_project_list_shows_local_cloud_presence_and_routes(
     assert "/beta" in result.stdout
 
 
-def test_project_ls_defaults_to_local_route(
+def test_project_ls_local_mode_defaults_to_local_route(
     runner: CliRunner, write_config, mock_client, tmp_path, monkeypatch
 ):
-    """project ls without flags should list local files and not require cloud credentials."""
+    """project ls without flags for a local-mode project should list local files."""
     project_dir = tmp_path / "alpha-files"
     (project_dir / "docs").mkdir(parents=True, exist_ok=True)
     (project_dir / "notes.md").write_text("# local note")
@@ -152,7 +152,7 @@ def test_project_ls_defaults_to_local_route(
     write_config(
         {
             "env": "dev",
-            "projects": {"alpha": {"path": project_dir.as_posix(), "mode": "cloud"}},
+            "projects": {"alpha": {"path": project_dir.as_posix(), "mode": "local"}},
             "default_project": "alpha",
         }
     )
@@ -191,6 +191,60 @@ def test_project_ls_defaults_to_local_route(
     assert "Files in alpha (LOCAL)" in result.stdout
     assert "notes.md" in result.stdout
     assert "docs/spec.md" in result.stdout
+
+
+def test_project_ls_cloud_mode_defaults_to_cloud_route(
+    runner: CliRunner, write_config, mock_client, tmp_path, monkeypatch
+):
+    """project ls without flags for a cloud-mode project should list cloud files."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {"alpha": {"path": str(tmp_path / "alpha"), "mode": "cloud"}},
+            "default_project": "alpha",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    cloud_payload = {
+        "projects": [
+            {
+                "id": 1,
+                "external_id": "11111111-1111-1111-1111-111111111111",
+                "name": "alpha",
+                "path": "/alpha",
+                "is_default": True,
+            }
+        ],
+        "default_project": "alpha",
+    }
+
+    class _Resp:
+        def json(self):
+            return cloud_payload
+
+    class _TenantInfo:
+        bucket_name = "tenant-bucket"
+
+    async def fake_call_get(client, path: str, **kwargs):
+        assert path == "/v2/projects/"
+        # Cloud routing should be active when project mode is cloud
+        assert os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes")
+        return _Resp()
+
+    async def fake_get_mount_info():
+        return _TenantInfo()
+
+    monkeypatch.setattr(project_cmd, "call_get", fake_call_get)
+    monkeypatch.setattr(project_cmd, "get_mount_info", fake_get_mount_info)
+    monkeypatch.setattr(project_cmd, "project_ls", lambda *args, **kwargs: ["        42 cloud.md"])
+
+    # No --cloud flag: project mode should determine route
+    result = runner.invoke(app, ["project", "ls", "--name", "alpha"], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    assert "Files in alpha (CLOUD)" in result.stdout
+    assert "cloud.md" in result.stdout
 
 
 def test_project_ls_cloud_route_uses_cloud_listing(

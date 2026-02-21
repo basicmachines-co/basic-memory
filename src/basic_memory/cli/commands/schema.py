@@ -2,6 +2,10 @@
 
 Provides CLI access to schema validation, inference, and drift detection.
 Registered as a subcommand group: `bm schema validate`, `bm schema infer`, `bm schema diff`.
+
+Each command calls the corresponding MCP tool with output_format="json" and
+renders the result as Rich tables — same code path as `bm tool schema-*` but
+with human-friendly formatting.
 """
 
 import json
@@ -16,8 +20,9 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.project_context import get_active_project
+from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
+from basic_memory.mcp.tools import schema_infer as mcp_schema_infer
+from basic_memory.mcp.tools import schema_validate as mcp_schema_validate
 
 console = Console()
 
@@ -37,77 +42,124 @@ def _resolve_project_name(project: Optional[str]) -> Optional[str]:
     return config_manager.default_project
 
 
-# --- Validate ---
+# --- Rendering helpers ---
 
 
-async def _run_validate(
-    target: Optional[str] = None,
-    project: Optional[str] = None,
-    strict: bool = False,
-):
-    """Run schema validation via the API."""
-    from basic_memory.mcp.clients.schema import SchemaClient
+def _render_validate_table(data: dict) -> None:
+    """Render a validation report dict as a Rich table."""
+    entity_type = data.get("entity_type")
+    title_label = entity_type or "all"
 
-    async with get_client(project_name=project) as client:
-        active_project = await get_active_project(client, project, None)
-        schema_client = SchemaClient(client, active_project.external_id)
+    table = Table(title=f"Schema Validation: {title_label}")
+    table.add_column("Note", style="cyan")
+    table.add_column("Status", justify="center")
+    table.add_column("Warnings", justify="right")
+    table.add_column("Errors", justify="right")
 
-        # Determine if target is a note identifier or note type
-        # Heuristic: if target contains / or ., treat as identifier
-        entity_type = None
-        identifier = None
-        if target:
-            if "/" in target or "." in target:
-                identifier = target
-            else:
-                entity_type = target
+    for result in data.get("results", []):
+        warnings = result.get("warnings", [])
+        errors = result.get("errors", [])
+        passed = result.get("passed", True)
 
-        report = await schema_client.validate(
-            entity_type=entity_type,
-            identifier=identifier,
+        if passed and not warnings:
+            status = "[green]pass[/green]"
+        elif passed:
+            status = "[yellow]warn[/yellow]"
+        else:
+            status = "[red]fail[/red]"
+
+        table.add_row(
+            result.get("note_identifier", ""),
+            status,
+            str(len(warnings)),
+            str(len(errors)),
         )
 
-        # --- Display results ---
-        if report.total_notes == 0:
-            if report.total_entities == 0:
-                console.print(f"[yellow]No notes of type '{entity_type}' found.[/yellow]")
-            else:
-                console.print(
-                    f"[yellow]Found {report.total_entities} notes but no schema "
-                    f"defined for '{entity_type}'.[/yellow]"
-                )
-            return
+    console.print(table)
+    console.print(
+        f"\nSummary: {data.get('valid_count', 0)}/{data.get('total_notes', 0)} valid, "
+        f"{data.get('warning_count', 0)} warnings, {data.get('error_count', 0)} errors"
+    )
 
-        table = Table(title=f"Schema Validation: {entity_type or identifier or 'all'}")
-        table.add_column("Note", style="cyan")
-        table.add_column("Status", justify="center")
-        table.add_column("Warnings", justify="right")
-        table.add_column("Errors", justify="right")
 
-        for result in report.results:
-            if result.passed and not result.warnings:
-                status = "[green]pass[/green]"
-            elif result.passed:
-                status = "[yellow]warn[/yellow]"
-            else:
-                status = "[red]fail[/red]"
+def _render_infer_table(data: dict) -> None:
+    """Render an inference report dict as a Rich table."""
+    entity_type = data.get("entity_type", "")
+    notes_analyzed = data.get("notes_analyzed", 0)
+    suggested_required = data.get("suggested_required", [])
+    suggested_optional = data.get("suggested_optional", [])
 
-            table.add_row(
-                result.note_identifier,
-                status,
-                str(len(result.warnings)),
-                str(len(result.errors)),
+    console.print(f"\n[bold]Analyzing {notes_analyzed} notes with type: {entity_type}...[/bold]\n")
+
+    table = Table(title="Field Frequencies")
+    table.add_column("Field", style="cyan")
+    table.add_column("Source")
+    table.add_column("Count", justify="right")
+    table.add_column("Percentage", justify="right")
+    table.add_column("Suggested")
+
+    for freq in data.get("field_frequencies", []):
+        pct = f"{freq.get('percentage', 0):.0%}"
+        name = freq.get("name", "")
+        if name in suggested_required:
+            suggested = "[green]required[/green]"
+        elif name in suggested_optional:
+            suggested = "[yellow]optional[/yellow]"
+        else:
+            suggested = "[dim]excluded[/dim]"
+
+        table.add_row(
+            name,
+            freq.get("source", ""),
+            str(freq.get("count", 0)),
+            pct,
+            suggested,
+        )
+
+    console.print(table)
+
+    suggested_schema = data.get("suggested_schema", {})
+    if suggested_schema:
+        console.print("\n[bold]Suggested schema:[/bold]")
+        console.print(json.dumps(suggested_schema, indent=2))
+
+
+def _render_diff_output(data: dict) -> None:
+    """Render a drift report dict as Rich output."""
+    entity_type = data.get("entity_type", "")
+    new_fields = data.get("new_fields", [])
+    dropped_fields = data.get("dropped_fields", [])
+    cardinality_changes = data.get("cardinality_changes", [])
+
+    has_drift = new_fields or dropped_fields or cardinality_changes
+
+    if not has_drift:
+        console.print(f"[green]No drift detected for {entity_type} schema.[/green]")
+        return
+
+    console.print(f"\n[bold]Schema drift detected for {entity_type}:[/bold]\n")
+
+    if new_fields:
+        console.print("[green]+ New fields (common in notes, not in schema):[/green]")
+        for f in new_fields:
+            console.print(
+                f"  + {f['name']}: {f.get('percentage', 0):.0%} of notes ({f.get('source', '')})"
             )
 
-        console.print(table)
-        console.print(
-            f"\nSummary: {report.valid_count}/{report.total_notes} valid, "
-            f"{report.warning_count} warnings, {report.error_count} errors"
-        )
+    if dropped_fields:
+        console.print("[red]- Dropped fields (in schema, rare in notes):[/red]")
+        for f in dropped_fields:
+            console.print(
+                f"  - {f['name']}: {f.get('percentage', 0):.0%} of notes ({f.get('source', '')})"
+            )
 
-        # Exit with error code in strict mode if there are failures
-        if strict and report.error_count > 0:
-            raise typer.Exit(1)
+    if cardinality_changes:
+        console.print("[yellow]~ Cardinality changes:[/yellow]")
+        for change in cardinality_changes:
+            console.print(f"  ~ {change}")
+
+
+# --- Commands ---
 
 
 @schema_app.command()
@@ -138,8 +190,36 @@ def validate(
     try:
         validate_routing_flags(local, cloud)
         project_name = _resolve_project_name(project)
+
+        # Heuristic: if target contains / or ., treat as identifier; otherwise as note type
+        note_type, identifier = None, None
+        if target:
+            if "/" in target or "." in target:
+                identifier = target
+            else:
+                note_type = target
+
         with force_routing(local=local, cloud=cloud):
-            run_with_cleanup(_run_validate(target, project_name, strict))
+            result = run_with_cleanup(
+                mcp_schema_validate(
+                    note_type=note_type,
+                    identifier=identifier,
+                    project=project_name,
+                    output_format="json",
+                )
+            )
+
+        # Handle error responses
+        if isinstance(result, dict) and "error" in result:
+            console.print(f"[yellow]{result['error']}[/yellow]")
+            return
+
+        # output_format="json" guarantees a dict return
+        assert isinstance(result, dict)
+        _render_validate_table(result)
+
+        if strict and result.get("error_count", 0) > 0:
+            raise typer.Exit(1)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -149,91 +229,6 @@ def validate(
             typer.echo(f"Error during schema validate: {e}", err=True)
             raise typer.Exit(1)
         raise
-
-
-# --- Infer ---
-
-
-async def _run_infer(
-    entity_type: str,
-    project: Optional[str] = None,
-    threshold: float = 0.25,
-    save: bool = False,
-):
-    """Run schema inference via the API."""
-    from basic_memory.mcp.clients.schema import SchemaClient
-
-    async with get_client(project_name=project) as client:
-        active_project = await get_active_project(client, project, None)
-        schema_client = SchemaClient(client, active_project.external_id)
-
-        report = await schema_client.infer(entity_type, threshold=threshold)
-
-        if report.notes_analyzed == 0:
-            console.print(f"[yellow]No notes found with type: {entity_type}[/yellow]")
-            return
-
-        # --- Empty schema guard ---
-        # Trigger: notes were analyzed but no fields met the threshold
-        # Why: dumping hundreds of excluded fields is not useful output
-        # Outcome: show count and suggest a more specific type
-        if not report.suggested_schema:
-            console.print(
-                f"\n[yellow]Analyzed {report.notes_analyzed} notes of type '{entity_type}', "
-                f"but no fields met the {threshold:.0%} threshold.[/yellow]\n"
-            )
-            console.print(
-                f"This usually means '{entity_type}' is too broad — "
-                f"the notes don't share a consistent structure.\n"
-            )
-            console.print("[bold]Suggestions:[/bold]")
-            console.print("  1. Use a more specific type")
-            console.print(
-                f"  2. Lower the threshold: bm schema infer {entity_type} --threshold 0.1"
-            )
-            console.print("  3. Create typed notes with write_note using a specific note_type")
-            return
-
-        # --- Display frequency analysis ---
-        console.print(
-            f"\n[bold]Analyzing {report.notes_analyzed} notes with type: {entity_type}...[/bold]\n"
-        )
-
-        table = Table(title="Field Frequencies")
-        table.add_column("Field", style="cyan")
-        table.add_column("Source")
-        table.add_column("Count", justify="right")
-        table.add_column("Percentage", justify="right")
-        table.add_column("Suggested")
-
-        for freq in report.field_frequencies:
-            pct = f"{freq.percentage:.0%}"
-            if freq.name in report.suggested_required:
-                suggested = "[green]required[/green]"
-            elif freq.name in report.suggested_optional:
-                suggested = "[yellow]optional[/yellow]"
-            else:
-                suggested = "[dim]excluded[/dim]"
-
-            table.add_row(
-                freq.name,
-                freq.source,
-                str(freq.count),
-                pct,
-                suggested,
-            )
-
-        console.print(table)
-
-        # --- Display suggested schema ---
-        console.print("\n[bold]Suggested schema:[/bold]")
-        console.print(json.dumps(report.suggested_schema, indent=2))
-
-        if save:
-            console.print(
-                f"\n[yellow]--save not yet implemented. "
-                f"Copy the schema above into schema/{entity_type}.md[/yellow]"
-            )
 
 
 @schema_app.command()
@@ -269,8 +264,37 @@ def infer(
     try:
         validate_routing_flags(local, cloud)
         project_name = _resolve_project_name(project)
+
         with force_routing(local=local, cloud=cloud):
-            run_with_cleanup(_run_infer(entity_type, project_name, threshold, save))
+            result = run_with_cleanup(
+                mcp_schema_infer(
+                    note_type=entity_type,
+                    threshold=threshold,
+                    project=project_name,
+                    output_format="json",
+                )
+            )
+
+        # Handle error responses
+        if isinstance(result, dict) and "error" in result:
+            console.print(f"[yellow]{result['error']}[/yellow]")
+            return
+
+        # output_format="json" guarantees a dict return
+        assert isinstance(result, dict)
+
+        # Handle zero notes
+        if result.get("notes_analyzed", 0) == 0:
+            console.print(f"[yellow]No notes found with type: {entity_type}[/yellow]")
+            return
+
+        _render_infer_table(result)
+
+        if save:
+            console.print(
+                f"\n[yellow]--save not yet implemented. "
+                f"Copy the schema above into schema/{entity_type}.md[/yellow]"
+            )
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
@@ -280,46 +304,6 @@ def infer(
             typer.echo(f"Error during schema infer: {e}", err=True)
             raise typer.Exit(1)
         raise
-
-
-# --- Diff ---
-
-
-async def _run_diff(
-    entity_type: str,
-    project: Optional[str] = None,
-):
-    """Run schema drift detection via the API."""
-    from basic_memory.mcp.clients.schema import SchemaClient
-
-    async with get_client(project_name=project) as client:
-        active_project = await get_active_project(client, project, None)
-        schema_client = SchemaClient(client, active_project.external_id)
-
-        report = await schema_client.diff(entity_type)
-
-        has_drift = report.new_fields or report.dropped_fields or report.cardinality_changes
-
-        if not has_drift:
-            console.print(f"[green]No drift detected for {entity_type} schema.[/green]")
-            return
-
-        console.print(f"\n[bold]Schema drift detected for {entity_type}:[/bold]\n")
-
-        if report.new_fields:
-            console.print("[green]+ New fields (common in notes, not in schema):[/green]")
-            for f in report.new_fields:
-                console.print(f"  + {f.name}: {f.percentage:.0%} of notes ({f.source})")
-
-        if report.dropped_fields:
-            console.print("[red]- Dropped fields (in schema, rare in notes):[/red]")
-            for f in report.dropped_fields:
-                console.print(f"  - {f.name}: {f.percentage:.0%} of notes ({f.source})")
-
-        if report.cardinality_changes:
-            console.print("[yellow]~ Cardinality changes:[/yellow]")
-            for change in report.cardinality_changes:
-                console.print(f"  ~ {change}")
 
 
 @schema_app.command()
@@ -349,8 +333,24 @@ def diff(
     try:
         validate_routing_flags(local, cloud)
         project_name = _resolve_project_name(project)
+
         with force_routing(local=local, cloud=cloud):
-            run_with_cleanup(_run_diff(entity_type, project_name))
+            result = run_with_cleanup(
+                mcp_schema_diff(
+                    note_type=entity_type,
+                    project=project_name,
+                    output_format="json",
+                )
+            )
+
+        # Handle error responses
+        if isinstance(result, dict) and "error" in result:
+            console.print(f"[yellow]{result['error']}[/yellow]")
+            return
+
+        # output_format="json" guarantees a dict return
+        assert isinstance(result, dict)
+        _render_diff_output(result)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)

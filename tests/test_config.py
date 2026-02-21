@@ -335,7 +335,7 @@ class TestConfigManager:
         config = config_manager.load_config()
 
         entry = config.projects["main"]
-        assert entry.cloud_sync_path is None
+        assert entry.local_sync_path is None
         assert entry.bisync_initialized is False
         assert entry.last_sync is None
 
@@ -357,7 +357,7 @@ class TestConfigManager:
                     "research": {
                         "path": str(temp_path / "research"),
                         "mode": "cloud",
-                        "cloud_sync_path": str(temp_path / "research-local"),
+                        "local_sync_path": str(temp_path / "research-local"),
                         "last_sync": now.isoformat(),
                         "bisync_initialized": True,
                     },
@@ -369,7 +369,7 @@ class TestConfigManager:
             loaded_config = config_manager.load_config()
             assert "research" in loaded_config.projects
             entry = loaded_config.projects["research"]
-            assert entry.cloud_sync_path == str(temp_path / "research-local")
+            assert entry.local_sync_path == str(temp_path / "research-local")
             assert entry.bisync_initialized is True
             assert entry.last_sync == now
 
@@ -389,14 +389,14 @@ class TestConfigManager:
 
             # Load, modify, and save
             config = config_manager.load_config()
-            assert config.projects["main"].cloud_sync_path is None
+            assert config.projects["main"].local_sync_path is None
 
-            config.projects["main"].cloud_sync_path = str(temp_path / "work-local")
+            config.projects["main"].local_sync_path = str(temp_path / "work-local")
             config_manager.save_config(config)
 
             # Reload and verify persistence
             reloaded_config = config_manager.load_config()
-            assert reloaded_config.projects["main"].cloud_sync_path == str(temp_path / "work-local")
+            assert reloaded_config.projects["main"].local_sync_path == str(temp_path / "work-local")
             assert reloaded_config.projects["main"].bisync_initialized is False
 
     def test_backward_compatibility_loading_old_format_config(self):
@@ -469,7 +469,7 @@ class TestConfigManager:
 
             # Verify migration
             assert config.projects["research"].mode == ProjectMode.CLOUD
-            assert config.projects["research"].cloud_sync_path == str(temp_path / "research-local")
+            assert config.projects["research"].local_sync_path == str(temp_path / "research-local")
             assert config.projects["research"].bisync_initialized is True
             assert config.projects["main"].mode == ProjectMode.LOCAL
 

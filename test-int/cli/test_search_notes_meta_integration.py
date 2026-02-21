@@ -25,8 +25,6 @@ def test_search_notes_query_plus_meta_filter(app, app_config, test_project, conf
             "meta-tests",
             "--content",
             active_content,
-            "--format",
-            "json",
         ],
     )
     assert active_write.exit_code == 0, active_write.output
@@ -43,8 +41,6 @@ def test_search_notes_query_plus_meta_filter(app, app_config, test_project, conf
             "meta-tests",
             "--content",
             inactive_content,
-            "--format",
-            "json",
         ],
     )
     assert inactive_write.exit_code == 0, inactive_write.output

@@ -189,7 +189,6 @@ class TestToolCommandsAcceptFlags:
             ("read-note", ["test"]),
             ("edit-note", ["test", "--operation", "append", "--content", "test"]),
             ("build-context", ["memory://test"]),
-            ("continue-conversation", []),
         ],
     )
     def test_tool_commands_accept_local_flag(self, command, args, app_config):
@@ -207,7 +206,6 @@ class TestToolCommandsAcceptFlags:
             ("read-note", ["test"]),
             ("edit-note", ["test", "--operation", "append", "--content", "test"]),
             ("build-context", ["memory://test"]),
-            ("continue-conversation", []),
         ],
     )
     def test_tool_commands_accept_cloud_flag(self, command, args, app_config):

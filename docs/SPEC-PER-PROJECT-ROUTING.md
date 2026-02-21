@@ -45,14 +45,14 @@ When explicit routing is active, project mode does not override the selected rou
     "main": {
       "path": "/Users/me/basic-memory",
       "mode": "local",
-      "cloud_sync_path": null,
+      "local_sync_path": null,
       "bisync_initialized": false,
       "last_sync": null
     },
     "specs": {
       "path": "specs",
       "mode": "cloud",
-      "cloud_sync_path": "/Users/me/dev/specs",
+      "local_sync_path": "/Users/me/dev/specs",
       "bisync_initialized": true,
       "last_sync": "2026-02-06T17:36:38.544153"
     }

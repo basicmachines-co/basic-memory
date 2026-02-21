@@ -69,9 +69,9 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "workspace",
         "output_format",
     ],
-    "schema_diff": ["note_type", "project", "workspace"],
-    "schema_infer": ["note_type", "threshold", "project", "workspace"],
-    "schema_validate": ["note_type", "identifier", "project", "workspace"],
+    "schema_diff": ["note_type", "project", "workspace", "output_format"],
+    "schema_infer": ["note_type", "threshold", "project", "workspace", "output_format"],
+    "schema_validate": ["note_type", "identifier", "project", "workspace", "output_format"],
     "search": ["query"],
     "search_by_metadata": ["filters", "project", "workspace", "limit", "offset"],
     "search_notes": [

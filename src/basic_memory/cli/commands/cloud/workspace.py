@@ -4,14 +4,13 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from basic_memory.cli.app import app
+from basic_memory.cli.app import cloud_app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.mcp.project_context import get_available_workspaces
 
 console = Console()
 
 workspace_app = typer.Typer(help="Manage cloud workspaces")
-app.add_typer(workspace_app, name="workspace")
 
 
 @workspace_app.command("list")
@@ -49,9 +48,3 @@ def list_workspaces() -> None:
         )
 
     console.print(table)
-
-
-@app.command("workspaces")
-def workspaces_alias() -> None:
-    """Alias for `bm workspace list`."""
-    list_workspaces()

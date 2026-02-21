@@ -19,8 +19,6 @@ def _write_note(title: str, folder: str, content: str, project: str | None = Non
         folder,
         "--content",
         content,
-        "--format",
-        "json",
     ]
     if project:
         args.extend(["--project", project])
@@ -31,7 +29,7 @@ def _write_note(title: str, folder: str, content: str, project: str | None = Non
 
 
 def _read_note(identifier: str, project: str | None = None) -> dict:
-    args = ["tool", "read-note", identifier, "--format", "json"]
+    args = ["tool", "read-note", identifier]
     if project:
         args.extend(["--project", project])
 
@@ -214,7 +212,7 @@ def test_edit_note_replace_section_fails_without_section(
 
 
 def test_edit_note_json_format_contract(app, app_config, test_project, config_manager):
-    """JSON format returns only metadata keys required by contract."""
+    """JSON output returns metadata keys required by contract."""
     note = _write_note(
         "Edit JSON Note",
         "edit-tests",
@@ -231,8 +229,6 @@ def test_edit_note_json_format_contract(app, app_config, test_project, config_ma
             "append",
             "--content",
             "\nJSON_MARKER",
-            "--format",
-            "json",
         ],
     )
 
@@ -243,10 +239,8 @@ def test_edit_note_json_format_contract(app, app_config, test_project, config_ma
     assert data["title"] == "Edit JSON Note"
 
 
-def test_edit_note_text_backend_failure_returns_nonzero(
-    app, app_config, test_project, config_manager
-):
-    """Text mode should return non-zero when backend edit operation fails."""
+def test_edit_note_backend_failure_returns_nonzero(app, app_config, test_project, config_manager):
+    """Edit should return non-zero when backend edit operation fails."""
     note = _write_note(
         "Edit Backend Failure Note",
         "edit-tests",
@@ -271,8 +265,6 @@ def test_edit_note_text_backend_failure_returns_nonzero(
     )
 
     assert result.exit_code != 0
-    assert "# Edit Failed - Wrong Replacement Count" in result.output
-    assert "Expected 2 occurrences of 'Gamma' but found 1" in result.output
 
 
 def test_edit_note_project_and_routing_flag_parity(app, app_config, test_project, config_manager):

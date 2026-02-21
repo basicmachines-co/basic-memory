@@ -56,7 +56,7 @@ async def _resolve_cloud_token(config) -> str:
 
     raise RuntimeError(
         "Cloud routing requested but no credentials found. "
-        "Run 'bm cloud set-key <key>' or 'bm cloud login' first."
+        "Run 'bm cloud api-key save <key>' or 'bm cloud login' first."
     )
 
 
@@ -158,7 +158,7 @@ async def get_client(
             except RuntimeError as exc:
                 raise RuntimeError(
                     f"Project '{project_name}' is set to cloud mode but no credentials found. "
-                    "Run 'bm cloud set-key <key>' or 'bm cloud login' first."
+                    "Run 'bm cloud api-key save <key>' or 'bm cloud login' first."
                 ) from exc
             return
 

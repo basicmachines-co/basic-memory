@@ -4,7 +4,7 @@ Provides tools for schema validation, inference, and drift detection through the
 These tools call the schema API endpoints via the typed SchemaClient.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from loguru import logger
 from fastmcp import Context
@@ -78,8 +78,9 @@ async def schema_validate(
     identifier: Optional[str] = None,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> ValidationReport | str:
+) -> ValidationReport | str | dict:
     """Validate notes against their resolved schema.
 
     Validates a specific note (by identifier) or all notes of a given type.
@@ -142,6 +143,8 @@ async def schema_validate(
             # Why: can't validate notes that don't exist yet
             # Outcome: return guidance on creating notes of this type
             if note_type and result.total_entities == 0:
+                if output_format == "json":
+                    return {"error": f"No notes found of type '{note_type}'"}
                 return _no_notes_guidance(note_type, "schema_validate")
 
             # --- No schema guard ---
@@ -149,12 +152,19 @@ async def schema_validate(
             # Why: notes of this type exist but no schema was found, so none were validated
             # Outcome: return guidance on how to create a schema
             if note_type and result.total_notes == 0:
+                if output_format == "json":
+                    return {"error": f"No schema found for type '{note_type}'"}
                 return _no_schema_guidance(note_type, "schema_validate")
+
+            if output_format == "json":
+                return result.model_dump(mode="json", exclude_none=True)
 
             return result
 
         except Exception as e:
             logger.error(f"Schema validation failed: {e}, project: {active_project.name}")
+            if output_format == "json":
+                return {"error": f"Schema validation failed: {e}"}
             return (
                 f"# Schema Validation Failed\n\n"
                 f"Error validating schemas: {e}\n\n"
@@ -174,8 +184,9 @@ async def schema_infer(
     threshold: float = 0.25,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> InferenceReport | str:
+) -> InferenceReport | str | dict:
     """Analyze existing notes and suggest a schema definition.
 
     Examines observation categories and relation types across all notes
@@ -235,6 +246,13 @@ async def schema_infer(
             # Why: returning hundreds of excluded fields overwhelms the LLM context
             # Outcome: return actionable guidance instead of a massive empty result
             if result.notes_analyzed > 0 and not result.suggested_schema:
+                if output_format == "json":
+                    return {
+                        "error": (
+                            f"No schema pattern found for '{note_type}' "
+                            f"(threshold: {threshold:.0%})"
+                        )
+                    }
                 return (
                     f"# No Schema Pattern Found\n\n"
                     f"Analyzed {result.notes_analyzed} notes of type '{note_type}', "
@@ -253,10 +271,15 @@ async def schema_infer(
                     f"structure\n"
                 )
 
+            if output_format == "json":
+                return result.model_dump(mode="json", exclude_none=True)
+
             return result
 
         except Exception as e:
             logger.error(f"Schema inference failed: {e}, project: {active_project.name}")
+            if output_format == "json":
+                return {"error": f"Schema inference failed: {e}"}
             return (
                 f"# Schema Inference Failed\n\n"
                 f"Error inferring schema for type '{note_type}': {e}\n\n"
@@ -275,8 +298,9 @@ async def schema_diff(
     note_type: str,
     project: Optional[str] = None,
     workspace: Optional[str] = None,
+    output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> DriftReport | str:
+) -> DriftReport | str | dict:
     """Detect drift between a schema definition and actual note usage.
 
     Compares the existing schema for a note type against how notes of
@@ -331,12 +355,19 @@ async def schema_diff(
             # Why: diff requires a schema to compare against
             # Outcome: return guidance on how to create a schema
             if not result.schema_found:
+                if output_format == "json":
+                    return {"error": f"No schema found for type '{note_type}'"}
                 return _no_schema_guidance(note_type, "schema_diff")
+
+            if output_format == "json":
+                return result.model_dump(mode="json", exclude_none=True)
 
             return result
 
         except Exception as e:
             logger.error(f"Schema diff failed: {e}, project: {active_project.name}")
+            if output_format == "json":
+                return {"error": f"Schema diff failed: {e}"}
             return (
                 f"# Schema Diff Failed\n\n"
                 f"Error detecting drift for type '{note_type}': {e}\n\n"

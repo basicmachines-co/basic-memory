@@ -109,7 +109,7 @@ def test_project_add_with_local_path_saves_to_config(
     assert "test-project" in config_data["projects"]
     entry = config_data["projects"]["test-project"]
     # Use as_posix() for cross-platform compatibility (Windows uses backslashes)
-    assert entry["cloud_sync_path"] == local_sync_dir.as_posix()
+    assert entry["local_sync_path"] == local_sync_dir.as_posix()
     assert entry.get("last_sync") is None
     assert entry.get("bisync_initialized", False) is False
 
@@ -131,10 +131,10 @@ def test_project_add_without_local_path_no_config_entry(runner, mock_config, moc
 
     # Verify config was NOT updated with cloud sync path
     config_data = json.loads(mock_config.read_text())
-    # Project may or may not be in config, but if it is, cloud_sync_path should be null
+    # Project may or may not be in config, but if it is, local_sync_path should be null
     entry = config_data.get("projects", {}).get("test-project")
     if entry:
-        assert entry.get("cloud_sync_path") is None
+        assert entry.get("local_sync_path") is None
 
 
 def test_project_add_local_path_expands_tilde(runner, mock_config, mock_api_client):
@@ -148,7 +148,7 @@ def test_project_add_local_path_expands_tilde(runner, mock_config, mock_api_clie
 
     # Verify config has expanded path
     config_data = json.loads(mock_config.read_text())
-    local_path = config_data["projects"]["test-project"]["cloud_sync_path"]
+    local_path = config_data["projects"]["test-project"]["local_sync_path"]
     # Path should be absolute (starts with / on Unix or drive letter on Windows)
     assert Path(local_path).is_absolute()
     assert "~" not in local_path

@@ -113,7 +113,7 @@ def status() -> None:
     has_credentials = bool(config.cloud_api_key) or tokens is not None
     if not has_credentials:
         console.print(
-            "\n[dim]No cloud credentials found. Run: bm cloud login or bm cloud set-key <key>[/dim]"
+            "\n[dim]No cloud credentials found. Run: bm cloud login or bm cloud api-key save <key>[/dim]"
         )
         return
 
@@ -140,7 +140,7 @@ def status() -> None:
     except CloudAPIError as e:
         console.print(f"[yellow]Cloud health check failed: {e}[/yellow]")
         console.print(
-            "[dim]Try re-authenticating with 'bm cloud login' or setting API key with 'bm cloud set-key'.[/dim]"
+            "[dim]Try re-authenticating with 'bm cloud login' or setting API key with 'bm cloud api-key save'.[/dim]"
         )
     except Exception as e:
         console.print(f"[yellow]Unexpected health check error: {e}[/yellow]")
@@ -219,17 +219,22 @@ def promo(enabled: bool = typer.Option(True, "--on/--off", help="Enable or disab
         console.print("[yellow]Cloud promo messages disabled[/yellow]")
 
 
-@cloud_app.command("set-key")
-def set_key(
+# --- API key management subcommand group ---
+
+api_key_app = typer.Typer(help="Manage cloud API keys")
+cloud_app.add_typer(api_key_app, name="api-key")
+
+
+@api_key_app.command("save")
+def api_key_save(
     api_key: str = typer.Argument(..., help="API key (bmc_ prefixed) for cloud access"),
 ) -> None:
-    """Save a cloud API key for per-project cloud routing.
+    """Save an existing API key to local config.
 
-    The API key is account-level and used by projects set to cloud mode.
-    Create a key in the web app or use 'bm cloud create-key'.
+    Use when you already have an API key (e.g., from the web app).
 
     Example:
-      bm cloud set-key bmc_abc123...
+      bm cloud api-key save bmc_abc123...
     """
     if not api_key.startswith("bmc_"):
         console.print("[red]Error: API key must start with 'bmc_'[/red]")
@@ -245,17 +250,16 @@ def set_key(
     console.print("[dim]Set a project to cloud mode: bm project set-cloud <name>[/dim]")
 
 
-@cloud_app.command("create-key")
-def create_key(
+@api_key_app.command("create")
+def api_key_create(
     name: str = typer.Argument(..., help="Human-readable name for the API key"),
 ) -> None:
-    """Create a new cloud API key and save it locally.
+    """Create a new API key via the cloud API and save it locally.
 
     Requires active OAuth session (run 'bm cloud login' first).
-    The key is created via the cloud API and saved to local config.
 
     Example:
-      bm cloud create-key "my-laptop"
+      bm cloud api-key create "my-laptop"
     """
 
     async def _create_key():

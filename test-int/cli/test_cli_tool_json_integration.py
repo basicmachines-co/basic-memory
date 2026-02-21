@@ -1,4 +1,4 @@
-"""Integration tests for CLI tool --format json output."""
+"""Integration tests for CLI tool JSON output."""
 
 import json
 
@@ -9,8 +9,8 @@ from basic_memory.cli.main import app as cli_app
 runner = CliRunner()
 
 
-def test_write_note_json_format(app, app_config, test_project, config_manager):
-    """Test write-note --format json returns valid JSON with expected keys."""
+def test_write_note_json_output(app, app_config, test_project, config_manager):
+    """write-note returns valid JSON with expected keys."""
     result = runner.invoke(
         cli_app,
         [
@@ -22,8 +22,6 @@ def test_write_note_json_format(app, app_config, test_project, config_manager):
             "test-notes",
             "--content",
             "# Test\n\nThis is test content.",
-            "--format",
-            "json",
         ],
     )
 
@@ -36,12 +34,11 @@ def test_write_note_json_format(app, app_config, test_project, config_manager):
     data = json.loads(result.stdout)
     assert data["title"] == "Integration Test Note"
     assert "permalink" in data
-    assert data["content"] == "# Test\n\nThis is test content."
     assert "file_path" in data
 
 
-def test_read_note_json_format(app, app_config, test_project, config_manager):
-    """Test read-note --format json returns valid JSON with expected keys."""
+def test_read_note_json_output(app, app_config, test_project, config_manager):
+    """read-note returns valid JSON with expected keys."""
     # First, write a note
     write_result = runner.invoke(
         cli_app,
@@ -54,8 +51,6 @@ def test_read_note_json_format(app, app_config, test_project, config_manager):
             "test-notes",
             "--content",
             "# Read Test\n\nContent to read back.",
-            "--format",
-            "json",
         ],
     )
     assert write_result.exit_code == 0
@@ -65,7 +60,7 @@ def test_read_note_json_format(app, app_config, test_project, config_manager):
     # Now read it back
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", permalink, "--format", "json"],
+        ["tool", "read-note", permalink],
     )
 
     if result.exit_code != 0:
@@ -78,25 +73,21 @@ def test_read_note_json_format(app, app_config, test_project, config_manager):
     assert data["permalink"] == permalink
     assert "content" in data
     assert "file_path" in data
-    assert "frontmatter" in data
-    assert isinstance(data["frontmatter"], dict)
 
 
-def test_read_note_json_strip_frontmatter_permalink(app, app_config, test_project, config_manager):
-    """read-note strips frontmatter in JSON mode for permalink lookup."""
+def test_read_note_include_frontmatter(app, app_config, test_project, config_manager):
+    """read-note --include-frontmatter includes frontmatter in output."""
     write_result = runner.invoke(
         cli_app,
         [
             "tool",
             "write-note",
             "--title",
-            "Read Strip Permalink Note",
+            "Read Frontmatter Note",
             "--folder",
             "test-notes",
             "--content",
-            "# Read Strip Permalink Note\n\nPermalink lookup content.",
-            "--format",
-            "json",
+            "# Read Frontmatter Note\n\nFrontmatter test content.",
         ],
     )
     assert write_result.exit_code == 0
@@ -108,68 +99,19 @@ def test_read_note_json_strip_frontmatter_permalink(app, app_config, test_projec
             "tool",
             "read-note",
             write_data["permalink"],
-            "--format",
-            "json",
-            "--strip-frontmatter",
+            "--include-frontmatter",
         ],
     )
 
     assert result.exit_code == 0
     data = json.loads(result.stdout)
-    assert data["title"] == "Read Strip Permalink Note"
+    assert data["title"] == "Read Frontmatter Note"
     assert data["permalink"] == write_data["permalink"]
-    assert not data["content"].startswith("---")
-    assert "# Read Strip Permalink Note" in data["content"]
-    assert isinstance(data["frontmatter"], dict)
-    assert data["frontmatter"].get("title") == "Read Strip Permalink Note"
+    assert "content" in data
 
 
-def test_read_note_json_strip_frontmatter_title(app, app_config, test_project, config_manager):
-    """read-note strips frontmatter in JSON mode for title-based lookup."""
-    write_result = runner.invoke(
-        cli_app,
-        [
-            "tool",
-            "write-note",
-            "--title",
-            "Read Strip Title Note",
-            "--folder",
-            "test-notes",
-            "--content",
-            "# Read Strip Title Note\n\nTitle lookup content.",
-            "--format",
-            "json",
-        ],
-    )
-    assert write_result.exit_code == 0
-    write_data = json.loads(write_result.stdout)
-
-    result = runner.invoke(
-        cli_app,
-        [
-            "tool",
-            "read-note",
-            "Read Strip Title Note",
-            "--format",
-            "json",
-            "--strip-frontmatter",
-        ],
-    )
-
-    assert result.exit_code == 0
-    data = json.loads(result.stdout)
-    assert data["title"] == "Read Strip Title Note"
-    assert data["permalink"] == write_data["permalink"]
-    assert not data["content"].startswith("---")
-    assert "# Read Strip Title Note" in data["content"]
-    assert isinstance(data["frontmatter"], dict)
-    assert data["frontmatter"].get("title") == "Read Strip Title Note"
-
-
-def test_recent_activity_json_format(app, app_config, test_project, config_manager, monkeypatch):
-    """Test recent-activity --format json returns valid JSON list."""
-    # _recent_activity_json uses resolve_project_parameter which requires either
-    # default_project set or BASIC_MEMORY_MCP_PROJECT to resolve a project
+def test_recent_activity_json_output(app, app_config, test_project, config_manager, monkeypatch):
+    """recent-activity returns valid JSON list."""
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
 
     # Write a note to ensure there's recent activity
@@ -184,8 +126,6 @@ def test_recent_activity_json_format(app, app_config, test_project, config_manag
             "test-notes",
             "--content",
             "# Activity\n\nTest content for activity.",
-            "--format",
-            "json",
         ],
     )
     assert write_result.exit_code == 0
@@ -193,7 +133,7 @@ def test_recent_activity_json_format(app, app_config, test_project, config_manag
     # Get recent activity
     result = runner.invoke(
         cli_app,
-        ["tool", "recent-activity", "--format", "json"],
+        ["tool", "recent-activity"],
     )
 
     if result.exit_code != 0:

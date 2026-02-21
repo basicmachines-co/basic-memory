@@ -120,7 +120,7 @@ bm project sync-setup research ~/Documents/research
 
 When you add a project with `--local-path`:
 1. Project created on cloud at `/app/data/research`
-2. Local path stored in config for that project (`cloud_sync_path`)
+2. Local path stored in config for that project (`local_sync_path`)
 3. Local directory created if it doesn't exist
 4. Bisync state directory created at `~/.basic-memory/bisync-state/research/`
 
