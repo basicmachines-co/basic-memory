@@ -11,7 +11,7 @@
 
 - **Cross-device and multi-platform support is here.** Your knowledge graph now works on desktop, web, and mobile.
 - **Cloud is optional.** The local-first open-source workflow continues as always.
-- **OSS discount:** use code `{{OSS_DISCOUNT_CODE}}` for 20% off for 3 months.
+- **OSS discount:** use code `BMFOSS` for 20% off for 3 months.
 
 [Sign up now →](https://basicmemory.com)
 
