@@ -249,10 +249,10 @@ class TestProjectCommandsAcceptFlags:
         result = runner.invoke(cli_app, ["project", "sync-config", "test", "--local"])
         assert "No such option: --local" not in result.output
 
-    def test_project_move_accepts_local_flag(self, app_config):
+    def test_project_move_local_only(self, app_config):
         """project move should accept --local flag."""
-        result = runner.invoke(cli_app, ["project", "move", "test", "/tmp/dest", "--local"])
-        assert "No such option: --local" not in result.output
+        result = runner.invoke(cli_app, ["project", "move", "test", "/tmp/dest", "--cloud"])
+        assert "No such option: --cloud"  in result.output
 
     def test_project_ls_accepts_local_flag(self, app_config):
         """project ls should accept --local flag."""
