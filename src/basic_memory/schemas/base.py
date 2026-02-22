@@ -156,8 +156,8 @@ Permalink = Annotated[str, MinLen(1)]
 """Unique identifier in format '{path}/{normalized_name}'."""
 
 
-EntityType = Annotated[str, BeforeValidator(to_snake_case), MinLen(1), MaxLen(200)]
-"""Classification of entity (e.g., 'person', 'project', 'concept'). """
+NoteType = Annotated[str, BeforeValidator(to_snake_case), MinLen(1), MaxLen(200)]
+"""Classification of note (e.g., 'note', 'person', 'spec', 'schema'). """
 
 ALLOWED_CONTENT_TYPES = {
     "text/markdown",
@@ -228,7 +228,7 @@ class Entity(BaseModel):
     title: str
     content: Optional[str] = None
     directory: str
-    entity_type: EntityType = "note"
+    note_type: NoteType = "note"
     entity_metadata: Optional[Dict] = Field(default=None, description="Optional metadata")
     content_type: ContentType = Field(
         description="MIME type of the content (e.g. text/markdown, image/jpeg)",

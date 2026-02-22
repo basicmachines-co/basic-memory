@@ -44,7 +44,7 @@ async def test_search_entities(
     # Create a test entity
     entity_data = {
         "title": "Searchable Entity",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "file_path": "searchable.md",
         "checksum": "search123",
@@ -79,7 +79,7 @@ async def test_search_with_pagination(
     for i in range(5):
         entity_data = {
             "title": f"Search Entity {i}",
-            "entity_type": "note",
+            "note_type": "note",
             "content_type": "text/markdown",
             "file_path": f"search_{i}.md",
             "checksum": f"searchsum{i}",
@@ -114,7 +114,7 @@ async def test_search_by_permalink(
     # Create a test entity with permalink
     entity_data = {
         "title": "Permalink Search",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "file_path": "permalink_search.md",
         "checksum": "perm123",
@@ -147,7 +147,7 @@ async def test_search_by_title(
     # Create a test entity
     entity_data = {
         "title": "Unique Title For Search",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "file_path": "unique_title.md",
         "checksum": "title123",
@@ -175,13 +175,13 @@ async def test_search_with_type_filter(
 ):
     """Test searching with entity type filter."""
     # Create test entities of different types
-    for entity_type in ["note", "document"]:
+    for note_type in ["note", "document"]:
         entity_data = {
-            "title": f"Type {entity_type}",
-            "entity_type": entity_type,
+            "title": f"Type {note_type}",
+            "note_type": note_type,
             "content_type": "text/markdown",
-            "file_path": f"type_{entity_type}.md",
-            "checksum": f"type{entity_type}",
+            "file_path": f"type_{note_type}.md",
+            "checksum": f"type{note_type}",
         }
         await create_test_entity(
             test_project, entity_data, entity_repository, search_service, file_service
@@ -189,7 +189,7 @@ async def test_search_with_type_filter(
 
     # Search with type filter
     response = await client.post(
-        f"{v2_project_url}/search/", json={"search_text": "Type", "types": ["note"]}
+        f"{v2_project_url}/search/", json={"search_text": "Type", "note_types": ["note"]}
     )
 
     assert response.status_code == 200
@@ -210,7 +210,7 @@ async def test_search_with_date_filter(
     # Create a test entity
     entity_data = {
         "title": "Date Filtered",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "file_path": "date_filtered.md",
         "checksum": "date123",
@@ -377,7 +377,7 @@ async def test_search_has_more_when_more_results_exist(
     for i in range(4):
         entity_data = {
             "title": f"HasMore Entity {i}",
-            "entity_type": "note",
+            "note_type": "note",
             "content_type": "text/markdown",
             "file_path": f"hasmore_{i}.md",
             "checksum": f"hasmore{i}",
@@ -411,7 +411,7 @@ async def test_search_has_more_false_on_last_page(
     """has_more should be False when all results fit on the current page."""
     entity_data = {
         "title": "Solo Search Entity",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "file_path": "solo_search.md",
         "checksum": "solo123",

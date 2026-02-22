@@ -43,7 +43,7 @@ def test_entity_data():
         "entities": [
             {
                 "title": "Test Entity",
-                "entity_type": "test",
+                "note_type": "test",
                 "summary": "",  # Empty string instead of None
             }
         ]

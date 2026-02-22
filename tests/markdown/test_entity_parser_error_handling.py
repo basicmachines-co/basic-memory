@@ -79,12 +79,12 @@ async def test_parse_file_with_completely_invalid_yaml(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_parse_file_without_entity_type(tmp_path):
-    """Test that files without entity_type get a default value (issue #184).
+async def test_parse_file_without_note_type(tmp_path):
+    """Test that files without note_type get a default value (issue #184).
 
-    This reproduces the NOT NULL constraint error where entity_type was missing.
+    This reproduces the NOT NULL constraint error where note_type was missing.
     """
-    # Create a file without entity_type in frontmatter
+    # Create a file without note_type in frontmatter
     test_file = tmp_path / "no_type.md"
     content = dedent(
         """
@@ -102,7 +102,7 @@ async def test_parse_file_without_entity_type(tmp_path):
     parser = EntityParser(tmp_path)
     result = await parser.parse_file(test_file)
 
-    # Should have default entity_type
+    # Should have default note_type
     assert result is not None
     assert result.frontmatter.type == "note"  # Default type applied
     assert result.frontmatter.title == "The Invisible Weight of Mental Habits"
@@ -159,9 +159,9 @@ async def test_parse_file_without_frontmatter(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_parse_file_with_null_entity_type(tmp_path):
-    """Test that files with explicit null entity_type get default (issue #184)."""
-    # Create a file with null/None entity_type
+async def test_parse_file_with_null_note_type(tmp_path):
+    """Test that files with explicit null note_type get default (issue #184)."""
+    # Create a file with null/None note_type
     test_file = tmp_path / "null_type.md"
     content = dedent(
         """
@@ -402,7 +402,7 @@ async def test_schema_to_markdown_empty_metadata_no_metadata_key():
 
     schema = SimpleNamespace(
         title="Empty Metadata Test",
-        entity_type="note",
+        note_type="note",
         permalink="empty-metadata-test",
         content="# Empty Metadata Test\n\nSome content.",
         entity_metadata={},

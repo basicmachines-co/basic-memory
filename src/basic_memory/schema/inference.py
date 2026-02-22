@@ -30,14 +30,14 @@ class FieldFrequency:
     percentage: float
     sample_values: list[str] = field(default_factory=list)
     is_array: bool = False  # True if typically appears multiple times per note
-    target_type: str | None = None  # For relations, the most common target entity type
+    target_type: str | None = None  # For relations, the most common target note type
 
 
 @dataclass
 class InferenceResult:
     """Complete inference result with frequency analysis and suggested schema."""
 
-    entity_type: str
+    note_type: str
     notes_analyzed: int
     field_frequencies: list[FieldFrequency]
     suggested_schema: dict  # Ready-to-use Picoschema YAML dict
@@ -65,7 +65,7 @@ class RelationData:
 
     relation_type: str
     target_name: str
-    target_entity_type: str | None = None
+    target_note_type: str | None = None
 
 
 @dataclass
@@ -85,7 +85,7 @@ class NoteData:
 
 
 def infer_schema(
-    entity_type: str,
+    note_type: str,
     notes: list[NoteData],
     required_threshold: float = 0.95,
     optional_threshold: float = 0.25,
@@ -98,7 +98,7 @@ def infer_schema(
     appear less frequently become optional.
 
     Args:
-        entity_type: The entity type being analyzed (e.g., "Person").
+        note_type: The note type being analyzed (e.g., "person").
         notes: List of NoteData objects to analyze.
         required_threshold: Frequency at or above which a field is required (default 0.95).
         optional_threshold: Frequency at or above which a field is optional (default 0.25).
@@ -110,7 +110,7 @@ def infer_schema(
     total = len(notes)
     if total == 0:
         return InferenceResult(
-            entity_type=entity_type,
+            note_type=note_type,
             notes_analyzed=0,
             field_frequencies=[],
             suggested_schema={},
@@ -145,7 +145,7 @@ def infer_schema(
     )
 
     return InferenceResult(
-        entity_type=entity_type,
+        note_type=note_type,
         notes_analyzed=total,
         field_frequencies=all_frequencies,
         suggested_schema=suggested_schema,
@@ -255,8 +255,8 @@ def analyze_relations(
             # Track target entity types from individual relations (not the source note)
             target_counter = rel_target_types.setdefault(rel_type, Counter())
             for rel in note_rel_objects[rel_type]:
-                if rel.target_entity_type:
-                    target_counter[rel.target_entity_type] += 1
+                if rel.target_note_type:
+                    target_counter[rel.target_note_type] += 1
 
     frequencies: list[FieldFrequency] = []
     for rel_type, count in rel_note_count.most_common():

@@ -16,7 +16,7 @@ class TestEntityModelFromMarkdown:
     def _create_markdown(
         self,
         title: str = "Test Entity",
-        entity_type: str = "note",
+        note_type: str = "note",
         permalink: str = "test/test-entity",
         created: datetime | None = None,
         modified: datetime | None = None,
@@ -27,7 +27,7 @@ class TestEntityModelFromMarkdown:
         return EntityMarkdown(
             frontmatter=EntityFrontmatter(
                 title=title,
-                type=entity_type,
+                type=note_type,
                 permalink=permalink,
             ),
             content=f"# {title}\n\nTest content.",
@@ -127,7 +127,7 @@ class TestEntityModelFromMarkdown:
         """
         markdown = self._create_markdown(
             title="My Test Entity",
-            entity_type="component",
+            note_type="component",
             permalink="components/my-test",
         )
         file_path = Path("components/my-test.md")

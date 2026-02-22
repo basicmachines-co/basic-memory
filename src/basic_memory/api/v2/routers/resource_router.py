@@ -145,14 +145,14 @@ async def create_resource(
         # Determine file details
         file_name = PathLib(data.file_path).name
         content_type = file_service.content_type(data.file_path)
-        entity_type = "canvas" if data.file_path.endswith(".canvas") else "file"
+        note_type = "canvas" if data.file_path.endswith(".canvas") else "file"
 
         # Create a new entity model
         # Explicitly set external_id to ensure NOT NULL constraint is satisfied (fixes #512)
         entity = EntityModel(
             external_id=str(uuid.uuid4()),
             title=file_name,
-            entity_type=entity_type,
+            note_type=note_type,
             content_type=content_type,
             file_path=data.file_path,
             checksum=checksum,
@@ -253,14 +253,14 @@ async def update_resource(
         # Determine file details
         file_name = PathLib(target_file_path).name
         content_type = file_service.content_type(target_file_path)
-        entity_type = "canvas" if target_file_path.endswith(".canvas") else "file"
+        note_type = "canvas" if target_file_path.endswith(".canvas") else "file"
 
         # Update entity using internal ID
         updated_entity = await entity_repository.update(
             entity.id,
             {
                 "title": file_name,
-                "entity_type": entity_type,
+                "note_type": note_type,
                 "content_type": content_type,
                 "file_path": target_file_path,
                 "checksum": checksum,

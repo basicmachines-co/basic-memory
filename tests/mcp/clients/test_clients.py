@@ -34,7 +34,7 @@ class TestKnowledgeClient:
             "permalink": "test",
             "title": "Test",
             "file_path": "test.md",
-            "entity_type": "note",
+            "note_type": "note",
             "content_type": "text/markdown",
             "observations": [],
             "relations": [],

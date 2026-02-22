@@ -30,7 +30,7 @@ async def test_entities(entity_service, file_service):
     e1, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Core Service",
-            entity_type="component",
+            note_type="component",
             directory="components",
             project=entity_service.repository.project_id,
         )
@@ -38,7 +38,7 @@ async def test_entities(entity_service, file_service):
     e2, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Service Config",
-            entity_type="config",
+            note_type="config",
             directory="config",
             project=entity_service.repository.project_id,
         )
@@ -46,7 +46,7 @@ async def test_entities(entity_service, file_service):
     e3, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Auth Service",
-            entity_type="component",
+            note_type="component",
             directory="components",
             project=entity_service.repository.project_id,
         )
@@ -54,7 +54,7 @@ async def test_entities(entity_service, file_service):
     e4, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Core Features",
-            entity_type="specs",
+            note_type="specs",
             directory="specs",
             project=entity_service.repository.project_id,
         )
@@ -62,7 +62,7 @@ async def test_entities(entity_service, file_service):
     e5, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Sub Features 1",
-            entity_type="specs",
+            note_type="specs",
             directory="specs/subspec",
             project=entity_service.repository.project_id,
         )
@@ -70,7 +70,7 @@ async def test_entities(entity_service, file_service):
     e6, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Sub Features 2",
-            entity_type="specs",
+            note_type="specs",
             directory="specs/subspec",
             project=entity_service.repository.project_id,
         )
@@ -80,7 +80,7 @@ async def test_entities(entity_service, file_service):
     e7 = await entity_service.repository.add(
         EntityModel(
             title="Image.png",
-            entity_type="file",
+            note_type="file",
             content_type="image/png",
             file_path="Image.png",
             permalink="image",  # Required for Postgres NOT NULL constraint
@@ -93,7 +93,7 @@ async def test_entities(entity_service, file_service):
     e8 = await entity_service.create_entity(  # duplicate title
         EntitySchema(
             title="Core Service",
-            entity_type="component",
+            note_type="component",
             directory="components2",
             project=entity_service.repository.project_id,
         )
@@ -186,7 +186,7 @@ async def test_resolve_file(link_resolver):
     # Basic new entity
     resolved = await link_resolver.resolve_link("Image.png")
     assert resolved is not None
-    assert resolved.entity_type == "file"
+    assert resolved.note_type == "file"
     assert resolved.title == "Image.png"
 
 
@@ -392,7 +392,7 @@ async def test_cross_project_link_resolution(
     target = await other_entity_repo.add(
         EntityModel(
             title="Cross Project Note",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="docs/Cross Project Note.md",
             permalink=f"{other_project.permalink}/docs/cross-project-note",
@@ -440,7 +440,7 @@ async def context_aware_entities(entity_repository):
     e1 = await entity_repository.add(
         EntityModel(
             title="testing",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="testing.md",
             permalink="testing",
@@ -455,7 +455,7 @@ async def context_aware_entities(entity_repository):
     e2 = await entity_repository.add(
         EntityModel(
             title="testing",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="main/testing/testing.md",
             permalink="main/testing/testing",
@@ -470,7 +470,7 @@ async def context_aware_entities(entity_repository):
     e3 = await entity_repository.add(
         EntityModel(
             title="another-test",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="main/testing/another-test.md",
             permalink="main/testing/another-test",
@@ -485,7 +485,7 @@ async def context_aware_entities(entity_repository):
     e4 = await entity_repository.add(
         EntityModel(
             title="testing",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="other/testing.md",
             permalink="other/testing",
@@ -500,7 +500,7 @@ async def context_aware_entities(entity_repository):
     e5 = await entity_repository.add(
         EntityModel(
             title="note",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="deep/nested/folder/note.md",
             permalink="deep/nested/folder/note",
@@ -515,7 +515,7 @@ async def context_aware_entities(entity_repository):
     e6 = await entity_repository.add(
         EntityModel(
             title="note",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="deep/note.md",
             permalink="deep/note",
@@ -530,7 +530,7 @@ async def context_aware_entities(entity_repository):
     e7 = await entity_repository.add(
         EntityModel(
             title="note",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="note.md",
             permalink="note",
@@ -739,7 +739,7 @@ async def relative_path_entities(entity_repository):
     e1 = await entity_repository.add(
         EntityModel(
             title="link-test",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="testing/link-test.md",
             permalink="testing/link-test",
@@ -754,7 +754,7 @@ async def relative_path_entities(entity_repository):
     e2 = await entity_repository.add(
         EntityModel(
             title="deep-note",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="testing/nested/deep-note.md",
             permalink="testing/nested/deep-note",
@@ -769,7 +769,7 @@ async def relative_path_entities(entity_repository):
     e3 = await entity_repository.add(
         EntityModel(
             title="deep-note",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="nested/deep-note.md",
             permalink="nested/deep-note",
@@ -784,7 +784,7 @@ async def relative_path_entities(entity_repository):
     e4 = await entity_repository.add(
         EntityModel(
             title="file",
-            entity_type="note",
+            note_type="note",
             content_type="text/markdown",
             file_path="other/file.md",
             permalink="other/file",

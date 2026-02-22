@@ -123,9 +123,9 @@ class ProductionCascadeTest:
 
             # Create test entity linked to project
             entity_sql = """
-            INSERT INTO entity (title, entity_type, content_type, project_id, permalink, file_path, 
+            INSERT INTO entity (title, note_type, content_type, project_id, permalink, file_path,
                               checksum, created_at, updated_at)
-            VALUES (:title, :entity_type, :content_type, :project_id, :permalink, :file_path, 
+            VALUES (:title, :note_type, :content_type, :project_id, :permalink, :file_path,
                     :checksum, :created_at, :updated_at)
             """
 
@@ -133,7 +133,7 @@ class ProductionCascadeTest:
                 text(entity_sql),
                 {
                     "title": "Cascade Test Entity",
-                    "entity_type": "note",
+                    "note_type": "note",
                     "content_type": "text/markdown",
                     "project_id": project_id,
                     "permalink": "cascade-test-entity",

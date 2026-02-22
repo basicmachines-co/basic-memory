@@ -22,8 +22,8 @@ class ProjectStatistics(BaseModel):
     )
 
     # Entity counts by type
-    entity_types: Dict[str, int] = Field(
-        description="Count of entities by type (e.g., note, conversation)"
+    note_types: Dict[str, int] = Field(
+        description="Count of entities by note type (e.g., note, conversation)"
     )
 
     # Observation counts by category

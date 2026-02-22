@@ -27,7 +27,7 @@ async def test_create_entity(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="",
-        entity_type="test",
+        note_type="test",
     )
     # Save expected permalink before create_entity mutates entity_data._permalink
     expected_permalink = f"{generate_permalink(project_config.name)}/{entity_data.permalink}"
@@ -39,14 +39,14 @@ async def test_create_entity(
     assert isinstance(entity, EntityModel)
     assert entity.permalink == expected_permalink
     assert entity.file_path == entity_data.file_path
-    assert entity.entity_type == "test"
+    assert entity.note_type == "test"
     assert entity.created_at is not None
     assert len(entity.relations) == 0
 
     # Verify we can retrieve it using permalink
     retrieved = await entity_service.get_by_permalink(entity.permalink)
     assert retrieved.title == "Test Entity"
-    assert retrieved.entity_type == "test"
+    assert retrieved.note_type == "test"
     assert retrieved.created_at is not None
 
     # Verify file was written
@@ -59,7 +59,7 @@ async def test_create_entity(
 
     # Verify frontmatter contents
     assert metadata["permalink"] == entity.permalink
-    assert metadata["type"] == entity.entity_type
+    assert metadata["type"] == entity.note_type
 
 
 @pytest.mark.asyncio
@@ -70,7 +70,7 @@ async def test_create_entity_file_exists(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="",
-        entity_type="test",
+        note_type="test",
         content="first",
     )
 
@@ -90,7 +90,7 @@ async def test_create_entity_file_exists(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="",
-        entity_type="test",
+        note_type="test",
         content="second",
     )
 
@@ -109,7 +109,7 @@ async def test_create_entity_unique_permalink(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
 
     entity = await entity_service.create_entity(entity_data)
@@ -143,14 +143,14 @@ async def test_get_by_permalink(entity_service: EntityService):
     entity1_data = EntitySchema(
         title="TestEntity1",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     entity1 = await entity_service.create_entity(entity1_data)
 
     entity2_data = EntitySchema(
         title="TestEntity2",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     entity2 = await entity_service.create_entity(entity2_data)
 
@@ -158,13 +158,13 @@ async def test_get_by_permalink(entity_service: EntityService):
     found = await entity_service.get_by_permalink(entity1_data.permalink)
     assert found is not None
     assert found.id == entity1.id
-    assert found.entity_type == entity1.entity_type
+    assert found.note_type == entity1.note_type
 
     # Find by type2 and name
     found = await entity_service.get_by_permalink(entity2_data.permalink)
     assert found is not None
     assert found.id == entity2.id
-    assert found.entity_type == entity2.entity_type
+    assert found.note_type == entity2.note_type
 
     # Test not found case
     with pytest.raises(EntityNotFoundError):
@@ -177,7 +177,7 @@ async def test_get_entity_success(entity_service: EntityService):
     entity_data = EntitySchema(
         title="TestEntity",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     await entity_service.create_entity(entity_data)
 
@@ -186,7 +186,7 @@ async def test_get_entity_success(entity_service: EntityService):
 
     assert isinstance(retrieved, EntityModel)
     assert retrieved.title == "TestEntity"
-    assert retrieved.entity_type == "test"
+    assert retrieved.note_type == "test"
 
 
 @pytest.mark.asyncio
@@ -195,7 +195,7 @@ async def test_delete_entity_success(entity_service: EntityService):
     entity_data = EntitySchema(
         title="TestEntity",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     await entity_service.create_entity(entity_data)
 
@@ -214,7 +214,7 @@ async def test_delete_entity_by_id(entity_service: EntityService):
     entity_data = EntitySchema(
         title="TestEntity",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     created = await entity_service.create_entity(entity_data)
 
@@ -247,7 +247,7 @@ async def test_create_entity_with_special_chars(entity_service: EntityService):
     entity_data = EntitySchema(
         title=name,
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     entity = await entity_service.create_entity(entity_data)
 
@@ -264,12 +264,12 @@ async def test_get_entities_by_permalinks(entity_service: EntityService):
     entity1_data = EntitySchema(
         title="Entity1",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     entity2_data = EntitySchema(
         title="Entity2",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     await entity_service.create_entity(entity1_data)
     await entity_service.create_entity(entity2_data)
@@ -297,7 +297,7 @@ async def test_get_entities_some_not_found(entity_service: EntityService):
     entity_data = EntitySchema(
         title="Entity1",
         directory="test",
-        entity_type="test",
+        note_type="test",
     )
     await entity_service.create_entity(entity_data)
 
@@ -315,7 +315,7 @@ async def test_get_entity_path(entity_service: EntityService):
     entity = EntityModel(
         permalink="test-entity",
         file_path="test-entity.md",
-        entity_type="test",
+        note_type="test",
     )
     path = entity_service.file_service.get_entity_path(entity)
     assert path == Path(entity_service.file_service.base_path / "test-entity.md")
@@ -328,7 +328,7 @@ async def test_update_note_entity_content(entity_service: EntityService, file_se
     schema = EntitySchema(
         title="test",
         directory="test",
-        entity_type="note",
+        note_type="note",
         entity_metadata={"status": "draft"},
     )
 
@@ -383,7 +383,7 @@ async def test_fast_write_and_reindex_entity(
     schema = EntitySchema(
         title="Reindex Target",
         directory="test",
-        entity_type="note",
+        note_type="note",
         content=dedent("""
             # Reindex Target
 
@@ -413,7 +413,7 @@ async def test_fast_write_entity_generates_external_id(entity_service: EntitySer
     schema = EntitySchema(
         title=title,
         directory="test",
-        entity_type="note",
+        note_type="note",
     )
 
     fast_entity = await entity_service.fast_write_entity(schema)
@@ -428,7 +428,7 @@ async def test_create_or_update_new(entity_service: EntityService, file_service:
         EntitySchema(
             title="test",
             directory="test",
-            entity_type="test",
+            note_type="test",
             entity_metadata={"status": "draft"},
         )
     )
@@ -444,7 +444,7 @@ async def test_create_or_update_existing(entity_service: EntityService, file_ser
         EntitySchema(
             title="test",
             directory="test",
-            entity_type="test",
+            note_type="test",
             content="Test entity",
             entity_metadata={"status": "final"},
         )
@@ -487,14 +487,14 @@ async def test_create_with_content(entity_service: EntityService, file_service: 
         EntitySchema(
             title="Git Workflow Guide",
             directory="test",
-            entity_type="test",
+            note_type="test",
             content=content,
         )
     )
 
     assert created is True
     assert entity.title == "Git Workflow Guide"
-    assert entity.entity_type == "test"
+    assert entity.note_type == "test"
     assert entity.permalink == "git-workflow-guide"
     assert entity.file_path == "test/Git Workflow Guide.md"
 
@@ -556,7 +556,7 @@ async def test_update_with_content(
     entity, created = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Git Workflow Guide",
-            entity_type="test",
+            note_type="test",
             directory="test",
             content=content,
         )
@@ -617,7 +617,7 @@ async def test_update_with_content(
         EntitySchema(
             title="Git Workflow Guide",
             directory="test",
-            entity_type="test",
+            note_type="test",
             content=update_content,
         )
     )
@@ -673,7 +673,7 @@ async def test_create_with_no_frontmatter(
 
     assert file_path.as_posix() == created.file_path
     assert created.title == "Git Workflow Guide"
-    assert created.entity_type == "note"
+    assert created.note_type == "note"
     assert created.permalink is None
 
     # assert file
@@ -691,7 +691,7 @@ async def test_edit_entity_append(entity_service: EntityService, file_service: F
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -717,7 +717,7 @@ async def test_edit_entity_prepend(entity_service: EntityService, file_service: 
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -743,7 +743,7 @@ async def test_edit_entity_find_replace(entity_service: EntityService, file_serv
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="This is old content that needs updating",
         )
     )
@@ -783,7 +783,7 @@ async def test_edit_entity_replace_section(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -814,7 +814,7 @@ async def test_edit_entity_replace_section_create_new(
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="# Main Title\n\nSome content",
         )
     )
@@ -851,7 +851,7 @@ async def test_edit_entity_invalid_operation(entity_service: EntityService):
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -870,7 +870,7 @@ async def test_edit_entity_find_replace_missing_find_text(entity_service: Entity
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -889,7 +889,7 @@ async def test_edit_entity_replace_section_missing_section(entity_service: Entit
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -919,7 +919,7 @@ async def test_edit_entity_with_observations_and_relations(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1028,7 +1028,7 @@ async def test_edit_entity_find_replace_not_found(entity_service: EntityService)
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="This is some content",
         )
     )
@@ -1053,7 +1053,7 @@ async def test_edit_entity_find_replace_multiple_occurrences_expected_one(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content="The word banana appears here. Another banana word here.",
         )
     )
@@ -1079,7 +1079,7 @@ async def test_edit_entity_find_replace_multiple_occurrences_success(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content="The word banana appears here. Another banana word here.",
         )
     )
@@ -1107,7 +1107,7 @@ async def test_edit_entity_find_replace_empty_find_text(entity_service: EntitySe
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Some content",
         )
     )
@@ -1142,7 +1142,7 @@ async def test_edit_entity_find_replace_multiline(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1184,7 +1184,7 @@ async def test_edit_entity_replace_section_multiple_sections_error(entity_servic
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1207,7 +1207,7 @@ async def test_edit_entity_replace_section_empty_section(entity_service: EntityS
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Some content",
         )
     )
@@ -1242,7 +1242,7 @@ async def test_edit_entity_replace_section_header_variations(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1282,7 +1282,7 @@ async def test_edit_entity_replace_section_at_end_of_document(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1329,7 +1329,7 @@ async def test_edit_entity_replace_section_with_subsections(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1373,7 +1373,7 @@ async def test_edit_entity_replace_section_strips_duplicate_header(
         EntitySchema(
             title="Sample Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1415,7 +1415,7 @@ async def test_move_entity_success(
         EntitySchema(
             title="Test Note",
             directory="original",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1464,7 +1464,7 @@ async def test_move_entity_with_permalink_update(
         EntitySchema(
             title="Test Note",
             directory="original",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1505,7 +1505,7 @@ async def test_move_entity_creates_destination_directory(
         EntitySchema(
             title="Test Note",
             directory="original",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1555,7 +1555,7 @@ async def test_move_entity_source_file_missing(
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1587,7 +1587,7 @@ async def test_move_entity_destination_exists(
         EntitySchema(
             title="Test Note 1",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Content 1",
         )
     )
@@ -1596,7 +1596,7 @@ async def test_move_entity_destination_exists(
         EntitySchema(
             title="Test Note 2",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Content 2",
         )
     )
@@ -1624,7 +1624,7 @@ async def test_move_entity_invalid_destination_path(
         EntitySchema(
             title="Test Note",
             directory="test",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1663,7 +1663,7 @@ async def test_move_entity_by_title(
         EntitySchema(
             title="Test Note",
             directory="original",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1708,7 +1708,7 @@ async def test_move_entity_preserves_observations_and_relations(
         EntitySchema(
             title="Test Note",
             directory="original",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1755,7 +1755,7 @@ async def test_move_entity_rollback_on_database_failure(
         EntitySchema(
             title="Test Note",
             directory="original",
-            entity_type="note",
+            note_type="note",
             content="Original content",
         )
     )
@@ -1815,7 +1815,7 @@ async def test_move_entity_with_complex_observations(
         EntitySchema(
             title="Complex Note",
             directory="docs",
-            entity_type="note",
+            note_type="note",
             content=content,
         )
     )
@@ -1878,7 +1878,7 @@ async def test_move_entity_with_null_permalink_generates_permalink(
     entity_data = {
         "title": "Test Entity",
         "file_path": "test/null-permalink-entity.md",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "permalink": None,  # This is the key - null permalink from migration
         "created_at": datetime.now(timezone.utc),
@@ -1947,7 +1947,7 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     entity_a = EntitySchema(
         title="Node A",
         directory="edge-cases",
-        entity_type="note",
+        note_type="note",
         content="# Node A\n\nOriginal content for Node A",
     )
 
@@ -1971,7 +1971,7 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     entity_b = EntitySchema(
         title="Node B",
         directory="edge-cases",
-        entity_type="note",
+        note_type="note",
         content="# Node B\n\nContent for Node B",
     )
 
@@ -1984,7 +1984,7 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     entity_c = EntitySchema(
         title="Node C",
         directory="edge-cases",
-        entity_type="note",
+        note_type="note",
         content="# Node C\n\nContent for Node C",
     )
 

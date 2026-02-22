@@ -603,7 +603,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         permalink: Optional[str] = None,
         permalink_match: Optional[str] = None,
         title: Optional[str] = None,
-        types: Optional[List[str]] = None,
+        note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,
@@ -619,7 +619,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             permalink=permalink,
             permalink_match=permalink_match,
             title=title,
-            types=types,
+            note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
             metadata_filters=metadata_filters,
@@ -682,14 +682,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
             type_list = ", ".join(f"'{t.value}'" for t in search_item_types)
             conditions.append(f"search_index.type IN ({type_list})")
 
-        # Handle entity type filter using JSONB containment
-        if types:
+        # Handle note type filter using JSONB containment (frontmatter type field)
+        if note_types:
             # Use JSONB @> operator for efficient containment queries
             type_conditions = []
-            for entity_type in types:
-                # Create JSONB containment condition for each type
+            for note_type in note_types:
+                # Create JSONB containment condition for each note type
                 type_conditions.append(
-                    f'search_index.metadata @> \'{{"entity_type": "{entity_type}"}}\''
+                    f'search_index.metadata @> \'{{"note_type": "{note_type}"}}\''
                 )
             conditions.append(f"({' OR '.join(type_conditions)})")
 

@@ -493,7 +493,7 @@ def search_notes(
                     page=page,
                     after_date=after_date,
                     page_size=page_size,
-                    types=note_types,
+                    note_types=note_types,
                     entity_types=entity_types,
                     metadata_filters=metadata_filters,
                     tags=tags,
@@ -654,7 +654,7 @@ def schema_validate(
 
 @tool_app.command("schema-infer")
 def schema_infer(
-    entity_type: Annotated[
+    note_type: Annotated[
         str,
         typer.Argument(help="Note type to analyze (e.g., person, meeting)"),
     ],
@@ -688,7 +688,7 @@ def schema_infer(
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_schema_infer(
-                    note_type=entity_type,
+                    note_type=note_type,
                     threshold=threshold,
                     project=project,
                     workspace=workspace,
@@ -711,7 +711,7 @@ def schema_infer(
 
 @tool_app.command("schema-diff")
 def schema_diff(
-    entity_type: Annotated[
+    note_type: Annotated[
         str,
         typer.Argument(help="Note type to check for drift"),
     ],
@@ -741,7 +741,7 @@ def schema_diff(
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_schema_diff(
-                    note_type=entity_type,
+                    note_type=note_type,
                     project=project,
                     workspace=workspace,
                     output_format="json",

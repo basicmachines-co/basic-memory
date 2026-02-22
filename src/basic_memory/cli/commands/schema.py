@@ -47,8 +47,8 @@ def _resolve_project_name(project: Optional[str]) -> Optional[str]:
 
 def _render_validate_table(data: dict) -> None:
     """Render a validation report dict as a Rich table."""
-    entity_type = data.get("entity_type")
-    title_label = entity_type or "all"
+    note_type = data.get("note_type")
+    title_label = note_type or "all"
 
     table = Table(title=f"Schema Validation: {title_label}")
     table.add_column("Note", style="cyan")
@@ -84,12 +84,12 @@ def _render_validate_table(data: dict) -> None:
 
 def _render_infer_table(data: dict) -> None:
     """Render an inference report dict as a Rich table."""
-    entity_type = data.get("entity_type", "")
+    note_type = data.get("note_type", "")
     notes_analyzed = data.get("notes_analyzed", 0)
     suggested_required = data.get("suggested_required", [])
     suggested_optional = data.get("suggested_optional", [])
 
-    console.print(f"\n[bold]Analyzing {notes_analyzed} notes with type: {entity_type}...[/bold]\n")
+    console.print(f"\n[bold]Analyzing {notes_analyzed} notes with type: {note_type}...[/bold]\n")
 
     table = Table(title="Field Frequencies")
     table.add_column("Field", style="cyan")
@@ -126,7 +126,7 @@ def _render_infer_table(data: dict) -> None:
 
 def _render_diff_output(data: dict) -> None:
     """Render a drift report dict as Rich output."""
-    entity_type = data.get("entity_type", "")
+    note_type = data.get("note_type", "")
     new_fields = data.get("new_fields", [])
     dropped_fields = data.get("dropped_fields", [])
     cardinality_changes = data.get("cardinality_changes", [])
@@ -134,10 +134,10 @@ def _render_diff_output(data: dict) -> None:
     has_drift = new_fields or dropped_fields or cardinality_changes
 
     if not has_drift:
-        console.print(f"[green]No drift detected for {entity_type} schema.[/green]")
+        console.print(f"[green]No drift detected for {note_type} schema.[/green]")
         return
 
-    console.print(f"\n[bold]Schema drift detected for {entity_type}:[/bold]\n")
+    console.print(f"\n[bold]Schema drift detected for {note_type}:[/bold]\n")
 
     if new_fields:
         console.print("[green]+ New fields (common in notes, not in schema):[/green]")
@@ -233,7 +233,7 @@ def validate(
 
 @schema_app.command()
 def infer(
-    entity_type: Annotated[
+    note_type: Annotated[
         str,
         typer.Argument(help="Note type to analyze (e.g., person, meeting)"),
     ],
@@ -268,7 +268,7 @@ def infer(
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_schema_infer(
-                    note_type=entity_type,
+                    note_type=note_type,
                     threshold=threshold,
                     project=project_name,
                     output_format="json",
@@ -285,7 +285,7 @@ def infer(
 
         # Handle zero notes
         if result.get("notes_analyzed", 0) == 0:
-            console.print(f"[yellow]No notes found with type: {entity_type}[/yellow]")
+            console.print(f"[yellow]No notes found with type: {note_type}[/yellow]")
             return
 
         _render_infer_table(result)
@@ -293,7 +293,7 @@ def infer(
         if save:
             console.print(
                 f"\n[yellow]--save not yet implemented. "
-                f"Copy the schema above into schema/{entity_type}.md[/yellow]"
+                f"Copy the schema above into schema/{note_type}.md[/yellow]"
             )
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
@@ -308,7 +308,7 @@ def infer(
 
 @schema_app.command()
 def diff(
-    entity_type: Annotated[
+    note_type: Annotated[
         str,
         typer.Argument(help="Note type to check for drift"),
     ],
@@ -337,7 +337,7 @@ def diff(
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_schema_diff(
-                    note_type=entity_type,
+                    note_type=note_type,
                     project=project_name,
                     output_format="json",
                 )

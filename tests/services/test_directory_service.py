@@ -39,7 +39,7 @@ async def test_directory_tree(directory_service: DirectoryService, test_graph):
     assert node_0.type == "directory"
     assert node_0.content_type is None
     assert node_0.entity_id is None
-    assert node_0.entity_type is None
+    assert node_0.note_type is None
     assert node_0.title is None
     assert node_0.directory_path == "/test"
     assert node_0.has_children is True
@@ -51,7 +51,7 @@ async def test_directory_tree(directory_service: DirectoryService, test_graph):
     assert node_file.type == "file"
     assert node_file.content_type == "text/markdown"
     assert node_file.entity_id == 1
-    assert node_file.entity_type == "deeper"
+    assert node_file.note_type == "deeper"
     assert node_file.title == "Deeper Entity"
     assert node_file.permalink == "test-project/test/deeper-entity"
     assert node_file.directory_path == "/test/Deeper Entity.md"
@@ -250,7 +250,7 @@ async def test_directory_structure(directory_service: DirectoryService, test_gra
     # Verify no file metadata is present
     assert node_0.content_type is None
     assert node_0.entity_id is None
-    assert node_0.entity_type is None
+    assert node_0.note_type is None
     assert node_0.title is None
     assert node_0.permalink is None
 

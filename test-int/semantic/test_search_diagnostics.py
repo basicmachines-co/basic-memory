@@ -109,7 +109,7 @@ async def seed_diagnostic_notes(search_service):
         entity = await search_service.entity_repository.create(
             {
                 "title": note["title"],
-                "entity_type": "note",
+                "note_type": "note",
                 "entity_metadata": {"tags": note.get("tags", [])},
                 "content_type": "text/markdown",
                 "permalink": note["permalink"],

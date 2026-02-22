@@ -52,7 +52,7 @@ def _entity_row(
         title=title,
         permalink=permalink,
         file_path=f"{permalink}.md",
-        metadata={"entity_type": "spec"},
+        metadata={"note_type": "spec"},
         entity_id=entity_id,
         content_stems=content_stems,
         content_snippet=content_stems,

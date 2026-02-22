@@ -50,7 +50,7 @@ def entity_model_from_markdown(
 
     # Update basic fields
     model.title = markdown.frontmatter.title
-    model.entity_type = markdown.frontmatter.type
+    model.note_type = markdown.frontmatter.type
     # Only update permalink if it exists in frontmatter, otherwise preserve existing
     if markdown.frontmatter.permalink is not None:
         model.permalink = markdown.frontmatter.permalink
@@ -86,7 +86,7 @@ async def schema_to_markdown(schema: Any) -> Post:
     Convert schema to markdown Post object.
 
     Args:
-        schema: Schema to convert (must have title, entity_type, and permalink attributes)
+        schema: Schema to convert (must have title, note_type, and permalink attributes)
 
     Returns:
         Post object with frontmatter metadata
@@ -113,7 +113,7 @@ async def schema_to_markdown(schema: Any) -> Post:
     post = Post(
         content,
         title=schema.title,
-        type=schema.entity_type,
+        type=schema.note_type,
     )
     # set the permalink if passed in
     if schema.permalink:

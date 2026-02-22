@@ -28,7 +28,7 @@ async def create_person_entities(entity_service, search_service):
         EntitySchema(
             title="Alice",
             directory="people",
-            entity_type="person",
+            note_type="person",
             content=dedent("""\
                 ## Observations
                 - [name] Alice Smith
@@ -42,7 +42,7 @@ async def create_person_entities(entity_service, search_service):
         EntitySchema(
             title="Bob",
             directory="people",
-            entity_type="person",
+            note_type="person",
             content=dedent("""\
                 ## Observations
                 - [name] Bob Jones
@@ -56,7 +56,7 @@ async def create_person_entities(entity_service, search_service):
         EntitySchema(
             title="Carol",
             directory="people",
-            entity_type="person",
+            note_type="person",
             content=dedent("""\
                 ## Observations
                 - [name] Carol Lee
@@ -93,13 +93,13 @@ async def test_infer_schema(
 
     response = await client.post(
         f"{v2_project_url}/schema/infer",
-        params={"entity_type": "person"},
+        params={"note_type": "person"},
     )
 
     assert response.status_code == 200
     data = response.json()
 
-    assert data["entity_type"] == "person"
+    assert data["note_type"] == "person"
     assert data["notes_analyzed"] == 3
     assert isinstance(data["field_frequencies"], list)
     assert isinstance(data["suggested_schema"], dict)
@@ -125,7 +125,7 @@ async def test_infer_schema_no_matching_notes(
     """Infer returns empty result when no notes of the given type exist."""
     response = await client.post(
         f"{v2_project_url}/schema/infer",
-        params={"entity_type": "nonexistent"},
+        params={"note_type": "nonexistent"},
     )
 
     assert response.status_code == 200
@@ -150,7 +150,7 @@ async def test_infer_schema_includes_relations(
 
     response = await client.post(
         f"{v2_project_url}/schema/infer",
-        params={"entity_type": "person"},
+        params={"note_type": "person"},
     )
 
     assert response.status_code == 200
@@ -184,7 +184,7 @@ async def test_validate_with_inline_schema(
         EntitySchema(
             title="Dave",
             directory="people",
-            entity_type="person",
+            note_type="person",
             entity_metadata={
                 "schema": {"name": "string", "role": "string"},
             },
@@ -199,7 +199,7 @@ async def test_validate_with_inline_schema(
 
     response = await client.post(
         f"{v2_project_url}/schema/validate",
-        params={"entity_type": "person"},
+        params={"note_type": "person"},
     )
 
     assert response.status_code == 200
@@ -233,7 +233,7 @@ async def test_validate_with_explicit_schema_reference_by_permalink_slug(
         EntitySchema(
             title="Strict Person V2",
             directory="schemas",
-            entity_type="schema",
+            note_type="schema",
             entity_metadata={
                 "entity": "person",
                 "schema": {"name": "string", "role": "string"},
@@ -250,7 +250,7 @@ async def test_validate_with_explicit_schema_reference_by_permalink_slug(
         EntitySchema(
             title="Frank",
             directory="people",
-            entity_type="person",
+            note_type="person",
             entity_metadata={
                 # Explicit schema identifier does not equal entity metadata field ("person")
                 # and must resolve by schema identifier, not fuzzy text search.
@@ -292,7 +292,7 @@ async def test_validate_missing_required_field(
         EntitySchema(
             title="Eve",
             directory="people",
-            entity_type="person",
+            note_type="person",
             entity_metadata={
                 "schema": {"name": "string", "role": "string"},
             },
@@ -306,7 +306,7 @@ async def test_validate_missing_required_field(
 
     response = await client.post(
         f"{v2_project_url}/schema/validate",
-        params={"entity_type": "person"},
+        params={"note_type": "person"},
     )
 
     assert response.status_code == 200
@@ -329,7 +329,7 @@ async def test_validate_no_matching_notes(
     """Validate returns empty result when no notes of the given type exist."""
     response = await client.post(
         f"{v2_project_url}/schema/validate",
-        params={"entity_type": "nonexistent"},
+        params={"note_type": "nonexistent"},
     )
 
     assert response.status_code == 200
@@ -352,7 +352,7 @@ async def test_validate_total_entities_without_schema(
 
     response = await client.post(
         f"{v2_project_url}/schema/validate",
-        params={"entity_type": "person"},
+        params={"note_type": "person"},
     )
 
     assert response.status_code == 200
@@ -381,7 +381,7 @@ async def test_validate_with_frontmatter_rules_passes(
         EntitySchema(
             title="Person Schema FM",
             directory="schemas",
-            entity_type="schema",
+            note_type="schema",
             entity_metadata={
                 "entity": "person_fm",
                 "schema": {"name": "string"},
@@ -406,7 +406,7 @@ async def test_validate_with_frontmatter_rules_passes(
         EntitySchema(
             title="Grace",
             directory="people",
-            entity_type="person_fm",
+            note_type="person_fm",
             entity_metadata={
                 "tags": ["engineer", "python"],
                 "status": "published",
@@ -449,7 +449,7 @@ async def test_validate_frontmatter_missing_required_key_warns(
         EntitySchema(
             title="Person Schema FM2",
             directory="schemas",
-            entity_type="schema",
+            note_type="schema",
             entity_metadata={
                 "entity": "person_fm2",
                 "schema": {"name": "string"},
@@ -473,7 +473,7 @@ async def test_validate_frontmatter_missing_required_key_warns(
         EntitySchema(
             title="Hank",
             directory="people",
-            entity_type="person_fm2",
+            note_type="person_fm2",
             content=dedent("""\
                 ## Observations
                 - [name] Hank Pym
@@ -507,7 +507,7 @@ async def test_validate_frontmatter_enum_mismatch_warns(
         EntitySchema(
             title="Person Schema FM3",
             directory="schemas",
-            entity_type="schema",
+            note_type="schema",
             entity_metadata={
                 "entity": "person_fm3",
                 "schema": {"name": "string"},
@@ -531,7 +531,7 @@ async def test_validate_frontmatter_enum_mismatch_warns(
         EntitySchema(
             title="Iris",
             directory="people",
-            entity_type="person_fm3",
+            note_type="person_fm3",
             entity_metadata={
                 "status": "archived",  # not in [draft, published]
             },
@@ -575,7 +575,7 @@ async def test_diff_no_schema_found(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["entity_type"] == "nonexistent"
+    assert data["note_type"] == "nonexistent"
     assert data["new_fields"] == []
     assert data["dropped_fields"] == []
     assert data["cardinality_changes"] == []
@@ -597,7 +597,7 @@ async def test_diff_with_schema_note(
         EntitySchema(
             title="Person Schema",
             directory="schemas",
-            entity_type="schema",
+            note_type="schema",
             entity_metadata={
                 "entity": "person",
                 "version": 1,
@@ -620,7 +620,7 @@ async def test_diff_with_schema_note(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["entity_type"] == "person"
+    assert data["note_type"] == "person"
     assert isinstance(data["new_fields"], list)
     assert isinstance(data["dropped_fields"], list)
     assert isinstance(data["cardinality_changes"], list)

@@ -45,9 +45,9 @@ class TestSchemaClientValidate:
 
     @pytest.mark.asyncio
     async def test_validate_no_params(self, schema_client, monkeypatch):
-        """Validate with no entity_type or identifier sends empty params."""
+        """Validate with no note_type or identifier sends empty params."""
         report_data = {
-            "entity_type": None,
+            "note_type": None,
             "total_notes": 0,
             "valid_count": 0,
             "warning_count": 0,
@@ -70,10 +70,10 @@ class TestSchemaClientValidate:
         assert result.total_notes == 0
 
     @pytest.mark.asyncio
-    async def test_validate_with_entity_type(self, schema_client, monkeypatch):
-        """Validate sends entity_type as query param."""
+    async def test_validate_with_note_type(self, schema_client, monkeypatch):
+        """Validate sends note_type as query param."""
         report_data = {
-            "entity_type": "person",
+            "note_type": "person",
             "total_notes": 5,
             "valid_count": 4,
             "warning_count": 1,
@@ -85,20 +85,20 @@ class TestSchemaClientValidate:
         mock_response = Response(200, json=report_data, request=request)
 
         async def mock_call_post(client, url, **kwargs):
-            assert kwargs["params"]["entity_type"] == "person"
+            assert kwargs["params"]["note_type"] == "person"
             return mock_response
 
         monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
 
-        result = await schema_client.validate(entity_type="person")
-        assert result.entity_type == "person"
+        result = await schema_client.validate(note_type="person")
+        assert result.note_type == "person"
         assert result.total_notes == 5
 
     @pytest.mark.asyncio
     async def test_validate_with_identifier(self, schema_client, monkeypatch):
         """Validate sends identifier as query param."""
         report_data = {
-            "entity_type": None,
+            "note_type": None,
             "total_notes": 1,
             "valid_count": 1,
             "warning_count": 0,
@@ -124,9 +124,9 @@ class TestSchemaClientInfer:
 
     @pytest.mark.asyncio
     async def test_infer_default_threshold(self, schema_client, monkeypatch):
-        """Infer sends entity_type and default threshold."""
+        """Infer sends note_type and default threshold."""
         report_data = {
-            "entity_type": "person",
+            "note_type": "person",
             "notes_analyzed": 10,
             "field_frequencies": [],
             "suggested_schema": {},
@@ -140,7 +140,7 @@ class TestSchemaClientInfer:
 
         async def mock_call_post(client, url, **kwargs):
             assert url == "/v2/projects/test-project-id/schema/infer"
-            assert kwargs["params"]["entity_type"] == "person"
+            assert kwargs["params"]["note_type"] == "person"
             assert kwargs["params"]["threshold"] == 0.25
             return mock_response
 
@@ -155,7 +155,7 @@ class TestSchemaClientInfer:
     async def test_infer_custom_threshold(self, schema_client, monkeypatch):
         """Infer passes custom threshold."""
         report_data = {
-            "entity_type": "meeting",
+            "note_type": "meeting",
             "notes_analyzed": 5,
             "field_frequencies": [],
             "suggested_schema": {},
@@ -174,7 +174,7 @@ class TestSchemaClientInfer:
         monkeypatch.setattr("basic_memory.mcp.clients.schema.call_post", mock_call_post)
 
         result = await schema_client.infer("meeting", threshold=0.5)
-        assert result.entity_type == "meeting"
+        assert result.note_type == "meeting"
 
 
 class TestSchemaClientDiff:
@@ -182,9 +182,9 @@ class TestSchemaClientDiff:
 
     @pytest.mark.asyncio
     async def test_diff(self, schema_client, monkeypatch):
-        """Diff calls GET with entity_type in path."""
+        """Diff calls GET with note_type in path."""
         report_data = {
-            "entity_type": "person",
+            "note_type": "person",
             "new_fields": [],
             "dropped_fields": [],
             "cardinality_changes": [],
@@ -201,13 +201,13 @@ class TestSchemaClientDiff:
 
         result = await schema_client.diff("person")
         assert isinstance(result, DriftReport)
-        assert result.entity_type == "person"
+        assert result.note_type == "person"
 
     @pytest.mark.asyncio
     async def test_diff_with_drift(self, schema_client, monkeypatch):
         """Diff returns populated drift report."""
         report_data = {
-            "entity_type": "person",
+            "note_type": "person",
             "new_fields": [
                 {
                     "name": "role",

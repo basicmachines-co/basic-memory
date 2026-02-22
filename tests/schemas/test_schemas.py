@@ -19,20 +19,20 @@ from basic_memory.schemas.base import to_snake_case, TimeFrame, parse_timeframe,
 
 def test_entity_project_name():
     """Test creating EntityIn with minimal required fields."""
-    data = {"title": "Test Entity", "directory": "test", "entity_type": "knowledge"}
+    data = {"title": "Test Entity", "directory": "test", "note_type": "knowledge"}
     entity = Entity.model_validate(data)
     assert entity.file_path == os.path.join("test", "Test Entity.md")
     assert entity.permalink == "test/test-entity"
-    assert entity.entity_type == "knowledge"
+    assert entity.note_type == "knowledge"
 
 
 def test_entity_project_id():
     """Test creating EntityIn with minimal required fields."""
-    data = {"project": 2, "title": "Test Entity", "directory": "test", "entity_type": "knowledge"}
+    data = {"project": 2, "title": "Test Entity", "directory": "test", "note_type": "knowledge"}
     entity = Entity.model_validate(data)
     assert entity.file_path == os.path.join("test", "Test Entity.md")
     assert entity.permalink == "test/test-entity"
-    assert entity.entity_type == "knowledge"
+    assert entity.note_type == "knowledge"
 
 
 def test_entity_non_markdown():
@@ -40,19 +40,19 @@ def test_entity_non_markdown():
     data = {
         "title": "Test Entity.txt",
         "directory": "test",
-        "entity_type": "file",
+        "note_type": "file",
         "content_type": "text/plain",
     }
     entity = Entity.model_validate(data)
     assert entity.file_path == os.path.join("test", "Test Entity.txt")
     assert entity.permalink == "test/test-entity"
-    assert entity.entity_type == "file"
+    assert entity.note_type == "file"
 
 
 def test_entity_in_validation():
     """Test validation errors for EntityIn."""
     with pytest.raises(ValidationError):
-        Entity.model_validate({"entity_type": "test"})  # Missing required fields
+        Entity.model_validate({"note_type": "test"})  # Missing required fields
 
 
 def test_relation_in_validation():
@@ -141,7 +141,7 @@ def test_entity_out_from_attributes():
         "title": "Test Entity",
         "permalink": "test/test",
         "file_path": "test",
-        "entity_type": "knowledge",
+        "note_type": "knowledge",
         "content_type": "text/markdown",
         "observations": [
             {
@@ -183,7 +183,7 @@ def test_entity_response_with_none_permalink():
         "title": "Test Entity",
         "permalink": None,  # This should not cause validation errors
         "file_path": "test/test-entity.md",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "observations": [],
         "relations": [],
@@ -196,7 +196,7 @@ def test_entity_response_with_none_permalink():
     assert entity.permalink is None
     assert entity.title == "Test Entity"
     assert entity.file_path == "test/test-entity.md"
-    assert entity.entity_type == "note"
+    assert entity.note_type == "note"
     assert len(entity.observations) == 0
     assert len(entity.relations) == 0
 

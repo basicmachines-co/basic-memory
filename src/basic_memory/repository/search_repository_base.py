@@ -108,7 +108,7 @@ class SearchRepositoryBase(ABC):
         permalink: Optional[str] = None,
         permalink_match: Optional[str] = None,
         title: Optional[str] = None,
-        types: Optional[List[str]] = None,
+        note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
@@ -124,7 +124,7 @@ class SearchRepositoryBase(ABC):
             permalink: Exact permalink match
             permalink_match: Permalink pattern match (supports *)
             title: Title search
-            types: Filter by entity types (from metadata.entity_type)
+            note_types: Filter by note types (from metadata.note_type)
             after_date: Filter by created_at > after_date
             search_item_types: Filter by SearchItemType (ENTITY, OBSERVATION, RELATION)
             metadata_filters: Structured frontmatter metadata filters
@@ -761,7 +761,7 @@ class SearchRepositoryBase(ABC):
         permalink: Optional[str],
         permalink_match: Optional[str],
         title: Optional[str],
-        types: Optional[List[str]],
+        note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         metadata_filters: Optional[dict],
@@ -794,7 +794,7 @@ class SearchRepositoryBase(ABC):
                 permalink=permalink,
                 permalink_match=permalink_match,
                 title=title,
-                types=types,
+                note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
                 metadata_filters=metadata_filters,
@@ -813,7 +813,7 @@ class SearchRepositoryBase(ABC):
                 permalink=permalink,
                 permalink_match=permalink_match,
                 title=title,
-                types=types,
+                note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
                 metadata_filters=metadata_filters,
@@ -842,7 +842,7 @@ class SearchRepositoryBase(ABC):
         permalink: Optional[str],
         permalink_match: Optional[str],
         title: Optional[str],
-        types: Optional[List[str]],
+        note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         metadata_filters: Optional[dict],
@@ -911,7 +911,7 @@ class SearchRepositoryBase(ABC):
                 permalink,
                 permalink_match,
                 title,
-                types,
+                note_types,
                 after_date,
                 search_item_types,
                 metadata_filters,
@@ -924,7 +924,7 @@ class SearchRepositoryBase(ABC):
                 permalink=permalink,
                 permalink_match=permalink_match,
                 title=title,
-                types=types,
+                note_types=note_types,
                 after_date=after_date,
                 search_item_types=search_item_types,
                 metadata_filters=metadata_filters,
@@ -1054,7 +1054,7 @@ class SearchRepositoryBase(ABC):
         permalink: Optional[str],
         permalink_match: Optional[str],
         title: Optional[str],
-        types: Optional[List[str]],
+        note_types: Optional[List[str]],
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         metadata_filters: Optional[dict],
@@ -1074,7 +1074,7 @@ class SearchRepositoryBase(ABC):
             permalink=permalink,
             permalink_match=permalink_match,
             title=title,
-            types=types,
+            note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
             metadata_filters=metadata_filters,
@@ -1087,7 +1087,7 @@ class SearchRepositoryBase(ABC):
             permalink=permalink,
             permalink_match=permalink_match,
             title=title,
-            types=types,
+            note_types=note_types,
             after_date=after_date,
             search_item_types=search_item_types,
             metadata_filters=metadata_filters,

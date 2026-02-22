@@ -475,7 +475,7 @@ def test_routing_both_flags_error():
 # --- schema-validate ---
 
 SCHEMA_VALIDATE_RESULT = {
-    "entity_type": "person",
+    "note_type": "person",
     "total_notes": 2,
     "total_entities": 2,
     "valid_count": 1,
@@ -514,7 +514,7 @@ def test_schema_validate_json_output(mock_mcp):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
-    assert data["entity_type"] == "person"
+    assert data["note_type"] == "person"
     assert data["total_notes"] == 2
     mock_mcp.assert_called_once()
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
@@ -557,7 +557,7 @@ def test_schema_validate_error_response(mock_mcp):
 # --- schema-infer ---
 
 SCHEMA_INFER_RESULT = {
-    "entity_type": "person",
+    "note_type": "person",
     "notes_analyzed": 5,
     "field_frequencies": [
         {"name": "name", "source": "observation", "count": 5, "total": 5, "percentage": 1.0},
@@ -584,7 +584,7 @@ def test_schema_infer_json_output(mock_mcp):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
-    assert data["entity_type"] == "person"
+    assert data["note_type"] == "person"
     assert data["notes_analyzed"] == 5
     mock_mcp.assert_called_once()
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
@@ -609,7 +609,7 @@ def test_schema_infer_threshold_passthrough(mock_mcp):
 # --- schema-diff ---
 
 SCHEMA_DIFF_RESULT = {
-    "entity_type": "person",
+    "note_type": "person",
     "schema_found": True,
     "new_fields": [
         {"name": "email", "source": "observation", "count": 3, "total": 5, "percentage": 0.6}
@@ -633,7 +633,7 @@ def test_schema_diff_json_output(mock_mcp):
 
     assert result.exit_code == 0, f"CLI failed: {result.output}"
     data = json.loads(result.output)
-    assert data["entity_type"] == "person"
+    assert data["note_type"] == "person"
     assert data["schema_found"] is True
     assert len(data["new_fields"]) == 1
     mock_mcp.assert_called_once()

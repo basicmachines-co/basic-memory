@@ -17,7 +17,7 @@ async def source_entity(session_maker, test_project: Project):
     entity = Entity(
         project_id=test_project.id,
         title="test_source",
-        entity_type="test",
+        note_type="test",
         permalink="source/test-source",
         file_path="source/test_source.md",
         content_type="text/markdown",
@@ -36,7 +36,7 @@ async def target_entity(session_maker, test_project: Project):
     entity = Entity(
         project_id=test_project.id,
         title="test_target",
-        entity_type="test",
+        note_type="test",
         permalink="target/test-target",
         file_path="target/test_target.md",
         content_type="text/markdown",
@@ -79,7 +79,7 @@ async def related_entity(entity_repository):
     """Create a second entity for testing relations"""
     entity_data = {
         "title": "Related Entity",
-        "entity_type": "test",
+        "note_type": "test",
         "permalink": "test/related-entity",
         "file_path": "test/related_entity.md",
         "summary": "A related test entity",

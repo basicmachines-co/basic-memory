@@ -113,7 +113,7 @@ def _format_search_error_response(
             ## Alternative search strategies:
             - Break into simpler terms: `search_notes("{project}", "{" ".join(clean_query.split()[:2])}")`
             - Try different search types: `search_notes("{project}","{clean_query}", search_type="title")`
-            - Use filtering: `search_notes("{project}","{clean_query}", types=["entity"])`
+            - Use filtering: `search_notes("{project}","{clean_query}", note_types=["note"])`
             """).strip()
 
     # Project not found errors (check before general "not found")
@@ -164,7 +164,7 @@ def _format_search_error_response(
                - Remove restrictive terms: Focus on the most important keywords
 
             5. **Use filtering to narrow scope**:
-               - By content type: `search_notes("{project}","{query}", types=["entity"])`
+               - By content type: `search_notes("{project}","{query}", note_types=["note"])`
                - By recent content: `search_notes("{project}","{query}", after_date="1 week")`
                - By entity type: `search_notes("{project}","{query}", entity_types=["observation"])`
 
@@ -233,7 +233,7 @@ Error searching for '{query}': {error_message}
 - **Different search types**: 
   - Title only: `search_notes("{project}","{query}", search_type="title")`
   - Permalink patterns: `search_notes("{project}","{query}*", search_type="permalink")`
-- **With filters**: `search_notes("{project}","{query}", types=["entity"])`
+- **With filters**: `search_notes("{project}","{query}", note_types=["note"])`
 - **Recent content**: `search_notes("{project}","{query}", after_date="1 week")`
 - **Boolean variations**: `search_notes("{project}","{" OR ".join(query.split()[:2])}")`
 
@@ -264,7 +264,7 @@ async def search_notes(
     page_size: int = 10,
     search_type: str | None = None,
     output_format: Literal["text", "json"] = "text",
-    types: List[str] | None = None,
+    note_types: List[str] | None = None,
     entity_types: List[str] | None = None,
     after_date: Optional[str] = None,
     metadata_filters: Optional[Dict[str, Any]] = None,
@@ -309,8 +309,8 @@ async def search_notes(
       text when disabled)
 
     ### Filtering Options
-    - `search_notes("my-project", "query", types=["entity"])` - Search only entities
-    - `search_notes("work-docs", "query", types=["note", "person"])` - Multiple content types
+    - `search_notes("my-project", "query", note_types=["note"])` - Search only notes
+    - `search_notes("work-docs", "query", note_types=["note", "person"])` - Multiple note types
     - `search_notes("research", "query", entity_types=["observation"])` - Filter by entity type
     - `search_notes("team-docs", "query", after_date="2024-01-01")` - Recent content only
     - `search_notes("my-project", "query", after_date="1 week")` - Relative date filtering
@@ -353,7 +353,7 @@ async def search_notes(
                     Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".
         output_format: "text" preserves existing structured search response behavior.
             "json" returns a machine-readable dictionary payload.
-        types: Optional list of note types to search (e.g., ["note", "person"])
+        note_types: Optional list of note types to search (e.g., ["note", "person"])
         entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
         metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"})
@@ -387,10 +387,10 @@ async def search_notes(
         # Exact phrase search
         results = await search_notes("\"weekly standup meeting\"")
 
-        # Search with type filter
+        # Search with note type filter
         results = await search_notes(
             "meeting notes",
-            types=["entity"],
+            note_types=["note"],
         )
 
         # Search with entity type filter
@@ -420,7 +420,7 @@ async def search_notes(
         # Complex search with multiple filters
         results = await search_notes(
             "(bug OR issue) AND NOT resolved",
-            types=["entity"],
+            note_types=["note"],
             after_date="2024-01-01"
         )
 
@@ -428,7 +428,7 @@ async def search_notes(
         results = await search_notes("project planning", project="my-project")
     """
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
-    types = types or []
+    note_types = note_types or []
     entity_types = entity_types or []
 
     # Detect project from memory URL prefix before routing
@@ -477,8 +477,8 @@ async def search_notes(
             # Add optional filters if provided (empty lists are treated as no filter)
             if entity_types:
                 search_query.entity_types = [SearchItemType(t) for t in entity_types]
-            if types:
-                search_query.types = types
+            if note_types:
+                search_query.note_types = note_types
             if after_date:
                 search_query.after_date = after_date
             if metadata_filters:

@@ -16,7 +16,7 @@ from typing import List, Optional, Dict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from basic_memory.schemas.base import Relation, Permalink, EntityType, ContentType, Observation
+from basic_memory.schemas.base import Relation, Permalink, NoteType, ContentType, Observation
 
 
 class SQLAlchemyModel(BaseModel):
@@ -162,7 +162,7 @@ class EntityResponse(SQLAlchemyModel):
     {
         "permalink": "component/memory-service",
         "file_path": "MemoryService",
-        "entity_type": "component",
+        "note_type": "component",
         "entity_metadata": {}
         "content_type: "text/markdown"
         "observations": [
@@ -191,7 +191,7 @@ class EntityResponse(SQLAlchemyModel):
     permalink: Optional[Permalink]
     title: str
     file_path: str
-    entity_type: EntityType
+    note_type: NoteType
     entity_metadata: Optional[Dict] = None
     checksum: Optional[str] = None
     content_type: ContentType
@@ -215,7 +215,7 @@ class EntityListResponse(SQLAlchemyModel):
             {
                 "permalink": "component/search_service",
                 "title": "SearchService",
-                "entity_type": "component",
+                "note_type": "component",
                 "description": "Knowledge graph search",
                 "observations": [
                     {
@@ -227,7 +227,7 @@ class EntityListResponse(SQLAlchemyModel):
             {
                 "permalink": "document/api_docs",
                 "title": "API_Documentation",
-                "entity_type": "document",
+                "note_type": "document",
                 "description": "API Reference",
                 "observations": [
                     {
@@ -255,7 +255,7 @@ class SearchNodesResponse(SQLAlchemyModel):
             {
                 "permalink": "component/memory-service",
                 "title": "MemoryService",
-                "entity_type": "component",
+                "note_type": "component",
                 "description": "Core service",
                 "observations": [...],
                 "relations": [...]

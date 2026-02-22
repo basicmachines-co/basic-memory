@@ -200,7 +200,7 @@ async def test_postgres_vector_dimension_detection(postgres_engine_factory, tmp_
     entity = await search_service.entity_repository.create(
         {
             "title": "Dimension Test Note",
-            "entity_type": "benchmark",
+            "note_type": "benchmark",
             "entity_metadata": {"tags": ["test"]},
             "content_type": "text/markdown",
             "permalink": "bench/dim-test",
@@ -243,7 +243,7 @@ async def test_postgres_incremental_vector_update(postgres_engine_factory, tmp_p
     entity = await search_service.entity_repository.create(
         {
             "title": "Update Test Note",
-            "entity_type": "benchmark",
+            "note_type": "benchmark",
             "entity_metadata": {"tags": ["test"]},
             "content_type": "text/markdown",
             "permalink": "bench/update-test",

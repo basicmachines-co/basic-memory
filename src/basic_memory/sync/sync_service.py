@@ -761,7 +761,7 @@ class SyncService:
             try:
                 entity = await self.entity_repository.add(
                     Entity(
-                        entity_type="file",
+                        note_type="file",
                         file_path=path,
                         checksum=checksum,
                         title=file_path.name,

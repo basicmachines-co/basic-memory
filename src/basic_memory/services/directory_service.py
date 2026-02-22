@@ -89,7 +89,7 @@ class DirectoryService:
                 permalink=file.permalink,
                 external_id=file.external_id,  # UUID for v2 API
                 entity_id=file.id,
-                entity_type=file.entity_type,
+                note_type=file.note_type,
                 content_type=file.content_type,
                 updated_at=_mtime_to_datetime(file),
             )
@@ -254,7 +254,7 @@ class DirectoryService:
                 permalink=file.permalink,
                 external_id=file.external_id,  # UUID for v2 API
                 entity_id=file.id,
-                entity_type=file.entity_type,
+                note_type=file.note_type,
                 content_type=file.content_type,
                 updated_at=_mtime_to_datetime(file),
             )

@@ -116,7 +116,7 @@ async def test_page1_scores_gte_page2_scores():
                 permalink=None,
                 permalink_match=None,
                 title=None,
-                types=None,
+                note_types=None,
                 after_date=None,
                 search_item_types=None,
                 metadata_filters=None,

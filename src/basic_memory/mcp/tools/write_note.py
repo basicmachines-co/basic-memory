@@ -174,7 +174,7 @@ async def write_note(
         entity = Entity(
             title=title,
             directory=directory,
-            entity_type=note_type,
+            note_type=note_type,
             content_type="text/markdown",
             content=content,
             entity_metadata=entity_metadata or None,

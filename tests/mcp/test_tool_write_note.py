@@ -533,10 +533,10 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_with_custom_entity_type(app, test_project):
-    """Test creating a note with custom entity_type parameter.
+async def test_write_note_with_custom_note_type(app, test_project):
+    """Test creating a note with custom note_type parameter.
 
-    This test verifies the fix for Issue #144 where entity_type parameter
+    This test verifies the fix for Issue #144 where note_type parameter
     was hardcoded to "note" instead of allowing custom types.
     """
     result = await write_note(
@@ -557,7 +557,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
     assert "- guide, documentation" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
-    # Verify the entity type is correctly set in the frontmatter
+    # Verify the note type is correctly set in the frontmatter
     content = await read_note("guides/test-guide", project=test_project.name)
     expected = normalize_newlines(
         dedent("""
@@ -580,7 +580,7 @@ async def test_write_note_with_custom_entity_type(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_with_report_entity_type(app, test_project):
+async def test_write_note_with_report_note_type(app, test_project):
     """Test creating a note with note_type="report"."""
     result = await write_note(
         project=test_project.name,
@@ -598,14 +598,14 @@ async def test_write_note_with_report_entity_type(app, test_project):
     assert f"permalink: {test_project.name}/reports/monthly-report" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
-    # Verify the entity type is correctly set in the frontmatter
+    # Verify the note type is correctly set in the frontmatter
     content = await read_note("reports/monthly-report", project=test_project.name)
     assert "type: report" in content
     assert "# Monthly Report" in content
 
 
 @pytest.mark.asyncio
-async def test_write_note_with_config_entity_type(app, test_project):
+async def test_write_note_with_config_note_type(app, test_project):
     """Test creating a note with note_type="config"."""
     result = await write_note(
         project=test_project.name,
@@ -622,18 +622,18 @@ async def test_write_note_with_config_entity_type(app, test_project):
     assert f"permalink: {test_project.name}/config/system-config" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
-    # Verify the entity type is correctly set in the frontmatter
+    # Verify the note type is correctly set in the frontmatter
     content = await read_note("config/system-config", project=test_project.name)
     assert "type: config" in content
     assert "# System Configuration" in content
 
 
 @pytest.mark.asyncio
-async def test_write_note_entity_type_default_behavior(app, test_project):
-    """Test that the entity_type parameter defaults to "note" when not specified.
+async def test_write_note_note_type_default_behavior(app, test_project):
+    """Test that the note_type parameter defaults to "note" when not specified.
 
     This ensures backward compatibility - existing code that doesn't specify
-    entity_type should continue to work as before.
+    note_type should continue to work as before.
     """
     result = await write_note(
         project=test_project.name,
@@ -650,15 +650,15 @@ async def test_write_note_entity_type_default_behavior(app, test_project):
     assert f"permalink: {test_project.name}/test/default-type-test" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
-    # Verify the entity type defaults to "note"
+    # Verify the note type defaults to "note"
     content = await read_note("test/default-type-test", project=test_project.name)
     assert "type: note" in content
     assert "# Default Type Test" in content
 
 
 @pytest.mark.asyncio
-async def test_write_note_update_existing_with_different_entity_type(app, test_project):
-    """Test updating an existing note with a different entity_type."""
+async def test_write_note_update_existing_with_different_note_type(app, test_project):
+    """Test updating an existing note with a different note_type."""
     # Create initial note as "note" type
     result1 = await write_note(
         project=test_project.name,
@@ -687,7 +687,7 @@ async def test_write_note_update_existing_with_different_entity_type(app, test_p
     assert "# Updated note" in result2
     assert f"project: {test_project.name}" in result2
 
-    # Verify the entity type was updated
+    # Verify the note type was updated
     content = await read_note("test/changeable-type", project=test_project.name)
     assert "type: guide" in content
     assert "# Updated Content" in content
@@ -695,10 +695,10 @@ async def test_write_note_update_existing_with_different_entity_type(app, test_p
 
 
 @pytest.mark.asyncio
-async def test_write_note_respects_frontmatter_entity_type(app, test_project):
-    """Test that entity_type in frontmatter is respected when parameter is not provided.
+async def test_write_note_respects_frontmatter_note_type(app, test_project):
+    """Test that note_type in frontmatter is respected when parameter is not provided.
 
-    This verifies that when write_note is called without entity_type parameter,
+    This verifies that when write_note is called without note_type parameter,
     but the content includes frontmatter with a 'type' field, that type is respected
     instead of defaulting to 'note'.
     """
@@ -716,7 +716,7 @@ async def test_write_note_respects_frontmatter_entity_type(app, test_project):
         This is a guide
         """).strip()
 
-    # Call write_note without entity_type parameter - it should respect frontmatter type
+    # Call write_note without note_type parameter - it should respect frontmatter type
     result = await write_note(
         project=test_project.name, title="Test Guide", directory="guides", content=note
     )
@@ -728,7 +728,7 @@ async def test_write_note_respects_frontmatter_entity_type(app, test_project):
     assert "permalink: guides/test-guide" in result
     assert f"[Session: Using project '{test_project.name}']" in result
 
-    # Verify the entity type from frontmatter is respected (should be "guide", not "note")
+    # Verify the note type from frontmatter is respected (should be "guide", not "note")
     content = await read_note("guides/test-guide", project=test_project.name)
     assert "type: guide" in content
     assert "# Guide Content" in content

@@ -1,7 +1,7 @@
 """Tests for the write_note `metadata` parameter.
 
 Covers positive, negative, and edge-case scenarios for passing arbitrary
-frontmatter fields through entity_metadata.
+frontmatter fields through note_metadata.
 """
 
 import pytest
@@ -192,7 +192,7 @@ async def test_metadata_empty_dict(app, test_project):
 async def test_metadata_title_key_stripped(app, test_project):
     """A 'title' key in metadata does not override the title parameter.
 
-    schema_to_markdown pops 'title' from entity_metadata so the Entity.title wins.
+    schema_to_markdown pops 'title' from note_metadata so the Entity.title wins.
     """
     result = await write_note(
         project=test_project.name,
@@ -213,7 +213,7 @@ async def test_metadata_title_key_stripped(app, test_project):
 async def test_metadata_type_key_stripped(app, test_project):
     """A 'type' key in metadata does not override note_type parameter.
 
-    schema_to_markdown pops 'type' from entity_metadata so Entity.entity_type wins.
+    schema_to_markdown pops 'type' from note_metadata so Entity.note_type wins.
     """
     result = await write_note(
         project=test_project.name,
@@ -235,7 +235,7 @@ async def test_metadata_type_key_stripped(app, test_project):
 async def test_metadata_permalink_key_stripped(app, test_project):
     """A 'permalink' key in metadata does not hijack the canonical permalink.
 
-    schema_to_markdown pops 'permalink' from entity_metadata.
+    schema_to_markdown pops 'permalink' from note_metadata.
     """
     result = await write_note(
         project=test_project.name,

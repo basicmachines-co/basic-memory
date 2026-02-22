@@ -251,7 +251,7 @@ async def _seed_benchmark_notes(search_service, note_count: int):
         entity = await search_service.entity_repository.create(
             {
                 "title": f"{topic.title()} Benchmark Note {note_index}",
-                "entity_type": "benchmark",
+                "note_type": "benchmark",
                 "entity_metadata": {"tags": ["benchmark", topic], "status": "active"},
                 "content_type": "text/markdown",
                 "permalink": permalink,

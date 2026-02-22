@@ -18,7 +18,7 @@ async def test_upsert_entity_with_observations_conflict(entity_repository: Entit
     entity1 = Entity(
         project_id=entity_repository.project_id,
         title="Original Title",
-        entity_type="note",
+        note_type="note",
         permalink="debugging/backup-system/coderabbit-feedback-resolution",
         file_path="debugging/backup-system/CodeRabbit Feedback Resolution - Backup System Issues.md",
         content_type="text/markdown",
@@ -47,7 +47,7 @@ async def test_upsert_entity_with_observations_conflict(entity_repository: Entit
     entity2 = Entity(
         project_id=entity_repository.project_id,
         title="Updated Title",
-        entity_type="note",
+        note_type="note",
         permalink="debugging/backup-system/coderabbit-feedback-resolution",  # Same permalink
         file_path="debugging/backup-system/CodeRabbit Feedback Resolution - Backup System Issues.md",  # Same file_path
         content_type="text/markdown",
@@ -99,7 +99,7 @@ async def test_upsert_entity_repeated_sync_same_file(entity_repository: EntityRe
     entity1 = Entity(
         project_id=entity_repository.project_id,
         title="Complete Process for Uploading New Training Videos",
-        entity_type="note",
+        note_type="note",
         permalink=permalink,
         file_path=file_path,
         content_type="text/markdown",
@@ -116,7 +116,7 @@ async def test_upsert_entity_repeated_sync_same_file(entity_repository: EntityRe
         entity_new = Entity(
             project_id=entity_repository.project_id,
             title="Complete Process for Uploading New Training Videos",
-            entity_type="note",
+            note_type="note",
             permalink=permalink,
             file_path=file_path,
             content_type="text/markdown",

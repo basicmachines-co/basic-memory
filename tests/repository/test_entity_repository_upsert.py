@@ -15,7 +15,7 @@ async def test_upsert_entity_new_entity(entity_repository: EntityRepository):
     entity = Entity(
         project_id=entity_repository.project_id,
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/test-entity",
         file_path="test/test-entity.md",
         content_type="text/markdown",
@@ -38,7 +38,7 @@ async def test_upsert_entity_same_file_update(entity_repository: EntityRepositor
     entity1 = Entity(
         project_id=entity_repository.project_id,
         title="Original Title",
-        entity_type="note",
+        note_type="note",
         permalink="test/test-entity",
         file_path="test/test-entity.md",
         content_type="text/markdown",
@@ -53,7 +53,7 @@ async def test_upsert_entity_same_file_update(entity_repository: EntityRepositor
     entity2 = Entity(
         project_id=entity_repository.project_id,
         title="Updated Title",
-        entity_type="note",
+        note_type="note",
         permalink="test/test-entity",  # Same permalink
         file_path="test/test-entity.md",  # Same file_path
         content_type="text/markdown",
@@ -77,7 +77,7 @@ async def test_upsert_entity_permalink_conflict_different_file(entity_repository
     entity1 = Entity(
         project_id=entity_repository.project_id,
         title="First Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/shared-permalink",
         file_path="test/first-file.md",
         content_type="text/markdown",
@@ -92,7 +92,7 @@ async def test_upsert_entity_permalink_conflict_different_file(entity_repository
     entity2 = Entity(
         project_id=entity_repository.project_id,
         title="Second Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/shared-permalink",  # Same permalink
         file_path="test/second-file.md",  # Different file_path
         content_type="text/markdown",
@@ -126,7 +126,7 @@ async def test_upsert_entity_multiple_permalink_conflicts(entity_repository: Ent
         entity = Entity(
             project_id=entity_repository.project_id,
             title=f"Entity {i + 1}",
-            entity_type="note",
+            note_type="note",
             permalink=base_permalink,  # All try to use same permalink
             file_path=f"test/file-{i + 1}.md",  # Different file paths
             content_type="text/markdown",
@@ -160,7 +160,7 @@ async def test_upsert_entity_race_condition_file_path(entity_repository: EntityR
     entity1 = Entity(
         project_id=entity_repository.project_id,
         title="Original Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/original",
         file_path="test/race-file.md",
         content_type="text/markdown",
@@ -176,7 +176,7 @@ async def test_upsert_entity_race_condition_file_path(entity_repository: EntityR
     entity2 = Entity(
         project_id=entity_repository.project_id,
         title="Race Condition Test",
-        entity_type="note",
+        note_type="note",
         permalink="test/race-entity",
         file_path="test/race-file.md",  # Same file path as entity1
         content_type="text/markdown",
@@ -208,7 +208,7 @@ async def test_upsert_entity_gap_in_suffixes(entity_repository: EntityRepository
         entity = Entity(
             project_id=entity_repository.project_id,
             title=f"Entity {i + 1}",
-            entity_type="note",
+            note_type="note",
             permalink=permalink,
             file_path=f"test/gap-file-{i + 1}.md",
             content_type="text/markdown",
@@ -221,7 +221,7 @@ async def test_upsert_entity_gap_in_suffixes(entity_repository: EntityRepository
     new_entity = Entity(
         project_id=entity_repository.project_id,
         title="Gap Filler",
-        entity_type="note",
+        note_type="note",
         permalink=base_permalink,  # Will conflict
         file_path="test/gap-new-file.md",
         content_type="text/markdown",
@@ -275,7 +275,7 @@ async def test_upsert_entity_project_scoping_isolation(session_maker):
     entity1 = Entity(
         project_id=project1.id,
         title="Shared Entity",
-        entity_type="note",
+        note_type="note",
         permalink="docs/shared-name",
         file_path="docs/shared-name.md",
         content_type="text/markdown",
@@ -286,7 +286,7 @@ async def test_upsert_entity_project_scoping_isolation(session_maker):
     entity2 = Entity(
         project_id=project2.id,
         title="Shared Entity",
-        entity_type="note",
+        note_type="note",
         permalink="docs/shared-name",  # Same permalink
         file_path="docs/shared-name.md",  # Same file_path
         content_type="text/markdown",
@@ -311,7 +311,7 @@ async def test_upsert_entity_project_scoping_isolation(session_maker):
     entity1_update = Entity(
         project_id=project1.id,
         title="Updated Shared Entity",
-        entity_type="note",
+        note_type="note",
         permalink="docs/shared-name",
         file_path="docs/shared-name.md",
         content_type="text/markdown",
@@ -322,7 +322,7 @@ async def test_upsert_entity_project_scoping_isolation(session_maker):
     entity2_update = Entity(
         project_id=project2.id,
         title="Also Updated Shared Entity",
-        entity_type="note",
+        note_type="note",
         permalink="docs/shared-name",
         file_path="docs/shared-name.md",
         content_type="text/markdown",
@@ -389,7 +389,7 @@ async def test_upsert_entity_permalink_conflict_within_project_only(session_make
     entity1 = Entity(
         project_id=project1.id,
         title="Original Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/conflict-permalink",
         file_path="test/original.md",
         content_type="text/markdown",
@@ -404,7 +404,7 @@ async def test_upsert_entity_permalink_conflict_within_project_only(session_make
     entity2 = Entity(
         project_id=project2.id,
         title="Cross-Project Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/conflict-permalink",  # Same permalink, different project
         file_path="test/cross-project.md",
         content_type="text/markdown",
@@ -420,7 +420,7 @@ async def test_upsert_entity_permalink_conflict_within_project_only(session_make
     entity3 = Entity(
         project_id=project1.id,
         title="Conflict Entity",
-        entity_type="note",
+        note_type="note",
         permalink="test/conflict-permalink",  # Same permalink, same project
         file_path="test/conflict.md",
         content_type="text/markdown",
@@ -449,7 +449,7 @@ async def test_upsert_entity_with_invalid_project_id(entity_repository: EntityRe
     # Create entity with non-existent project_id
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         file_path="test.md",
         permalink="test",
         project_id=99999,  # This project doesn't exist

@@ -250,7 +250,7 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
         # Create entities in project1
         entity1_p1 = Entity(
             title="Entity1_P1",
-            entity_type="document",
+            note_type="document",
             content_type="text/markdown",
             project_id=project1.id,
             permalink="project1/entity1",
@@ -260,7 +260,7 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
         )
         entity2_p1 = Entity(
             title="Entity2_P1",
-            entity_type="document",
+            note_type="document",
             content_type="text/markdown",
             project_id=project1.id,
             permalink="project1/entity2",
@@ -272,7 +272,7 @@ async def test_project_isolation_in_find_related(session_maker, app_config):
         # Create entities in project2
         entity1_p2 = Entity(
             title="Entity1_P2",
-            entity_type="document",
+            note_type="document",
             content_type="text/markdown",
             project_id=project2.id,
             permalink="project2/entity1",

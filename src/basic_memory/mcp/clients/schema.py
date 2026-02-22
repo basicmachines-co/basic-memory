@@ -24,7 +24,7 @@ class SchemaClient:
     Usage:
         async with get_client() as http_client:
             client = SchemaClient(http_client, project_id)
-            report = await client.validate(entity_type="Person")
+            report = await client.validate(note_type="person")
     """
 
     def __init__(self, http_client: AsyncClient, project_id: str):
@@ -41,13 +41,13 @@ class SchemaClient:
     async def validate(
         self,
         *,
-        entity_type: str | None = None,
+        note_type: str | None = None,
         identifier: str | None = None,
     ) -> ValidationReport:
         """Validate notes against their resolved schemas.
 
         Args:
-            entity_type: Optional entity type to batch-validate
+            note_type: Optional note type to batch-validate
             identifier: Optional specific note to validate
 
         Returns:
@@ -57,8 +57,8 @@ class SchemaClient:
             ToolError: If the request fails
         """
         params: dict[str, str] = {}
-        if entity_type:
-            params["entity_type"] = entity_type
+        if note_type:
+            params["note_type"] = note_type
         if identifier:
             params["identifier"] = identifier
 
@@ -71,14 +71,14 @@ class SchemaClient:
 
     async def infer(
         self,
-        entity_type: str,
+        note_type: str,
         *,
         threshold: float = 0.25,
     ) -> InferenceReport:
         """Infer a schema from existing notes of a given type.
 
         Args:
-            entity_type: The entity type to analyze
+            note_type: The note type to analyze
             threshold: Minimum frequency for optional fields (0-1)
 
         Returns:
@@ -90,15 +90,15 @@ class SchemaClient:
         response = await call_post(
             self.http_client,
             f"{self._base_path}/infer",
-            params={"entity_type": entity_type, "threshold": threshold},
+            params={"note_type": note_type, "threshold": threshold},
         )
         return InferenceReport.model_validate(response.json())
 
-    async def diff(self, entity_type: str) -> DriftReport:
+    async def diff(self, note_type: str) -> DriftReport:
         """Show drift between schema definition and actual usage.
 
         Args:
-            entity_type: The entity type to check for drift
+            note_type: The note type to check for drift
 
         Returns:
             DriftReport with detected differences
@@ -108,6 +108,6 @@ class SchemaClient:
         """
         response = await call_get(
             self.http_client,
-            f"{self._base_path}/diff/{entity_type}",
+            f"{self._base_path}/diff/{note_type}",
         )
         return DriftReport.model_validate(response.json())

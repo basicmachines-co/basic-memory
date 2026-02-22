@@ -15,7 +15,7 @@ runner = CliRunner()
 # --- Shared mock data ---
 
 VALIDATE_REPORT = {
-    "entity_type": "person",
+    "note_type": "person",
     "total_notes": 2,
     "total_entities": 2,
     "valid_count": 1,
@@ -40,7 +40,7 @@ VALIDATE_REPORT = {
 }
 
 INFER_REPORT = {
-    "entity_type": "person",
+    "note_type": "person",
     "notes_analyzed": 5,
     "field_frequencies": [
         {"name": "name", "source": "observation", "count": 5, "total": 5, "percentage": 1.0},
@@ -53,7 +53,7 @@ INFER_REPORT = {
 }
 
 DIFF_REPORT_WITH_DRIFT = {
-    "entity_type": "person",
+    "note_type": "person",
     "schema_found": True,
     "new_fields": [
         {"name": "email", "source": "observation", "count": 3, "total": 5, "percentage": 0.6}
@@ -65,7 +65,7 @@ DIFF_REPORT_WITH_DRIFT = {
 }
 
 DIFF_REPORT_NO_DRIFT = {
-    "entity_type": "person",
+    "note_type": "person",
     "schema_found": True,
     "new_fields": [],
     "dropped_fields": [],
@@ -214,7 +214,7 @@ def test_infer_error_response(mock_mcp, mock_config_cls):
     "basic_memory.cli.commands.schema.mcp_schema_infer",
     new_callable=AsyncMock,
     return_value={
-        "entity_type": "person",
+        "note_type": "person",
         "notes_analyzed": 0,
         "field_frequencies": [],
         "suggested_schema": {},

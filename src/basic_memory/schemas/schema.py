@@ -45,7 +45,7 @@ class NoteValidationResponse(BaseModel):
 class ValidationReport(BaseModel):
     """Full validation report for one or more notes."""
 
-    entity_type: str | None = None
+    note_type: str | None = None
     total_notes: int = 0
     total_entities: int = 0
     valid_count: int = 0
@@ -72,14 +72,14 @@ class FieldFrequencyResponse(BaseModel):
     )
     target_type: str | None = Field(
         default=None,
-        description="For relations, the most common target entity type",
+        description="For relations, the most common target note type",
     )
 
 
 class InferenceReport(BaseModel):
     """Inference result with suggested schema definition."""
 
-    entity_type: str
+    note_type: str
     notes_analyzed: int
     field_frequencies: list[FieldFrequencyResponse] = Field(default_factory=list)
     suggested_schema: dict = Field(
@@ -110,7 +110,7 @@ class DriftFieldResponse(BaseModel):
 class DriftReport(BaseModel):
     """Schema drift analysis comparing schema definition to actual usage."""
 
-    entity_type: str
+    note_type: str
     schema_found: bool = Field(
         default=True,
         description="Whether a schema was found for this type",

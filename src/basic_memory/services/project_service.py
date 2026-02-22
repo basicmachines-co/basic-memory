@@ -692,14 +692,14 @@ class ProjectService:
         )
         total_unresolved = unresolved_count_result.scalar() or 0
 
-        # Get entity counts by type
-        entity_types_result = await self.repository.execute_query(
+        # Get entity counts by note type
+        note_types_result = await self.repository.execute_query(
             text(
-                "SELECT entity_type, COUNT(*) FROM entity WHERE project_id = :project_id GROUP BY entity_type"
+                "SELECT note_type, COUNT(*) FROM entity WHERE project_id = :project_id GROUP BY note_type"
             ),
             {"project_id": project_id},
         )
-        entity_types = {row[0]: row[1] for row in entity_types_result.fetchall()}
+        note_types = {row[0]: row[1] for row in note_types_result.fetchall()}
 
         # Get observation counts by category
         category_result = await self.repository.execute_query(
@@ -761,7 +761,7 @@ class ProjectService:
             total_observations=total_observations,
             total_relations=total_relations,
             total_unresolved_relations=total_unresolved,
-            entity_types=entity_types,
+            note_types=note_types,
             observation_categories=observation_categories,
             relation_types=relation_types,
             most_connected_entities=most_connected,
@@ -780,7 +780,7 @@ class ProjectService:
         # Get recently created entities (project filtered)
         created_result = await self.repository.execute_query(
             text("""
-            SELECT id, title, permalink, entity_type, created_at, file_path 
+            SELECT id, title, permalink, note_type, created_at, file_path
             FROM entity
             WHERE project_id = :project_id
             ORDER BY created_at DESC
@@ -793,7 +793,7 @@ class ProjectService:
                 "id": row[0],
                 "title": row[1],
                 "permalink": row[2],
-                "entity_type": row[3],
+                "note_type": row[3],
                 "created_at": row[4],
                 "file_path": row[5],
             }
@@ -803,7 +803,7 @@ class ProjectService:
         # Get recently updated entities (project filtered)
         updated_result = await self.repository.execute_query(
             text("""
-            SELECT id, title, permalink, entity_type, updated_at, file_path 
+            SELECT id, title, permalink, note_type, updated_at, file_path
             FROM entity
             WHERE project_id = :project_id
             ORDER BY updated_at DESC
@@ -816,7 +816,7 @@ class ProjectService:
                 "id": row[0],
                 "title": row[1],
                 "permalink": row[2],
-                "entity_type": row[3],
+                "note_type": row[3],
                 "updated_at": row[4],
                 "file_path": row[5],
             }

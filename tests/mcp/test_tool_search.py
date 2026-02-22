@@ -186,17 +186,17 @@ async def test_search_pagination(client, test_project):
 
 @pytest.mark.asyncio
 async def test_search_with_type_filter(client, test_project):
-    """Test search with entity type filter."""
+    """Test search with note type filter."""
     # Create test content
     await write_note(
         project=test_project.name,
-        title="Entity Type Test",
+        title="Note Type Test",
         directory="test",
         content="# Test\nFiltered by type",
     )
 
-    # Search with type filter
-    response = await search_notes(project=test_project.name, query="type", types=["note"])
+    # Search with note type filter
+    response = await search_notes(project=test_project.name, query="type", note_types=["note"])
 
     # Verify results - handle both success and error cases
     if isinstance(response, SearchResponse):
@@ -209,7 +209,7 @@ async def test_search_with_type_filter(client, test_project):
 
 @pytest.mark.asyncio
 async def test_search_with_entity_type_filter(client, test_project):
-    """Test search with entity type filter."""
+    """Test search with entity_types (SearchItemType) filter."""
     # Create test content
     await write_note(
         project=test_project.name,
@@ -218,7 +218,7 @@ async def test_search_with_entity_type_filter(client, test_project):
         content="# Test\nFiltered by type",
     )
 
-    # Search with entity type filter
+    # Search with entity_types (SearchItemType) filter
     response = await search_notes(project=test_project.name, query="type", entity_types=["entity"])
 
     # Verify results - handle both success and error cases

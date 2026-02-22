@@ -301,7 +301,7 @@ async def test_semantic_embedding_backfill_syncs_each_entity(
         entity = await entity_repository.create(
             {
                 "title": f"Backfill Entity {i}",
-                "entity_type": "note",
+                "note_type": "note",
                 "entity_metadata": {},
                 "content_type": "text/markdown",
                 "file_path": f"test/backfill-{i}.md",

@@ -118,7 +118,7 @@ class EntityResponseV2(BaseModel):
 
     # Core entity fields
     title: str = Field(..., description="Entity title")
-    entity_type: str = Field(..., description="Entity type")
+    note_type: str = Field(..., description="Note type (from frontmatter 'type' field)")
     content_type: str = Field(default="text/markdown", description="Content MIME type")
 
     # Secondary identifiers (for compatibility and convenience)

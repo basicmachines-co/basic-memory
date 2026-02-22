@@ -178,7 +178,7 @@ class SearchService:
             permalink=query.permalink,
             permalink_match=query.permalink_match,
             title=query.title,
-            types=query.types,
+            note_types=query.note_types,
             search_item_types=query.entity_types,
             after_date=after_date,
             metadata_filters=metadata_filters,
@@ -210,7 +210,7 @@ class SearchService:
             permalink=query.permalink,
             permalink_match=query.permalink_match,
             title=query.title,
-            types=query.types,
+            note_types=query.note_types,
             search_item_types=query.entity_types,
             after_date=after_date,
             metadata_filters=metadata_filters,
@@ -415,7 +415,7 @@ class SearchService:
                 permalink=entity.permalink,  # Required for Postgres NOT NULL constraint
                 file_path=entity.file_path,
                 metadata={
-                    "entity_type": entity.entity_type,
+                    "note_type": entity.note_type,
                 },
                 created_at=entity.created_at,
                 updated_at=_mtime_to_datetime(entity),
@@ -500,7 +500,7 @@ class SearchService:
                 file_path=entity.file_path,
                 entity_id=entity.id,
                 metadata={
-                    "entity_type": entity.entity_type,
+                    "note_type": entity.note_type,
                 },
                 created_at=entity.created_at,
                 updated_at=_mtime_to_datetime(entity),

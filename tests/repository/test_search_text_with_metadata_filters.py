@@ -20,7 +20,7 @@ async def _index_entity(search_repository, session_maker, title: str, status: st
         entity = Entity(
             project_id=search_repository.project_id,
             title=title,
-            entity_type="note",
+            note_type="note",
             permalink=permalink,
             file_path=file_path,
             content_type="text/markdown",
@@ -42,7 +42,7 @@ async def _index_entity(search_repository, session_maker, title: str, status: st
             permalink=entity.permalink,
             file_path=entity.file_path,
             entity_id=entity.id,
-            metadata={"entity_type": entity.entity_type},
+            metadata={"note_type": entity.note_type},
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )

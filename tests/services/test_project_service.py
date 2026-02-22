@@ -135,7 +135,7 @@ async def test_get_statistics(project_service: ProjectService, test_graph, test_
     # Assert it returns a valid ProjectStatistics object
     assert isinstance(statistics, ProjectStatistics)
     assert statistics.total_entities > 0
-    assert "test" in statistics.entity_types
+    assert "test" in statistics.note_types
 
 
 @pytest.mark.asyncio

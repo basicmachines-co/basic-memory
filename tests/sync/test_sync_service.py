@@ -227,7 +227,7 @@ A test concept.
     other = Entity(
         permalink="concept/other",
         title="Other",
-        entity_type="test",
+        note_type="test",
         file_path="concept/other.md",
         checksum="12345678",
         content_type="text/markdown",
@@ -245,7 +245,7 @@ A test concept.
 
     # Find new entity
     test_concept = next(e for e in entities if e.permalink == "concept/test-concept")
-    assert test_concept.entity_type == "knowledge"
+    assert test_concept.note_type == "knowledge"
 
     # Verify relation was created
     # with forward link
@@ -907,7 +907,7 @@ async def test_sync_null_checksum_cleanup(
     entity = Entity(
         permalink="concept/incomplete",
         title="Incomplete",
-        entity_type="test",
+        note_type="test",
         file_path="concept/incomplete.md",
         checksum=None,  # Null checksum
         content_type="text/markdown",
@@ -1417,7 +1417,7 @@ This is a test file for race condition handling.
     # on the "add" call (same effect as the race-condition branch).
     await sync_service.entity_repository.add(
         Entity(
-            entity_type="file",
+            note_type="file",
             file_path=rel_path,
             checksum="old_checksum",
             title="Test Race Condition",

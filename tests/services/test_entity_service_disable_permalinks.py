@@ -35,7 +35,7 @@ async def test_create_entity_with_permalinks_disabled(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="test",
-        entity_type="note",
+        note_type="note",
         content="Test content",
     )
 
@@ -81,7 +81,7 @@ async def test_update_entity_with_permalinks_disabled(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="test",
-        entity_type="note",
+        note_type="note",
         content="Original content",
     )
 
@@ -151,7 +151,7 @@ async def test_create_entity_with_content_frontmatter_permalinks_disabled(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="test",
-        entity_type="note",
+        note_type="note",
         content=content,
     )
 
@@ -197,7 +197,7 @@ async def test_move_entity_with_permalinks_disabled(
     entity_data = EntitySchema(
         title="Test Entity",
         directory="test",
-        entity_type="note",
+        note_type="note",
         content="Test content",
     )
 

@@ -152,12 +152,12 @@ async def test_filters(search_service, test_graph):
     """Test search filters."""
     # Combined filters
     results = await search_service.search(
-        SearchQuery(text="Deep", entity_types=[SearchItemType.ENTITY], types=["deep"])
+        SearchQuery(text="Deep", entity_types=[SearchItemType.ENTITY], note_types=["deep"])
     )
     assert len(results) == 1
     for r in results:
         assert r.type == SearchItemType.ENTITY
-        assert r.metadata.get("entity_type") == "deep"
+        assert r.metadata.get("note_type") == "deep"
 
 
 @pytest.mark.asyncio
@@ -197,7 +197,7 @@ async def test_search_type(search_service, test_graph):
     """Test search filters."""
 
     # Should find only type
-    results = await search_service.search(SearchQuery(types=["test"]))
+    results = await search_service.search(SearchQuery(note_types=["test"]))
     assert len(results) > 0
     for r in results:
         assert r.type == SearchItemType.ENTITY
@@ -222,7 +222,7 @@ async def test_extract_entity_tags_exception_handling(search_service):
     # Create entity with string tags that will cause parsing to fail and fall back to single tag
     entity_with_invalid_tags = Entity(
         title="Test Entity",
-        entity_type="test",
+        note_type="test",
         entity_metadata={"tags": "just a string"},  # This will fail ast.literal_eval
         content_type="text/markdown",
         file_path="test/test-entity.md",
@@ -236,7 +236,7 @@ async def test_extract_entity_tags_exception_handling(search_service):
     # Test with empty string (should return empty list) - covers line 149
     entity_with_empty_tags = Entity(
         title="Test Entity Empty",
-        entity_type="test",
+        note_type="test",
         entity_metadata={"tags": ""},
         content_type="text/markdown",
         file_path="test/test-entity-empty.md",
@@ -429,7 +429,7 @@ async def test_plain_multiterm_fts_retries_with_relaxed_or_when_strict_empty(
         created_at=now,
         updated_at=now,
         permalink="test/fallback",
-        metadata={"entity_type": "note"},
+        metadata={"note_type": "note"},
         title="Fallback Match",
         score=1.0,
     )
@@ -560,7 +560,7 @@ async def test_extract_entity_tags_list_format(search_service, session_maker):
 
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         entity_metadata={"tags": ["business", "strategy", "planning"]},
         content_type="text/markdown",
         file_path="test/business-strategy.md",
@@ -578,7 +578,7 @@ async def test_extract_entity_tags_string_format(search_service, session_maker):
 
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         entity_metadata={"tags": "['documentation', 'tools', 'best-practices']"},
         content_type="text/markdown",
         file_path="test/docs.md",
@@ -596,7 +596,7 @@ async def test_extract_entity_tags_empty_list(search_service, session_maker):
 
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         entity_metadata={"tags": []},
         content_type="text/markdown",
         file_path="test/empty-tags.md",
@@ -614,7 +614,7 @@ async def test_extract_entity_tags_empty_string(search_service, session_maker):
 
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         entity_metadata={"tags": "[]"},
         content_type="text/markdown",
         file_path="test/empty-string-tags.md",
@@ -632,7 +632,7 @@ async def test_extract_entity_tags_no_metadata(search_service, session_maker):
 
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         entity_metadata=None,
         content_type="text/markdown",
         file_path="test/no-metadata.md",
@@ -650,7 +650,7 @@ async def test_extract_entity_tags_no_tags_key(search_service, session_maker):
 
     entity = Entity(
         title="Test Entity",
-        entity_type="note",
+        note_type="note",
         entity_metadata={"title": "Some Title", "type": "note"},
         content_type="text/markdown",
         file_path="test/no-tags-key.md",
@@ -670,7 +670,7 @@ async def test_search_tag_prefix_maps_to_tags_filter(search_service, entity_serv
         EntitySchema(
             title="Tagged Note Missing",
             directory="tags",
-            entity_type="note",
+            note_type="note",
             content="# Tagged Note",
             entity_metadata={"tags": ["tier1", "alpha"]},
         )
@@ -692,7 +692,7 @@ async def test_search_tag_prefix_with_nonexistent_tag_returns_empty(search_servi
         EntitySchema(
             title="Tagged Note",
             directory="tags",
-            entity_type="note",
+            note_type="note",
             content="# Tagged Note",
             entity_metadata={"tags": ["tier1", "alpha"]},
         )
@@ -714,7 +714,7 @@ async def test_search_tag_prefix_multiple_tags_requires_all(search_service, enti
         EntitySchema(
             title="Multi Tagged Note",
             directory="tags/multi",
-            entity_type="note",
+            note_type="note",
             content="# Tagged Note",
             entity_metadata={"tags": ["tier1", "alpha"]},
         )
@@ -739,7 +739,7 @@ async def test_search_by_frontmatter_tags(search_service, session_maker, test_pr
 
     entity_data = {
         "title": "Business Strategy Guide",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {"tags": ["business", "strategy", "planning", "organization"]},
         "content_type": "text/markdown",
         "file_path": "guides/business-strategy.md",
@@ -791,7 +791,7 @@ async def test_search_by_frontmatter_tags_string_format(
 
     entity_data = {
         "title": "Documentation Guidelines",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {"tags": "['documentation', 'tools', 'best-practices']"},
         "content_type": "text/markdown",
         "file_path": "guides/documentation.md",
@@ -844,7 +844,7 @@ async def test_search_special_characters_in_title(search_service, session_maker,
 
         entity_data = {
             "title": title,
-            "entity_type": "note",
+            "note_type": "note",
             "entity_metadata": {"tags": ["special", "characters"]},
             "content_type": "text/markdown",
             "file_path": f"special/{title}.md",
@@ -887,7 +887,7 @@ async def test_search_title_with_parentheses_specific(search_service, session_ma
 
     entity_data = {
         "title": "Note (with parentheses)",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {"tags": ["test"]},
         "content_type": "text/markdown",
         "file_path": "special/Note (with parentheses).md",
@@ -923,7 +923,7 @@ async def test_search_title_via_repository_direct(search_service, session_maker,
 
     entity_data = {
         "title": "Note (with parentheses)",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {"tags": ["test"]},
         "content_type": "text/markdown",
         "file_path": "special/Note (with parentheses).md",
@@ -971,7 +971,7 @@ async def test_index_entity_with_duplicate_observations(
     # Create entity
     entity_data = {
         "title": "Entity With Duplicate Observations",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {},
         "content_type": "text/markdown",
         "file_path": "test/duplicate-obs.md",
@@ -1026,7 +1026,7 @@ async def test_index_entity_dedupes_observations_by_permalink(
     # Create entity
     entity_data = {
         "title": "Dedupe Test Entity",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {},
         "content_type": "text/markdown",
         "file_path": "test/dedupe-test.md",
@@ -1084,7 +1084,7 @@ async def test_index_entity_multiple_categories_same_content(
     # Create entity
     entity_data = {
         "title": "Multi Category Entity",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {},
         "content_type": "text/markdown",
         "file_path": "test/multi-category.md",
@@ -1145,7 +1145,7 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
 
     entity_data = {
         "title": "NUL Test Entity",
-        "entity_type": "note",
+        "note_type": "note",
         "entity_metadata": {},
         "content_type": "text/markdown",
         "file_path": "test/nul-test.md",
@@ -1184,7 +1184,7 @@ async def test_reindex_vectors(search_service, session_maker, test_project):
         entity = await entity_repo.create(
             {
                 "title": f"Vector Test Entity {i}",
-                "entity_type": "note",
+                "note_type": "note",
                 "entity_metadata": {},
                 "content_type": "text/markdown",
                 "file_path": f"test/vector-test-{i}.md",
@@ -1226,7 +1226,7 @@ async def test_reindex_vectors_no_callback(search_service, session_maker, test_p
     entity = await entity_repo.create(
         {
             "title": "No Callback Entity",
-            "entity_type": "note",
+            "note_type": "note",
             "entity_metadata": {},
             "content_type": "text/markdown",
             "file_path": "test/no-callback.md",

@@ -453,7 +453,7 @@ async def sample_entity(entity_repository: EntityRepository) -> Entity:
     entity_data = {
         "project_id": entity_repository.project_id,
         "title": "Test Entity",
-        "entity_type": "test",
+        "note_type": "test",
         "permalink": "test/test-entity",
         "file_path": "test/test_entity.md",
         "content_type": "text/markdown",
@@ -481,7 +481,7 @@ async def full_entity(sample_entity, entity_repository, file_service, entity_ser
         EntitySchema(
             title="Search_Entity",
             directory="test",
-            entity_type="test",
+            note_type="test",
             content=dedent("""
                 ## Observations
                 - [tech] Tech note
@@ -511,7 +511,7 @@ async def test_graph(
     deeper, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Deeper Entity",
-            entity_type="deeper",
+            note_type="deeper",
             directory="test",
             content=dedent("""
                 # Deeper Entity
@@ -522,7 +522,7 @@ async def test_graph(
     deep, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Deep Entity",
-            entity_type="deep",
+            note_type="deep",
             directory="test",
             content=dedent("""
                 # Deep Entity
@@ -534,7 +534,7 @@ async def test_graph(
     connected_2, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Connected Entity 2",
-            entity_type="test",
+            note_type="test",
             directory="test",
             content=dedent("""
                 # Connected Entity 2
@@ -546,7 +546,7 @@ async def test_graph(
     connected_1, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Connected Entity 1",
-            entity_type="test",
+            note_type="test",
             directory="test",
             content=dedent("""
                 # Connected Entity 1
@@ -559,7 +559,7 @@ async def test_graph(
     root, _ = await entity_service.create_or_update_entity(
         EntitySchema(
             title="Root",
-            entity_type="test",
+            note_type="test",
             directory="test",
             content=dedent("""
                 # Root Entity

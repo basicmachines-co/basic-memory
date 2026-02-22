@@ -61,7 +61,7 @@ async def run_doctor() -> None:
                 api_note = Entity(
                     title=api_note_title,
                     directory="doctor",
-                    entity_type="note",
+                    note_type="note",
                     content_type="text/markdown",
                     content=f"# {api_note_title}\n\n- [note] API to file check",
                     entity_metadata={"tags": ["doctor"]},

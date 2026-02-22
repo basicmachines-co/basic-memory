@@ -398,7 +398,7 @@ Related concepts: {keyword_line}.
         entity = await search_service.entity_repository.create(
             {
                 "title": f"{topic.title()} Benchmark Note {note_index}",
-                "entity_type": "benchmark",
+                "note_type": "benchmark",
                 "entity_metadata": {"tags": ["benchmark", topic], "status": "active"},
                 "content_type": "text/markdown",
                 "permalink": permalink,

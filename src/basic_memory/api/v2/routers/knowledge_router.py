@@ -201,7 +201,7 @@ async def create_entity(
         Created entity with generated external_id (UUID) and file content
     """
     logger.info(
-        "API v2 request", endpoint="create_entity", entity_type=data.entity_type, title=data.title
+        "API v2 request", endpoint="create_entity", note_type=data.note_type, title=data.title
     )
 
     if fast:

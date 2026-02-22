@@ -255,8 +255,8 @@ class EntityParser:
         else:
             metadata["title"] = title
 
-        entity_type = metadata.get("type")
-        metadata["type"] = entity_type if entity_type is not None else "note"
+        note_type = metadata.get("type")
+        metadata["type"] = note_type if note_type is not None else "note"
 
         tags = parse_tags(metadata.get("tags", []))  # pyright: ignore
         if tags:

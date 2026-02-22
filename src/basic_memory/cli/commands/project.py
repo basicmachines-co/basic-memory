@@ -775,16 +775,16 @@ def display_project_info(
 
             console.print(stats_table)
 
-            # Entity types
-            if info.statistics.entity_types:
-                entity_types_table = Table(title="Entity Types")
-                entity_types_table.add_column("Type", style="blue")
-                entity_types_table.add_column("Count", style="green")
+            # Note types
+            if info.statistics.note_types:
+                note_types_table = Table(title="Note Types")
+                note_types_table.add_column("Type", style="blue")
+                note_types_table.add_column("Count", style="green")
 
-                for entity_type, count in info.statistics.entity_types.items():
-                    entity_types_table.add_row(entity_type, str(count))
+                for note_type, count in info.statistics.note_types.items():
+                    note_types_table.add_row(note_type, str(count))
 
-                console.print(entity_types_table)
+                console.print(note_types_table)
 
             # Most connected entities
             if info.statistics.most_connected_entities:  # pragma: no cover
@@ -815,7 +815,7 @@ def display_project_info(
                     )
                     recent_table.add_row(
                         entity["title"],
-                        entity["entity_type"],
+                        entity["note_type"],
                         updated_at.strftime("%Y-%m-%d %H:%M"),
                     )
 

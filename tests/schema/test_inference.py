@@ -236,14 +236,14 @@ class TestInferSuggestedSchema:
 
 class TestInferRelationTargetType:
     """Verify that relation target type comes from the individual relation,
-    not from the source note's entity_type."""
+    not from the source note's note_type."""
 
     def test_target_type_from_relation_data(self):
-        """Relations with target_entity_type produce correct schema suggestions."""
+        """Relations with target_note_type produce correct schema suggestions."""
         notes = [
             _note(
                 f"n{i}",
-                relations=[Rel("works_at", f"Org{i}", target_entity_type="organization")],
+                relations=[Rel("works_at", f"Org{i}", target_note_type="organization")],
             )
             for i in range(3)
         ]
@@ -252,7 +252,7 @@ class TestInferRelationTargetType:
         assert works_at.target_type == "organization"
 
     def test_target_type_none_when_unresolved(self):
-        """Relations without target_entity_type produce None target_type."""
+        """Relations without target_note_type produce None target_type."""
         notes = [_note(f"n{i}", relations=[Rel("knows", f"P{i}")]) for i in range(3)]
         result = infer_schema("Person", notes)
         knows = next(f for f in result.field_frequencies if f.name == "knows")
@@ -261,9 +261,9 @@ class TestInferRelationTargetType:
     def test_mixed_target_types_uses_most_common(self):
         """When relations point to different types, the most common wins."""
         notes = [
-            _note("n0", relations=[Rel("works_at", "OrgA", target_entity_type="organization")]),
-            _note("n1", relations=[Rel("works_at", "OrgB", target_entity_type="organization")]),
-            _note("n2", relations=[Rel("works_at", "SchoolC", target_entity_type="school")]),
+            _note("n0", relations=[Rel("works_at", "OrgA", target_note_type="organization")]),
+            _note("n1", relations=[Rel("works_at", "OrgB", target_note_type="organization")]),
+            _note("n2", relations=[Rel("works_at", "SchoolC", target_note_type="school")]),
         ]
         result = infer_schema("Person", notes)
         works_at = next(f for f in result.field_frequencies if f.name == "works_at")

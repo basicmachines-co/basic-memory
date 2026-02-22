@@ -154,7 +154,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
     data = {
         "title": "TestV2Entity",
         "directory": "test",
-        "entity_type": "test",
+        "note_type": "test",
         "content_type": "text/markdown",
         "content": "TestContent for V2",
     }
@@ -173,7 +173,7 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
 
     assert entity.permalink == "test-project/test/test-v2-entity"
     assert entity.file_path == "test/TestV2Entity.md"
-    assert entity.entity_type == data["entity_type"]
+    assert entity.note_type == data["note_type"]
 
     # Verify file was created
     file_path = file_service.get_entity_path(entity)
@@ -187,7 +187,7 @@ async def test_create_entity_conflict_returns_409(client: AsyncClient, v2_projec
     data = {
         "title": "TestV2EntityConflict",
         "directory": "conflict",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "content": "Original content for conflict",
     }
@@ -215,7 +215,7 @@ async def test_create_entity_returns_content(client: AsyncClient, file_service, 
     data = {
         "title": "TestContentReturn",
         "directory": "test",
-        "entity_type": "note",
+        "note_type": "note",
         "content_type": "text/markdown",
         "content": "Body content for return test",
     }

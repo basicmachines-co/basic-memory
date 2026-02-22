@@ -82,7 +82,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "page_size",
         "search_type",
         "output_format",
-        "types",
+        "note_types",
         "entity_types",
         "after_date",
         "metadata_filters",

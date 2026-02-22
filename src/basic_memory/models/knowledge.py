@@ -37,7 +37,7 @@ class Entity(Base):
     __tablename__ = "entity"
     __table_args__ = (
         # Regular indexes
-        Index("ix_entity_type", "entity_type"),
+        Index("ix_note_type", "note_type"),
         Index("ix_entity_title", "title"),
         Index("ix_entity_external_id", "external_id", unique=True),
         Index("ix_entity_created_at", "created_at"),  # For timeline queries
@@ -64,7 +64,7 @@ class Entity(Base):
     # External UUID for API references - stable identifier that won't change
     external_id: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String)
-    entity_type: Mapped[str] = mapped_column(String)
+    note_type: Mapped[str] = mapped_column(String)
     entity_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     content_type: Mapped[str] = mapped_column(String)
 
@@ -133,7 +133,7 @@ class Entity(Base):
         return value
 
     def __repr__(self) -> str:
-        return f"Entity(id={self.id}, external_id='{self.external_id}', name='{self.title}', type='{self.entity_type}', checksum='{self.checksum}')"
+        return f"Entity(id={self.id}, external_id='{self.external_id}', name='{self.title}', type='{self.note_type}', checksum='{self.checksum}')"
 
 
 class Observation(Base):

@@ -129,7 +129,7 @@ async def test_schema_infer(app, test_project, sync_service):
     )
 
     assert isinstance(result, InferenceReport)
-    assert result.entity_type == "person"
+    assert result.note_type == "person"
     assert result.notes_analyzed >= 3
 
 
@@ -168,7 +168,7 @@ permalink: people/dave
     )
 
     assert isinstance(result, DriftReport)
-    assert result.entity_type == "person"
+    assert result.note_type == "person"
 
 
 # --- write_note metadata → schema workflow ---

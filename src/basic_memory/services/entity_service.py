@@ -206,14 +206,14 @@ class EntityService(BaseService[EntityModel]):
         return self._project_permalink
 
     def _build_frontmatter_markdown(
-        self, title: str, entity_type: str, permalink: str
+        self, title: str, note_type: str, permalink: str
     ) -> EntityMarkdown:
         """Build a minimal EntityMarkdown object for permalink resolution."""
         from basic_memory.markdown.schemas import EntityFrontmatter
 
         frontmatter_metadata = {
             "title": title,
-            "type": entity_type,
+            "type": note_type,
             "permalink": permalink,
         }
         frontmatter_obj = EntityFrontmatter(metadata=frontmatter_metadata)
@@ -257,18 +257,18 @@ class EntityService(BaseService[EntityModel]):
                 f"file for entity {schema.directory}/{schema.title} already exists: {file_path}"
             )
 
-        # Parse content frontmatter to check for user-specified permalink and entity_type
+        # Parse content frontmatter to check for user-specified permalink and note_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
 
-            # If content has entity_type/type, use it to override the schema entity_type
+            # If content has type, use it to override the schema note_type
             if "type" in content_frontmatter:
-                schema.entity_type = content_frontmatter["type"]
+                schema.note_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    schema.title, schema.entity_type, content_frontmatter["permalink"]
+                    schema.title, schema.note_type, content_frontmatter["permalink"]
                 )
 
         # Get unique permalink (prioritizing content frontmatter) unless disabled
@@ -315,18 +315,18 @@ class EntityService(BaseService[EntityModel]):
             content=existing_content,
         )
 
-        # Parse content frontmatter to check for user-specified permalink and entity_type
+        # Parse content frontmatter to check for user-specified permalink and note_type
         content_markdown = None
         if schema.content and has_frontmatter(schema.content):
             content_frontmatter = parse_frontmatter(schema.content)
 
-            # If content has entity_type/type, use it to override the schema entity_type
+            # If content has type, use it to override the schema note_type
             if "type" in content_frontmatter:
-                schema.entity_type = content_frontmatter["type"]
+                schema.note_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    schema.title, schema.entity_type, content_frontmatter["permalink"]
+                    schema.title, schema.note_type, content_frontmatter["permalink"]
                 )
 
         # Check if we need to update the permalink based on content frontmatter (unless disabled)
@@ -406,11 +406,11 @@ class EntityService(BaseService[EntityModel]):
             content_frontmatter = parse_frontmatter(schema.content)
 
             if "type" in content_frontmatter:
-                schema.entity_type = content_frontmatter["type"]
+                schema.note_type = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
-                    schema.title, schema.entity_type, content_frontmatter["permalink"]
+                    schema.title, schema.note_type, content_frontmatter["permalink"]
                 )
 
         # --- Permalink Resolution ---
@@ -436,7 +436,7 @@ class EntityService(BaseService[EntityModel]):
         entity_metadata = {k: v for k, v in metadata.items() if v is not None}
         update_data = {
             "title": schema.title,
-            "entity_type": schema.entity_type,
+            "note_type": schema.note_type,
             "file_path": file_path.as_posix(),
             "content_type": schema.content_type,
             "entity_metadata": entity_metadata or None,
@@ -488,12 +488,12 @@ class EntityService(BaseService[EntityModel]):
             if "title" in content_frontmatter:
                 update_data["title"] = content_frontmatter["title"]
             if "type" in content_frontmatter:
-                update_data["entity_type"] = content_frontmatter["type"]
+                update_data["note_type"] = content_frontmatter["type"]
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
                     update_data.get("title", entity.title),
-                    update_data.get("entity_type", entity.entity_type),
+                    update_data.get("note_type", entity.note_type),
                     content_frontmatter["permalink"],
                 )
 

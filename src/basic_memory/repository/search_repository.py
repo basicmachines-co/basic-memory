@@ -37,7 +37,7 @@ class SearchRepository(Protocol):
         permalink: Optional[str] = None,
         permalink_match: Optional[str] = None,
         title: Optional[str] = None,
-        types: Optional[List[str]] = None,
+        note_types: Optional[List[str]] = None,
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         metadata_filters: Optional[dict] = None,

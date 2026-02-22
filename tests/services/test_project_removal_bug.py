@@ -45,7 +45,7 @@ async def test_remove_project_with_related_entities(project_service: ProjectServ
 
             entity_data = {
                 "title": "Test Entity for Deletion",
-                "entity_type": "note",
+                "note_type": "note",
                 "content_type": "text/markdown",
                 "project_id": project.id,
                 "permalink": "test-deletion-entity",

@@ -34,11 +34,11 @@ def test_search_filters():
     query = SearchQuery(
         text="search",
         entity_types=[SearchItemType.ENTITY],
-        types=["component"],
+        note_types=["component"],
         after_date=datetime(2024, 1, 1),
     )
     assert query.entity_types == [SearchItemType.ENTITY]
-    assert query.types == ["component"]
+    assert query.note_types == ["component"]
     assert query.after_date == "2024-01-01T00:00:00"
 
 
@@ -58,13 +58,13 @@ def test_search_result():
         type=SearchItemType.ENTITY,
         entity="some_entity",
         score=0.8,
-        metadata={"entity_type": "component"},
+        metadata={"note_type": "component"},
         permalink="specs/search",
         file_path="specs/search.md",
     )
     assert result.type == SearchItemType.ENTITY
     assert result.score == 0.8
-    assert result.metadata == {"entity_type": "component"}
+    assert result.metadata == {"note_type": "component"}
 
 
 def test_observation_result():

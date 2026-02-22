@@ -79,7 +79,7 @@ async def test_postgres_search_repository_index_and_search(session_maker, test_p
         permalink="docs/coffee-brewing",
         file_path="docs/coffee-brewing.md",
         type="entity",
-        metadata={"entity_type": "note"},
+        metadata={"note_type": "note"},
         created_at=now,
         updated_at=now,
     )
@@ -109,8 +109,8 @@ async def test_postgres_search_repository_index_and_search(session_maker, test_p
     results = await repo.search(search_item_types=[SearchItemType.ENTITY])
     assert any(r.permalink == "docs/coffee-brewing" for r in results)
 
-    # Entity type filter via metadata JSONB containment
-    results = await repo.search(types=["note"])
+    # Note type filter via metadata JSONB containment
+    results = await repo.search(note_types=["note"])
     assert any(r.permalink == "docs/coffee-brewing" for r in results)
 
     # Date filter (also exercises order_by_clause)
@@ -150,7 +150,7 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
             permalink="docs/pour-over",
             file_path="docs/pour-over.md",
             type="entity",
-            metadata={"entity_type": "note"},
+            metadata={"note_type": "note"},
             created_at=now,
             updated_at=now,
         ),
@@ -163,7 +163,7 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
             permalink="docs/french-press",
             file_path="docs/french-press.md",
             type="entity",
-            metadata={"entity_type": "note"},
+            metadata={"note_type": "note"},
             created_at=now,
             updated_at=now,
         ),
@@ -194,7 +194,7 @@ async def test_postgres_search_repository_wildcard_text_and_permalink_match_exac
             permalink="docs/x",
             file_path="docs/x.md",
             type="entity",
-            metadata={"entity_type": "note"},
+            metadata={"note_type": "note"},
             created_at=now,
             updated_at=now,
         )
@@ -254,7 +254,7 @@ async def test_bulk_index_items_strips_nul_bytes(session_maker, test_project):
         permalink="test/nul-row",
         file_path="test/nul.md",
         type="entity",
-        metadata={"entity_type": "note"},
+        metadata={"note_type": "note"},
         created_at=now,
         updated_at=now,
     )
@@ -280,7 +280,7 @@ async def test_index_item_strips_nul_bytes(session_maker, test_project):
         permalink="test/nul-single",
         file_path="test/nul-single.md",
         type="entity",
-        metadata={"entity_type": "note"},
+        metadata={"note_type": "note"},
         created_at=now,
         updated_at=now,
     )
@@ -342,7 +342,7 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
                 file_path="specs/authentication.md",
                 type=SearchItemType.ENTITY.value,
                 entity_id=401,
-                metadata={"entity_type": "spec"},
+                metadata={"note_type": "spec"},
                 created_at=now,
                 updated_at=now,
             ),
@@ -356,7 +356,7 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
                 file_path="specs/migrations.md",
                 type=SearchItemType.ENTITY.value,
                 entity_id=402,
-                metadata={"entity_type": "spec"},
+                metadata={"note_type": "spec"},
                 created_at=now,
                 updated_at=now,
             ),
@@ -408,7 +408,7 @@ async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_m
                 file_path="specs/task-queue-worker.md",
                 type=SearchItemType.ENTITY.value,
                 entity_id=411,
-                metadata={"entity_type": "spec"},
+                metadata={"note_type": "spec"},
                 created_at=now,
                 updated_at=now,
             ),
@@ -422,7 +422,7 @@ async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_m
                 file_path="specs/search-index.md",
                 type=SearchItemType.ENTITY.value,
                 entity_id=412,
-                metadata={"entity_type": "spec"},
+                metadata={"note_type": "spec"},
                 created_at=now,
                 updated_at=now,
             ),

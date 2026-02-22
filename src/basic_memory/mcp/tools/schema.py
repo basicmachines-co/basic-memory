@@ -128,7 +128,7 @@ async def schema_validate(
 
             schema_client = SchemaClient(client, active_project.external_id)
             result = await schema_client.validate(
-                entity_type=note_type,
+                note_type=note_type,
                 identifier=identifier,
             )
 
@@ -285,7 +285,7 @@ async def schema_infer(
                 f"Error inferring schema for type '{note_type}': {e}\n\n"
                 f"## Troubleshooting\n"
                 f"1. Ensure notes of type '{note_type}' exist in the project\n"
-                f'2. Try searching: `search_notes("{note_type}", types=["{note_type}"])`\n'
+                f'2. Try searching: `search_notes("{note_type}", note_types=["{note_type}"])`\n'
                 f"3. Verify the project has been synced: `basic-memory status`\n"
             )
 
