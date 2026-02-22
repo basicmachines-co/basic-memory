@@ -751,3 +751,101 @@ def test_schema_diff_json_output(mock_mcp, mock_config_cls):
     assert len(data["new_fields"]) == 1
     mock_mcp.assert_called_once()
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
+
+
+# --- list-projects ---
+
+LIST_PROJECTS_RESULT = {
+    "projects": [
+        {
+            "name": "main",
+            "path": "/home/user/notes",
+            "is_default": True,
+            "status": "active",
+        },
+        {
+            "name": "research",
+            "path": "/home/user/research",
+            "is_default": False,
+            "status": "active",
+        },
+    ],
+    "count": 2,
+}
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_list_projects",
+    new_callable=AsyncMock,
+    return_value=LIST_PROJECTS_RESULT,
+)
+def test_list_projects_json_output(mock_mcp):
+    """list-projects outputs valid JSON from MCP tool."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "list-projects"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["count"] == 2
+    assert len(data["projects"]) == 2
+    assert data["projects"][0]["name"] == "main"
+    mock_mcp.assert_called_once()
+    assert mock_mcp.call_args.kwargs["output_format"] == "json"
+
+
+# --- list-workspaces ---
+
+LIST_WORKSPACES_RESULT = {
+    "workspaces": [
+        {
+            "tenant_id": "tenant-abc",
+            "name": "My Workspace",
+            "workspace_type": "personal",
+            "role": "owner",
+            "organization_id": None,
+            "has_active_subscription": True,
+        },
+    ],
+    "count": 1,
+}
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_list_workspaces",
+    new_callable=AsyncMock,
+    return_value=LIST_WORKSPACES_RESULT,
+)
+def test_list_workspaces_json_output(mock_mcp):
+    """list-workspaces outputs valid JSON from MCP tool."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "list-workspaces"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["count"] == 1
+    assert data["workspaces"][0]["tenant_id"] == "tenant-abc"
+    assert data["workspaces"][0]["name"] == "My Workspace"
+    mock_mcp.assert_called_once()
+    assert mock_mcp.call_args.kwargs["output_format"] == "json"
+
+
+@patch(
+    "basic_memory.cli.commands.tool.mcp_list_workspaces",
+    new_callable=AsyncMock,
+    return_value={"workspaces": [], "count": 0},
+)
+def test_list_workspaces_empty(mock_mcp):
+    """list-workspaces handles empty workspace list."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "list-workspaces"],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    data = json.loads(result.output)
+    assert data["workspaces"] == []
+    assert data["count"] == 0

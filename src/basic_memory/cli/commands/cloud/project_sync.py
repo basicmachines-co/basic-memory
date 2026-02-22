@@ -11,7 +11,6 @@ import typer
 from rich.console import Console
 
 from basic_memory.cli.app import cloud_app
-from basic_memory.cli.auth import CLIAuth
 from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
 from basic_memory.cli.commands.cloud.rclone_commands import (
     RcloneError,
@@ -25,8 +24,8 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing
 from basic_memory.config import ConfigManager, ProjectEntry
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_get, call_post
-from basic_memory.schemas.project_info import ProjectItem, ProjectList
+from basic_memory.mcp.clients import ProjectClient
+from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import generate_permalink, normalize_project_path
 
 console = Console()
@@ -37,11 +36,9 @@ console = Console()
 
 def _has_cloud_credentials(config) -> bool:
     """Return whether cloud credentials are available (API key or OAuth token)."""
-    if config.cloud_api_key:
-        return True
+    from basic_memory.config import has_cloud_credentials
 
-    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-    return auth.load_tokens() is not None
+    return has_cloud_credentials(config)
 
 
 def _require_cloud_credentials(config) -> None:
@@ -57,8 +54,7 @@ def _require_cloud_credentials(config) -> None:
 async def _get_cloud_project(name: str) -> ProjectItem | None:
     """Fetch a project by name from the cloud API."""
     async with get_client() as client:
-        response = await call_get(client, "/v2/projects/")
-        projects_list = ProjectList.model_validate(response.json())
+        projects_list = await ProjectClient(client).list_projects()
         for proj in projects_list.projects:
             if generate_permalink(proj.name) == generate_permalink(name):
                 return proj
@@ -132,12 +128,9 @@ def sync_project_command(
 
                 async def _trigger_db_sync():
                     async with get_client() as client:
-                        response = await call_post(
-                            client,
-                            f"/v2/projects/{project_data.external_id}/sync?force_full=true",
-                            json={},
+                        return await ProjectClient(client).sync(
+                            project_data.external_id, force_full=True
                         )
-                        return response.json()
 
                 try:
                     with force_routing(cloud=True):
@@ -210,12 +203,9 @@ def bisync_project_command(
 
                 async def _trigger_db_sync():
                     async with get_client() as client:
-                        response = await call_post(
-                            client,
-                            f"/v2/projects/{project_data.external_id}/sync?force_full=true",
-                            json={},
+                        return await ProjectClient(client).sync(
+                            project_data.external_id, force_full=True
                         )
-                        return response.json()
 
                 try:
                     with force_routing(cloud=True):
@@ -329,9 +319,8 @@ def setup_project_sync(
     async def _verify_project_exists():
         """Verify the project exists on cloud by listing all projects."""
         async with get_client() as client:
-            response = await call_get(client, "/v2/projects/")
-            project_list = response.json()
-            project_names = [p["name"] for p in project_list["projects"]]
+            projects_list = await ProjectClient(client).list_projects()
+            project_names = [p.name for p in projects_list.projects]
             if name not in project_names:
                 raise ValueError(f"Project '{name}' not found on cloud")
             return True

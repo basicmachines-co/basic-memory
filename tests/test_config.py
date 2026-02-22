@@ -934,3 +934,56 @@ class TestProjectMode:
         modes_by_name = {p.name: p.mode for p in project_list}
         assert modes_by_name["main"] == ProjectMode.LOCAL
         assert modes_by_name["research"] == ProjectMode.CLOUD
+
+    def test_workspace_id_defaults_to_none(self):
+        """Test that workspace_id on ProjectEntry defaults to None."""
+        entry = ProjectEntry(path="/tmp/test")
+        assert entry.workspace_id is None
+
+    def test_workspace_id_can_be_set(self):
+        """Test that workspace_id can be configured on ProjectEntry."""
+        entry = ProjectEntry(
+            path="/tmp/test",
+            workspace_id="11111111-1111-1111-1111-111111111111",
+        )
+        assert entry.workspace_id == "11111111-1111-1111-1111-111111111111"
+
+    def test_default_workspace_defaults_to_none(self):
+        """Test that default_workspace on BasicMemoryConfig defaults to None."""
+        config = BasicMemoryConfig()
+        assert config.default_workspace is None
+
+    def test_default_workspace_can_be_set(self):
+        """Test that default_workspace can be configured."""
+        config = BasicMemoryConfig(default_workspace="22222222-2222-2222-2222-222222222222")
+        assert config.default_workspace == "22222222-2222-2222-2222-222222222222"
+
+    def test_workspace_fields_round_trip(self):
+        """Test that workspace fields survive save/load cycle."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            test_config = BasicMemoryConfig(
+                projects={
+                    "main": {"path": str(temp_path / "main")},
+                    "research": {
+                        "path": str(temp_path / "research"),
+                        "mode": "cloud",
+                        "workspace_id": "11111111-1111-1111-1111-111111111111",
+                    },
+                },
+                default_workspace="22222222-2222-2222-2222-222222222222",
+            )
+            config_manager.save_config(test_config)
+
+            loaded = config_manager.load_config()
+            assert loaded.default_workspace == "22222222-2222-2222-2222-222222222222"
+            assert (
+                loaded.projects["research"].workspace_id == "11111111-1111-1111-1111-111111111111"
+            )
+            assert loaded.projects["main"].workspace_id is None

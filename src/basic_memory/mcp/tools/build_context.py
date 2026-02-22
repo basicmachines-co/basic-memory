@@ -5,7 +5,12 @@ from typing import Optional, Literal
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.config import ConfigManager
+from basic_memory.mcp.project_context import (
+    detect_project_from_url_prefix,
+    get_project_client,
+    resolve_project_and_path,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
@@ -247,6 +252,12 @@ async def build_context(
     Raises:
         ToolError: If project doesn't exist or depth parameter is invalid
     """
+    # Detect project from memory URL prefix before routing
+    if project is None:
+        detected = detect_project_from_url_prefix(url, ConfigManager().config)
+        if detected:
+            project = detected
+
     logger.info(f"Building context from {url} in project {project}")
 
     # Convert string depth to integer if needed

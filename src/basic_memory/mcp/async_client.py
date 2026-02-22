@@ -106,6 +106,27 @@ def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncCl
     _client_factory = factory
 
 
+def is_factory_mode() -> bool:
+    """Return True when a client factory override is active (e.g., cloud app)."""
+    return _client_factory is not None
+
+
+@asynccontextmanager
+async def get_cloud_proxy_client(
+    workspace: Optional[str] = None,
+) -> AsyncIterator[AsyncClient]:
+    """Create a cloud proxy client for project-level operations.
+
+    Used by MCP tools to fetch cloud project lists independently of the
+    default get_client() routing, which always goes through the local ASGI
+    transport in stdio mode.
+    """
+    config = ConfigManager().config
+    timeout = _build_timeout()
+    async with _cloud_client(config, timeout, workspace=workspace) as client:
+        yield client
+
+
 @asynccontextmanager
 async def get_client(
     project_name: Optional[str] = None,

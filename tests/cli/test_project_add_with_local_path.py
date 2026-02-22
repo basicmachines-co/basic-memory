@@ -8,6 +8,11 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.mcp.clients.project import ProjectClient
+from basic_memory.schemas.project_info import ProjectStatusResponse
+
+# Importing registers project subcommands on the shared app instance.
+import basic_memory.cli.commands.project as project_cmd  # noqa: F401
 
 
 @pytest.fixture
@@ -45,36 +50,33 @@ def mock_config(tmp_path, monkeypatch):
 @pytest.fixture
 def mock_api_client(monkeypatch):
     """Stub the API client for project add without stdlib mocks."""
-    import basic_memory.cli.commands.project as project_cmd
 
     @asynccontextmanager
     async def fake_get_client():
         yield object()
 
-    class _Resp:
-        def json(self):
-            return {
-                "message": "Project 'test-project' added successfully",
-                "status": "success",
-                "default": False,
-                "old_project": None,
-                "new_project": {
-                    "id": 1,
-                    "external_id": "12345678-1234-1234-1234-123456789012",
-                    "name": "test-project",
-                    "path": "/test-project",
-                    "is_default": False,
-                },
-            }
+    _response_data = {
+        "message": "Project 'test-project' added successfully",
+        "status": "success",
+        "default": False,
+        "old_project": None,
+        "new_project": {
+            "id": 1,
+            "external_id": "12345678-1234-1234-1234-123456789012",
+            "name": "test-project",
+            "path": "/test-project",
+            "is_default": False,
+        },
+    }
 
-    calls: list[tuple[str, dict]] = []
+    calls: list[dict] = []
 
-    async def fake_call_post(client, path: str, json: dict, **kwargs):
-        calls.append((path, json))
-        return _Resp()
+    async def fake_create_project(self, project_data):
+        calls.append(project_data)
+        return ProjectStatusResponse.model_validate(_response_data)
 
     monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
-    monkeypatch.setattr(project_cmd, "call_post", fake_call_post)
+    monkeypatch.setattr(ProjectClient, "create_project", fake_create_project)
 
     return calls
 

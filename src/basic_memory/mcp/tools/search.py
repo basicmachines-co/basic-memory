@@ -8,7 +8,11 @@ from fastmcp import Context
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.container import get_container
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.mcp.project_context import (
+    detect_project_from_url_prefix,
+    get_project_client,
+    resolve_project_and_path,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -426,6 +430,12 @@ async def search_notes(
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     types = types or []
     entity_types = entity_types or []
+
+    # Detect project from memory URL prefix before routing
+    if project is None:
+        detected = detect_project_from_url_prefix(query, ConfigManager().config)
+        if detected:
+            project = detected
 
     async with get_project_client(project, workspace, context) as (client, active_project):
         # Handle memory:// URLs by resolving to permalink search

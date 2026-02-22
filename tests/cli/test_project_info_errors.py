@@ -9,6 +9,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.mcp.clients.project import ProjectClient
 import basic_memory.cli.commands.command_utils as command_utils
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
 
@@ -26,12 +27,12 @@ async def test_get_project_info_cloud_config_error_has_clear_message(monkeypatch
     async def fake_get_active_project(client, project, context):
         return SimpleNamespace(external_id="proj-123")
 
-    async def fake_call_get(client, url):
+    async def fake_get_info(self, project_external_id):
         raise ToolError("Internal proxy error: Project 'demo' not found in configuration")
 
     monkeypatch.setattr(command_utils, "get_client", fake_get_client)
     monkeypatch.setattr(command_utils, "get_active_project", fake_get_active_project)
-    monkeypatch.setattr(command_utils, "call_get", fake_call_get)
+    monkeypatch.setattr(ProjectClient, "get_info", fake_get_info)
 
     with pytest.raises(typer.Exit) as exc:
         await command_utils.get_project_info("demo")

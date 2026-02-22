@@ -191,7 +191,7 @@ class WatchService:
                         for p in projects
                         if self.app_config.get_project_mode(p.name) != ProjectMode.CLOUD
                     ]
-                    logger.info(f"Skipping cloud-mode projects in watch cycle: {cloud_projects}")
+                    logger.debug(f"Skipping cloud-mode projects in watch cycle: {cloud_projects}")
 
                 project_paths = [project.path for project in projects]
                 logger.debug(f"Starting watch cycle for directories: {project_paths}")

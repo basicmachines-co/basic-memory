@@ -19,7 +19,6 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import KnowledgeClient, ProjectClient, SearchClient
-from basic_memory.mcp.tools.utils import call_post
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.project_info import ProjectInfoRequest
 from basic_memory.schemas.search import SearchQuery
@@ -98,11 +97,10 @@ async def run_doctor() -> None:
                 await processor.write_file(manual_path, manual_markdown)
                 console.print("[green]OK[/green] Manual file written")
 
-                sync_response = await call_post(
-                    client,
-                    f"/v2/projects/{project_id}/sync?force_full=true&run_in_background=false",
+                sync_data = await project_client.sync(
+                    project_id, force_full=True, run_in_background=False
                 )
-                sync_report = SyncReportResponse.model_validate(sync_response.json())
+                sync_report = SyncReportResponse.model_validate(sync_data)
                 if sync_report.total == 0:
                     raise ValueError("Sync did not detect any changes")
 
@@ -118,8 +116,7 @@ async def run_doctor() -> None:
 
                 console.print("[green]OK[/green] Search confirmed manual file")
 
-                status_response = await call_post(client, f"/v2/projects/{project_id}/status")
-                status_report = SyncReportResponse.model_validate(status_response.json())
+                status_report = await project_client.get_status(project_id)
                 if status_report.total != 0:
                     raise ValueError("Project status not clean after sync")
 

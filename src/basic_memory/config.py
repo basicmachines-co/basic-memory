@@ -96,6 +96,10 @@ class ProjectEntry(BaseModel):
         default=ProjectMode.LOCAL,
         description="Routing mode: local (in-process ASGI) or cloud (remote API)",
     )
+    workspace_id: Optional[str] = Field(
+        default=None,
+        description="Cloud workspace tenant_id. Set by 'bm project set-cloud --workspace'.",
+    )
     # Cloud sync state (replaces CloudProjectConfig)
     local_sync_path: Optional[str] = Field(
         default=None,
@@ -320,6 +324,11 @@ class BasicMemoryConfig(BaseSettings):
     cloud_api_key: Optional[str] = Field(
         default=None,
         description="API key for cloud access (bmc_ prefixed). Account-level, not per-project.",
+    )
+
+    default_workspace: Optional[str] = Field(
+        default=None,
+        description="Default cloud workspace tenant_id. Set by 'bm cloud workspace set-default'.",
     )
 
     @model_validator(mode="before")
@@ -774,6 +783,20 @@ def get_project_config(project_name: Optional[str] = None) -> ProjectConfig:
 
     # otherwise raise error
     raise ValueError(f"Project '{actual_project_name}' not found")  # pragma: no cover
+
+
+def has_cloud_credentials(config: BasicMemoryConfig) -> bool:
+    """Check if cloud credentials are available (API key or OAuth token).
+
+    Shared utility used by both MCP tools and CLI commands to determine
+    whether cloud project discovery is possible.
+    """
+    if config.cloud_api_key:
+        return True
+    from basic_memory.cli.auth import CLIAuth
+
+    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+    return auth.load_tokens() is not None
 
 
 def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None:

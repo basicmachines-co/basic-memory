@@ -9,6 +9,8 @@ import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.mcp.clients.project import ProjectClient
+from basic_memory.schemas.project_info import ProjectList
 
 # Importing registers project subcommands on the shared app instance.
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
@@ -43,7 +45,7 @@ def mock_client(monkeypatch):
     """Mock get_client with a no-op async context manager."""
 
     @asynccontextmanager
-    async def fake_get_client():
+    async def fake_get_client(workspace=None):
         yield object()
 
     monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
@@ -105,20 +107,14 @@ def test_project_list_shows_local_cloud_presence_and_routes(
         "default_project": "alpha",
     }
 
-    class _Resp:
-        def __init__(self, payload: dict):
-            self._payload = payload
+    _original_list_projects = ProjectClient.list_projects
 
-        def json(self):
-            return self._payload
-
-    async def fake_call_get(client, path: str, **kwargs):
-        assert path == "/v2/projects/"
+    async def fake_list_projects(self):
         if os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes"):
-            return _Resp(cloud_payload)
-        return _Resp(local_payload)
+            return ProjectList.model_validate(cloud_payload)
+        return ProjectList.model_validate(local_payload)
 
-    monkeypatch.setattr(project_cmd, "call_get", fake_call_get)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
 
     result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
 
@@ -170,19 +166,14 @@ def test_project_ls_local_mode_defaults_to_local_route(
         "default_project": "alpha",
     }
 
-    class _Resp:
-        def json(self):
-            return payload
-
-    async def fake_call_get(client, path: str, **kwargs):
-        assert path == "/v2/projects/"
+    async def fake_list_projects(self):
         assert os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() not in ("true", "1", "yes")
-        return _Resp()
+        return ProjectList.model_validate(payload)
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("project_ls should not be used for default local route")
 
-    monkeypatch.setattr(project_cmd, "call_get", fake_call_get)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
     monkeypatch.setattr(project_cmd, "project_ls", fail_if_called)
 
     result = runner.invoke(app, ["project", "ls", "--name", "alpha"], env={"COLUMNS": "200"})
@@ -219,23 +210,18 @@ def test_project_ls_cloud_mode_defaults_to_cloud_route(
         "default_project": "alpha",
     }
 
-    class _Resp:
-        def json(self):
-            return cloud_payload
-
     class _TenantInfo:
         bucket_name = "tenant-bucket"
 
-    async def fake_call_get(client, path: str, **kwargs):
-        assert path == "/v2/projects/"
+    async def fake_list_projects(self):
         # Cloud routing should be active when project mode is cloud
         assert os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes")
-        return _Resp()
+        return ProjectList.model_validate(cloud_payload)
 
     async def fake_get_mount_info():
         return _TenantInfo()
 
-    monkeypatch.setattr(project_cmd, "call_get", fake_call_get)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
     monkeypatch.setattr(project_cmd, "get_mount_info", fake_get_mount_info)
     monkeypatch.setattr(project_cmd, "project_ls", lambda *args, **kwargs: ["        42 cloud.md"])
 
@@ -273,22 +259,17 @@ def test_project_ls_cloud_route_uses_cloud_listing(
         "default_project": "alpha",
     }
 
-    class _Resp:
-        def json(self):
-            return cloud_payload
-
     class _TenantInfo:
         bucket_name = "tenant-bucket"
 
-    async def fake_call_get(client, path: str, **kwargs):
-        assert path == "/v2/projects/"
+    async def fake_list_projects(self):
         assert os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes")
-        return _Resp()
+        return ProjectList.model_validate(cloud_payload)
 
     async def fake_get_mount_info():
         return _TenantInfo()
 
-    monkeypatch.setattr(project_cmd, "call_get", fake_call_get)
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
     monkeypatch.setattr(project_cmd, "get_mount_info", fake_get_mount_info)
     monkeypatch.setattr(project_cmd, "project_ls", lambda *args, **kwargs: ["        42 cloud.md"])
 

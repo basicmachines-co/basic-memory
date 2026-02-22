@@ -25,9 +25,8 @@ from basic_memory.cli.commands.command_utils import get_project_info, run_with_c
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_delete, call_get, call_patch, call_post, call_put
-from basic_memory.schemas.project_info import ProjectItem, ProjectList, ProjectStatusResponse
-from basic_memory.schemas.v2 import ProjectResolveResponse
+from basic_memory.mcp.clients import ProjectClient
+from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink, normalize_project_path
 
 console = Console()
@@ -49,6 +48,7 @@ def format_path(path: str) -> str:
 def list_projects(
     local: bool = typer.Option(False, "--local", help="Force local routing for this command"),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+    workspace: str = typer.Option(None, "--workspace", help="Cloud workspace name or tenant_id"),
 ) -> None:
     """List Basic Memory projects from local and (when available) cloud."""
     try:
@@ -57,20 +57,22 @@ def list_projects(
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
-    async def _list_projects():
-        async with get_client() as client:
-            response = await call_get(client, "/v2/projects/")
-            return ProjectList.model_validate(response.json())
+    async def _list_projects(ws: str | None = None):
+        async with get_client(workspace=ws) as client:
+            return await ProjectClient(client).list_projects()
 
     try:
         config = ConfigManager().config
+        # Use explicit workspace, fall back to config default
+        effective_workspace = workspace or config.default_workspace
+
         local_result: ProjectList | None = None
         cloud_result: ProjectList | None = None
         cloud_error: Exception | None = None
 
         if cloud:
             with force_routing(cloud=True):
-                cloud_result = run_with_cleanup(_list_projects())
+                cloud_result = run_with_cleanup(_list_projects(effective_workspace))
         elif local:
             with force_routing(local=True):
                 local_result = run_with_cleanup(_list_projects())
@@ -82,14 +84,33 @@ def list_projects(
             if _has_cloud_credentials(config):
                 try:
                     with force_routing(cloud=True):
-                        cloud_result = run_with_cleanup(_list_projects())
+                        cloud_result = run_with_cleanup(_list_projects(effective_workspace))
                 except Exception as exc:  # pragma: no cover
                     cloud_error = exc
+
+        # Resolve workspace name for cloud projects (best-effort)
+        cloud_ws_name: str | None = None
+        cloud_ws_type: str | None = None
+        if cloud_result and effective_workspace:
+            try:
+                from basic_memory.mcp.project_context import get_available_workspaces
+
+                workspaces = run_with_cleanup(get_available_workspaces())
+                matched = next(
+                    (ws for ws in workspaces if ws.tenant_id == effective_workspace),
+                    None,
+                )
+                if matched:
+                    cloud_ws_name = matched.name
+                    cloud_ws_type = matched.workspace_type
+            except Exception:
+                pass
 
         table = Table(title="Basic Memory Projects")
         table.add_column("Name", style="cyan")
         table.add_column("Local Path", style="yellow", no_wrap=True, overflow="fold")
         table.add_column("Cloud Path", style="green")
+        table.add_column("Workspace", style="green")
         table.add_column("CLI Route", style="blue")
         table.add_column("MCP (stdio)", style="blue")
         table.add_column("Sync", style="green")
@@ -151,10 +172,16 @@ def list_projects(
             has_sync = "[X]" if entry and entry.local_sync_path else ""
             mcp_stdio_target = "local" if local_project is not None else "n/a"
 
+            # Show workspace name (type) for cloud-sourced projects
+            ws_label = ""
+            if cloud_project is not None and cloud_ws_name:
+                ws_label = f"{cloud_ws_name} ({cloud_ws_type})" if cloud_ws_type else cloud_ws_name
+
             row = [
                 project_name,
                 local_path,
                 cloud_path,
+                ws_label,
                 cli_route,
                 mcp_stdio_target,
                 has_sync,
@@ -229,8 +256,7 @@ def add_project(
                     "local_sync_path": local_sync_path,
                     "set_default": set_default,
                 }
-                response = await call_post(client, "/v2/projects/", json=data)
-                return ProjectStatusResponse.model_validate(response.json())
+                return await ProjectClient(client).create_project(data)
     else:
         # Local mode: path is required
         if path is None:
@@ -243,8 +269,7 @@ def add_project(
         async def _add_project():
             async with get_client() as client:
                 data = {"name": name, "path": resolved_path, "set_default": set_default}
-                response = await call_post(client, "/v2/projects/", json=data)
-                return ProjectStatusResponse.model_validate(response.json())
+                return await ProjectClient(client).create_project(data)
 
     try:
         with force_routing(local=local, cloud=cloud):
@@ -302,19 +327,13 @@ def remove_project(
 
     async def _remove_project():
         async with get_client() as client:
+            project_client = ProjectClient(client)
             # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)
-
-            # Use v2 project resolver to find project ID by permalink
-            resolve_data = {"identifier": project_permalink}
-            response = await call_post(client, "/v2/projects/resolve", json=resolve_data)
-            target_project = response.json()
-
-            # Use v2 API with project ID
-            response = await call_delete(
-                client, f"/v2/projects/{target_project['external_id']}?delete_notes={delete_notes}"
+            target_project = await project_client.resolve_project(project_permalink)
+            return await project_client.delete_project(
+                target_project.external_id, delete_notes=delete_notes
             )
-            return ProjectStatusResponse.model_validate(response.json())
 
     try:
         # Get config to check for local sync path and bisync state
@@ -387,19 +406,11 @@ def set_default_project(
 
     async def _set_default():
         async with get_client() as client:
+            project_client = ProjectClient(client)
             # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)
-
-            # Use v2 project resolver to find project ID by permalink
-            resolve_data = {"identifier": project_permalink}
-            response = await call_post(client, "/v2/projects/resolve", json=resolve_data)
-            target_project = response.json()
-
-            # Use v2 API with project ID
-            response = await call_put(
-                client, f"/v2/projects/{target_project['external_id']}/default"
-            )
-            return ProjectStatusResponse.model_validate(response.json())
+            target_project = await project_client.resolve_project(project_permalink)
+            return await project_client.set_default(target_project.external_id)
 
     try:
         with force_routing(local=local):
@@ -407,31 +418,6 @@ def set_default_project(
         console.print(f"[green]{result.message}[/green]")
     except Exception as e:
         console.print(f"[red]Error setting default project: {str(e)}[/red]")
-        raise typer.Exit(1)
-
-
-@project_app.command("sync-config")
-def synchronize_projects(
-    local: bool = typer.Option(
-        False, "--local", help="Force local API routing (required in cloud mode)"
-    ),
-) -> None:
-    """Synchronize project config between configuration file and database.
-
-    In cloud mode, use --local to sync local configuration.
-    """
-
-    async def _sync_config():
-        async with get_client() as client:
-            response = await call_post(client, "/v2/projects/config/sync")
-            return ProjectStatusResponse.model_validate(response.json())
-
-    try:
-        with force_routing(local=local):
-            result = run_with_cleanup(_sync_config())
-        console.print(f"[green]{result.message}[/green]")
-    except Exception as e:  # pragma: no cover
-        console.print(f"[red]Error synchronizing projects: {str(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -450,17 +436,11 @@ def move_project(
 
     async def _move_project():
         async with get_client() as client:
-            data = {"path": resolved_path}
-            resolve_response = await call_post(
-                client,
-                "/v2/projects/resolve",
-                json={"identifier": name},
+            project_client = ProjectClient(client)
+            project_info = await project_client.resolve_project(name)
+            return await project_client.update_project(
+                project_info.external_id, {"path": resolved_path}
             )
-            project_info = ProjectResolveResponse.model_validate(resolve_response.json())
-            response = await call_patch(
-                client, f"/v2/projects/{project_info.external_id}", json=data
-            )
-            return ProjectStatusResponse.model_validate(response.json())
 
     try:
         with force_routing(local=True):
@@ -489,17 +469,24 @@ def move_project(
 @project_app.command("set-cloud")
 def set_cloud(
     name: str = typer.Argument(..., help="Name of the project to route through cloud"),
+    workspace: str = typer.Option(
+        None,
+        "--workspace",
+        help="Cloud workspace name or tenant_id to associate with this project",
+    ),
 ) -> None:
     """Set a project to cloud mode (route through cloud API).
 
     Requires either an API key or an active OAuth session.
 
-    Examples:
-      bm cloud api-key save bmc_abc123...   # save API key, then:
-      bm project set-cloud research    # route "research" through cloud
+    Use --workspace to associate a specific workspace with this project.
+    If omitted, uses the default workspace (if set) or auto-selects when
+    only one workspace is available.
 
-      bm cloud login                   # OAuth login, then:
-      bm project set-cloud research    # route "research" through cloud
+    Examples:
+      bm project set-cloud research --workspace Personal
+      bm project set-cloud research --workspace 11111111-...
+      bm project set-cloud research   # uses default workspace
     """
 
     config_manager = ConfigManager()
@@ -522,10 +509,54 @@ def set_cloud(
         console.print("[dim]Run 'bm cloud api-key save <key>' or 'bm cloud login' first[/dim]")
         raise typer.Exit(1)
 
+    # --- Resolve workspace to tenant_id ---
+    resolved_workspace_id: str | None = None
+
+    if workspace is not None:
+        # Explicit --workspace: resolve to tenant_id via cloud lookup
+        from basic_memory.mcp.project_context import (
+            get_available_workspaces,
+            _workspace_matches_identifier,
+            _workspace_choices,
+        )
+
+        workspaces = run_with_cleanup(get_available_workspaces())
+        matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, workspace)]
+        if not matches:
+            console.print(f"[red]Error: Workspace '{workspace}' not found[/red]")
+            if workspaces:
+                console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+            raise typer.Exit(1)
+        if len(matches) > 1:
+            console.print(
+                f"[red]Error: Workspace name '{workspace}' matches multiple workspaces. "
+                f"Use tenant_id instead.[/red]"
+            )
+            console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+            raise typer.Exit(1)
+        resolved_workspace_id = matches[0].tenant_id
+    elif config.default_workspace:
+        # Fall back to global default
+        resolved_workspace_id = config.default_workspace
+    else:
+        # Try auto-select if single workspace
+        try:
+            from basic_memory.mcp.project_context import get_available_workspaces
+
+            workspaces = run_with_cleanup(get_available_workspaces())
+            if len(workspaces) == 1:
+                resolved_workspace_id = workspaces[0].tenant_id
+        except Exception:
+            pass  # Workspace resolution is optional at set-cloud time
+
     config.set_project_mode(name, ProjectMode.CLOUD)
+    if resolved_workspace_id:
+        config.projects[name].workspace_id = resolved_workspace_id
     config_manager.save_config(config)
 
     console.print(f"[green]Project '{name}' set to cloud mode[/green]")
+    if resolved_workspace_id:
+        console.print(f"[dim]Workspace: {resolved_workspace_id}[/dim]")
     console.print("[dim]MCP tools and CLI commands for this project will route through cloud[/dim]")
 
 
@@ -534,6 +565,8 @@ def set_local(
     name: str = typer.Argument(..., help="Name of the project to revert to local mode"),
 ) -> None:
     """Revert a project to local mode (use in-process ASGI transport).
+
+    Clears any associated cloud workspace.
 
     Example:
       bm project set-local research
@@ -547,6 +580,7 @@ def set_local(
         raise typer.Exit(1)
 
     config.set_project_mode(name, ProjectMode.LOCAL)
+    config.projects[name].workspace_id = None
     config_manager.save_config(config)
 
     console.print(f"[green]Project '{name}' set to local mode[/green]")
@@ -612,8 +646,7 @@ def ls_project_command(
         # Get project info
         async def _get_project():
             async with get_client() as client:
-                response = await call_get(client, "/v2/projects/")
-                projects_list = ProjectList.model_validate(response.json())
+                projects_list = await ProjectClient(client).list_projects()
                 for proj in projects_list.projects:
                     if generate_permalink(proj.name) == generate_permalink(name):
                         return proj

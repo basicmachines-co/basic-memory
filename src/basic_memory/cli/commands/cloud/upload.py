@@ -10,7 +10,6 @@ import httpx
 
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_put
 
 # Archive file extensions that should be skipped during upload
 ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
@@ -24,7 +23,7 @@ async def upload_path(
     dry_run: bool = False,
     *,
     client_cm_factory: Callable[[], AbstractAsyncContextManager[httpx.AsyncClient]] | None = None,
-    put_func=call_put,
+    put_func: Callable | None = None,
 ) -> bool:
     """
     Upload a file or directory to cloud project via WebDAV.
@@ -117,9 +116,20 @@ async def upload_path(
 
                     # Upload via HTTP PUT to WebDAV endpoint with mtime header
                     # Using X-OC-Mtime (ownCloud/Nextcloud standard)
-                    response = await put_func(
-                        client, remote_path, content=content, headers={"X-OC-Mtime": str(mtime)}
-                    )
+                    if put_func is not None:
+                        # Test injection path
+                        response = await put_func(
+                            client,
+                            remote_path,
+                            content=content,
+                            headers={"X-OC-Mtime": str(mtime)},
+                        )
+                    else:
+                        response = await client.put(
+                            remote_path,
+                            content=content,
+                            headers={"X-OC-Mtime": str(mtime)},
+                        )
                     response.raise_for_status()
 
         # Format total size based on magnitude

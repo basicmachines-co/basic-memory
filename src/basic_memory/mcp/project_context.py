@@ -19,7 +19,7 @@ from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
 from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
@@ -346,6 +346,35 @@ def add_project_metadata(result: str, project_name: str) -> str:
     return f"{result}\n\n[Session: Using project '{project_name}']"
 
 
+def detect_project_from_url_prefix(identifier: str, config: BasicMemoryConfig) -> Optional[str]:
+    """Check if a memory URL's first path segment matches a known project in config.
+
+    This enables automatic project routing from memory URLs like
+    ``memory://specs/in-progress`` without requiring the caller to pass
+    an explicit ``project`` parameter.
+
+    Uses local config only — no network calls.
+
+    Args:
+        identifier: Raw identifier string (may or may not start with ``memory://``).
+        config: Current BasicMemoryConfig with project entries.
+
+    Returns:
+        Matching project name from config, or None if no match.
+    """
+    path = memory_url_path(identifier) if identifier.strip().startswith("memory://") else identifier
+    normalized = normalize_project_reference(path)
+    prefix, _ = _split_project_prefix(normalized)
+    if prefix is None:
+        return None
+
+    prefix_permalink = generate_permalink(prefix)
+    for project_name in config.projects:
+        if generate_permalink(project_name) == prefix_permalink:
+            return project_name
+    return None
+
+
 @asynccontextmanager
 async def get_project_client(
     project: Optional[str] = None,
@@ -359,6 +388,20 @@ async def get_project_client(
     the project. This helper resolves the project from config first (no
     network), creates the correctly-routed client, then validates via API.
 
+    Routing decision order:
+    1. Explicit --local/--cloud flags → skip workspace, use flag routing
+    2. Cloud routing (explicit --cloud OR project mode CLOUD) →
+       resolve workspace via priority chain, create cloud client
+    3. Otherwise → local ASGI client
+
+    Workspace resolution priority (when cloud routing):
+    1. Explicit ``workspace`` parameter
+    2. Per-project ``workspace_id`` from config
+    3. Global ``default_workspace`` from config
+    4. MCP session cache (context)
+    5. Auto-select if single workspace
+    6. Error listing choices
+
     Args:
         project: Optional explicit project parameter
         workspace: Optional cloud workspace selector (tenant_id or unique name)
@@ -371,8 +414,12 @@ async def get_project_client(
         ValueError: If no project can be resolved
         RuntimeError: If cloud project but no API key configured
     """
-    # Deferred import to avoid circular dependency
-    from basic_memory.mcp.async_client import get_client
+    # Deferred imports to avoid circular dependency
+    from basic_memory.mcp.async_client import (
+        _explicit_routing,
+        _force_local_mode,
+        get_client,
+    )
 
     # Step 1: Resolve project name from config (no network call)
     resolved_project = await resolve_project_parameter(project)
@@ -386,28 +433,64 @@ async def get_project_client(
                 f"Available projects: {project_names}"
             )
 
-    # Step 2: Resolve project mode and optional workspace selection
+    # Step 2: Check explicit routing BEFORE workspace resolution
+    # Trigger: CLI passed --local or --cloud
+    # Why: explicit flags must be deterministic — skip workspace entirely for --local
+    # Outcome: route strictly based on explicit flag, no workspace network calls
+    if _explicit_routing() and _force_local_mode():
+        async with get_client(project_name=resolved_project) as client:
+            active_project = await get_active_project(client, resolved_project, context)
+            yield client, active_project
+        return
+
+    # Step 3: Determine if cloud routing is needed
     config = ConfigManager().config
     project_mode = config.get_project_mode(resolved_project)
-    active_workspace: WorkspaceInfo | None = None
 
-    # Trigger: workspace provided for a local project
+    # Trigger: workspace provided for a local project (without explicit --cloud)
     # Why: workspace selection is a cloud routing concern only
     # Outcome: fail fast with a deterministic guidance message
-    if project_mode != ProjectMode.CLOUD and workspace is not None:
+    if project_mode != ProjectMode.CLOUD and workspace is not None and not _explicit_routing():
         raise ValueError(
             f"Workspace '{workspace}' cannot be used with local project '{resolved_project}'. "
             "Workspace selection is only supported for cloud-mode projects."
         )
 
-    if project_mode == ProjectMode.CLOUD:
-        active_workspace = await resolve_workspace_parameter(workspace=workspace, context=context)
+    if project_mode == ProjectMode.CLOUD or (_explicit_routing() and not _force_local_mode()):
+        # --- Cloud routing: resolve workspace with priority chain ---
+        effective_workspace = workspace
+        project_entry = config.projects.get(resolved_project)
 
-    # Step 2: Create client routed based on project's mode
-    async with get_client(
-        project_name=resolved_project,
-        workspace=active_workspace.tenant_id if active_workspace else None,
-    ) as client:
-        # Step 3: Validate project exists via API
+        # Priority 2: per-project workspace_id from config
+        if effective_workspace is None and project_entry and project_entry.workspace_id:
+            effective_workspace = project_entry.workspace_id
+
+        # Priority 3: global default_workspace from config
+        if effective_workspace is None and config.default_workspace:
+            effective_workspace = config.default_workspace
+
+        # Priorities 4-6: if still unresolved, fall back to resolve_workspace_parameter
+        # which checks context cache, auto-selects single workspace, or errors
+        if effective_workspace is not None:
+            # Config-resolved workspace — pass directly to get_client, skip network lookup
+            async with get_client(
+                project_name=resolved_project,
+                workspace=effective_workspace,
+            ) as client:
+                active_project = await get_active_project(client, resolved_project, context)
+                yield client, active_project
+        else:
+            # No config-based workspace — use resolve_workspace_parameter for discovery
+            active_ws = await resolve_workspace_parameter(workspace=None, context=context)
+            async with get_client(
+                project_name=resolved_project,
+                workspace=active_ws.tenant_id,
+            ) as client:
+                active_project = await get_active_project(client, resolved_project, context)
+                yield client, active_project
+        return
+
+    # Step 4: Local routing (default)
+    async with get_client(project_name=resolved_project) as client:
         active_project = await get_active_project(client, resolved_project, context)
         yield client, active_project

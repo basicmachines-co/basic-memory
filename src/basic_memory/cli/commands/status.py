@@ -14,7 +14,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_post
+from basic_memory.mcp.clients import ProjectClient
 from basic_memory.schemas import SyncReportResponse
 from basic_memory.mcp.project_context import get_active_project
 
@@ -149,8 +149,7 @@ async def run_status(project: Optional[str] = None, verbose: bool = False):  # p
     try:
         async with get_client(project_name=project) as client:
             project_item = await get_active_project(client, project, None)
-            response = await call_post(client, f"/v2/projects/{project_item.external_id}/status")
-            sync_report = SyncReportResponse.model_validate(response.json())
+            sync_report = await ProjectClient(client).get_status(project_item.external_id)
 
             display_changes(project_item.name, "Status", sync_report, verbose)
 

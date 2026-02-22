@@ -154,3 +154,112 @@ class TestSetLocal:
         result = runner.invoke(app, ["project", "set-local", "main"])
         assert result.exit_code == 0
         assert "local mode" in result.stdout.lower()
+
+    def test_set_local_clears_workspace_id(self, runner, mock_config):
+        """Test that set-local clears workspace_id from the project entry."""
+        from basic_memory import config as config_module
+
+        # Manually set workspace_id on the project
+        config_module._CONFIG_CACHE = None
+        config_data = json.loads(mock_config.read_text())
+        config_data["projects"]["research"]["mode"] = "cloud"
+        config_data["projects"]["research"]["workspace_id"] = "11111111-1111-1111-1111-111111111111"
+        mock_config.write_text(json.dumps(config_data, indent=2))
+        config_module._CONFIG_CACHE = None
+
+        # Set back to local
+        result = runner.invoke(app, ["project", "set-local", "research"])
+        assert result.exit_code == 0
+
+        # Verify workspace_id was cleared
+        config_module._CONFIG_CACHE = None
+        updated_data = json.loads(mock_config.read_text())
+        assert updated_data["projects"]["research"]["workspace_id"] is None
+        assert updated_data["projects"]["research"]["mode"] == "local"
+
+
+class TestSetCloudWithWorkspace:
+    """Tests for 'bm project set-cloud --workspace' option."""
+
+    def test_set_cloud_with_workspace_stores_workspace_id(self, runner, mock_config, monkeypatch):
+        """Test that --workspace resolves to tenant_id and stores it."""
+        from basic_memory import config as config_module
+        from basic_memory.schemas.cloud import WorkspaceInfo
+
+        config_module._CONFIG_CACHE = None
+
+        async def fake_get_available_workspaces():
+            return [
+                WorkspaceInfo(
+                    tenant_id="11111111-1111-1111-1111-111111111111",
+                    workspace_type="personal",
+                    name="Personal",
+                    role="owner",
+                ),
+            ]
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.get_available_workspaces",
+            fake_get_available_workspaces,
+        )
+
+        result = runner.invoke(app, ["project", "set-cloud", "research", "--workspace", "Personal"])
+        assert result.exit_code == 0
+        assert "cloud mode" in result.stdout.lower()
+        assert "11111111-1111-1111-1111-111111111111" in result.stdout
+
+        # Verify workspace_id was persisted
+        config_module._CONFIG_CACHE = None
+        updated_data = json.loads(mock_config.read_text())
+        assert (
+            updated_data["projects"]["research"]["workspace_id"]
+            == "11111111-1111-1111-1111-111111111111"
+        )
+
+    def test_set_cloud_with_workspace_not_found(self, runner, mock_config, monkeypatch):
+        """Test --workspace with unknown workspace name."""
+        from basic_memory import config as config_module
+        from basic_memory.schemas.cloud import WorkspaceInfo
+
+        config_module._CONFIG_CACHE = None
+
+        async def fake_get_available_workspaces():
+            return [
+                WorkspaceInfo(
+                    tenant_id="11111111-1111-1111-1111-111111111111",
+                    workspace_type="personal",
+                    name="Personal",
+                    role="owner",
+                ),
+            ]
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.get_available_workspaces",
+            fake_get_available_workspaces,
+        )
+
+        result = runner.invoke(
+            app, ["project", "set-cloud", "research", "--workspace", "Nonexistent"]
+        )
+        assert result.exit_code == 1
+        assert "not found" in result.stdout.lower()
+
+    def test_set_cloud_uses_default_workspace_when_no_flag(self, runner, mock_config, monkeypatch):
+        """Test that set-cloud uses default_workspace when --workspace is not passed."""
+        from basic_memory import config as config_module
+
+        config_module._CONFIG_CACHE = None
+
+        # Set default_workspace in config
+        config_data = json.loads(mock_config.read_text())
+        config_data["default_workspace"] = "global-default-tenant-id"
+        mock_config.write_text(json.dumps(config_data, indent=2))
+        config_module._CONFIG_CACHE = None
+
+        result = runner.invoke(app, ["project", "set-cloud", "research"])
+        assert result.exit_code == 0
+
+        # Verify workspace_id was set from default
+        config_module._CONFIG_CACHE = None
+        updated_data = json.loads(mock_config.read_text())
+        assert updated_data["projects"]["research"]["workspace_id"] == "global-default-tenant-id"

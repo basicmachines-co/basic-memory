@@ -274,3 +274,158 @@ async def test_get_project_client_rejects_workspace_for_local_project():
     ):
         async with get_project_client(project="main", workspace="tenant-123"):
             pass
+
+
+class TestDetectProjectFromUrlPrefix:
+    """Test detect_project_from_url_prefix for URL-based project detection."""
+
+    def test_detects_project_from_memory_url(self, config_manager):
+        from basic_memory.mcp.project_context import detect_project_from_url_prefix
+
+        config = config_manager.load_config()
+        # The config has "test-project" from the conftest fixture
+        result = detect_project_from_url_prefix("memory://test-project/some-note", config)
+        assert result == "test-project"
+
+    def test_detects_project_from_plain_path(self, config_manager):
+        from basic_memory.mcp.project_context import detect_project_from_url_prefix
+
+        config = config_manager.load_config()
+        result = detect_project_from_url_prefix("test-project/some-note", config)
+        assert result == "test-project"
+
+    def test_returns_none_for_unknown_prefix(self, config_manager):
+        from basic_memory.mcp.project_context import detect_project_from_url_prefix
+
+        config = config_manager.load_config()
+        result = detect_project_from_url_prefix("memory://unknown-project/note", config)
+        assert result is None
+
+    def test_returns_none_for_no_slash(self, config_manager):
+        from basic_memory.mcp.project_context import detect_project_from_url_prefix
+
+        config = config_manager.load_config()
+        result = detect_project_from_url_prefix("memory://single-segment", config)
+        assert result is None
+
+    def test_returns_none_for_wildcard_prefix(self, config_manager):
+        from basic_memory.mcp.project_context import detect_project_from_url_prefix
+
+        config = config_manager.load_config()
+        result = detect_project_from_url_prefix("memory://*/notes", config)
+        assert result is None
+
+    def test_matches_case_insensitive_via_permalink(self, config_manager):
+        from basic_memory.mcp.project_context import detect_project_from_url_prefix
+        from basic_memory.config import ProjectEntry
+
+        config = config_manager.load_config()
+        (config_manager.config_dir.parent / "My Research").mkdir(parents=True, exist_ok=True)
+        config.projects["My Research"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "My Research")
+        )
+        config_manager.save_config(config)
+
+        result = detect_project_from_url_prefix("memory://my-research/notes", config)
+        assert result == "My Research"
+
+
+class TestGetProjectClientRoutingOrder:
+    """Test that get_project_client respects explicit routing before workspace resolution."""
+
+    @pytest.mark.asyncio
+    async def test_local_flag_skips_workspace_resolution(self, config_manager, monkeypatch):
+        """--local flag should never trigger workspace resolution, even for cloud projects."""
+        from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.config import ProjectEntry, ProjectMode
+
+        config = config_manager.load_config()
+        config.projects["cloud-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "cloud-proj"),
+            mode=ProjectMode.CLOUD,
+        )
+        config_manager.save_config(config)
+
+        # Set explicit local routing
+        monkeypatch.setenv("BASIC_MEMORY_EXPLICIT_ROUTING", "true")
+        monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
+        monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
+
+        # Should not raise "Multiple workspaces" — it should skip workspace entirely
+        # It will fail at project validation (no API running), which proves routing worked
+        with pytest.raises(Exception) as exc_info:
+            async with get_project_client(project="cloud-proj"):
+                pass
+
+        # The error should NOT be about workspaces
+        assert "workspace" not in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_cloud_project_uses_per_project_workspace_id(self, config_manager, monkeypatch):
+        """Cloud project with workspace_id in config should use it without network lookup."""
+        from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.config import ProjectEntry, ProjectMode
+
+        config = config_manager.load_config()
+        config.projects["cloud-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "cloud-proj"),
+            mode=ProjectMode.CLOUD,
+            workspace_id="per-project-tenant-id",
+        )
+        config.cloud_api_key = "bmc_test123"
+        config_manager.save_config(config)
+
+        # Patch resolve_workspace_parameter to fail if called — it should be skipped
+        async def fail_if_called(**kwargs):  # pragma: no cover
+            raise AssertionError(
+                "resolve_workspace_parameter should not be called when workspace_id is set"
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.resolve_workspace_parameter",
+            fail_if_called,
+        )
+
+        # Will fail at cloud client creation (no real cloud), but proves workspace
+        # resolution was skipped
+        with pytest.raises(Exception) as exc_info:
+            async with get_project_client(project="cloud-proj"):
+                pass
+
+        # Should not be a workspace resolution error
+        error_msg = str(exc_info.value).lower()
+        assert "resolve_workspace_parameter should not be called" not in error_msg
+
+    @pytest.mark.asyncio
+    async def test_cloud_project_uses_default_workspace(self, config_manager, monkeypatch):
+        """Cloud project without workspace_id should fall back to default_workspace."""
+        from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.config import ProjectEntry, ProjectMode
+
+        config = config_manager.load_config()
+        config.projects["cloud-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "cloud-proj"),
+            mode=ProjectMode.CLOUD,
+        )
+        config.default_workspace = "global-default-tenant-id"
+        config.cloud_api_key = "bmc_test123"
+        config_manager.save_config(config)
+
+        # Patch resolve_workspace_parameter to fail if called — it should be skipped
+        async def fail_if_called(**kwargs):  # pragma: no cover
+            raise AssertionError(
+                "resolve_workspace_parameter should not be called when default_workspace is set"
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.resolve_workspace_parameter",
+            fail_if_called,
+        )
+
+        # Will fail at cloud client creation, but proves workspace resolution was skipped
+        with pytest.raises(Exception) as exc_info:
+            async with get_project_client(project="cloud-proj"):
+                pass
+
+        error_msg = str(exc_info.value).lower()
+        assert "resolve_workspace_parameter should not be called" not in error_msg

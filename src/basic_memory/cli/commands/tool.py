@@ -17,6 +17,8 @@ from basic_memory.cli.commands.routing import force_routing, validate_routing_fl
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.tools import build_context as mcp_build_context
 from basic_memory.mcp.tools import edit_note as mcp_edit_note
+from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
+from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
 from basic_memory.mcp.tools import read_note as mcp_read_note
 from basic_memory.mcp.tools import recent_activity as mcp_recent_activity
 from basic_memory.mcp.tools import schema_diff as mcp_schema_diff
@@ -541,6 +543,72 @@ def search_notes(
         if not isinstance(e, typer.Exit):
             logger.exception("Error during search", e)
             typer.echo(f"Error during search: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+# --- list-projects ---
+
+
+@tool_app.command("list-projects")
+def list_projects(
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """List all available projects with their status (JSON output).
+
+    Examples:
+
+    bm tool list-projects
+    bm tool list-projects --local
+    """
+    try:
+        validate_routing_flags(local, cloud)
+
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(mcp_list_projects(output_format="json"))
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during list_projects: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+# --- list-workspaces ---
+
+
+@tool_app.command("list-workspaces")
+def list_workspaces(
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """List available cloud workspaces (JSON output).
+
+    Examples:
+
+    bm tool list-workspaces
+    bm tool list-workspaces --cloud
+    """
+    try:
+        validate_routing_flags(local, cloud)
+
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(mcp_list_workspaces(output_format="json"))
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during list_workspaces: {e}", err=True)
             raise typer.Exit(1)
         raise
 

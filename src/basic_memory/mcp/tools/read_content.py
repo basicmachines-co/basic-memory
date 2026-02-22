@@ -15,7 +15,12 @@ from PIL import Image as PILImage
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.config import ConfigManager
+from basic_memory.mcp.project_context import (
+    detect_project_from_url_prefix,
+    get_project_client,
+    resolve_project_and_path,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
 from basic_memory.schemas.memory import memory_url_path
@@ -205,6 +210,12 @@ async def read_content(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If path attempts path traversal
     """
+    # Detect project from memory URL prefix before routing
+    if project is None:
+        detected = detect_project_from_url_prefix(path, ConfigManager().config)
+        if detected:
+            project = detected
+
     logger.info("Reading file", path=path, project=project)
 
     async with get_project_client(project, workspace, context) as (client, active_project):

@@ -11,9 +11,8 @@ from rich.console import Console
 from basic_memory import db
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
-from basic_memory.mcp.tools.utils import call_post, call_get
+from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.project_context import get_active_project
-from basic_memory.schemas import ProjectInfoResponse
 
 console = Console()
 
@@ -61,16 +60,12 @@ async def run_sync(
     try:
         async with get_client(project_name=project) as client:
             project_item = await get_active_project(client, project, None)
-            url = f"/v2/projects/{project_item.external_id}/sync"
-            params = []
-            if force_full:
-                params.append("force_full=true")
-            if not run_in_background:
-                params.append("run_in_background=false")
-            if params:
-                url += "?" + "&".join(params)
-            response = await call_post(client, url)
-            data = response.json()
+            project_client = ProjectClient(client)
+            data = await project_client.sync(
+                project_item.external_id,
+                force_full=force_full,
+                run_in_background=run_in_background,
+            )
             # Background mode returns {"message": "..."}, foreground returns SyncReportResponse
             if "message" in data:
                 console.print(f"[green]{data['message']}[/green]")
@@ -94,8 +89,7 @@ async def get_project_info(project: str):
     try:
         async with get_client(project_name=project) as client:
             project_item = await get_active_project(client, project, None)
-            response = await call_get(client, f"/v2/projects/{project_item.external_id}/info")
-            return ProjectInfoResponse.model_validate(response.json())
+            return await ProjectClient(client).get_info(project_item.external_id)
     except (ToolError, ValueError) as e:
         error_text = str(e)
         if "internal proxy error" in error_text.lower() and "not found in configuration" in (

@@ -8,7 +8,12 @@ import yaml
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.config import ConfigManager
+from basic_memory.mcp.project_context import (
+    detect_project_from_url_prefix,
+    get_project_client,
+    resolve_project_and_path,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.memory import memory_url_path
@@ -128,6 +133,12 @@ async def read_note(
         If the exact note isn't found, this tool provides helpful suggestions
         including related notes, search commands, and note creation templates.
     """
+    # Detect project from memory URL prefix before routing
+    if project is None:
+        detected = detect_project_from_url_prefix(identifier, ConfigManager().config)
+        if detected:
+            project = detected
+
     async with get_project_client(project, workspace, context) as (client, active_project):
         # Resolve identifier with project-prefix awareness for memory:// URLs
         _, entity_path, _ = await resolve_project_and_path(client, identifier, project, context)
