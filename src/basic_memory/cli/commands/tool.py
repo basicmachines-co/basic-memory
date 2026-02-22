@@ -14,7 +14,6 @@ from loguru import logger
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
-from basic_memory.config import ConfigManager
 from basic_memory.mcp.tools import build_context as mcp_build_context
 from basic_memory.mcp.tools import edit_note as mcp_edit_note
 from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
@@ -34,16 +33,6 @@ VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
 
 
 # --- Shared helpers ---
-
-
-def _resolve_project(config_manager: ConfigManager, project: Optional[str]) -> Optional[str]:
-    """Resolve project name from CLI arg or config default."""
-    if project is not None:
-        project_name, _ = config_manager.get_project(project)
-        if not project_name:
-            raise ValueError(f"No project found named: {project}")
-        return project_name
-    return config_manager.default_project
 
 
 def _print_json(result: Any) -> None:
@@ -108,9 +97,6 @@ def write_note(
             typer.echo("Empty content provided. Please provide non-empty content.", err=True)
             raise typer.Exit(1)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         assert content is not None
 
         with force_routing(local=local, cloud=cloud):
@@ -119,7 +105,7 @@ def write_note(
                     title=title,
                     content=content,
                     directory=folder,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     tags=tags,
                     output_format="json",
@@ -168,14 +154,11 @@ def read_note(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_read_note(
                     identifier=identifier,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     page=page,
                     page_size=page_size,
@@ -237,16 +220,13 @@ def edit_note(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_edit_note(
                     identifier=identifier,
                     operation=operation,
                     content=content,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     section=section,
                     find_text=find_text,
@@ -304,14 +284,11 @@ def build_context(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_build_context(
                     url=url,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     depth=depth,
                     timeframe=timeframe,
@@ -365,9 +342,6 @@ def recent_activity(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_recent_activity(
@@ -376,7 +350,7 @@ def recent_activity(
                     timeframe=timeframe if timeframe is not None else "7d",
                     page=page,
                     page_size=page_size,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     output_format="json",
                 )
@@ -460,9 +434,6 @@ def search_notes(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         mode_flags = [permalink, title, vector, hybrid]
         if sum(1 for enabled in mode_flags if enabled) > 1:  # pragma: no cover
             typer.echo(
@@ -515,7 +486,7 @@ def search_notes(
             result = run_with_cleanup(
                 mcp_search(
                     query=query or "",
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     search_type=search_type,
                     output_format="json",
@@ -649,9 +620,6 @@ def schema_validate(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         # Heuristic: if target contains / or ., treat as identifier; otherwise as note type
         note_type, identifier = None, None
         if target:
@@ -665,7 +633,7 @@ def schema_validate(
                 mcp_schema_validate(
                     note_type=note_type,
                     identifier=identifier,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     output_format="json",
                 )
@@ -717,15 +685,12 @@ def schema_infer(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_schema_infer(
                     note_type=entity_type,
                     threshold=threshold,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     output_format="json",
                 )
@@ -773,14 +738,11 @@ def schema_diff(
     try:
         validate_routing_flags(local, cloud)
 
-        config_manager = ConfigManager()
-        project_name = _resolve_project(config_manager, project)
-
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
                 mcp_schema_diff(
                     note_type=entity_type,
-                    project=project_name,
+                    project=project,
                     workspace=workspace,
                     output_format="json",
                 )

@@ -425,10 +425,12 @@ class BasicMemoryConfig(BaseSettings):
     def get_project_mode(self, project_name: str) -> ProjectMode:
         """Get the routing mode for a project.
 
-        Returns the per-project mode if set, otherwise LOCAL.
+        Returns the per-project mode if set.
+        Unknown projects (not in local config) default to CLOUD —
+        local projects are always registered in config.
         """
         entry = self.projects.get(project_name)
-        return entry.mode if entry else ProjectMode.LOCAL
+        return entry.mode if entry else ProjectMode.CLOUD
 
     def set_project_mode(self, project_name: str, mode: ProjectMode) -> None:
         """Set the routing mode for a project.

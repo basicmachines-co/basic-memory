@@ -5,7 +5,7 @@ Tests mock the MCP tool functions directly.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from typer.testing import CliRunner
 
@@ -79,28 +79,16 @@ SEARCH_RESULT = {
 }
 
 
-def _mock_config_manager():
-    """Create a mock ConfigManager that avoids reading real config."""
-    mock_cm = MagicMock()
-    mock_cm.config = MagicMock()
-    mock_cm.default_project = "test-project"
-    mock_cm.get_project.return_value = ("test-project", "/tmp/test")
-    return mock_cm
-
-
 # --- write-note ---
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_write_note",
     new_callable=AsyncMock,
     return_value=WRITE_NOTE_RESULT,
 )
-def test_write_note_json_output(mock_mcp_write, mock_config_cls):
+def test_write_note_json_output(mock_mcp_write):
     """write-note outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         [
@@ -125,16 +113,13 @@ def test_write_note_json_output(mock_mcp_write, mock_config_cls):
     assert mock_mcp_write.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_write_note",
     new_callable=AsyncMock,
     return_value=WRITE_NOTE_RESULT,
 )
-def test_write_note_with_tags(mock_mcp_write, mock_config_cls):
+def test_write_note_with_tags(mock_mcp_write):
     """write-note passes tags through to MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         [
@@ -160,16 +145,13 @@ def test_write_note_with_tags(mock_mcp_write, mock_config_cls):
 # --- read-note ---
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
-def test_read_note_json_output(mock_mcp_read, mock_config_cls):
+def test_read_note_json_output(mock_mcp_read):
     """read-note outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "read-note", "test-note"],
@@ -185,16 +167,13 @@ def test_read_note_json_output(mock_mcp_read, mock_config_cls):
     assert mock_mcp_read.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
-def test_read_note_workspace_passthrough(mock_mcp_read, mock_config_cls):
+def test_read_note_workspace_passthrough(mock_mcp_read):
     """read-note --workspace passes workspace through to the MCP tool call."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "read-note", "test-note", "--workspace", "tenant-123"],
@@ -204,16 +183,13 @@ def test_read_note_workspace_passthrough(mock_mcp_read, mock_config_cls):
     assert mock_mcp_read.call_args.kwargs["workspace"] == "tenant-123"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
-def test_read_note_include_frontmatter(mock_mcp_read, mock_config_cls):
+def test_read_note_include_frontmatter(mock_mcp_read):
     """read-note --include-frontmatter passes flag through to MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "read-note", "test-note", "--include-frontmatter"],
@@ -223,16 +199,13 @@ def test_read_note_include_frontmatter(mock_mcp_read, mock_config_cls):
     assert mock_mcp_read.call_args.kwargs["include_frontmatter"] is True
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_read_note",
     new_callable=AsyncMock,
     return_value=READ_NOTE_RESULT,
 )
-def test_read_note_pagination(mock_mcp_read, mock_config_cls):
+def test_read_note_pagination(mock_mcp_read):
     """read-note --page and --page-size are passed through."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "read-note", "test-note", "--page", "2", "--page-size", "5"],
@@ -246,16 +219,13 @@ def test_read_note_pagination(mock_mcp_read, mock_config_cls):
 # --- edit-note ---
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_edit_note",
     new_callable=AsyncMock,
     return_value=EDIT_NOTE_RESULT,
 )
-def test_edit_note_json_output(mock_mcp_edit, mock_config_cls):
+def test_edit_note_json_output(mock_mcp_edit):
     """edit-note outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         [
@@ -277,16 +247,13 @@ def test_edit_note_json_output(mock_mcp_edit, mock_config_cls):
     assert mock_mcp_edit.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_edit_note",
     new_callable=AsyncMock,
     return_value={"title": "Test", "permalink": "test", "error": "Edit failed: not found"},
 )
-def test_edit_note_error_response(mock_mcp_edit, mock_config_cls):
+def test_edit_note_error_response(mock_mcp_edit):
     """edit-note exits with code 1 when MCP tool returns error field."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         [
@@ -306,16 +273,13 @@ def test_edit_note_error_response(mock_mcp_edit, mock_config_cls):
 # --- build-context ---
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
-def test_build_context_json_output(mock_build_ctx, mock_config_cls):
+def test_build_context_json_output(mock_build_ctx):
     """build-context outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "build-context", "memory://test/topic"],
@@ -328,16 +292,13 @@ def test_build_context_json_output(mock_build_ctx, mock_config_cls):
     assert mock_build_ctx.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_build_context",
     new_callable=AsyncMock,
     return_value=BUILD_CONTEXT_RESULT,
 )
-def test_build_context_with_options(mock_build_ctx, mock_config_cls):
+def test_build_context_with_options(mock_build_ctx):
     """build-context passes depth, timeframe, pagination through."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         [
@@ -366,16 +327,13 @@ def test_build_context_with_options(mock_build_ctx, mock_config_cls):
 # --- recent-activity ---
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_recent_activity",
     new_callable=AsyncMock,
     return_value=RECENT_ACTIVITY_RESULT,
 )
-def test_recent_activity_json_output(mock_mcp_recent, mock_config_cls):
+def test_recent_activity_json_output(mock_mcp_recent):
     """recent-activity outputs valid JSON list from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "recent-activity"],
@@ -391,16 +349,13 @@ def test_recent_activity_json_output(mock_mcp_recent, mock_config_cls):
     assert mock_mcp_recent.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_recent_activity",
     new_callable=AsyncMock,
     return_value=RECENT_ACTIVITY_RESULT,
 )
-def test_recent_activity_pagination(mock_mcp_recent, mock_config_cls):
+def test_recent_activity_pagination(mock_mcp_recent):
     """recent-activity passes --page and --page-size through."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "recent-activity", "--page", "2", "--page-size", "10"],
@@ -412,16 +367,13 @@ def test_recent_activity_pagination(mock_mcp_recent, mock_config_cls):
     assert kwargs["page_size"] == 10
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_recent_activity",
     new_callable=AsyncMock,
     return_value=[],
 )
-def test_recent_activity_empty(mock_mcp_recent, mock_config_cls):
+def test_recent_activity_empty(mock_mcp_recent):
     """recent-activity handles empty results."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "recent-activity"],
@@ -435,16 +387,13 @@ def test_recent_activity_empty(mock_mcp_recent, mock_config_cls):
 # --- search-notes ---
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_search",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
-def test_search_notes_json_output(mock_mcp_search, mock_config_cls):
+def test_search_notes_json_output(mock_mcp_search):
     """search-notes outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "search-notes", "test query"],
@@ -458,16 +407,13 @@ def test_search_notes_json_output(mock_mcp_search, mock_config_cls):
     assert mock_mcp_search.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_search",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
-def test_search_notes_with_meta_filter(mock_mcp_search, mock_config_cls):
+def test_search_notes_with_meta_filter(mock_mcp_search):
     """search-notes --meta key=value builds metadata filters."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "search-notes", "query", "--meta", "status=draft"],
@@ -477,16 +423,13 @@ def test_search_notes_with_meta_filter(mock_mcp_search, mock_config_cls):
     assert mock_mcp_search.call_args.kwargs["metadata_filters"] == {"status": "draft"}
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_search",
     new_callable=AsyncMock,
     return_value=SEARCH_RESULT,
 )
-def test_search_notes_permalink_mode(mock_mcp_search, mock_config_cls):
+def test_search_notes_permalink_mode(mock_mcp_search):
     """search-notes --permalink sets search_type."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "search-notes", "specs/*", "--permalink"],
@@ -496,57 +439,19 @@ def test_search_notes_permalink_mode(mock_mcp_search, mock_config_cls):
     assert mock_mcp_search.call_args.kwargs["search_type"] == "permalink"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_search",
     new_callable=AsyncMock,
     return_value="Error: search failed",
 )
-def test_search_notes_string_error(mock_mcp_search, mock_config_cls):
+def test_search_notes_string_error(mock_mcp_search):
     """search-notes exits with code 1 when MCP returns string error."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "search-notes", "query"],
     )
 
     assert result.exit_code == 1
-
-
-# --- Project resolution ---
-
-
-@patch("basic_memory.cli.commands.tool.ConfigManager")
-@patch(
-    "basic_memory.cli.commands.tool.mcp_write_note",
-    new_callable=AsyncMock,
-    return_value=WRITE_NOTE_RESULT,
-)
-def test_project_not_found_error(mock_mcp_write, mock_config_cls):
-    """Commands exit with error when specified project doesn't exist."""
-    mock_cm = _mock_config_manager()
-    mock_cm.get_project.return_value = (None, None)
-    mock_config_cls.return_value = mock_cm
-
-    result = runner.invoke(
-        cli_app,
-        [
-            "tool",
-            "write-note",
-            "--title",
-            "Test",
-            "--folder",
-            "notes",
-            "--content",
-            "hello",
-            "--project",
-            "nonexistent",
-        ],
-    )
-
-    assert result.exit_code == 1
-    assert "No project found" in result.output
 
 
 # --- Routing flags ---
@@ -595,16 +500,13 @@ SCHEMA_VALIDATE_RESULT = {
 }
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_schema_validate",
     new_callable=AsyncMock,
     return_value=SCHEMA_VALIDATE_RESULT,
 )
-def test_schema_validate_json_output(mock_mcp, mock_config_cls):
+def test_schema_validate_json_output(mock_mcp):
     """schema-validate outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "schema-validate", "person"],
@@ -618,16 +520,13 @@ def test_schema_validate_json_output(mock_mcp, mock_config_cls):
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_schema_validate",
     new_callable=AsyncMock,
     return_value=SCHEMA_VALIDATE_RESULT,
 )
-def test_schema_validate_identifier_heuristic(mock_mcp, mock_config_cls):
+def test_schema_validate_identifier_heuristic(mock_mcp):
     """schema-validate treats target with / as identifier, not note_type."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "schema-validate", "people/alice.md"],
@@ -638,16 +537,13 @@ def test_schema_validate_identifier_heuristic(mock_mcp, mock_config_cls):
     assert mock_mcp.call_args.kwargs["note_type"] is None
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_schema_validate",
     new_callable=AsyncMock,
     return_value={"error": "No notes found of type 'person'"},
 )
-def test_schema_validate_error_response(mock_mcp, mock_config_cls):
+def test_schema_validate_error_response(mock_mcp):
     """schema-validate outputs error JSON when MCP returns error dict."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "schema-validate", "person"],
@@ -674,16 +570,13 @@ SCHEMA_INFER_RESULT = {
 }
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_schema_infer",
     new_callable=AsyncMock,
     return_value=SCHEMA_INFER_RESULT,
 )
-def test_schema_infer_json_output(mock_mcp, mock_config_cls):
+def test_schema_infer_json_output(mock_mcp):
     """schema-infer outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "schema-infer", "person"],
@@ -697,16 +590,13 @@ def test_schema_infer_json_output(mock_mcp, mock_config_cls):
     assert mock_mcp.call_args.kwargs["output_format"] == "json"
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_schema_infer",
     new_callable=AsyncMock,
     return_value=SCHEMA_INFER_RESULT,
 )
-def test_schema_infer_threshold_passthrough(mock_mcp, mock_config_cls):
+def test_schema_infer_threshold_passthrough(mock_mcp):
     """schema-infer passes --threshold through to MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "schema-infer", "person", "--threshold", "0.5"],
@@ -729,16 +619,13 @@ SCHEMA_DIFF_RESULT = {
 }
 
 
-@patch("basic_memory.cli.commands.tool.ConfigManager")
 @patch(
     "basic_memory.cli.commands.tool.mcp_schema_diff",
     new_callable=AsyncMock,
     return_value=SCHEMA_DIFF_RESULT,
 )
-def test_schema_diff_json_output(mock_mcp, mock_config_cls):
+def test_schema_diff_json_output(mock_mcp):
     """schema-diff outputs valid JSON from MCP tool."""
-    mock_config_cls.return_value = _mock_config_manager()
-
     result = runner.invoke(
         cli_app,
         ["tool", "schema-diff", "person"],

@@ -445,6 +445,7 @@ async def get_project_client(
 
     # Step 3: Determine if cloud routing is needed
     config = ConfigManager().config
+    project_entry = config.projects.get(resolved_project)
     project_mode = config.get_project_mode(resolved_project)
 
     # Trigger: workspace provided for a local project (without explicit --cloud)
@@ -459,7 +460,6 @@ async def get_project_client(
     if project_mode == ProjectMode.CLOUD or (_explicit_routing() and not _force_local_mode()):
         # --- Cloud routing: resolve workspace with priority chain ---
         effective_workspace = workspace
-        project_entry = config.projects.get(resolved_project)
 
         # Priority 2: per-project workspace_id from config
         if effective_workspace is None and project_entry and project_entry.workspace_id:

@@ -830,10 +830,14 @@ class TestProjectMode:
         assert ProjectMode.LOCAL.value == "local"
         assert ProjectMode.CLOUD.value == "cloud"
 
-    def test_get_project_mode_defaults_to_local(self):
-        """Test that unknown projects default to LOCAL mode."""
+    def test_get_project_mode_defaults_to_cloud(self):
+        """Test that unknown projects default to CLOUD mode.
+
+        Unknown projects are not registered in local config, so they
+        are assumed to be cloud-only projects discovered from the API.
+        """
         config = BasicMemoryConfig()
-        assert config.get_project_mode("nonexistent") == ProjectMode.LOCAL
+        assert config.get_project_mode("nonexistent") == ProjectMode.CLOUD
 
     def test_set_project_mode_cloud(self):
         """Test setting a project to cloud mode."""

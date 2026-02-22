@@ -128,6 +128,7 @@ async def test_get_client_local_project_uses_asgi_transport(config_manager):
     """Local-mode project uses ASGI transport even if API key exists."""
     cfg = config_manager.load_config()
     cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("main", ProjectMode.LOCAL)
     config_manager.save_config(cfg)
 
     async with get_client(project_name="main") as client:

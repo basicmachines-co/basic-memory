@@ -148,6 +148,7 @@ async def test_run_filters_cloud_projects_each_cycle(monkeypatch, tmp_path):
     config = BasicMemoryConfig(
         watch_project_reload_interval=1,
         projects={
+            "local-project": {"path": str(tmp_path / "local"), "mode": "local"},
             "cloud-project": {"path": str(tmp_path / "cloud"), "mode": "cloud"},
         },
     )
@@ -258,7 +259,12 @@ async def test_timer_task_cancelled_properly(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_new_project_addition_scenario(monkeypatch, tmp_path):
-    config = BasicMemoryConfig()
+    config = BasicMemoryConfig(
+        projects={
+            "existing": {"path": str(tmp_path / "existing"), "mode": "local"},
+            "new": {"path": str(tmp_path / "new"), "mode": "local"},
+        },
+    )
 
     initial_projects = [
         Project(id=1, name="existing", path=str(tmp_path / "existing"), permalink="existing")

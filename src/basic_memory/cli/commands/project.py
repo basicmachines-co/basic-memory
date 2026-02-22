@@ -161,13 +161,7 @@ def list_projects(
             else:
                 cli_route = ProjectMode.LOCAL.value
 
-            is_default = ""
-            if config.default_project == project_name:
-                is_default = "[X]"
-            if local_project is not None and local_project.is_default:
-                is_default = "[X]"
-            if cloud_project is not None and cloud_project.is_default:
-                is_default = "[X]"
+            is_default = "[X]" if config.default_project == project_name else ""
 
             has_sync = "[X]" if entry and entry.local_sync_path else ""
             mcp_stdio_target = "local" if local_project is not None else "n/a"
@@ -326,7 +320,16 @@ def remove_project(
         raise typer.Exit(1)
 
     async def _remove_project():
-        async with get_client() as client:
+        # Resolve workspace so cloud-only projects auto-route without --cloud
+        config = ConfigManager().config
+        entry = config.projects.get(name)
+        ws = None
+        if entry and entry.workspace_id:
+            ws = entry.workspace_id
+        elif config.default_workspace:
+            ws = config.default_workspace
+
+        async with get_client(project_name=name, workspace=ws) as client:
             project_client = ProjectClient(client)
             # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)
@@ -405,7 +408,16 @@ def set_default_project(
     """
 
     async def _set_default():
-        async with get_client() as client:
+        # Resolve workspace so cloud-only projects auto-route without flags
+        config = ConfigManager().config
+        entry = config.projects.get(name)
+        ws = None
+        if entry and entry.workspace_id:
+            ws = entry.workspace_id
+        elif config.default_workspace:
+            ws = config.default_workspace
+
+        async with get_client(project_name=name, workspace=ws) as client:
             project_client = ProjectClient(client)
             # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)

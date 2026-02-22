@@ -266,8 +266,15 @@ async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_project_client_rejects_workspace_for_local_project():
+async def test_get_project_client_rejects_workspace_for_local_project(config_manager):
     from basic_memory.mcp.project_context import get_project_client
+    from basic_memory.config import ProjectEntry
+
+    # Register "main" as a LOCAL project so get_project_mode returns LOCAL
+    config = config_manager.load_config()
+    (config_manager.config_dir.parent / "main").mkdir(parents=True, exist_ok=True)
+    config.projects["main"] = ProjectEntry(path=str(config_manager.config_dir.parent / "main"))
+    config_manager.save_config(config)
 
     with pytest.raises(
         ValueError, match="Workspace 'tenant-123' cannot be used with local project"
@@ -429,3 +436,42 @@ class TestGetProjectClientRoutingOrder:
 
         error_msg = str(exc_info.value).lower()
         assert "resolve_workspace_parameter should not be called" not in error_msg
+
+    @pytest.mark.asyncio
+    async def test_cloud_only_project_routes_to_cloud(self, config_manager, monkeypatch):
+        """Project NOT in local config should route to cloud (not default to LOCAL).
+
+        Cloud-only projects aren't registered in local config. The routing logic
+        should detect this and use CLOUD mode, falling back to default_workspace.
+        """
+        from basic_memory.mcp.project_context import get_project_client
+
+        config = config_manager.load_config()
+        # Do NOT add "cloud-only-proj" to config.projects — it's cloud-only
+        config.default_workspace = "global-default-tenant-id"
+        config.cloud_api_key = "bmc_test123"
+        config_manager.save_config(config)
+
+        # Patch resolve_workspace_parameter to fail if called — it should be skipped
+        # because default_workspace is set (priority 3)
+        async def fail_if_called(**kwargs):  # pragma: no cover
+            raise AssertionError(
+                "resolve_workspace_parameter should not be called when default_workspace is set"
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.resolve_workspace_parameter",
+            fail_if_called,
+        )
+
+        # Will fail at cloud client creation (no real cloud), but proves cloud routing
+        # was selected instead of local routing
+        with pytest.raises(Exception) as exc_info:
+            async with get_project_client(project="cloud-only-proj"):
+                pass
+
+        # The error should NOT be about workspace resolution or local routing
+        error_msg = str(exc_info.value).lower()
+        assert "resolve_workspace_parameter should not be called" not in error_msg
+        # Should not get a local ASGI routing error
+        assert "no project found" not in error_msg
