@@ -97,6 +97,8 @@ dev = [
     "pyright>=1.1.408",
     "pytest-testmon>=2.2.0",
     "ty>=0.0.18",
+    "cst-lsp>=0.1.3",
+    "libcst>=1.8.6",
 ]
 
 [tool.hatch.version]
@@ -115,6 +117,7 @@ ignore = ["test/"]
 defineConstant = { DEBUG = true }
 reportMissingImports = "error"
 reportMissingTypeStubs = false
+reportUnusedImport = "none"
 pythonVersion = "3.12"
 
 
