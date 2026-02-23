@@ -119,6 +119,7 @@ class SearchResult(BaseModel):
     entity: Optional[Permalink] = None
     permalink: Optional[str]
     content: Optional[str] = None
+    matched_chunk: Optional[str] = None
     file_path: str
 
     metadata: Optional[dict] = None

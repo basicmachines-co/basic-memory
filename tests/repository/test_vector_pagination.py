@@ -20,6 +20,7 @@ class FakeRow:
     id: int
     type: str = "entity"
     score: float = 0.0
+    matched_chunk_text: str | None = None
 
 
 class ConcreteSearchRepo(SearchRepositoryBase):
@@ -78,7 +79,13 @@ def _make_descending_vector_rows(count: int) -> list[dict]:
         # Similarity decreases linearly: 0.95, 0.94, 0.93, ...
         similarity = 0.95 - (i * 0.01)
         distance = (1.0 / similarity) - 1.0
-        rows.append({"chunk_key": f"entity:{i}:0", "best_distance": distance})
+        rows.append(
+            {
+                "chunk_key": f"entity:{i}:0",
+                "best_distance": distance,
+                "chunk_text": f"chunk text {i}",
+            }
+        )
     return rows
 
 

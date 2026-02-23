@@ -16,6 +16,7 @@ class FakeRow:
     id: int
     type: str = "entity"
     score: float = 0.0
+    matched_chunk_text: str | None = None
 
 
 class ConcreteSearchRepo(SearchRepositoryBase):
@@ -74,7 +75,13 @@ def _make_vector_rows(scores: list[float]) -> list[dict]:
     rows = []
     for i, score in enumerate(scores):
         distance = (1.0 / score) - 1.0
-        rows.append({"chunk_key": f"entity:{i}:0", "best_distance": distance})
+        rows.append(
+            {
+                "chunk_key": f"entity:{i}:0",
+                "best_distance": distance,
+                "chunk_text": f"chunk text for entity:{i}:0",
+            }
+        )
     return rows
 
 
@@ -257,3 +264,36 @@ async def test_per_query_min_similarity_tightens_threshold():
 
     assert len(results) == 1
     assert results[0].id == 0
+
+
+@pytest.mark.asyncio
+async def test_matched_chunk_text_populated_on_vector_results():
+    """Vector search results carry the matched chunk text from the best-matching chunk."""
+    repo = ConcreteSearchRepo()
+    repo._semantic_min_similarity = 0.0
+
+    fake_rows = _make_vector_rows([0.9, 0.7])
+
+    mock_embed = AsyncMock(return_value=[0.0] * 384)
+    repo._embedding_provider = type("EP", (), {"embed_query": mock_embed, "dimensions": 384})()
+
+    with (
+        patch(
+            "basic_memory.repository.search_repository_base.db.scoped_session", fake_scoped_session
+        ),
+        patch.object(repo, "_ensure_vector_tables", new_callable=AsyncMock),
+        patch.object(repo, "_prepare_vector_session", new_callable=AsyncMock),
+        patch.object(repo, "_run_vector_query", new_callable=AsyncMock, return_value=fake_rows),
+        patch.object(
+            repo,
+            "_fetch_search_index_rows_by_ids",
+            new_callable=AsyncMock,
+            return_value={i: FakeRow(id=i) for i in range(2)},
+        ),
+    ):
+        results = await repo._search_vector_only(**COMMON_SEARCH_KWARGS)
+
+    assert len(results) == 2
+    # Results are sorted by score descending, so id=0 (0.9) first, id=1 (0.7) second
+    assert results[0].matched_chunk_text == "chunk text for entity:0:0"
+    assert results[1].matched_chunk_text == "chunk text for entity:1:0"

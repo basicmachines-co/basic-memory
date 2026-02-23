@@ -424,7 +424,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     ORDER BY e.embedding <=> CAST(:query_embedding AS vector)
                     LIMIT :vector_k
                 )
-                SELECT c.entity_id, c.chunk_key, vector_matches.distance AS best_distance
+                SELECT c.entity_id, c.chunk_key, c.chunk_text, vector_matches.distance AS best_distance
                 FROM vector_matches
                 JOIN search_vector_chunks c ON c.id = vector_matches.chunk_id
                 WHERE c.project_id = :project_id

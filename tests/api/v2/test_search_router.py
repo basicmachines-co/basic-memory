@@ -1,11 +1,14 @@
 """Tests for v2 search router endpoints."""
 
+from datetime import datetime, timezone
+
 import pytest
 from httpx import AsyncClient
 from pathlib import Path
 
 from basic_memory.deps.services import get_search_service_v2_external
 from basic_memory.models import Project
+from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
@@ -428,3 +431,86 @@ async def test_search_has_more_false_on_last_page(
     assert response.status_code == 200
     data = response.json()
     assert data["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_search_result_includes_matched_chunk(
+    client: AsyncClient,
+    app,
+    v2_project_url: str,
+):
+    """matched_chunk field appears in search API JSON when set on SearchIndexRow."""
+    now = datetime.now(timezone.utc)
+    fake_row = SearchIndexRow(
+        project_id=1,
+        id=42,
+        type="entity",
+        file_path="notes/pricing.md",
+        created_at=now,
+        updated_at=now,
+        title="Pricing Notes",
+        permalink="notes/pricing",
+        content_snippet="# Pricing Notes\n\n- [pricing] Team plan is $9/mo per seat",
+        score=0.85,
+        matched_chunk_text="- [pricing] Team plan is $9/mo per seat",
+    )
+
+    class FakeSearchService:
+        async def search(self, *args, **kwargs):
+            return [fake_row]
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"search_text": "pricing"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) == 1
+    result = data["results"][0]
+    assert result["matched_chunk"] == "- [pricing] Team plan is $9/mo per seat"
+
+
+@pytest.mark.asyncio
+async def test_search_result_omits_matched_chunk_when_none(
+    client: AsyncClient,
+    app,
+    v2_project_url: str,
+):
+    """matched_chunk field is null when not set (FTS-only results)."""
+    now = datetime.now(timezone.utc)
+    fake_row = SearchIndexRow(
+        project_id=1,
+        id=43,
+        type="entity",
+        file_path="notes/general.md",
+        created_at=now,
+        updated_at=now,
+        title="General Notes",
+        permalink="notes/general",
+        content_snippet="# General Notes\n\nSome content here",
+        score=0.7,
+    )
+
+    class FakeSearchService:
+        async def search(self, *args, **kwargs):
+            return [fake_row]
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: FakeSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"search_text": "general"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) == 1
+    result = data["results"][0]
+    assert result["matched_chunk"] is None

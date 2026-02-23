@@ -34,6 +34,7 @@ class FakeRow:
     created_at: str | None = None
     updated_at: str | None = None
     project_id: int = 1
+    matched_chunk_text: str | None = None
 
 
 class ConcreteSearchRepo(SearchRepositoryBase):

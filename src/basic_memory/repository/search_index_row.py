@@ -38,6 +38,9 @@ class SearchIndexRow:
     to_id: Optional[int] = None  # relations
     relation_type: Optional[str] = None  # relations
 
+    # Matched chunk text from vector search (the actual content that matched the query)
+    matched_chunk_text: Optional[str] = None
+
     CONTENT_DISPLAY_LIMIT = 250
 
     @property

@@ -177,6 +177,7 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                 score=r.score,  # pyright: ignore
                 entity=entities[0].permalink if entities else None,
                 content=r.content,
+                matched_chunk=r.matched_chunk_text,
                 file_path=r.file_path,
                 metadata=r.metadata,
                 entity_id=entity_id,

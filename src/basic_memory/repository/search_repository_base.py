@@ -871,12 +871,14 @@ class SearchRepositoryBase(ABC):
 
         # Build per-search_index_row similarity scores from chunk-level results.
         # Each chunk_key encodes the search_index row type and id.
-        # Keep the best similarity per search_index row id.
+        # Keep the best similarity (and its chunk text) per search_index row id.
         similarity_by_si_id: dict[int, float] = {}
+        best_chunk_by_si_id: dict[int, str] = {}
         for row in vector_rows:
             chunk_key = row.get("chunk_key", "")
             distance = float(row["best_distance"])
             similarity = self._distance_to_similarity(distance)
+            chunk_text = row.get("chunk_text", "")
             try:
                 _, si_id = self._parse_chunk_key(chunk_key)
             except (ValueError, IndexError):
@@ -885,6 +887,7 @@ class SearchRepositoryBase(ABC):
             current = similarity_by_si_id.get(si_id)
             if current is None or similarity > current:
                 similarity_by_si_id[si_id] = similarity
+                best_chunk_by_si_id[si_id] = chunk_text
 
         if not similarity_by_si_id:
             return []
@@ -944,7 +947,13 @@ class SearchRepositoryBase(ABC):
             row = search_index_rows.get(si_id)
             if row is None:
                 continue
-            ranked_rows.append(replace(row, score=similarity))
+            ranked_rows.append(
+                replace(
+                    row,
+                    score=similarity,
+                    matched_chunk_text=best_chunk_by_si_id.get(si_id),
+                )
+            )
 
         ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
         return ranked_rows[offset : offset + limit]
