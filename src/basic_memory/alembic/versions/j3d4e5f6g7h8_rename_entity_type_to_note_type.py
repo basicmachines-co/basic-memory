@@ -22,7 +22,10 @@ def table_exists(connection, table_name: str) -> bool:
     """Check if a table exists (idempotent migration support)."""
     if connection.dialect.name == "postgresql":
         result = connection.execute(
-            text("SELECT 1 FROM information_schema.tables WHERE table_name = :table_name"),
+            text(
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_name = :table_name"
+            ),
             {"table_name": table_name},
         )
         return result.fetchone() is not None
