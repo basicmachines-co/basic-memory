@@ -94,6 +94,11 @@ class Entity(Base):
         onupdate=lambda: datetime.now().astimezone(),
     )
 
+    # Who created this entity (cloud user_profile_id UUID, null for local/CLI usage)
+    created_by: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)
+    # Who last modified this entity (cloud user_profile_id UUID, null for local/CLI usage)
+    last_updated_by: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)
+
     # Relationships
     project = relationship("Project", back_populates="entities")
     observations = relationship(

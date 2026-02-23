@@ -139,6 +139,10 @@ class EntityResponseV2(BaseModel):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
 
+    # User tracking (cloud only, null for local/CLI usage)
+    created_by: Optional[str] = Field(None, description="User profile ID of creator")
+    last_updated_by: Optional[str] = Field(None, description="User profile ID of last editor")
+
     # V2-specific metadata
     api_version: Literal["v2"] = Field(
         default="v2", description="API version (always 'v2' for this response)"

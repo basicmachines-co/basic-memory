@@ -833,3 +833,24 @@ async def test_delete_directory_v2_nested_structure(client: AsyncClient, v2_proj
     assert result.total_files == 2
     assert result.successful_deletes == 2
     assert result.failed_deletes == 0
+
+
+@pytest.mark.asyncio
+async def test_entity_response_includes_user_tracking_fields(
+    client: AsyncClient, v2_project_url
+):
+    """EntityResponseV2 includes created_by and last_updated_by fields (null for local)."""
+    entity_data = {
+        "title": "UserTrackingTest",
+        "directory": "test",
+        "content": "Test content",
+    }
+    response = await client.post(f"{v2_project_url}/knowledge/entities", json=entity_data)
+    assert response.status_code == 200
+
+    body = response.json()
+    # Fields should be present in the response (null for local/CLI usage)
+    assert "created_by" in body
+    assert "last_updated_by" in body
+    assert body["created_by"] is None
+    assert body["last_updated_by"] is None

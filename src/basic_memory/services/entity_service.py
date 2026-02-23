@@ -1,5 +1,6 @@
 """Service for managing entities in the database."""
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
@@ -68,6 +69,9 @@ class EntityService(BaseService[EntityModel]):
         self.search_service = search_service
         self.app_config = app_config
         self._project_permalink: Optional[str] = None
+        # Callable that returns the current user ID (cloud user_profile_id UUID as string).
+        # Default returns None for local/CLI usage. Cloud overrides this to read from UserContext.
+        self.get_user_id: Callable[[], Optional[str]] = lambda: None
 
     async def detect_file_path_conflicts(
         self, file_path: str, skip_check: bool = False
@@ -445,7 +449,12 @@ class EntityService(BaseService[EntityModel]):
             "updated_at": datetime.now().astimezone(),
         }
 
+        user_id = self.get_user_id()
+
         if existing:
+            # Preserve existing created_by; only update last_updated_by
+            if user_id is not None:
+                update_data["last_updated_by"] = user_id
             updated = await self.repository.update(existing.id, update_data)
             if not updated:
                 raise ValueError(f"Failed to update entity in database: {existing.id}")
@@ -454,6 +463,9 @@ class EntityService(BaseService[EntityModel]):
         create_data = dict(update_data)
         if external_id is not None:
             create_data["external_id"] = external_id
+        if user_id is not None:
+            create_data["created_by"] = user_id
+            create_data["last_updated_by"] = user_id
         return await self.repository.create(create_data)
 
     async def fast_edit_entity(
@@ -481,6 +493,10 @@ class EntityService(BaseService[EntityModel]):
             "checksum": checksum,
             "updated_at": datetime.now().astimezone(),
         }
+        user_id = self.get_user_id()
+        if user_id is not None:
+            update_data["last_updated_by"] = user_id
+
         content_markdown = None
         if has_frontmatter(new_content):
             content_frontmatter = parse_frontmatter(new_content)
@@ -611,6 +627,12 @@ class EntityService(BaseService[EntityModel]):
         # Mark as incomplete because we still need to add relations
         model.checksum = None
 
+        # Set user tracking fields for cloud usage
+        user_id = self.get_user_id()
+        if user_id is not None:
+            model.created_by = user_id
+            model.last_updated_by = user_id
+
         # Use UPSERT to handle conflicts cleanly
         try:
             return await self.repository.upsert_entity(model)
@@ -652,6 +674,11 @@ class EntityService(BaseService[EntityModel]):
 
         # checksum value is None == not finished with sync
         db_entity.checksum = None
+
+        # Set last_updated_by for cloud usage (preserve existing created_by)
+        user_id = self.get_user_id()
+        if user_id is not None:
+            db_entity.last_updated_by = user_id
 
         # update entity
         return await self.repository.update(

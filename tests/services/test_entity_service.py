@@ -2017,3 +2017,151 @@ async def test_create_or_update_entity_fuzzy_search_bug(
     assert "Original content for Node A" not in content_c, (
         "Node C.md should not contain Node A content"
     )
+
+
+# --- User Tracking (created_by / last_updated_by) ---
+
+
+@pytest.mark.asyncio
+async def test_created_by_null_by_default(entity_service: EntityService):
+    """created_by and last_updated_by are NULL when get_user_id returns None (local/CLI usage)."""
+    schema = EntitySchema(
+        title="Local Entity",
+        directory="test",
+        entity_type="note",
+    )
+    entity = await entity_service.create_entity(schema)
+    assert entity.created_by is None
+    assert entity.last_updated_by is None
+
+
+@pytest.mark.asyncio
+async def test_created_by_set_when_get_user_id_returns_value(entity_service: EntityService):
+    """created_by and last_updated_by are set when get_user_id returns a user ID."""
+    user_id = str(uuid.uuid4())
+    entity_service.get_user_id = lambda: user_id
+
+    schema = EntitySchema(
+        title="Cloud Entity",
+        directory="test",
+        entity_type="note",
+    )
+    entity = await entity_service.create_entity(schema)
+    assert entity.created_by == user_id
+    assert entity.last_updated_by == user_id
+
+
+@pytest.mark.asyncio
+async def test_update_preserves_created_by(entity_service: EntityService):
+    """Updating an entity preserves created_by and updates last_updated_by."""
+    creator_id = str(uuid.uuid4())
+    editor_id = str(uuid.uuid4())
+
+    # Create as creator
+    entity_service.get_user_id = lambda: creator_id
+    schema = EntitySchema(
+        title="Owned Entity",
+        directory="test",
+        entity_type="note",
+        content="Original content",
+    )
+    entity = await entity_service.create_entity(schema)
+    assert entity.created_by == creator_id
+
+    # Update as editor
+    entity_service.get_user_id = lambda: editor_id
+    update_schema = EntitySchema(
+        title="Owned Entity",
+        directory="test",
+        entity_type="note",
+        content="Updated content",
+    )
+    updated = await entity_service.update_entity(entity, update_schema)
+    assert updated.created_by == creator_id  # preserved
+    assert updated.last_updated_by == editor_id  # updated
+
+
+@pytest.mark.asyncio
+async def test_fast_write_entity_sets_user_tracking(entity_service: EntityService):
+    """fast_write_entity sets created_by and last_updated_by on create."""
+    user_id = str(uuid.uuid4())
+    entity_service.get_user_id = lambda: user_id
+
+    schema = EntitySchema(
+        title="Fast Write Tracked",
+        directory="test",
+        entity_type="note",
+    )
+    entity = await entity_service.fast_write_entity(schema, external_id=str(uuid.uuid4()))
+    assert entity.created_by == user_id
+    assert entity.last_updated_by == user_id
+
+
+@pytest.mark.asyncio
+async def test_fast_write_entity_update_preserves_created_by(entity_service: EntityService):
+    """fast_write_entity update path preserves created_by, sets last_updated_by."""
+    creator_id = str(uuid.uuid4())
+    editor_id = str(uuid.uuid4())
+    external_id = str(uuid.uuid4())
+
+    # Create
+    entity_service.get_user_id = lambda: creator_id
+    schema = EntitySchema(
+        title="Fast Write Update",
+        directory="test",
+        entity_type="note",
+    )
+    entity = await entity_service.fast_write_entity(schema, external_id=external_id)
+    assert entity.created_by == creator_id
+
+    # Update (same external_id triggers update path)
+    entity_service.get_user_id = lambda: editor_id
+    update_schema = EntitySchema(
+        title="Fast Write Update",
+        directory="test",
+        entity_type="note",
+        content="Updated",
+    )
+    updated = await entity_service.fast_write_entity(update_schema, external_id=external_id)
+    assert updated.created_by == creator_id  # preserved
+    assert updated.last_updated_by == editor_id  # updated
+
+
+@pytest.mark.asyncio
+async def test_fast_edit_entity_sets_last_updated_by(entity_service: EntityService):
+    """fast_edit_entity sets last_updated_by on edit."""
+    creator_id = str(uuid.uuid4())
+    editor_id = str(uuid.uuid4())
+
+    # Create entity first
+    entity_service.get_user_id = lambda: creator_id
+    schema = EntitySchema(
+        title="Fast Edit Tracked",
+        directory="test",
+        entity_type="note",
+        content="Original content",
+    )
+    entity = await entity_service.fast_write_entity(schema, external_id=str(uuid.uuid4()))
+
+    # Edit as different user
+    entity_service.get_user_id = lambda: editor_id
+    edited = await entity_service.fast_edit_entity(
+        entity=entity,
+        operation="append",
+        content="\nAppended content",
+    )
+    assert edited.created_by == creator_id  # preserved
+    assert edited.last_updated_by == editor_id  # updated
+
+
+@pytest.mark.asyncio
+async def test_fast_write_entity_null_user_id(entity_service: EntityService):
+    """fast_write_entity with default get_user_id (None) leaves tracking fields null."""
+    schema = EntitySchema(
+        title="No User Tracking",
+        directory="test",
+        entity_type="note",
+    )
+    entity = await entity_service.fast_write_entity(schema, external_id=str(uuid.uuid4()))
+    assert entity.created_by is None
+    assert entity.last_updated_by is None
