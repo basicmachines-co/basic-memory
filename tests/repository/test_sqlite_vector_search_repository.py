@@ -1,13 +1,15 @@
 """SQLite sqlite-vec search repository tests."""
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository, SQLITE_VEC_MAX_K
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -264,3 +266,55 @@ async def test_sqlite_hybrid_search_combines_fts_and_vector(search_repository):
 
     assert results
     assert any(result.permalink == "specs/search-index" for result in results)
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_k_capped_at_4096(search_repository):
+    """_run_vector_query never passes k > SQLITE_VEC_MAX_K to sqlite-vec.
+
+    Regression test for: k value in knn query too large when a project has
+    more than 4096 vector chunks. The candidate_limit derived from
+    (limit + offset) * 10 can easily exceed 4096 for large projects.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+
+    # Insert one row so _search_vector_only has something to query.
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=401,
+            entity_id=401,
+            title="Auth Design",
+            permalink="specs/auth-design-k-cap",
+            content_stems="auth token session login",
+        )
+    )
+    await search_repository.sync_entity_vectors(401)
+
+    # Track the actual k value passed to sqlite-vec by intercepting _run_vector_query.
+    captured_k: list[int] = []
+    original_run = search_repository._run_vector_query
+
+    async def capturing_run(session: AsyncSession, embedding: list[float], candidate_limit: int):
+        captured_k.append(candidate_limit)
+        return await original_run(session, embedding, candidate_limit)
+
+    search_repository._run_vector_query = capturing_run  # type: ignore[method-assign]
+
+    # Use limit=500, offset=0 → base candidate_limit = 500*10 = 5000, which exceeds 4096.
+    # The cap should reduce it to SQLITE_VEC_MAX_K before hitting sqlite-vec.
+    await search_repository.search(
+        search_text="auth token",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=500,
+        offset=0,
+    )
+
+    assert captured_k, "Expected _run_vector_query to be called"
+    assert all(
+        k <= SQLITE_VEC_MAX_K for k in captured_k
+    ), f"k exceeded SQLITE_VEC_MAX_K={SQLITE_VEC_MAX_K}: {captured_k}"

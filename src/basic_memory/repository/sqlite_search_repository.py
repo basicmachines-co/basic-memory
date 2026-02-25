@@ -28,6 +28,10 @@ from basic_memory.repository.metadata_filters import parse_metadata_filters, bui
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
+# sqlite-vec enforces a hard upper limit on the k parameter in knn queries.
+# Exceeding this limit raises OperationalError: k value in knn query too large.
+SQLITE_VEC_MAX_K = 4096
+
 
 class SQLiteSearchRepository(SearchRepositoryBase):
     """SQLite FTS5 implementation of search repository.
@@ -444,6 +448,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         query_embedding: list[float],
         candidate_limit: int,
     ) -> list[dict]:
+        # sqlite-vec rejects k values above SQLITE_VEC_MAX_K with an OperationalError.
+        # Cap here so large projects (>4096 chunks) don't crash vector search.
+        candidate_limit = min(candidate_limit, SQLITE_VEC_MAX_K)
         query_embedding_json = json.dumps(query_embedding)
         vector_result = await session.execute(
             text(
