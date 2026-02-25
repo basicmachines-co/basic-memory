@@ -20,6 +20,43 @@ def _capture_console() -> tuple[Console, StringIO]:
     return Console(file=buf, force_terminal=True), buf
 
 
+# --- _is_interactive_session tests ---
+
+
+def test_is_interactive_session_returns_false_on_closed_stdin(monkeypatch):
+    """isatty() raises ValueError when stdio is closed (e.g., MCP shutdown)."""
+    import sys
+
+    from basic_memory.cli.promo import _is_interactive_session
+
+    class _ClosedStdin:
+        def isatty(self):
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr(sys, "stdin", _ClosedStdin())
+    assert _is_interactive_session() is False
+
+
+def test_is_interactive_session_returns_false_on_closed_stdout(monkeypatch):
+    """isatty() raises ValueError on closed stdout (e.g., MCP shutdown)."""
+    import sys
+
+    from basic_memory.cli.promo import _is_interactive_session
+
+    class _ClosedStdout:
+        def isatty(self):
+            raise ValueError("I/O operation on closed file")
+
+    # stdin reports interactive, but stdout is closed
+    class _InteractiveStdin:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", _InteractiveStdin())
+    monkeypatch.setattr(sys, "stdout", _ClosedStdout())
+    assert _is_interactive_session() is False
+
+
 # --- maybe_show_init_line tests ---
 
 

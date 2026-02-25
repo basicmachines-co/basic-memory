@@ -24,7 +24,14 @@ def _promos_disabled_by_env() -> bool:
 
 def _is_interactive_session() -> bool:
     """Return whether stdin/stdout are interactive terminals."""
-    return sys.stdin.isatty() and sys.stdout.isatty()
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except ValueError:
+        # Trigger: stdin/stdout already closed (e.g., MCP stdio transport shutdown).
+        # Why: isatty() raises ValueError on closed file objects; treat as non-interactive
+        # so the promo is suppressed rather than crashing the shutdown path.
+        # Outcome: promo skipped for this invocation.
+        return False
 
 
 def _build_cloud_promo_message() -> str:
