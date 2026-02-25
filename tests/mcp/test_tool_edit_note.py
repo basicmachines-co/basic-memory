@@ -456,3 +456,40 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     assert f"permalink: {test_project.name}/test/test-note" in second_result
     assert f"[Session: Using project '{test_project.name}']" in second_result
     # The edit should succeed without validation errors
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_with_null_optional_fields(client, test_project):
+    """Regression test for issue #606: null optional fields should be silently ignored.
+
+    MCP clients may send explicit null values for unused optional fields (e.g.
+    find_text=null, section=null, expected_replacements=null).  Before this fix,
+    expected_replacements being typed as `int` caused FastMCP schema validation to
+    reject null, resulting in an "invalid payload" error even for simple append/prepend
+    operations that don't use those fields.
+    """
+    # Create initial note
+    await write_note(
+        project=test_project.name,
+        title="Null Fields Test",
+        directory="test",
+        content="# Null Fields Test\nOriginal content.",
+    )
+
+    # Simulate an MCP client that sends explicit null for all optional fields.
+    # expected_replacements=None (null), find_text=None, section=None should all be
+    # treated as absent rather than rejected.
+    result = await edit_note(
+        project=test_project.name,
+        identifier="test/null-fields-test",
+        operation="append",
+        content="\n## Appended Section\nContent added via null-field call.",
+        find_text=None,
+        section=None,
+        expected_replacements=None,
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (append)" in result
+    assert f"project: {test_project.name}" in result
+    assert "file_path: test/Null Fields Test.md" in result

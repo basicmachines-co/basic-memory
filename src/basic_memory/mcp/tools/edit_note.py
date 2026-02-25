@@ -135,7 +135,7 @@ async def edit_note(
     workspace: Optional[str] = None,
     section: Optional[str] = None,
     find_text: Optional[str] = None,
-    expected_replacements: int = 1,
+    expected_replacements: Optional[int] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
@@ -219,6 +219,10 @@ async def edit_note(
     async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
+        # Null optional fields are equivalent to absent — treat None as the default.
+        # This handles MCP clients that send explicit null values for unused optional fields.
+        effective_replacements = expected_replacements if expected_replacements is not None else 1
+
         # Validate operation
         valid_operations = ["append", "prepend", "find_replace", "replace_section"]
         if operation not in valid_operations:
@@ -254,8 +258,8 @@ async def edit_note(
                 edit_data["section"] = section
             if find_text:
                 edit_data["find_text"] = find_text
-            if expected_replacements != 1:  # Only send if different from default
-                edit_data["expected_replacements"] = str(expected_replacements)
+            if effective_replacements != 1:  # Only send if different from default
+                edit_data["expected_replacements"] = str(effective_replacements)
 
             # Call the PATCH endpoint
             result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
@@ -339,5 +343,5 @@ async def edit_note(
                     "error": str(e),
                 }
             return _format_error_response(
-                str(e), operation, identifier, find_text, expected_replacements, active_project.name
+                str(e), operation, identifier, find_text, effective_replacements, active_project.name
             )
