@@ -59,6 +59,7 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.12"
+            coverage: true
           - os: ubuntu-latest
             python-version: "3.13"
           - os: ubuntu-latest
@@ -92,18 +93,18 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests (SQLite Unit)
-        run: |
-          just test-unit-sqlite
-
-      # Collect coverage data on the Python 3.12 ubuntu run for the coverage summary job
-      - name: Run tests with coverage (SQLite Unit)
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Run tests with coverage
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.sqlite-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests
 
+      - name: Run tests
+        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
+        run: |
+          just test-unit-sqlite
+
       - name: Upload coverage data
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-sqlite-unit
@@ -120,6 +121,7 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.12"
+            coverage: true
           - os: ubuntu-latest
             python-version: "3.13"
           - os: ubuntu-latest
@@ -153,17 +155,18 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests (SQLite Integration)
-        run: |
-          just test-int-sqlite
-
-      - name: Run tests with coverage (SQLite Integration)
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Run tests with coverage
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.sqlite-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
 
+      - name: Run tests
+        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
+        run: |
+          just test-int-sqlite
+
       - name: Upload coverage data
-        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-sqlite-int
@@ -177,7 +180,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ "3.12", "3.13", "3.14" ]
+        include:
+          - python-version: "3.12"
+            coverage: true
+          - python-version: "3.13"
+          - python-version: "3.14"
     runs-on: ubuntu-latest
 
     # Note: No services section needed - testcontainers handles Postgres in Docker
@@ -207,17 +214,18 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests (Postgres Unit)
-        run: |
-          just test-unit-postgres
-
-      - name: Run tests with coverage (Postgres Unit)
-        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Run tests with coverage
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests' || test $? -eq 137
 
+      - name: Run tests
+        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
+        run: |
+          just test-unit-postgres
+
       - name: Upload coverage data
-        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-postgres-unit
@@ -232,7 +240,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ "3.12", "3.13", "3.14" ]
+        include:
+          - python-version: "3.12"
+            coverage: true
+          - python-version: "3.13"
+          - python-version: "3.14"
     runs-on: ubuntu-latest
 
     # Note: No services section needed - testcontainers handles Postgres in Docker
@@ -262,17 +274,18 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests (Postgres Integration)
-        run: |
-          just test-int-postgres
-
-      - name: Run tests with coverage (Postgres Integration)
-        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Run tests with coverage
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres test-int' || test $? -eq 137
 
+      - name: Run tests
+        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
+        run: |
+          just test-int-postgres
+
       - name: Upload coverage data
-        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-postgres-int
@@ -311,14 +324,15 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests (Semantic)
-        run: |
-          just test-semantic
-
-      - name: Run tests with coverage (Semantic)
+      - name: Run tests with coverage
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.semantic --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m semantic test-int/semantic/
+
+      - name: Run tests
+        if: "!(github.event_name == 'push' && github.ref == 'refs/heads/main')"
+        run: |
+          just test-semantic
 
       - name: Upload coverage data
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
