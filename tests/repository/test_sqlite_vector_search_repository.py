@@ -1,8 +1,7 @@
 """SQLite sqlite-vec search repository tests."""
 
-import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import text
@@ -284,7 +283,6 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository):
 
     # Track the parameters passed to session.execute
     captured_params: list[dict] = []
-    original_execute = None
 
     async def capturing_execute(stmt, params=None):
         if params and "vector_k" in params:
@@ -296,7 +294,6 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository):
 
     async with db.scoped_session(search_repository.session_maker) as session:
         await search_repository._prepare_vector_session(session)
-        original_execute = session.execute
         session.execute = capturing_execute
 
         query_embedding = [0.1] * search_repository._vector_dimensions

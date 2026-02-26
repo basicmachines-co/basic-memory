@@ -173,6 +173,7 @@ def validate(
         typer.Option(help="The project name."),
     ] = None,
     strict: bool = typer.Option(False, "--strict", help="Exit with error on validation failures"),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -183,6 +184,7 @@ def validate(
     TARGET can be a note path (e.g., people/ada-lovelace.md) or a note type
     (e.g., person). If omitted, validates all notes that have schemas.
 
+    Use --json for machine-readable output.
     Use --strict to exit with error code 1 if any validation errors are found.
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
@@ -211,12 +213,19 @@ def validate(
 
         # Handle error responses
         if isinstance(result, dict) and "error" in result:
-            console.print(f"[yellow]{result['error']}[/yellow]")
+            if json_output:
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                console.print(f"[yellow]{result['error']}[/yellow]")
             return
 
         # output_format="json" guarantees a dict return
         assert isinstance(result, dict)
-        _render_validate_table(result)
+
+        if json_output:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            _render_validate_table(result)
 
         if strict and result.get("error_count", 0) > 0:
             raise typer.Exit(1)
@@ -245,6 +254,7 @@ def infer(
         0.25, "--threshold", help="Minimum frequency for optional fields (0-1)"
     ),
     save: bool = typer.Option(False, "--save", help="Save inferred schema to schema/ directory"),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -258,6 +268,7 @@ def infer(
     Fields present in 95%+ of notes become required. Fields above the
     threshold (default 25%) become optional. Fields below threshold are excluded.
 
+    Use --json for machine-readable output.
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
@@ -277,7 +288,10 @@ def infer(
 
         # Handle error responses
         if isinstance(result, dict) and "error" in result:
-            console.print(f"[yellow]{result['error']}[/yellow]")
+            if json_output:
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                console.print(f"[yellow]{result['error']}[/yellow]")
             return
 
         # output_format="json" guarantees a dict return
@@ -285,10 +299,16 @@ def infer(
 
         # Handle zero notes
         if result.get("notes_analyzed", 0) == 0:
-            console.print(f"[yellow]No notes found with type: {note_type}[/yellow]")
+            if json_output:
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                console.print(f"[yellow]No notes found with type: {note_type}[/yellow]")
             return
 
-        _render_infer_table(result)
+        if json_output:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            _render_infer_table(result)
 
         if save:
             console.print(
@@ -316,6 +336,7 @@ def diff(
         Optional[str],
         typer.Option(help="The project name."),
     ] = None,
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -327,6 +348,7 @@ def diff(
     are actually structured. Identifies new fields,
     dropped fields, and cardinality changes.
 
+    Use --json for machine-readable output.
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """
@@ -345,12 +367,19 @@ def diff(
 
         # Handle error responses
         if isinstance(result, dict) and "error" in result:
-            console.print(f"[yellow]{result['error']}[/yellow]")
+            if json_output:
+                print(json.dumps(result, indent=2, default=str))
+            else:
+                console.print(f"[yellow]{result['error']}[/yellow]")
             return
 
         # output_format="json" guarantees a dict return
         assert isinstance(result, dict)
-        _render_diff_output(result)
+
+        if json_output:
+            print(json.dumps(result, indent=2, default=str))
+        else:
+            _render_diff_output(result)
     except ValueError as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)

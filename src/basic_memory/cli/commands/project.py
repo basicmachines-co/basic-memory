@@ -61,6 +61,7 @@ def list_projects(
     local: bool = typer.Option(False, "--local", help="Force local routing for this command"),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
     workspace: str = typer.Option(None, "--workspace", help="Cloud workspace name or tenant_id"),
+    json_output: bool = typer.Option(False, "--json", help="Output in JSON format"),
 ) -> None:
     """List Basic Memory projects from local and (when available) cloud."""
     try:
@@ -96,13 +97,9 @@ def list_projects(
 
             if _has_cloud_credentials(config):
                 try:
-                    with console.status(
-                        "[bold blue]Fetching cloud projects...", spinner="dots"
-                    ):
+                    with console.status("[bold blue]Fetching cloud projects...", spinner="dots"):
                         with force_routing(cloud=True):
-                            cloud_result = run_with_cleanup(
-                                _list_projects(effective_workspace)
-                            )
+                            cloud_result = run_with_cleanup(_list_projects(effective_workspace))
                 except Exception as exc:  # pragma: no cover
                     cloud_error = exc
 
@@ -113,9 +110,7 @@ def list_projects(
             try:
                 from basic_memory.mcp.project_context import get_available_workspaces
 
-                with console.status(
-                    "[bold blue]Resolving workspace...", spinner="dots"
-                ):
+                with console.status("[bold blue]Resolving workspace...", spinner="dots"):
                     workspaces = run_with_cleanup(get_available_workspaces())
                 matched = next(
                     (ws for ws in workspaces if ws.tenant_id == effective_workspace),
@@ -153,6 +148,8 @@ def list_projects(
                 project_names_by_permalink[permalink] = project.name
                 cloud_projects_by_permalink[permalink] = project
 
+        # --- Build unified project list ---
+        project_rows: list[dict] = []
         for permalink in sorted(project_names_by_permalink):
             project_name = project_names_by_permalink[permalink]
             local_project = local_projects_by_permalink.get(permalink)
@@ -182,9 +179,9 @@ def list_projects(
             else:
                 cli_route = ProjectMode.LOCAL.value
 
-            is_default = "[X]" if config.default_project == project_name else ""
+            is_default = config.default_project == project_name
 
-            has_sync = "[X]" if entry and entry.local_sync_path else ""
+            has_sync = bool(entry and entry.local_sync_path)
             mcp_stdio_target = "local" if local_project is not None else "n/a"
 
             # Show workspace name (type) for cloud-sourced projects
@@ -192,18 +189,41 @@ def list_projects(
             if cloud_project is not None and cloud_ws_name:
                 ws_label = f"{cloud_ws_name} ({cloud_ws_type})" if cloud_ws_type else cloud_ws_name
 
-            row = [
-                project_name,
-                local_path,
-                cloud_path,
-                ws_label,
-                cli_route,
-                mcp_stdio_target,
-                has_sync,
-                is_default,
-            ]
+            row_data = {
+                "name": project_name,
+                "permalink": permalink,
+                "local_path": local_path,
+                "cloud_path": cloud_path,
+                "cli_route": cli_route,
+                "mcp_stdio": mcp_stdio_target,
+                "sync": has_sync,
+                "is_default": is_default,
+            }
+            if ws_label:
+                row_data["workspace"] = cloud_ws_name or ""
+                if cloud_ws_type:
+                    row_data["workspace_type"] = cloud_ws_type
 
-            table.add_row(*row)
+            project_rows.append(row_data)
+
+        # --- JSON output ---
+        if json_output:
+            print(json.dumps({"projects": project_rows}, indent=2, default=str))
+            return
+
+        # --- Rich table output ---
+        for row_data in project_rows:
+            table.add_row(
+                row_data["name"],
+                row_data["local_path"],
+                row_data["cloud_path"],
+                row_data.get("workspace", "")
+                + (f" ({row_data['workspace_type']})" if row_data.get("workspace_type") else ""),
+                row_data["cli_route"],
+                row_data["mcp_stdio"],
+                "[X]" if row_data["sync"] else "",
+                "[X]" if row_data["is_default"] else "",
+            )
 
         console.print(table)
         if cloud_error is not None:
