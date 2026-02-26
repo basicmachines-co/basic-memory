@@ -23,6 +23,7 @@ class FakeRow:
     score: float = 0.0
     title: str = ""
     permalink: str = ""
+    content_snippet: str | None = None
     file_path: str = ""
     metadata: str | None = None
     from_id: int | None = None

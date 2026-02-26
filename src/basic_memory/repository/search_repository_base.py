@@ -29,6 +29,8 @@ FUSION_BONUS = 0.3
 FTS_GATE_THRESHOLD = 0.0
 MAX_VECTOR_CHUNK_CHARS = 900
 VECTOR_CHUNK_OVERLAP_CHARS = 120
+TOP_CHUNKS_PER_RESULT = 3
+SMALL_NOTE_CONTENT_LIMIT = 2000
 HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
 BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 
@@ -872,9 +874,9 @@ class SearchRepositoryBase(ABC):
 
         # Build per-search_index_row similarity scores from chunk-level results.
         # Each chunk_key encodes the search_index row type and id.
-        # Keep the best similarity (and its chunk text) per search_index row id.
+        # Track the best similarity per row (for ranking) and all chunks (for context).
         similarity_by_si_id: dict[int, float] = {}
-        best_chunk_by_si_id: dict[int, str] = {}
+        chunks_by_si_id: dict[int, list[tuple[float, str]]] = {}
         for row in vector_rows:
             chunk_key = row.get("chunk_key", "")
             distance = float(row["best_distance"])
@@ -888,7 +890,7 @@ class SearchRepositoryBase(ABC):
             current = similarity_by_si_id.get(si_id)
             if current is None or similarity > current:
                 similarity_by_si_id[si_id] = similarity
-                best_chunk_by_si_id[si_id] = chunk_text
+            chunks_by_si_id.setdefault(si_id, []).append((similarity, chunk_text))
 
         if not similarity_by_si_id:
             return []
@@ -948,11 +950,23 @@ class SearchRepositoryBase(ABC):
             row = search_index_rows.get(si_id)
             if row is None:
                 continue
+
+            # Small notes: return full content so the answer is always present.
+            # Large notes: return top-N most relevant chunks for richer context.
+            content_snippet = row.content_snippet or ""
+            if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
+                matched_chunk_text = content_snippet
+            else:
+                si_chunks = chunks_by_si_id.get(si_id, [])
+                si_chunks.sort(key=lambda c: c[0], reverse=True)
+                top_texts = [text for _, text in si_chunks[:TOP_CHUNKS_PER_RESULT]]
+                matched_chunk_text = "\n---\n".join(top_texts) if top_texts else None
+
             ranked_rows.append(
                 replace(
                     row,
                     score=similarity,
-                    matched_chunk_text=best_chunk_by_si_id.get(si_id),
+                    matched_chunk_text=matched_chunk_text,
                 )
             )
 

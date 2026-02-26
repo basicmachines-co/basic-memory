@@ -21,6 +21,7 @@ class FakeRow:
     type: str = "entity"
     score: float = 0.0
     matched_chunk_text: str | None = None
+    content_snippet: str | None = None
 
 
 class ConcreteSearchRepo(SearchRepositoryBase):
