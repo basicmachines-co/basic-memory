@@ -29,7 +29,7 @@ FUSION_BONUS = 0.3
 FTS_GATE_THRESHOLD = 0.0
 MAX_VECTOR_CHUNK_CHARS = 900
 VECTOR_CHUNK_OVERLAP_CHARS = 120
-TOP_CHUNKS_PER_RESULT = 3
+TOP_CHUNKS_PER_RESULT = 5
 SMALL_NOTE_CONTENT_LIMIT = 2000
 HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
 BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
@@ -1164,5 +1164,11 @@ class SearchRepositoryBase(ABC):
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
         output: list[SearchIndexRow] = []
         for row_id, fused_score in ranked[offset : offset + limit]:
-            output.append(replace(rows_by_id[row_id], score=fused_score))
+            row = rows_by_id[row_id]
+            # Trigger: FTS-only results have no matched_chunk_text from vector search.
+            # Why: without chunk text, API falls back to truncated content, losing answer text.
+            # Outcome: FTS-only results get full content_snippet as matched_chunk.
+            if row.matched_chunk_text is None and row.content_snippet:
+                row = replace(row, matched_chunk_text=row.content_snippet)
+            output.append(replace(row, score=fused_score))
         return output

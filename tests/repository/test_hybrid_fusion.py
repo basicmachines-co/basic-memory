@@ -189,3 +189,78 @@ async def test_zero_score_produces_zero_fused():
     assert len(results) == 1
     # Zero FTS score, no vector → fused = max(0, 0) + 0.3 * min(0, 0) = 0.0
     assert results[0].score == pytest.approx(0.0, rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_fts_only_result_gets_matched_chunk_from_content_snippet():
+    """FTS-only results should have matched_chunk_text populated from content_snippet."""
+    repo = ConcreteSearchRepo()
+
+    content = "This is the full note content with the answer we need to find."
+    fts_results = [
+        FakeRow(id=1, score=5.0, title="fts-hit", content_snippet=content),
+    ]
+    vector_results = []
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(**HYBRID_KWARGS)
+
+    assert len(results) == 1
+    assert results[0].matched_chunk_text == content
+
+
+@pytest.mark.asyncio
+async def test_fts_only_result_with_null_content_keeps_null_matched_chunk():
+    """FTS-only results with no content_snippet should keep matched_chunk_text as None."""
+    repo = ConcreteSearchRepo()
+
+    fts_results = [
+        FakeRow(id=1, score=5.0, title="fts-hit", content_snippet=None),
+    ]
+    vector_results = []
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(**HYBRID_KWARGS)
+
+    assert len(results) == 1
+    assert results[0].matched_chunk_text is None
+
+
+@pytest.mark.asyncio
+async def test_dual_source_result_keeps_vector_matched_chunk():
+    """Dual-source results should keep matched_chunk_text from vector search, not overwrite."""
+    repo = ConcreteSearchRepo()
+
+    content = "Full note content from FTS."
+    vector_chunk = "Specific chunk matched by vector search."
+    fts_results = [
+        FakeRow(id=1, score=5.0, title="both", content_snippet=content),
+    ]
+    vector_results = [
+        FakeRow(
+            id=1, score=0.9, title="both",
+            content_snippet=content, matched_chunk_text=vector_chunk,
+        ),
+    ]
+
+    with (
+        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
+        patch.object(
+            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
+        ),
+    ):
+        results = await repo._search_hybrid(**HYBRID_KWARGS)
+
+    assert len(results) == 1
+    # Vector result overwrites the FTS row in rows_by_id, so matched_chunk_text is preserved
+    assert results[0].matched_chunk_text == vector_chunk

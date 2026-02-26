@@ -41,7 +41,7 @@ class SearchIndexRow:
     # Matched chunk text from vector search (the actual content that matched the query)
     matched_chunk_text: Optional[str] = None
 
-    CONTENT_DISPLAY_LIMIT = 2000
+    CONTENT_DISPLAY_LIMIT = 4000
 
     @property
     def content(self):

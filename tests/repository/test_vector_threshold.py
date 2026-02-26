@@ -326,12 +326,12 @@ def _make_multi_chunk_vector_rows(si_id: int, scores: list[float]) -> list[dict]
 
 @pytest.mark.asyncio
 async def test_top_n_chunks_joined_in_matched_chunk_text():
-    """Large note with 4 chunks: top 3 by similarity are joined with separator."""
+    """Large note with 7 chunks: top 5 by similarity are joined with separator."""
     repo = ConcreteSearchRepo()
     repo._semantic_min_similarity = 0.0
 
-    # 4 chunks for entity 0, with varying similarities
-    chunk_scores = [0.6, 0.9, 0.4, 0.8]
+    # 7 chunks for entity 0, with varying similarities
+    chunk_scores = [0.6, 0.9, 0.4, 0.8, 0.75, 0.3, 0.85]
     fake_rows = _make_multi_chunk_vector_rows(si_id=0, scores=chunk_scores)
 
     mock_embed = AsyncMock(return_value=[0.0] * 384)
@@ -359,12 +359,14 @@ async def test_top_n_chunks_joined_in_matched_chunk_text():
     assert len(results) == 1
     text = results[0].matched_chunk_text
 
-    # Top 3 chunks by similarity: 0.9, 0.8, 0.6 (0.4 is excluded)
+    # Top 5 chunks by similarity: 0.9, 0.85, 0.8, 0.75, 0.6 (0.4 and 0.3 excluded)
     parts = text.split("\n---\n")
     assert len(parts) == TOP_CHUNKS_PER_RESULT
     assert parts[0] == "chunk-1 (sim=0.9)"
-    assert parts[1] == "chunk-3 (sim=0.8)"
-    assert parts[2] == "chunk-0 (sim=0.6)"
+    assert parts[1] == "chunk-6 (sim=0.85)"
+    assert parts[2] == "chunk-3 (sim=0.8)"
+    assert parts[3] == "chunk-4 (sim=0.75)"
+    assert parts[4] == "chunk-0 (sim=0.6)"
 
 
 @pytest.mark.asyncio
