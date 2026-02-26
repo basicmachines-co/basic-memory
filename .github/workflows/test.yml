@@ -96,6 +96,20 @@ jobs:
         run: |
           just test-unit-sqlite
 
+      # Collect coverage data on the Python 3.12 ubuntu run for the coverage summary job
+      - name: Run tests with coverage (SQLite Unit)
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.sqlite-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests
+
+      - name: Upload coverage data
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sqlite-unit
+          path: .coverage.sqlite-unit
+          retention-days: 1
+
   test-sqlite-integration:
     name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 45
@@ -143,6 +157,19 @@ jobs:
         run: |
           just test-int-sqlite
 
+      - name: Run tests with coverage (SQLite Integration)
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.sqlite-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
+
+      - name: Upload coverage data
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-sqlite-int
+          path: .coverage.sqlite-int
+          retention-days: 1
+
   test-postgres-unit:
     name: Test Postgres Unit (Python ${{ matrix.python-version }})
     timeout-minutes: 30
@@ -183,6 +210,20 @@ jobs:
       - name: Run tests (Postgres Unit)
         run: |
           just test-unit-postgres
+
+      - name: Run tests with coverage (Postgres Unit)
+        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests' || test $? -eq 137
+
+      - name: Upload coverage data
+        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-postgres-unit
+          path: .coverage.postgres-unit
+          retention-days: 1
+          if-no-files-found: warn
 
   test-postgres-integration:
     name: Test Postgres Integration (Python ${{ matrix.python-version }})
@@ -225,6 +266,20 @@ jobs:
         run: |
           just test-int-postgres
 
+      - name: Run tests with coverage (Postgres Integration)
+        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres test-int' || test $? -eq 137
+
+      - name: Upload coverage data
+        if: matrix.python-version == '3.12' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-postgres-int
+          path: .coverage.postgres-int
+          retention-days: 1
+          if-no-files-found: warn
+
   test-semantic:
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
@@ -260,11 +315,23 @@ jobs:
         run: |
           just test-semantic
 
+      - name: Run tests with coverage (Semantic)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.semantic --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m semantic test-int/semantic/
+
+      - name: Upload coverage data
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-semantic
+          path: .coverage.semantic
+          retention-days: 1
+
   coverage:
-    name: Coverage Summary (combined, Python 3.12)
-    timeout-minutes: 60
+    name: Coverage Summary
+    timeout-minutes: 10
     needs:
-      - static-checks
       - test-sqlite-unit
       - test-sqlite-integration
       - test-postgres-unit
@@ -288,8 +355,6 @@ jobs:
         run: |
           pip install uv
 
-      - uses: extractions/setup-just@v3
-
       - name: Create virtual env
         run: |
           uv venv
@@ -298,9 +363,18 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run combined coverage (SQLite + Postgres)
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine coverage and report
         run: |
-          just coverage
+          ls -la .coverage.* || echo "No coverage files found"
+          uv run coverage combine .coverage.*
+          uv run coverage report -m
+          uv run coverage html
 
       - name: Add coverage report to job summary
         if: always()
