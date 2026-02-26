@@ -165,13 +165,13 @@ Returns results ranked by cosine similarity. Individual observations and relatio
 
 ### `hybrid`
 
-Combines FTS and vector results using reciprocal rank fusion (RRF). This is generally the best mode when you want both keyword precision and semantic recall.
+Combines FTS and vector results using score-based fusion. This is generally the best mode when you want both keyword precision and semantic recall.
 
 ```python
 search_notes("authentication security", search_type="hybrid")
 ```
 
-RRF merges the two ranked lists so that items appearing in both get a score boost, while items found by only one method still appear.
+Score-based fusion uses the formula `max(vec, fts) + bonus * min(vec, fts)` to preserve the dominant signal while rewarding results found by both methods.
 
 ### When to Use Which
 
@@ -236,14 +236,14 @@ Each chunk has a `source_hash` (SHA-256 of the chunk text). On re-sync, unchange
 
 ### Hybrid Fusion
 
-Hybrid search uses reciprocal rank fusion (RRF) to merge FTS and vector results:
+Hybrid search uses score-based fusion to merge FTS and vector results:
 
-1. Run FTS search to get keyword-ranked results
-2. Run vector search to get similarity-ranked results
-3. For each result, compute: `score = 1/(k + fts_rank) + 1/(k + vector_rank)` where `k = 60`
+1. Run FTS search to get keyword-ranked results; normalize scores to [0, 1]
+2. Run vector search to get similarity-ranked results (already [0, 1])
+3. For each result, compute: `fused = max(vec_score, fts_score) + 0.3 * min(vec_score, fts_score)`
 4. Sort by fused score
 
-Items found by both methods get a natural score boost. Items found by only one method still appear but rank lower.
+The dominant signal (whichever source scored higher) is preserved, and dual-source agreement adds a bonus. Unlike rank-based fusion, this approach retains score magnitude — a strong vector match stays strong even without an FTS hit.
 
 ### Observation-Level Results
 

@@ -228,7 +228,7 @@ async def test_sqlite_vector_search_returns_ranked_entities(search_repository):
 
 @pytest.mark.asyncio
 async def test_sqlite_hybrid_search_combines_fts_and_vector(search_repository):
-    """Hybrid mode fuses FTS and vector results with RRF."""
+    """Hybrid mode fuses FTS and vector results with score-based fusion."""
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
 

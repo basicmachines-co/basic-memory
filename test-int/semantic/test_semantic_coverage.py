@@ -82,10 +82,10 @@ async def test_postgres_vector_table_setup_and_query(postgres_engine_factory, tm
 @pytest.mark.semantic
 @pytest.mark.benchmark
 async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
-    """Exercise the hybrid (RRF fusion) code path on Postgres.
+    """Exercise the hybrid (score-based fusion) code path on Postgres.
 
     This covers the full _search_hybrid path including both FTS and vector
-    retrieval with reciprocal rank fusion.
+    retrieval with score-based fusion.
     """
     skip_if_needed(PG_FASTEMBED)
     if postgres_engine_factory is None:
@@ -98,7 +98,7 @@ async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
 
     await seed_benchmark_notes(search_service, note_count=20)
 
-    # Hybrid search — exercises _search_hybrid RRF fusion
+    # Hybrid search — exercises _search_hybrid score-based fusion
     results = await search_service.search(
         SearchQuery(
             text="database migration schema",

@@ -1,9 +1,9 @@
-"""Tests for score-weighted reciprocal rank fusion (RRF) in hybrid search.
+"""Tests for score-based fusion in hybrid search.
 
-Verifies that the weighted RRF formula:
-1. Boosts high-FTS-score results over low-FTS-score results at the same rank
+Verifies that the fusion formula (max + FUSION_BONUS * min):
+1. Preserves FTS score differentiation (high-score > low-score)
 2. Ranks dual-source results higher than single-source results
-3. Uses a weight floor to prevent zero contribution from low scores
+3. Produces zero fused score when the source score is zero
 """
 
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from basic_memory.repository.search_repository_base import RRF_K, SearchRepositoryBase
+from basic_memory.repository.search_repository_base import FUSION_BONUS, SearchRepositoryBase
 
 
 @dataclass
@@ -38,7 +38,7 @@ class FakeRow:
 
 
 class ConcreteSearchRepo(SearchRepositoryBase):
-    """Minimal concrete subclass for testing hybrid RRF logic."""
+    """Minimal concrete subclass for testing hybrid fusion logic."""
 
     def __init__(self):
         self._semantic_enabled = True
@@ -98,10 +98,10 @@ HYBRID_KWARGS = dict(
 
 @pytest.mark.asyncio
 async def test_high_fts_score_boosts_ranking():
-    """A high FTS score at rank 1 should outscore a low FTS score at rank 1."""
+    """FTS-only: a high normalized score should outscore a low normalized score."""
     repo = ConcreteSearchRepo()
 
-    # Two FTS results at ranks 1 and 2, with very different scores
+    # Two FTS results with very different scores
     high_score_row = FakeRow(id=1, score=10.0, title="high")
     low_score_row = FakeRow(id=2, score=0.5, title="low")
     fts_results = [high_score_row, low_score_row]
@@ -126,19 +126,19 @@ async def test_high_fts_score_boosts_ranking():
         results = await repo._search_hybrid(**HYBRID_KWARGS)
 
     assert len(results) == 2
-    # High FTS score at rank 1 should rank first
+    # After normalization: id=1 → 1.0, id=2 → 0.05
     assert results[0].id == 1
-    # Verify the score is weighted — not just 1/(k+rank)
-    1.0 / (RRF_K + 1)
-    assert results[0].score > results[1].score
+    assert results[0].score == pytest.approx(1.0, rel=1e-6)
+    assert results[1].score == pytest.approx(0.05, rel=1e-6)
 
 
 @pytest.mark.asyncio
 async def test_dual_source_ranks_higher_than_single():
-    """A result in both FTS and vector should rank above one in only FTS."""
+    """A result in both FTS and vector should rank above single-source results."""
     repo = ConcreteSearchRepo()
 
-    # Row 1 appears in both FTS and vector; Row 2 only in FTS
+    # Row 1 in both (fts=5.0→norm 1.0, vec=0.9), Row 2 FTS-only (fts=5.0→norm 1.0),
+    # Row 3 vec-only (0.8)
     fts_results = [
         FakeRow(id=1, score=5.0, title="both"),
         FakeRow(id=2, score=5.0, title="fts-only"),
@@ -157,13 +157,20 @@ async def test_dual_source_ranks_higher_than_single():
         results = await repo._search_hybrid(**HYBRID_KWARGS)
 
     result_ids = [r.id for r in results]
-    # Row 1 (dual-source) should rank first
-    assert result_ids[0] == 1
+    # Row 1 (dual-source) should rank first, then Row 2 (FTS 1.0), then Row 3 (vec 0.8)
+    assert result_ids == [1, 2, 3]
+
+    # Row 1: max(0.9, 1.0) + 0.3 * min(0.9, 1.0) = 1.0 + 0.27 = 1.27
+    assert results[0].score == pytest.approx(1.0 + FUSION_BONUS * 0.9, rel=1e-6)
+    # Row 2: FTS-only, fused = max(0, 1.0) + 0.3 * min(0, 1.0) = 1.0
+    assert results[1].score == pytest.approx(1.0, rel=1e-6)
+    # Row 3: vec-only, fused = max(0.8, 0) + 0.3 * min(0.8, 0) = 0.8
+    assert results[2].score == pytest.approx(0.8, rel=1e-6)
 
 
 @pytest.mark.asyncio
-async def test_weight_floor_prevents_zero_contribution():
-    """Even a zero-score result should contribute via the 0.1 weight floor."""
+async def test_zero_score_produces_zero_fused():
+    """A zero-score FTS result with no vector match produces a zero fused score."""
     repo = ConcreteSearchRepo()
 
     # FTS result with score 0.0
@@ -179,6 +186,5 @@ async def test_weight_floor_prevents_zero_contribution():
         results = await repo._search_hybrid(**HYBRID_KWARGS)
 
     assert len(results) == 1
-    # Weight floor of 0.1 means score = 0.1 * 1/(60+1)
-    expected_min = 0.1 * (1.0 / (RRF_K + 1))
-    assert results[0].score == pytest.approx(expected_min, rel=1e-6)
+    # Zero FTS score, no vector → fused = max(0, 0) + 0.3 * min(0, 0) = 0.0
+    assert results[0].score == pytest.approx(0.0, rel=1e-6)

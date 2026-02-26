@@ -379,7 +379,7 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
 
 @pytest.mark.asyncio
 async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_maker, test_project):
-    """Hybrid mode fuses FTS and vector ranks using RRF."""
+    """Hybrid mode fuses FTS and vector results with score-based fusion."""
     await _skip_if_pgvector_unavailable(session_maker)
     app_config = BasicMemoryConfig(
         env="test",

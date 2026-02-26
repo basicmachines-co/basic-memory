@@ -3,7 +3,7 @@
 These tests isolate specific problems with the search pipeline:
 1. Similarity score compression — cosine distances map to a narrow similarity band
 2. Observation noise — context-free observations match too broadly
-3. RRF fusion behavior — how FTS and vector scores interact
+3. Hybrid fusion behavior — how FTS and vector scores interact
 4. Min-similarity threshold effectiveness
 """
 
@@ -235,17 +235,16 @@ async def test_observation_noise_vs_entity(sqlite_engine_factory, tmp_path):
             print(f"    {r.permalink}: {r.score:.4f}")
 
 
-# --- Test: RRF fusion — vector vs hybrid comparison ---
+# --- Test: Score-based fusion — vector vs hybrid comparison ---
 
 
 @pytest.mark.asyncio
 @pytest.mark.semantic
 @pytest.mark.benchmark
-async def test_rrf_fusion_preserves_strong_vector_match(sqlite_engine_factory, tmp_path):
+async def test_score_fusion_preserves_strong_vector_match(sqlite_engine_factory, tmp_path):
     """When vector gives a strong match and FTS doesn't, hybrid should still surface it.
 
-    This is the core claim of issue #577 — that RRF dilutes strong vector scores.
-    Let's verify with a controlled corpus.
+    Score-based fusion preserves dominant signals instead of compressing them.
     """
     skip_if_needed(DIAG_COMBO)
     provider = _create_fastembed_provider()
@@ -296,7 +295,7 @@ async def test_rrf_fusion_preserves_strong_vector_match(sqlite_engine_factory, t
             # Auth should still be in the top 3 in hybrid mode
             assert hybrid_auth_rank <= 3, (
                 f"Hybrid pushed auth from vector rank 1 to hybrid rank {hybrid_auth_rank}. "
-                f"RRF dilution confirmed."
+                f"Fusion diluted strong vector match."
             )
         else:
             print("\n  WARNING: Auth found by vector but missing from hybrid results entirely!")

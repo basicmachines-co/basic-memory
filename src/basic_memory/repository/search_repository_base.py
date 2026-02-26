@@ -25,7 +25,8 @@ from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 # --- Semantic search constants ---
 
 VECTOR_FILTER_SCAN_LIMIT = 50000
-RRF_K = 60
+FUSION_BONUS = 0.3
+FTS_GATE_THRESHOLD = 0.0
 MAX_VECTOR_CHUNK_CHARS = 900
 VECTOR_CHUNK_OVERLAP_CHARS = 120
 HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
@@ -38,7 +39,7 @@ class SearchRepositoryBase(ABC):
     This class defines the common interface that all search repositories must implement,
     regardless of whether they use SQLite FTS5 or Postgres tsvector for full-text search.
 
-    Shared semantic search logic (chunking, embedding orchestration, hybrid RRF fusion)
+    Shared semantic search logic (chunking, embedding orchestration, hybrid score-based fusion)
     lives here. Backend-specific operations are delegated to abstract hooks.
 
     Concrete implementations:
@@ -1053,7 +1054,7 @@ class SearchRepositoryBase(ABC):
         return result
 
     # ------------------------------------------------------------------
-    # Shared semantic search: hybrid RRF fusion
+    # Shared semantic search: hybrid score-based fusion
     # ------------------------------------------------------------------
 
     async def _search_hybrid(
@@ -1071,10 +1072,11 @@ class SearchRepositoryBase(ABC):
         limit: int,
         offset: int,
     ) -> List[SearchIndexRow]:
-        """Fuse FTS and vector rankings using reciprocal rank fusion (RRF).
+        """Fuse FTS and vector results using score-based fusion.
 
-        Uses entity_id as the fusion key (not permalink) to correctly handle
-        entities with NULL permalinks.
+        Uses search_index row id as the fusion key. The formula
+        ``max(vec, fts) + FUSION_BONUS * min(vec, fts)`` preserves
+        the dominant signal and rewards dual-source agreement.
         """
         self._assert_semantic_available()
         candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
@@ -1105,10 +1107,9 @@ class SearchRepositoryBase(ABC):
             offset=0,
         )
 
-        # Score-weighted RRF fusion keyed on search_index row id.
-        # Multiplies the standard 1/(k+rank) score by the normalized original score
-        # so that high-confidence matches contribute more than weak ones at the same rank.
-        fused_scores: dict[int, float] = {}
+        # --- Score-based fusion keyed on search_index row id ---
+        # FTS scores are normalized to [0, 1] (BM25 is unbounded).
+        # Vector scores are used raw — already calibrated [0, 1] by _distance_to_similarity().
         rows_by_id: dict[int, SearchIndexRow] = {}
 
         # Normalize FTS scores to [0, 1] — handles both SQLite (negative bm25)
@@ -1116,24 +1117,35 @@ class SearchRepositoryBase(ABC):
         fts_abs = [abs(row.score or 0.0) for row in fts_results]
         fts_max = max(fts_abs) if fts_abs else 1.0
 
-        for rank, row in enumerate(fts_results, start=1):
+        fts_scores: dict[int, float] = {}
+        for row in fts_results:
             if row.id is None:
                 continue
             norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
-            weight = max(norm, 0.1)  # floor preserves RRF stability
-            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + weight * (1.0 / (RRF_K + rank))
+            # Gate: FTS scores below threshold contribute zero
+            if norm < FTS_GATE_THRESHOLD:
+                norm = 0.0
+            fts_scores[row.id] = norm
             rows_by_id[row.id] = row
 
-        # Vector scores already in [0, 1] from the similarity formula
-        vec_max = max((row.score or 0.0) for row in vector_results) if vector_results else 1.0
-
-        for rank, row in enumerate(vector_results, start=1):
+        vec_scores: dict[int, float] = {}
+        for row in vector_results:
             if row.id is None:
                 continue
-            norm = (row.score or 0.0) / vec_max if vec_max > 0 else 0.0
-            weight = max(norm, 0.1)  # floor preserves RRF stability
-            fused_scores[row.id] = fused_scores.get(row.id, 0.0) + weight * (1.0 / (RRF_K + rank))
+            # Trigger: no re-normalization by vec_max
+            # Why: vector similarity is already calibrated [0, 1]; re-normalizing
+            # inflates weak matches when the entire result set is mediocre
+            vec_scores[row.id] = row.score or 0.0
             rows_by_id[row.id] = row
+
+        # Fuse: max(v, f) + FUSION_BONUS * min(v, f)
+        # Preserves the dominant signal; bonus rewards dual-source agreement.
+        # Output range: [0, 1.3] for dual-source, [0, 1.0] for single-source.
+        fused_scores: dict[int, float] = {}
+        for row_id in fts_scores.keys() | vec_scores.keys():
+            v = vec_scores.get(row_id, 0.0)
+            f = fts_scores.get(row_id, 0.0)
+            fused_scores[row_id] = max(v, f) + FUSION_BONUS * min(v, f)
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
         output: list[SearchIndexRow] = []
