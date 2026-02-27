@@ -72,8 +72,8 @@ class TestDateTimeSerialization:
         assert "to_entity_id" not in data
         assert "to_entity_external_id" not in data
 
-    def test_observation_summary_datetime_serialization(self):
-        """Test ObservationSummary excludes datetime and internal fields."""
+    def test_observation_summary_serialization(self):
+        """Test ObservationSummary keeps file_path/created_at, excludes internal IDs."""
         test_datetime = datetime(2023, 12, 8, 20, 15, 45)
 
         observation = ObservationSummary(
@@ -87,18 +87,18 @@ class TestDateTimeSerialization:
             created_at=test_datetime,
         )
 
-        # Test model_dump_json() excludes internal fields
         json_str = observation.model_dump_json()
         data = json.loads(json_str)
 
-        # All internal/redundant fields excluded
-        assert "created_at" not in data
+        # Internal ID fields excluded
         assert "observation_id" not in data
         assert "entity_id" not in data
         assert "entity_external_id" not in data
         assert "title" not in data
-        assert "file_path" not in data
-        # Kept fields
+        # file_path and created_at kept (needed when observation is primary_result)
+        assert data["file_path"] == "test/observation.md"
+        assert data["created_at"] == "2023-12-08T20:15:45"
+        # Other kept fields
         assert data["type"] == "observation"
         assert data["category"] == "note"
         assert data["content"] == "Test content"
@@ -152,15 +152,17 @@ class TestDateTimeSerialization:
             primary_result=entity, observations=[observation], related_results=[]
         )
 
-        # Test model_dump_json() produces ISO format for entity, excludes for observation
+        # Test model_dump_json() produces ISO format for nested models
         json_str = context_result.model_dump_json()
         data = json.loads(json_str)
 
-        # Entity created_at kept
+        # Entity created_at kept, entity_id excluded
         assert data["primary_result"]["created_at"] == "2023-12-08T09:30:15"
         assert "entity_id" not in data["primary_result"]
-        # Observation created_at excluded
-        assert "created_at" not in data["observations"][0]
+        # Observation created_at kept (needed for primary_result use), internal IDs excluded
+        assert data["observations"][0]["created_at"] == "2023-12-08T09:30:15"
+        assert "observation_id" not in data["observations"][0]
+        assert "entity_id" not in data["observations"][0]
 
     def test_graph_context_full_serialization(self):
         """Test full GraphContext serialization with all datetime fields."""
@@ -356,16 +358,16 @@ class TestDateTimeSerialization:
         assert result["primary_result"]["created_at"] == "2023-12-08T14:00:00"
         assert "entity_id" not in result["primary_result"]
 
-        # Observation: compact, only permalink/category/content/type
+        # Observation: internal IDs excluded, file_path/created_at kept
         obs_data = result["observations"][0]
         assert obs_data["category"] == "note"
         assert obs_data["content"] == "Some observation"
         assert obs_data["permalink"] == "test/primary"
+        assert obs_data["file_path"] == "test/primary.md"
+        assert obs_data["created_at"] == "2023-12-08T14:00:00"
         assert "observation_id" not in obs_data
         assert "entity_id" not in obs_data
         assert "title" not in obs_data
-        assert "file_path" not in obs_data
-        assert "created_at" not in obs_data
 
         # Related entity: identifying fields present
         rel_entity = result["related_results"][0]
@@ -401,3 +403,65 @@ class TestDateTimeSerialization:
         reparsed = json.loads(json_str)
         assert reparsed["results"][0]["related_results"][0]["title"] == "Related Entity"
         assert reparsed["results"][0]["related_results"][1]["relation_type"] == "relates_to"
+
+    def test_observation_as_primary_result_preserves_fields(self):
+        """Test that ObservationSummary retains file_path and created_at when used as primary_result.
+
+        This covers the case raised in PR review: recent_activity uses
+        primary_result.created_at and primary_result.file_path for activity
+        tracking. These fields must survive the JSON round-trip.
+        """
+        test_datetime = datetime(2023, 12, 8, 16, 0, 0)
+
+        obs_primary = ObservationSummary(
+            observation_id=42,
+            entity_id=7,
+            entity_external_id="obs-ext-id",
+            title="Parent Entity Title",
+            file_path="notes/daily.md",
+            permalink="notes/daily",
+            category="status",
+            content="Shipped the feature today",
+            created_at=test_datetime,
+        )
+
+        context_result = ContextResult(
+            primary_result=obs_primary,
+            observations=[],
+            related_results=[],
+        )
+
+        graph = GraphContext(
+            results=[context_result],
+            metadata=MemoryMetadata(
+                depth=1, generated_at=test_datetime, primary_count=1, related_count=0
+            ),
+            page=1,
+            page_size=10,
+        )
+
+        # Serialize and round-trip through JSON (same path as API responses)
+        json_str = graph.model_dump_json()
+        data = json.loads(json_str)
+
+        primary = data["results"][0]["primary_result"]
+
+        # file_path and created_at must be present for recent_activity tracking
+        assert primary["file_path"] == "notes/daily.md"
+        assert primary["created_at"] == "2023-12-08T16:00:00"
+        assert primary["permalink"] == "notes/daily"
+        assert primary["category"] == "status"
+        assert primary["content"] == "Shipped the feature today"
+        assert primary["type"] == "observation"
+
+        # Internal IDs still excluded
+        assert "observation_id" not in primary
+        assert "entity_id" not in primary
+        assert "entity_external_id" not in primary
+        assert "title" not in primary
+
+        # Round-trip: deserialize back into GraphContext
+        reparsed = GraphContext.model_validate_json(json_str)
+        reparsed_primary = reparsed.results[0].primary_result
+        assert reparsed_primary.file_path == "notes/daily.md"
+        assert reparsed_primary.created_at == test_datetime

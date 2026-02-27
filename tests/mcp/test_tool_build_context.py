@@ -32,15 +32,16 @@ async def test_get_basic_discussion_context(client, test_graph, test_project):
     assert "entity_id" not in primary
     assert "created_at" in primary
 
-    # Verify observation-level excluded fields
+    # Verify observation-level fields: internal IDs excluded, file_path/created_at kept
     if result["results"][0]["observations"]:
         obs = result["results"][0]["observations"][0]
         assert "observation_id" not in obs
         assert "entity_id" not in obs
-        assert "file_path" not in obs
         assert "title" not in obs
-        assert "created_at" not in obs
-        # Kept fields
+        # file_path and created_at kept (needed when observation is primary_result)
+        assert "file_path" in obs
+        assert "created_at" in obs
+        # Other kept fields
         assert "permalink" in obs
         assert "category" in obs
         assert "content" in obs

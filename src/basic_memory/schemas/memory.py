@@ -172,11 +172,17 @@ class ObservationSummary(BaseModel):
     entity_id: Optional[int] = Field(None, exclude=True)  # Internal FK
     entity_external_id: Optional[str] = Field(None, exclude=True)  # Internal routing ID
     title: Optional[str] = Field(None, exclude=True)  # Redundant with parent entity
-    file_path: Optional[str] = Field(None, exclude=True)  # Redundant with parent entity
+    file_path: str
     permalink: str
     category: str
     content: str
-    created_at: Optional[datetime] = Field(None, exclude=True)  # Redundant with parent entity
+    created_at: Annotated[
+        datetime, Field(json_schema_extra={"type": "string", "format": "date-time"})
+    ]
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
 
 
 class MemoryMetadata(BaseModel):
