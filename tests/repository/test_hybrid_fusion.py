@@ -248,8 +248,11 @@ async def test_dual_source_result_keeps_vector_matched_chunk():
     ]
     vector_results = [
         FakeRow(
-            id=1, score=0.9, title="both",
-            content_snippet=content, matched_chunk_text=vector_chunk,
+            id=1,
+            score=0.9,
+            title="both",
+            content_snippet=content,
+            matched_chunk_text=vector_chunk,
         ),
     ]
 

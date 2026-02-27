@@ -262,7 +262,14 @@ def test_edit_note_json_format_contract(app, app_config, test_project, config_ma
 
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
-    assert set(data.keys()) == {"title", "permalink", "file_path", "operation", "checksum", "fileCreated"}
+    assert set(data.keys()) == {
+        "title",
+        "permalink",
+        "file_path",
+        "operation",
+        "checksum",
+        "fileCreated",
+    }
     assert data["operation"] == "append"
     assert data["fileCreated"] is False
     assert data["title"] == "Edit JSON Note"

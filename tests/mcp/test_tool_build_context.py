@@ -9,7 +9,7 @@ from basic_memory.mcp.tools import build_context
 
 @pytest.mark.asyncio
 async def test_get_basic_discussion_context(client, test_graph, test_project):
-    """Test getting basic discussion context returns slimmed JSON dict."""
+    """Test getting basic discussion context returns JSON dict with excluded fields removed."""
     result = await build_context(project=test_project.name, url="memory://test/root")
 
     assert isinstance(result, dict)
@@ -19,7 +19,7 @@ async def test_get_basic_discussion_context(client, test_graph, test_project):
     assert primary["permalink"] == f"{test_project.name}/test/root"
     assert len(result["results"][0]["related_results"]) > 0
 
-    # Verify metadata — stripped fields should be absent
+    # Verify metadata — excluded fields should be absent
     meta = result["metadata"]
     assert meta["uri"] == f"{test_project.name}/test/root"
     assert meta["depth"] == 1  # default depth
@@ -28,16 +28,39 @@ async def test_get_basic_discussion_context(client, test_graph, test_project):
     assert "generated_at" not in meta
     assert "total_results" not in meta
 
-    # Verify entity-level stripped fields
+    # Entity: entity_id excluded, created_at kept (needed for related results)
     assert "entity_id" not in primary
-    assert "created_at" not in primary
+    assert "created_at" in primary
 
-    # Verify observation-level stripped fields
+    # Verify observation-level fields: internal IDs excluded, file_path/created_at kept
     if result["results"][0]["observations"]:
         obs = result["results"][0]["observations"][0]
         assert "observation_id" not in obs
         assert "entity_id" not in obs
-        assert "file_path" not in obs
+        assert "title" not in obs
+        # file_path and created_at kept (needed when observation is primary_result)
+        assert "file_path" in obs
+        assert "created_at" in obs
+        # Other kept fields
+        assert "permalink" in obs
+        assert "category" in obs
+        assert "content" in obs
+
+    # Verify related_results item structure — entities have identifying fields
+    for related in result["results"][0]["related_results"]:
+        item_type = related["type"]
+        if item_type == "entity":
+            assert "title" in related
+            assert "file_path" in related
+            assert "created_at" in related
+            assert "entity_id" not in related  # excluded
+        elif item_type == "relation":
+            assert "relation_type" in related
+            assert "title" in related
+            assert "file_path" in related
+            assert "created_at" in related
+            assert "relation_id" not in related  # excluded
+            assert "entity_id" not in related  # excluded
 
 
 @pytest.mark.asyncio

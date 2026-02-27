@@ -580,8 +580,8 @@ async def test_postgres_note_types_sql_injection_returns_empty(session_maker, te
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
 
     malicious_payloads = [
-        'note"}}\' OR \'1\'=\'1',
-        "note\"; DROP TABLE search_index;--",
+        "note\"}}' OR '1'='1",
+        'note"; DROP TABLE search_index;--',
         'note"}} UNION SELECT * FROM entity--',
     ]
     for payload in malicious_payloads:

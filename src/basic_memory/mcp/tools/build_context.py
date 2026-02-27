@@ -22,74 +22,6 @@ from basic_memory.schemas.memory import (
     RelationSummary,
 )
 
-# --- Fields to strip from each model (redundant with parent entity) ---
-
-_OBSERVATION_STRIP = {
-    "observation_id",
-    "entity_id",
-    "entity_external_id",
-    "title",
-    "file_path",
-    "created_at",
-}
-_RELATION_STRIP = {
-    "relation_id",
-    "entity_id",
-    "from_entity_id",
-    "from_entity_external_id",
-    "to_entity_id",
-    "to_entity_external_id",
-    "title",
-    "file_path",
-    "created_at",
-}
-_ENTITY_STRIP = {"entity_id", "created_at"}
-_METADATA_STRIP = {"total_results", "generated_at"}
-
-
-def _slim_summary(summary: EntitySummary | RelationSummary | ObservationSummary) -> dict:
-    """Strip redundant fields from a summary model based on its type."""
-    if isinstance(summary, ObservationSummary):
-        strip = _OBSERVATION_STRIP
-    elif isinstance(summary, RelationSummary):
-        strip = _RELATION_STRIP
-    else:
-        strip = _ENTITY_STRIP
-
-    data = summary.model_dump()
-    for key in strip:
-        data.pop(key, None)
-    return data
-
-
-def _slim_context(graph: GraphContext) -> dict:
-    """Transform GraphContext into a slimmed dict, stripping redundant fields.
-
-    Reduces payload size ~40% by removing fields on nested objects that
-    duplicate information already present on the parent entity (IDs,
-    timestamps, file paths).
-    """
-    slimmed_results = []
-    for result in graph.results:
-        slimmed_results.append(
-            {
-                "primary_result": _slim_summary(result.primary_result),
-                "observations": [_slim_summary(obs) for obs in result.observations],
-                "related_results": [_slim_summary(rel) for rel in result.related_results],
-            }
-        )
-
-    metadata = graph.metadata.model_dump()
-    for key in _METADATA_STRIP:
-        metadata.pop(key, None)
-
-    return {
-        "results": slimmed_results,
-        "metadata": metadata,
-        "page": graph.page,
-        "page_size": graph.page_size,
-    }
-
 
 def _format_entity_block(result: ContextResult) -> str:
     """Format a single context result as a markdown block."""
@@ -194,7 +126,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     - Or standard formats like "7d", "24h"
 
     Format options:
-    - "json" (default): Slimmed JSON with redundant fields removed
+    - "json" (default): Structured JSON with internal fields excluded
     - "text": Compact markdown text for LLM consumption
     """,
     annotations={"readOnlyHint": True, "openWorldHint": False},
@@ -231,12 +163,12 @@ async def build_context(
         page: Page number of results to return (default: 1)
         page_size: Number of results to return per page (default: 10)
         max_related: Maximum number of related results to return (default: 10)
-        output_format: Response format - "json" for slimmed JSON dict,
+        output_format: Response format - "json" for structured JSON dict,
             "text" for compact markdown text
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        dict (output_format="json"): Slimmed JSON with redundant fields removed
+        dict (output_format="json"): Structured JSON with internal fields excluded
         str (output_format="text"): Compact markdown representation
 
     Examples:
@@ -292,4 +224,4 @@ async def build_context(
         if output_format == "text":
             return _format_context_markdown(graph, active_project.name)
 
-        return _slim_context(graph)
+        return graph.model_dump()
