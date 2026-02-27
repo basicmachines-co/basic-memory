@@ -168,6 +168,7 @@ async def test_notes_with_similar_titles_maintain_separate_files(app, test_proje
             title=title,
             directory=folder,
             content=f"# {title}\n\nUnique content for {title}",
+            overwrite=True,
         )
 
         permalink = None

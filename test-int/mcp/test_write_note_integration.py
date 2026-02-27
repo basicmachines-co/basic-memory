@@ -88,7 +88,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
 
         assert "# Created note" in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-        # Update the same note
+        # Update the same note (explicit overwrite)
         result2 = await client.call_tool(
             "write_note",
             {
@@ -97,6 +97,7 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
                 "directory": "test",
                 "content": "# Update Test\n\nUpdated content with changes.",
                 "tags": "updated,modified",
+                "overwrite": True,
             },
         )
 
@@ -475,3 +476,49 @@ async def test_write_note_project_path_validation(mcp_server, app, test_project)
         # Should successfully create without path validation errors
         assert "# Created note" in response_text
         assert "not allowed" not in response_text
+
+
+@pytest.mark.asyncio
+async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_project):
+    """End-to-end test: overwrite guard works through the MCP Client protocol."""
+
+    async with Client(mcp_server) as client:
+        # Create initial note
+        result1 = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "MCP Guard Test",
+                "directory": "guard",
+                "content": "# MCP Guard Test\n\nOriginal content via MCP.",
+            },
+        )
+        assert "# Created note" in result1.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+
+        # Second write without overwrite should be blocked
+        result2 = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "MCP Guard Test",
+                "directory": "guard",
+                "content": "# MCP Guard Test\n\nReplacement content via MCP.",
+            },
+        )
+        response_text = result2.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Error: Note already exists" in response_text
+        assert "edit_note" in response_text
+
+        # Overwrite with explicit flag should succeed
+        result3 = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "MCP Guard Test",
+                "directory": "guard",
+                "content": "# MCP Guard Test\n\nReplacement content via MCP.",
+                "overwrite": True,
+            },
+        )
+        response_text3 = result3.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Updated note" in response_text3

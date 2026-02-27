@@ -99,6 +99,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "tags",
         "note_type",
         "metadata",
+        "overwrite",
         "output_format",
     ],
 }

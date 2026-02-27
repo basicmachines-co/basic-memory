@@ -245,6 +245,16 @@ class BasicMemoryConfig(BaseSettings):
         description="Disable automatic permalink generation in frontmatter. When enabled, new notes won't have permalinks added and sync won't update permalinks. Existing permalinks will still work for reading.",
     )
 
+    write_note_overwrite_default: bool = Field(
+        default=False,
+        description=(
+            "Default value for write_note's overwrite parameter. "
+            "When False (default), write_note errors if note already exists. "
+            "Set to True to restore pre-v0.20 upsert behavior. "
+            "Env: BASIC_MEMORY_WRITE_NOTE_OVERWRITE_DEFAULT"
+        ),
+    )
+
     ensure_frontmatter_on_sync: bool = Field(
         default=True,
         description="Ensure markdown files have frontmatter during sync by adding derived title/type/permalink when missing. When combined with disable_permalinks=True, this setting takes precedence for missing-frontmatter files and still writes permalinks.",
