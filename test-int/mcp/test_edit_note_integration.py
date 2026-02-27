@@ -323,17 +323,18 @@ Current endpoints include user management."""
 
 @pytest.mark.asyncio
 async def test_edit_note_error_handling_note_not_found(mcp_server, app, test_project):
-    """Test error handling when trying to edit a non-existent note."""
+    """Test error handling when using find_replace on a non-existent note."""
 
     async with Client(mcp_server) as client:
-        # Try to edit a note that doesn't exist
+        # find_replace on a non-existent note should still error
         edit_result = await client.call_tool(
             "edit_note",
             {
                 "project": test_project.name,
                 "identifier": "Non-existent Note",
-                "operation": "append",
-                "content": "Some content to add",
+                "operation": "find_replace",
+                "content": "replacement",
+                "find_text": "old text",
             },
         )
 
@@ -343,6 +344,78 @@ async def test_edit_note_error_handling_note_not_found(mcp_server, app, test_pro
         assert "Edit Failed" in error_text
         assert "Non-existent Note" in error_text
         assert "search_notes(" in error_text
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_creates_nonexistent_note(mcp_server, app, test_project):
+    """append to a non-existent note should auto-create it and make it readable."""
+
+    async with Client(mcp_server) as client:
+        # Append to a note that doesn't exist yet
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "conversations/daily-log",
+                "operation": "append",
+                "content": "# Daily Log\n\nFirst entry for today.",
+            },
+        )
+
+        # Should return a "Created note" summary
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
+        assert "Created note (append)" in edit_text
+        assert "fileCreated: true" in edit_text
+
+        # The note should now be readable
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "conversations/daily-log",
+            },
+        )
+
+        content = read_result.content[0].text
+        assert "Daily Log" in content
+        assert "First entry for today." in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_prepend_creates_nonexistent_note(mcp_server, app, test_project):
+    """prepend to a non-existent note should auto-create it and make it readable."""
+
+    async with Client(mcp_server) as client:
+        # Prepend to a note that doesn't exist yet
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/quick-thought",
+                "operation": "prepend",
+                "content": "# Quick Thought\n\nSomething important.",
+            },
+        )
+
+        # Should return a "Created note" summary
+        assert len(edit_result.content) == 1
+        edit_text = edit_result.content[0].text
+        assert "Created note (prepend)" in edit_text
+        assert "fileCreated: true" in edit_text
+
+        # The note should now be readable
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/quick-thought",
+            },
+        )
+
+        content = read_result.content[0].text
+        assert "Quick Thought" in content
+        assert "Something important." in content
 
 
 @pytest.mark.asyncio

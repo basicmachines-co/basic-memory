@@ -7,6 +7,35 @@ from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.base import Entity
+from basic_memory.utils import validate_project_path
+
+
+def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]:
+    """Parse an identifier into (title, directory) for creating a new note.
+
+    Strips memory:// prefix if present, then splits on the last '/' to
+    separate the directory path from the note title.
+
+    Examples:
+        "conversations/my-note" → ("my-note", "conversations")
+        "my-note"              → ("my-note", "")
+        "a/b/c/my-note"       → ("my-note", "a/b/c")
+        "memory://a/b/note"   → ("note", "a/b")
+    """
+    cleaned = identifier
+    if cleaned.startswith("memory://"):
+        cleaned = cleaned[len("memory://"):]
+
+    if "/" in cleaned:
+        last_slash = cleaned.rfind("/")
+        directory = cleaned[:last_slash]
+        title = cleaned[last_slash + 1:]
+    else:
+        directory = ""
+        title = cleaned
+
+    return title, directory
 
 
 def _format_error_response(
@@ -19,15 +48,19 @@ def _format_error_response(
 ) -> str:
     """Format helpful error responses for edit_note failures that guide the AI to retry successfully."""
 
-    # Entity not found errors
+    # Entity not found errors — only reachable for find_replace/replace_section
+    # because append/prepend auto-create the note when it doesn't exist
     if "Entity not found" in error_message or "entity not found" in error_message.lower():
         return f"""# Edit Failed - Note Not Found
 
-The note with identifier '{identifier}' could not be found. Edit operations require an exact match (no fuzzy matching).
+The note with identifier '{identifier}' could not be found. The `find_replace` and `replace_section` operations require an existing note with content to modify.
+
+**Tip:** `append` and `prepend` operations automatically create the note if it doesn't exist.
 
 ## Suggestions to try:
-1. **Search for the note first**: Use `search_notes("{project or "project-name"}", "{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
-2. **Try different exact identifier formats**:
+1. **Use append/prepend instead**: These operations will create the note automatically if it doesn't exist
+2. **Search for the note first**: Use `search_notes("{project or "project-name"}", "{identifier.split("/")[-1]}")` to find similar notes with exact identifiers
+3. **Try different exact identifier formats**:
    - If you used a permalink like "folder/note-title", try the exact title: "{identifier.split("/")[-1].replace("-", " ").title()}"
    - If you used a title, try the exact permalink format: "{identifier.lower().replace(" ", "-")}"
    - Use `read_note("{project or "project-name"}", "{identifier}")` first to verify the note exists and get the exact identifier
@@ -152,10 +185,10 @@ async def edit_note(
                    Must be an exact match - fuzzy matching is not supported for edit operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
         operation: The editing operation to perform:
-                  - "append": Add content to the end of the note
-                  - "prepend": Add content to the beginning of the note
-                  - "find_replace": Replace occurrences of find_text with content
-                  - "replace_section": Replace content under a specific markdown header
+                  - "append": Add content to the end of the note (creates the note if it doesn't exist)
+                  - "prepend": Add content to the beginning of the note (creates the note if it doesn't exist)
+                  - "find_replace": Replace occurrences of find_text with content (note must exist)
+                  - "replace_section": Replace content under a specific markdown header (note must exist)
         content: The content to add or use for replacement
         project: Project name to edit in. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
@@ -243,48 +276,118 @@ async def edit_note(
             # Use typed KnowledgeClient for API calls
             knowledge_client = KnowledgeClient(client, active_project.external_id)
 
-            # Resolve identifier to entity ID
-            entity_id = await knowledge_client.resolve_entity(identifier)
+            file_created = False
 
-            # Prepare the edit request data
-            edit_data = {
-                "operation": operation,
-                "content": content,
-            }
+            # Try to resolve the entity; for append/prepend, create it if not found
+            try:
+                entity_id = await knowledge_client.resolve_entity(identifier)
+            except Exception as resolve_error:
+                # Trigger: entity does not exist yet
+                # Why: append/prepend can meaningfully create a new note from the content,
+                #      while find_replace/replace_section require existing content to modify
+                # Outcome: note is created via the same path as write_note
+                error_msg = str(resolve_error).lower()
+                is_not_found = "entity not found" in error_msg or "not found" in error_msg
 
-            # Add optional parameters
-            if section:
-                edit_data["section"] = section
-            if find_text:
-                edit_data["find_text"] = find_text
-            if effective_replacements != 1:  # Only send if different from default
-                edit_data["expected_replacements"] = str(effective_replacements)
+                if is_not_found and operation in ("append", "prepend"):
+                    title, directory = _parse_identifier_to_title_and_directory(identifier)
 
-            # Call the PATCH endpoint
-            result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
+                    # Validate directory path (same security check as write_note)
+                    project_path = active_project.home
+                    if directory and not validate_project_path(directory, project_path):
+                        logger.warning(
+                            "Attempted path traversal attack blocked",
+                            directory=directory,
+                            project=active_project.name,
+                        )
+                        if output_format == "json":
+                            return {
+                                "title": title,
+                                "permalink": None,
+                                "file_path": None,
+                                "checksum": None,
+                                "operation": operation,
+                                "fileCreated": False,
+                                "error": "SECURITY_VALIDATION_ERROR",
+                            }
+                        return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
 
-            # Format summary
-            summary = [
-                f"# Edited note ({operation})",
-                f"project: {active_project.name}",
-                f"file_path: {result.file_path}",
-                f"permalink: {result.permalink}",
-                f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
-            ]
+                    entity = Entity(
+                        title=title,
+                        directory=directory,
+                        content_type="text/markdown",
+                        content=content,
+                    )
 
-            # Add operation-specific details
-            if operation == "append":
+                    logger.info(
+                        "Creating note via edit_note auto-create",
+                        title=title,
+                        directory=directory,
+                        operation=operation,
+                    )
+                    result = await knowledge_client.create_entity(
+                        entity.model_dump(), fast=False
+                    )
+                    file_created = True
+                else:
+                    # find_replace/replace_section require existing content — re-raise
+                    raise resolve_error
+
+            # --- Standard edit path (entity already existed) ---
+            if not file_created:
+                # Prepare the edit request data
+                edit_data = {
+                    "operation": operation,
+                    "content": content,
+                }
+
+                # Add optional parameters
+                if section:
+                    edit_data["section"] = section
+                if find_text:
+                    edit_data["find_text"] = find_text
+                if effective_replacements != 1:  # Only send if different from default
+                    edit_data["expected_replacements"] = str(effective_replacements)
+
+                # Call the PATCH endpoint
+                result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
+
+            # --- Format response ---
+            if file_created:
+                summary = [
+                    f"# Created note ({operation})",
+                    f"project: {active_project.name}",
+                    f"file_path: {result.file_path}",
+                    f"permalink: {result.permalink}",
+                    f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+                    "fileCreated: true",
+                ]
                 lines_added = len(content.split("\n"))
-                summary.append(f"operation: Added {lines_added} lines to end of note")
-            elif operation == "prepend":
-                lines_added = len(content.split("\n"))
-                summary.append(f"operation: Added {lines_added} lines to beginning of note")
-            elif operation == "find_replace":
-                # For find_replace, we can't easily count replacements from here
-                # since we don't have the original content, but the server handled it
-                summary.append("operation: Find and replace operation completed")
-            elif operation == "replace_section":
-                summary.append(f"operation: Replaced content under section '{section}'")
+                summary.append(f"operation: Created note with {lines_added} lines")
+            else:
+                summary = [
+                    f"# Edited note ({operation})",
+                    f"project: {active_project.name}",
+                    f"file_path: {result.file_path}",
+                    f"permalink: {result.permalink}",
+                    f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+                ]
+
+                # Add operation-specific details
+                if operation == "append":
+                    lines_added = len(content.split("\n"))
+                    summary.append(f"operation: Added {lines_added} lines to end of note")
+                elif operation == "prepend":
+                    lines_added = len(content.split("\n"))
+                    summary.append(
+                        f"operation: Added {lines_added} lines to beginning of note"
+                    )
+                elif operation == "find_replace":
+                    # For find_replace, we can't easily count replacements from here
+                    # since we don't have the original content, but the server handled it
+                    summary.append("operation: Find and replace operation completed")
+                elif operation == "replace_section":
+                    summary.append(f"operation: Replaced content under section '{section}'")
 
             # Count observations by category (reuse logic from write_note)
             categories = {}
@@ -316,6 +419,7 @@ async def edit_note(
                 permalink=result.permalink,
                 observations_count=len(result.observations),
                 relations_count=len(result.relations),
+                file_created=file_created,
             )
 
             if output_format == "json":
@@ -325,6 +429,7 @@ async def edit_note(
                     "file_path": result.file_path,
                     "checksum": result.checksum,
                     "operation": operation,
+                    "fileCreated": file_created,
                 }
 
             summary_result = "\n".join(summary)
@@ -339,6 +444,7 @@ async def edit_note(
                     "file_path": None,
                     "checksum": None,
                     "operation": operation,
+                    "fileCreated": False,
                     "error": str(e),
                 }
             return _format_error_response(

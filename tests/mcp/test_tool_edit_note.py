@@ -120,19 +120,141 @@ async def test_edit_note_replace_section_operation(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_edit_note_nonexistent_note(client, test_project):
-    """Test editing a note that doesn't exist - should return helpful guidance."""
+async def test_edit_note_nonexistent_note_find_replace(client, test_project):
+    """Test find_replace on a note that doesn't exist - should return helpful guidance."""
     result = await edit_note(
         project=test_project.name,
         identifier="nonexistent/note",
-        operation="append",
-        content="Some content",
+        operation="find_replace",
+        content="replacement",
+        find_text="old text",
     )
 
     assert isinstance(result, str)
     assert "# Edit Failed" in result
     assert "search_notes" in result  # Should suggest searching
-    assert "read_note" in result  # Should suggest reading to verify
+    assert "append" in result  # Should suggest using append/prepend instead
+
+
+@pytest.mark.asyncio
+async def test_edit_note_nonexistent_note_replace_section(client, test_project):
+    """Test replace_section on a note that doesn't exist - should return helpful guidance."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="nonexistent/note",
+        operation="replace_section",
+        content="new section content",
+        section="## Missing Section",
+    )
+
+    assert isinstance(result, str)
+    assert "# Edit Failed" in result
+    assert "search_notes" in result  # Should suggest searching
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_creates_note_if_not_found(client, test_project):
+    """append to a non-existent note should create it automatically."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="auto-created-note",
+        operation="append",
+        content="# New Note\n\nCreated via append.",
+    )
+
+    assert isinstance(result, str)
+    assert "Created note (append)" in result
+    assert "fileCreated: true" in result
+    assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_prepend_creates_note_if_not_found(client, test_project):
+    """prepend to a non-existent note should create it automatically."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="auto-created-prepend",
+        operation="prepend",
+        content="# Prepended Note\n\nCreated via prepend.",
+    )
+
+    assert isinstance(result, str)
+    assert "Created note (prepend)" in result
+    assert "fileCreated: true" in result
+    assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_creates_with_directory_from_identifier(client, test_project):
+    """Identifier 'conversations/my-note' should create in conversations/ directory."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="conversations/my-note",
+        operation="append",
+        content="# My Note\n\nCreated in conversations directory.",
+    )
+
+    assert isinstance(result, str)
+    assert "Created note (append)" in result
+    assert "fileCreated: true" in result
+    assert "conversations/" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_creates_at_root_when_no_directory(client, test_project):
+    """Identifier 'my-note' (no slash) should create at project root."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="root-level-note",
+        operation="append",
+        content="# Root Note\n\nCreated at root.",
+    )
+
+    assert isinstance(result, str)
+    assert "Created note (append)" in result
+    assert "fileCreated: true" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_creates_json_format(client, test_project):
+    """JSON output should include fileCreated: true when note is auto-created."""
+    result = await edit_note(
+        project=test_project.name,
+        identifier="json-auto-create",
+        operation="append",
+        content="# JSON Test\n\nAuto-created.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is True
+    assert result["title"] is not None
+    assert result["operation"] == "append"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_existing_note_json_includes_file_created_false(client, test_project):
+    """JSON output for editing an existing note should include fileCreated: false."""
+    # Create the note first
+    await write_note(
+        project=test_project.name,
+        title="Existing JSON Note",
+        directory="test",
+        content="# Existing Note\nOriginal content.",
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="test/existing-json-note",
+        operation="append",
+        content="\nAppended content.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["fileCreated"] is False
+    assert result["title"] == "Existing JSON Note"
+    assert result["operation"] == "append"
 
 
 @pytest.mark.asyncio

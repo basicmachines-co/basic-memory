@@ -211,6 +211,34 @@ def test_edit_note_replace_section_fails_without_section(
     assert "section parameter is required for replace_section operation" in result.output
 
 
+def test_edit_note_append_creates_nonexistent_note_cli(
+    app, app_config, test_project, config_manager
+):
+    """append to a non-existent note via CLI should auto-create and include fileCreated."""
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "edit-note",
+            "cli-tests/auto-created-note",
+            "--operation",
+            "append",
+            "--content",
+            "# Auto Created\n\nCreated via CLI append.",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["fileCreated"] is True
+    assert data["operation"] == "append"
+    assert data["title"] is not None
+
+    # Verify the note is readable
+    read_data = _read_note(data["permalink"])
+    assert "Auto Created" in read_data["content"]
+
+
 def test_edit_note_json_format_contract(app, app_config, test_project, config_manager):
     """JSON output returns metadata keys required by contract."""
     note = _write_note(
@@ -234,8 +262,9 @@ def test_edit_note_json_format_contract(app, app_config, test_project, config_ma
 
     assert result.exit_code == 0, result.output
     data = json.loads(result.stdout)
-    assert set(data.keys()) == {"title", "permalink", "file_path", "operation", "checksum"}
+    assert set(data.keys()) == {"title", "permalink", "file_path", "operation", "checksum", "fileCreated"}
     assert data["operation"] == "append"
+    assert data["fileCreated"] is False
     assert data["title"] == "Edit JSON Note"
 
 
