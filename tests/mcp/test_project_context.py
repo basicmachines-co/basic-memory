@@ -475,3 +475,77 @@ class TestGetProjectClientRoutingOrder:
         assert "resolve_workspace_parameter should not be called" not in error_msg
         # Should not get a local ASGI routing error
         assert "no project found" not in error_msg
+
+    @pytest.mark.asyncio
+    async def test_factory_mode_skips_workspace_resolution(self, config_manager, monkeypatch):
+        """When a client factory is set (in-process cloud server), skip workspace resolution.
+
+        The cloud MCP server calls set_client_factory() so that get_client() routes
+        requests through TenantASGITransport. In this mode, workspace and tenant context
+        are already resolved by the transport layer. Attempting cloud workspace resolution
+        would call the production control-plane API and fail with 401.
+        """
+        from contextlib import asynccontextmanager
+
+        from basic_memory.mcp import async_client
+        from basic_memory.mcp.project_context import get_project_client
+        from basic_memory.config import ProjectEntry, ProjectMode
+
+        config = config_manager.load_config()
+        config.projects["cloud-proj"] = ProjectEntry(
+            path=str(config_manager.config_dir.parent / "cloud-proj"),
+            mode=ProjectMode.CLOUD,
+        )
+        config_manager.save_config(config)
+
+        # Set up a factory (simulates what cloud MCP server does)
+        @asynccontextmanager
+        async def fake_factory():
+            from httpx import ASGITransport, AsyncClient
+            from basic_memory.api.app import app as fastapi_app
+
+            async with AsyncClient(
+                transport=ASGITransport(app=fastapi_app),
+                base_url="http://test",
+            ) as client:
+                yield client
+
+        original_factory = async_client._client_factory
+        async_client.set_client_factory(fake_factory)
+
+        # Patch workspace resolution to fail if called — factory mode should skip it
+        async def fail_if_called(**kwargs):  # pragma: no cover
+            raise AssertionError(
+                "resolve_workspace_parameter must not be called in factory mode"
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.project_context.resolve_workspace_parameter",
+            fail_if_called,
+        )
+
+        # Patch get_cloud_control_plane_client to fail if called
+        @asynccontextmanager
+        async def fail_control_plane():  # pragma: no cover
+            raise AssertionError(
+                "get_cloud_control_plane_client must not be called in factory mode"
+            )
+
+        monkeypatch.setattr(
+            "basic_memory.mcp.async_client.get_cloud_control_plane_client",
+            fail_control_plane,
+        )
+
+        try:
+            # Will fail at project validation (no real project in DB), but proves
+            # workspace resolution and control-plane calls were skipped
+            with pytest.raises(Exception) as exc_info:
+                async with get_project_client(project="cloud-proj"):
+                    pass
+
+            error_msg = str(exc_info.value).lower()
+            assert "resolve_workspace_parameter must not be called" not in error_msg
+            assert "get_cloud_control_plane_client must not be called" not in error_msg
+        finally:
+            # Restore original factory to avoid polluting other tests
+            async_client._client_factory = original_factory

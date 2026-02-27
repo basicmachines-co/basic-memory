@@ -419,6 +419,7 @@ async def get_project_client(
         _explicit_routing,
         _force_local_mode,
         get_client,
+        is_factory_mode,
     )
 
     # Step 1: Resolve project name from config (no network call)
@@ -432,6 +433,18 @@ async def get_project_client(
                 "Either set 'default_project' in config, or use 'project' argument.\n"
                 f"Available projects: {project_names}"
             )
+
+    # Step 1b: Factory injection (in-process cloud server)
+    # Trigger: set_client_factory() was called (e.g., by cloud MCP server)
+    # Why: the transport layer already resolved workspace and tenant context;
+    #   attempting cloud workspace resolution here would call the production
+    #   control-plane API with no valid credentials and fail with 401
+    # Outcome: use the factory client directly, skip workspace resolution
+    if is_factory_mode():
+        async with get_client() as client:
+            active_project = await get_active_project(client, resolved_project, context)
+            yield client, active_project
+        return
 
     # Step 2: Check explicit routing BEFORE workspace resolution
     # Trigger: CLI passed --local or --cloud
