@@ -1,9 +1,11 @@
 """Write note tool for Basic Memory MCP server."""
 
+import textwrap
 from typing import List, Union, Optional, Literal
 
 from loguru import logger
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
@@ -15,8 +17,8 @@ TagType = Union[List[str], str, None]
 
 
 @mcp.tool(
-    description="Create or update a markdown note. Returns a markdown formatted summary of the semantic content.",
-    annotations={"destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+    description="Create a markdown note. If the note already exists, returns an error by default — pass overwrite=True to replace.",
+    annotations={"destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
 )
 async def write_note(
     title: str,
@@ -27,12 +29,15 @@ async def write_note(
     tags: list[str] | str | None = None,
     note_type: str = "note",
     metadata: dict | None = None,
+    overwrite: bool | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict:
     """Write a markdown note to the knowledge base.
 
-    Creates or updates a markdown note with semantic observations and relations.
+    Creates a markdown note with semantic observations and relations.
+    If the note already exists, returns an error by default. Pass overwrite=True
+    to replace the existing note. For incremental updates, use edit_note instead.
 
     Project Resolution:
     Server resolves projects using a unified priority chain (same in local and cloud modes):
@@ -74,6 +79,8 @@ async def write_note(
         metadata: Optional dict of extra frontmatter fields merged into entity_metadata.
                   Useful for schema notes or any note that needs custom YAML frontmatter
                   beyond title/type/tags. Nested dicts are supported.
+        overwrite: If True, replace existing note on conflict. If False, error on conflict.
+                   If None (default), consult write_note_overwrite_default config setting.
         output_format: "text" returns the existing markdown summary. "json" returns
                        machine-readable metadata.
         context: Optional FastMCP context for performance caching.
@@ -106,12 +113,13 @@ async def write_note(
             note_type="guide"
         )
 
-        # Update existing note (same title/directory)
+        # Overwrite an existing note explicitly
         write_note(
             project="my-research",
             title="Meeting Notes",
             directory="meetings",
-            content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech"
+            content="# Weekly Standup\\n\\n- [decision] Use PostgreSQL instead #tech",
+            overwrite=True
         )
 
         # Create a schema note with custom frontmatter via metadata
@@ -132,6 +140,14 @@ async def write_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If directory path attempts path traversal
     """
+    # Resolve overwrite flag: explicit parameter > config default
+    # Trigger: caller omitted the parameter (None)
+    # Why: lets users set a global default without breaking per-call overrides
+    effective_overwrite = (
+        overwrite if overwrite is not None
+        else ConfigManager().config.write_note_overwrite_default
+    )
+
     async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info(
             f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
@@ -199,6 +215,25 @@ async def write_note(
                 or "conflict" in str(e).lower()
                 or "already exists" in str(e).lower()
             ):
+                # Guard: block overwrite unless explicitly enabled
+                if not effective_overwrite:
+                    logger.warning(
+                        f"write_note blocked: note already exists (overwrite not enabled) "
+                        f"permalink={entity.permalink}"
+                    )
+                    if output_format == "json":
+                        return {
+                            "title": title,
+                            "permalink": entity.permalink,
+                            "file_path": None,
+                            "checksum": None,
+                            "action": "conflict",
+                            "error": "NOTE_ALREADY_EXISTS",
+                        }
+                    return _format_overwrite_error(
+                        title, entity.permalink, active_project.name
+                    )
+
                 logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
                 try:
                     if not entity.permalink:
@@ -270,3 +305,23 @@ async def write_note(
 
         summary_result = "\n".join(summary)
         return add_project_metadata(summary_result, active_project.name)
+
+
+def _format_overwrite_error(title: str, permalink: str | None, project_name: str) -> str:
+    """Format a helpful error when write_note is blocked by the overwrite guard."""
+    return textwrap.dedent(f"""\
+        # Error: Note already exists
+
+        **"{title}"** already exists (permalink: `{permalink}`).
+
+        `write_note` does not overwrite by default. Choose an option:
+
+        | Goal | Action |
+        |------|--------|
+        | Append content | `edit_note("{permalink}", operation="append", content="...")` |
+        | Prepend content | `edit_note("{permalink}", operation="prepend", content="...")` |
+        | Replace a section | `edit_note("{permalink}", operation="replace_section", section="...", content="...")` |
+        | Full replace | `write_note("{title}", ..., overwrite=True)` |
+        | Inspect first | `read_note("{permalink}")` |
+
+        Project: {project_name}""")

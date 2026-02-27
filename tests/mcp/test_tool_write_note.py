@@ -1,8 +1,10 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
 from textwrap import dedent
+
 import pytest
 
+from basic_memory import config as config_module
 from basic_memory.mcp.tools import write_note, read_note, delete_note
 from basic_memory.utils import normalize_newlines
 
@@ -120,6 +122,7 @@ async def test_write_note_update_existing(app, test_project):
         directory="test",
         content="# Test\nThis is an updated note",
         tags=["test", "documentation"],
+        overwrite=True,
     )
     assert "# Updated note" in result
     assert f"project: {test_project.name}" in result
@@ -229,6 +232,7 @@ async def test_issue_93_write_note_respects_custom_permalink_existing_note(app, 
         title="Existing Note",
         directory="test",
         content=updated_content,
+        overwrite=True,
     )
 
     # Verify the custom permalink is respected
@@ -385,6 +389,7 @@ async def test_write_note_preserves_custom_metadata(app, project_config, test_pr
         directory="test",
         content="# Updated content",
         tags=["test", "updated"],
+        overwrite=True,
     )
 
     # Verify the update was successful
@@ -501,6 +506,7 @@ async def test_write_note_permalink_collision_fix_issue_139(app, test_project):
         title="Note 1",  # Same title as first note
         directory="test",  # Same folder as first note
         content="Replacement content for note 1",  # Different content
+        overwrite=True,
     )
 
     # This should not raise a UNIQUE constraint failure error
@@ -681,6 +687,7 @@ async def test_write_note_update_existing_with_different_note_type(app, test_pro
         content="# Updated Content\nThis is now a guide",
         tags=["guide"],
         note_type="guide",
+        overwrite=True,
     )
 
     assert result2
@@ -1143,3 +1150,148 @@ class TestWriteNoteSecurityEdgeCases:
             if ".." in attack_folder.strip() or "~" in attack_folder.strip():
                 assert "# Error" in result
                 assert "paths must stay within project boundaries" in result
+
+
+class TestWriteNoteOverwriteGuard:
+    """Test the write_note overwrite guard feature (Issue #625)."""
+
+    @pytest.mark.asyncio
+    async def test_write_note_blocks_overwrite_by_default(self, app, test_project):
+        """Second write_note to same title/directory returns error, original content untouched."""
+        # Create initial note
+        result1 = await write_note(
+            project=test_project.name,
+            title="Guard Test",
+            directory="guard",
+            content="# Guard Test\n\nOriginal content",
+        )
+        assert "# Created note" in result1
+
+        # Second write without overwrite should be blocked
+        result2 = await write_note(
+            project=test_project.name,
+            title="Guard Test",
+            directory="guard",
+            content="# Guard Test\n\nReplacement content",
+        )
+        assert "# Error: Note already exists" in result2
+        assert "Guard Test" in result2
+        assert "edit_note" in result2
+
+        # Original content should be untouched
+        content = await read_note("guard/guard-test", project=test_project.name)
+        assert "Original content" in content
+        assert "Replacement content" not in content
+
+    @pytest.mark.asyncio
+    async def test_write_note_overwrite_false_explicit(self, app, test_project):
+        """Explicit overwrite=False behaves same as default."""
+        await write_note(
+            project=test_project.name,
+            title="Explicit False",
+            directory="guard",
+            content="# Explicit False\n\nOriginal",
+        )
+
+        result = await write_note(
+            project=test_project.name,
+            title="Explicit False",
+            directory="guard",
+            content="# Explicit False\n\nReplacement",
+            overwrite=False,
+        )
+        assert "# Error: Note already exists" in result
+
+    @pytest.mark.asyncio
+    async def test_write_note_overwrite_true_replaces(self, app, test_project):
+        """Explicit overwrite=True performs the update."""
+        await write_note(
+            project=test_project.name,
+            title="Overwrite True",
+            directory="guard",
+            content="# Overwrite True\n\nOriginal content",
+        )
+
+        result = await write_note(
+            project=test_project.name,
+            title="Overwrite True",
+            directory="guard",
+            content="# Overwrite True\n\nReplacement content",
+            overwrite=True,
+        )
+        assert "# Updated note" in result
+
+        # Verify content was replaced
+        content = await read_note("guard/overwrite-true", project=test_project.name)
+        assert "Replacement content" in content
+        assert "Original content" not in content
+
+    @pytest.mark.asyncio
+    async def test_write_note_overwrite_error_json_format(self, app, test_project):
+        """JSON output returns structured error with NOTE_ALREADY_EXISTS."""
+        await write_note(
+            project=test_project.name,
+            title="JSON Guard",
+            directory="guard",
+            content="# JSON Guard\n\nOriginal",
+        )
+
+        result = await write_note(
+            project=test_project.name,
+            title="JSON Guard",
+            directory="guard",
+            content="# JSON Guard\n\nReplacement",
+            output_format="json",
+        )
+        assert isinstance(result, dict)
+        assert result["error"] == "NOTE_ALREADY_EXISTS"
+        assert result["action"] == "conflict"
+        assert result["title"] == "JSON Guard"
+        assert result["permalink"] is not None
+
+    @pytest.mark.asyncio
+    async def test_write_note_config_overwrite_default_true(
+        self, app, test_project, app_config, config_manager
+    ):
+        """Config write_note_overwrite_default=True restores old upsert behavior."""
+        # Set config to allow overwrites by default
+        app_config.write_note_overwrite_default = True
+        config_module._CONFIG_CACHE = app_config
+
+        try:
+            await write_note(
+                project=test_project.name,
+                title="Config Default",
+                directory="guard",
+                content="# Config Default\n\nOriginal",
+            )
+
+            result = await write_note(
+                project=test_project.name,
+                title="Config Default",
+                directory="guard",
+                content="# Config Default\n\nReplacement via config default",
+            )
+            # Should succeed as update because config default is True
+            assert "# Updated note" in result
+
+            content = await read_note("guard/config-default", project=test_project.name)
+            assert "Replacement via config default" in content
+        finally:
+            # Restore config
+            app_config.write_note_overwrite_default = False
+            config_module._CONFIG_CACHE = app_config
+
+    @pytest.mark.asyncio
+    async def test_write_note_new_note_unaffected(self, app, test_project):
+        """Guard only triggers on conflict — new notes are created normally."""
+        result = await write_note(
+            project=test_project.name,
+            title="Brand New Note",
+            directory="guard",
+            content="# Brand New Note\n\nFresh content",
+            tags=["new"],
+        )
+        assert "# Created note" in result
+        assert f"project: {test_project.name}" in result
+        assert "file_path: guard/Brand New Note.md" in result

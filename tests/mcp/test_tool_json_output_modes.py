@@ -38,6 +38,7 @@ async def test_write_note_text_and_json_modes(app, test_project):
         directory="mode-tests",
         content="# Mode Write Note\n\nupdated",
         output_format="json",
+        overwrite=True,
     )
     assert isinstance(json_result, dict)
     assert json_result["title"] == "Mode Write Note"

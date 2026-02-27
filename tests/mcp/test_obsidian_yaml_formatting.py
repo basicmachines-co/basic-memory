@@ -143,6 +143,7 @@ async def test_write_note_update_preserves_yaml_format(app, project_config, test
         directory="test",
         content="Updated content",
         tags=["updated", "new-tag", "format"],
+        overwrite=True,
     )
 
     # Should be an update, not a new creation
