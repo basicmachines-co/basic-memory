@@ -347,7 +347,7 @@ class SearchService:
         entity: Entity,
         content: str | None = None,
     ) -> None:
-        logger.info(
+        logger.debug(
             f"[BackgroundTask] Starting search index for entity_id={entity.id} "
             f"permalink={entity.permalink} project_id={entity.project_id}"
         )
@@ -360,7 +360,7 @@ class SearchService:
                 entity, content
             ) if entity.is_markdown else await self.index_entity_file(entity)
 
-            logger.info(
+            logger.debug(
                 f"[BackgroundTask] Completed search index for entity_id={entity.id} "
                 f"permalink={entity.permalink}"
             )

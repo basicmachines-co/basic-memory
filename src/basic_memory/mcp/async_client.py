@@ -154,13 +154,13 @@ async def get_client(
     # Outcome: route strictly based on explicit flag.
     if _explicit_routing():
         if _force_local_mode():
-            logger.info("Explicit local routing enabled - using ASGI client")
+            logger.debug("Explicit local routing enabled - using ASGI client")
             async with _asgi_client(timeout) as client:
                 yield client
             return
 
         if _force_cloud_mode():
-            logger.info("Explicit cloud routing enabled - using cloud proxy client")
+            logger.debug("Explicit cloud routing enabled - using cloud proxy client")
             async with _cloud_client(config, timeout, workspace=workspace) as client:
                 yield client
             return
@@ -172,7 +172,7 @@ async def get_client(
     if project_name is not None and not _explicit_routing():
         project_mode = config.get_project_mode(project_name)
         if project_mode == ProjectMode.CLOUD:
-            logger.info(f"Project '{project_name}' is cloud mode - using cloud proxy client")
+            logger.debug(f"Project '{project_name}' is cloud mode - using cloud proxy client")
             try:
                 async with _cloud_client(config, timeout, workspace=workspace) as client:
                     yield client
@@ -183,13 +183,13 @@ async def get_client(
                 ) from exc
             return
 
-        logger.info(f"Project '{project_name}' is local mode - using ASGI client")
+        logger.debug(f"Project '{project_name}' is local mode - using ASGI client")
         async with _asgi_client(timeout) as client:
             yield client
         return
 
     # --- Default fallback ---
-    logger.info("Default routing - using ASGI client for local Basic Memory API")
+    logger.debug("Default routing - using ASGI client for local Basic Memory API")
     async with _asgi_client(timeout) as client:
         yield client
 

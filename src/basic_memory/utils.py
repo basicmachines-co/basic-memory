@@ -281,7 +281,7 @@ def setup_logging(
             str(log_path),
             level=log_level,
             rotation="10 MB",
-            retention="10 days",
+            retention=5,
             backtrace=True,
             diagnose=True,
             enqueue=False,

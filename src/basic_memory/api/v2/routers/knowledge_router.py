@@ -130,7 +130,7 @@ async def resolve_identifier(
         resolution_method=resolution_method,
     )
 
-    logger.info(
+    logger.debug(
         f"API v2 response: resolved '{data.identifier}' to external_id={result.external_id} via {resolution_method}"
     )
 

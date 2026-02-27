@@ -267,7 +267,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         if self._vector_tables_initialized:
             return
 
-        logger.info("Ensuring Postgres vector tables exist for semantic search")
+        logger.debug("Ensuring Postgres vector tables exist for semantic search")
 
         async with self._vector_tables_lock:
             if self._vector_tables_initialized:
@@ -358,7 +358,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 await session.commit()
 
-            logger.info(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
+            logger.debug(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
             self._vector_tables_initialized = True
 
     async def _get_existing_embedding_dims(self, session: AsyncSession) -> int | None:

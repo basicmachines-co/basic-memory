@@ -437,13 +437,13 @@ class SyncService:
         elif project.last_scan_timestamp is not None:
             # Incremental scan: only files modified since last scan
             scan_type = "incremental"
-            logger.info(
+            logger.debug(
                 f"Running incremental scan for files modified since {project.last_scan_timestamp}"
             )
             file_paths_to_scan = await self._scan_directory_modified_since(
                 directory, project.last_scan_timestamp
             )
-            logger.info(
+            logger.debug(
                 f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
             )
 
@@ -705,7 +705,7 @@ class SyncService:
 
             # If permalink changed, update the file
             if permalink != entity_markdown.frontmatter.permalink:
-                logger.info(
+                logger.debug(
                     f"Updating permalink for path: {path}, old_permalink: {entity_markdown.frontmatter.permalink}, new_permalink: {permalink}"
                 )
 

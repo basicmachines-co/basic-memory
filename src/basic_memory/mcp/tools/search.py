@@ -513,7 +513,7 @@ async def search_notes(
                     "`tags`, `status`, `note_types`, `entity_types`, or `after_date`."
                 )
 
-            logger.info(f"Searching for {search_query} in project {active_project.name}")
+            logger.debug(f"Searching for {search_query} in project {active_project.name}")
             # Import here to avoid circular import (tools → clients → utils → tools)
             from basic_memory.mcp.clients import SearchClient
 
@@ -527,7 +527,7 @@ async def search_notes(
 
             # Check if we got no results and provide helpful guidance
             if not result.results:
-                logger.info(
+                logger.debug(
                     f"Search returned no results for query: {query} in project {active_project.name}"
                 )
                 # Don't treat this as an error, but the user might want guidance

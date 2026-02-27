@@ -79,7 +79,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         across server restarts. Also creates vector tables when semantic search
         is enabled so missing dependencies are caught at startup, not first query.
         """
-        logger.info("Initializing SQLite FTS5 search index")
+        logger.debug("Initializing SQLite FTS5 search index")
         try:
             async with db.scoped_session(self.session_maker) as session:
                 # Create FTS5 virtual table if it doesn't exist
@@ -378,7 +378,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         if self._vector_tables_initialized:
             return
 
-        logger.info("Ensuring SQLite vector tables exist for semantic search")
+        logger.debug("Ensuring SQLite vector tables exist for semantic search")
 
         async with db.scoped_session(self.session_maker) as session:
             await self._ensure_sqlite_vec_loaded(session)
@@ -431,7 +431,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             await session.execute(create_sqlite_search_vector_embeddings(self._vector_dimensions))
             await session.commit()
 
-        logger.info(f"SQLite vector tables ready (dimensions={self._vector_dimensions})")
+        logger.debug(f"SQLite vector tables ready (dimensions={self._vector_dimensions})")
         self._vector_tables_initialized = True
 
     async def _prepare_vector_session(self, session: AsyncSession) -> None:

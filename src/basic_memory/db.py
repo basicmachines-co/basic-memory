@@ -475,7 +475,7 @@ async def run_migrations(
     Note: Alembic tracks which migrations have been applied via the alembic_version table,
     so it's safe to call this multiple times - it will only run pending migrations.
     """
-    logger.info("Running database migrations...")
+    logger.debug("Running database migrations...")
     temp_engine: AsyncEngine | None = None
     try:
         revisions_before_upgrade: set[str] = set()
@@ -514,7 +514,7 @@ async def run_migrations(
         config.set_main_option("sqlalchemy.url", db_url)
 
         command.upgrade(config, "head")
-        logger.info("Migrations completed successfully")
+        logger.debug("Migrations completed successfully")
 
         # Get session maker - ensure we don't trigger recursive migration calls
         if _session_maker is None:
