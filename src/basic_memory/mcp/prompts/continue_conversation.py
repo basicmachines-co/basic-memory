@@ -125,7 +125,7 @@ def _format_continuation_results(result: SearchResponse, topic: str) -> str:
         lines.append(f"### {title}")
         if permalink:
             lines.append(f"permalink: {permalink}")
-            lines.append(f"Read with: `read_note(\"{permalink}\")`")
+            lines.append(f'Read with: `read_note("{permalink}")`')
         if item.content:
             content = item.content[:300] + "..." if len(item.content) > 300 else item.content
             lines.append(f"\n{content}")

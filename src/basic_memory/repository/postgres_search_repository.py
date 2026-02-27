@@ -689,9 +689,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             for idx, note_type in enumerate(note_types):
                 param_name = f"note_type_{idx}"
                 params[param_name] = json.dumps({"note_type": note_type})
-                type_conditions.append(
-                    f"search_index.metadata @> CAST(:{param_name} AS jsonb)"
-                )
+                type_conditions.append(f"search_index.metadata @> CAST(:{param_name} AS jsonb)")
             conditions.append(f"({' OR '.join(type_conditions)})")
 
         # Handle date filter

@@ -836,9 +836,7 @@ async def test_delete_directory_v2_nested_structure(client: AsyncClient, v2_proj
 
 
 @pytest.mark.asyncio
-async def test_entity_response_includes_user_tracking_fields(
-    client: AsyncClient, v2_project_url
-):
+async def test_entity_response_includes_user_tracking_fields(client: AsyncClient, v2_project_url):
     """EntityResponseV2 includes created_by and last_updated_by fields (null for local)."""
     entity_data = {
         "title": "UserTrackingTest",

@@ -466,7 +466,12 @@ async def search_notes(
             effective_query = (query or "").strip()
             if effective_query:
                 valid_search_types = {
-                    "text", "title", "permalink", "vector", "semantic", "hybrid",
+                    "text",
+                    "title",
+                    "permalink",
+                    "vector",
+                    "semantic",
+                    "hybrid",
                 }
                 if effective_search_type == "text":
                     search_query.text = effective_query

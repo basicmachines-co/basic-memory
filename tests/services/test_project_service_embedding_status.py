@@ -40,7 +40,11 @@ async def test_embedding_status_vector_tables_missing(
     """When vector tables don't exist, recommend reindex."""
     # Drop the chunks table created by the fixture to simulate missing vector tables
     # Postgres requires CASCADE (due to index dependencies); SQLite doesn't support it
-    drop_sql = "DROP TABLE IF EXISTS search_vector_chunks CASCADE" if _is_postgres() else "DROP TABLE IF EXISTS search_vector_chunks"
+    drop_sql = (
+        "DROP TABLE IF EXISTS search_vector_chunks CASCADE"
+        if _is_postgres()
+        else "DROP TABLE IF EXISTS search_vector_chunks"
+    )
     await project_service.repository.execute_query(text(drop_sql), {})
 
     with patch.object(
@@ -112,9 +116,7 @@ async def test_embedding_status_orphaned_chunks(
     # SQLite queries join on rowid which aliases INTEGER PRIMARY KEY.
     await project_service.repository.execute_query(
         text(
-            "CREATE TABLE IF NOT EXISTS search_vector_embeddings ("
-            "  chunk_id INTEGER PRIMARY KEY"
-            ")"
+            "CREATE TABLE IF NOT EXISTS search_vector_embeddings (  chunk_id INTEGER PRIMARY KEY)"
         ),
         {},
     )
@@ -141,14 +143,10 @@ async def test_embedding_status_orphaned_chunks(
 
 
 @pytest.mark.asyncio
-async def test_embedding_status_healthy(
-    project_service: ProjectService, test_graph, test_project
-):
+async def test_embedding_status_healthy(project_service: ProjectService, test_graph, test_project):
     """When all entities have embeddings, no reindex recommended."""
     # Clear any leftover data from prior tests
-    await project_service.repository.execute_query(
-        text("DELETE FROM search_vector_chunks"), {}
-    )
+    await project_service.repository.execute_query(text("DELETE FROM search_vector_chunks"), {})
 
     # Drop any existing virtual table (may have been created by search_service init)
     # and recreate as a simple regular table for testing the join logic.
@@ -158,19 +156,13 @@ async def test_embedding_status_healthy(
         text("DROP TABLE IF EXISTS search_vector_embeddings"), {}
     )
     await project_service.repository.execute_query(
-        text(
-            "CREATE TABLE search_vector_embeddings ("
-            "  chunk_id INTEGER PRIMARY KEY"
-            ")"
-        ),
+        text("CREATE TABLE search_vector_embeddings (  chunk_id INTEGER PRIMARY KEY)"),
         {},
     )
 
     # Insert a chunk + matching embedding for every search_index entity
     entity_result = await project_service.repository.execute_query(
-        text(
-            "SELECT DISTINCT entity_id FROM search_index WHERE project_id = :project_id"
-        ),
+        text("SELECT DISTINCT entity_id FROM search_index WHERE project_id = :project_id"),
         {"project_id": test_project.id},
     )
     entity_ids = [row[0] for row in entity_result.fetchall()]

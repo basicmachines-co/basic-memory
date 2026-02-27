@@ -977,16 +977,13 @@ class ProjectService:
                 total_indexed_entities=total_indexed_entities,
                 vector_tables_exist=False,
                 reindex_recommended=True,
-                reindex_reason=(
-                    "Vector tables not initialized — run: bm reindex --embeddings"
-                ),
+                reindex_reason=("Vector tables not initialized — run: bm reindex --embeddings"),
             )
 
         # --- Count queries (tables exist) ---
         si_result = await self.repository.execute_query(
             text(
-                "SELECT COUNT(DISTINCT entity_id) FROM search_index "
-                "WHERE project_id = :project_id"
+                "SELECT COUNT(DISTINCT entity_id) FROM search_index WHERE project_id = :project_id"
             ),
             {"project_id": project_id},
         )
@@ -1040,9 +1037,7 @@ class ProjectService:
                 "WHERE c.project_id = :project_id AND e.rowid IS NULL"
             )
 
-        orphan_result = await self.repository.execute_query(
-            orphan_sql, {"project_id": project_id}
-        )
+        orphan_result = await self.repository.execute_query(orphan_sql, {"project_id": project_id})
         orphaned_chunks = orphan_result.scalar() or 0
 
         # --- Reindex recommendation logic (priority order) ---
@@ -1051,9 +1046,7 @@ class ProjectService:
 
         if total_indexed_entities > 0 and total_chunks == 0:
             reindex_recommended = True
-            reindex_reason = (
-                "Embeddings have never been built — run: bm reindex --embeddings"
-            )
+            reindex_reason = "Embeddings have never been built — run: bm reindex --embeddings"
         elif orphaned_chunks > 0:
             reindex_recommended = True
             reindex_reason = (
@@ -1063,9 +1056,7 @@ class ProjectService:
         elif total_indexed_entities > total_entities_with_chunks:
             missing = total_indexed_entities - total_entities_with_chunks
             reindex_recommended = True
-            reindex_reason = (
-                f"{missing} entities missing embeddings — run: bm reindex --embeddings"
-            )
+            reindex_reason = f"{missing} entities missing embeddings — run: bm reindex --embeddings"
 
         return EmbeddingStatus(
             semantic_search_enabled=True,
