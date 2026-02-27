@@ -8,6 +8,7 @@ from fastmcp import Context
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import Entity
+from basic_memory.schemas.response import EntityResponse
 from basic_memory.utils import validate_project_path
 
 
@@ -25,12 +26,12 @@ def _parse_identifier_to_title_and_directory(identifier: str) -> tuple[str, str]
     """
     cleaned = identifier
     if cleaned.startswith("memory://"):
-        cleaned = cleaned[len("memory://"):]
+        cleaned = cleaned[len("memory://") :]
 
     if "/" in cleaned:
         last_slash = cleaned.rfind("/")
         directory = cleaned[:last_slash]
-        title = cleaned[last_slash + 1:]
+        title = cleaned[last_slash + 1 :]
     else:
         directory = ""
         title = cleaned
@@ -277,6 +278,8 @@ async def edit_note(
             knowledge_client = KnowledgeClient(client, active_project.external_id)
 
             file_created = False
+            entity_id = ""
+            result: EntityResponse | None = None
 
             # Try to resolve the entity; for append/prepend, create it if not found
             try:
@@ -325,9 +328,7 @@ async def edit_note(
                         directory=directory,
                         operation=operation,
                     )
-                    result = await knowledge_client.create_entity(
-                        entity.model_dump(), fast=False
-                    )
+                    result = await knowledge_client.create_entity(entity.model_dump(), fast=False)
                     file_created = True
                 else:
                     # find_replace/replace_section require existing content — re-raise
@@ -353,6 +354,8 @@ async def edit_note(
                 result = await knowledge_client.patch_entity(entity_id, edit_data, fast=False)
 
             # --- Format response ---
+            # result is always set: either by create_entity (auto-create) or patch_entity (edit)
+            assert result is not None
             if file_created:
                 summary = [
                     f"# Created note ({operation})",
@@ -379,9 +382,7 @@ async def edit_note(
                     summary.append(f"operation: Added {lines_added} lines to end of note")
                 elif operation == "prepend":
                     lines_added = len(content.split("\n"))
-                    summary.append(
-                        f"operation: Added {lines_added} lines to beginning of note"
-                    )
+                    summary.append(f"operation: Added {lines_added} lines to beginning of note")
                 elif operation == "find_replace":
                     # For find_replace, we can't easily count replacements from here
                     # since we don't have the original content, but the server handled it
@@ -448,5 +449,10 @@ async def edit_note(
                     "error": str(e),
                 }
             return _format_error_response(
-                str(e), operation, identifier, find_text, effective_replacements, active_project.name
+                str(e),
+                operation,
+                identifier,
+                find_text,
+                effective_replacements,
+                active_project.name,
             )
