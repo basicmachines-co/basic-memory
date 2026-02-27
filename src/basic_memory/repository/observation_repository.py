@@ -2,9 +2,10 @@
 
 from typing import Dict, List, Sequence
 
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.interfaces import LoaderOption
 
 from basic_memory.models import Observation
 from basic_memory.repository.repository import Repository
@@ -21,6 +22,10 @@ class ObservationRepository(Repository[Observation]):
             project_id: Project ID to filter all operations by
         """
         super().__init__(session_maker, Observation, project_id=project_id)
+
+    def get_load_options(self) -> List[LoaderOption]:
+        """Eager-load parent entity to prevent N+1 if obs.entity is accessed."""
+        return [selectinload(Observation.entity)]
 
     async def find_by_entity(self, entity_id: int) -> Sequence[Observation]:
         """Find all observations for a specific entity."""

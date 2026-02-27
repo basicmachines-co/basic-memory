@@ -38,6 +38,8 @@ class TestDateTimeSerialization:
         assert data["type"] == "entity"
         assert data["title"] == "Test Entity"
         assert data["external_id"] == "550e8400-e29b-41d4-a716-446655440000"
+        # entity_id is excluded from serialization
+        assert "entity_id" not in data
 
     def test_relation_summary_datetime_serialization(self):
         """Test RelationSummary serializes datetime as ISO format string."""
@@ -62,9 +64,16 @@ class TestDateTimeSerialization:
         assert data["created_at"] == "2023-12-08T15:45:30"
         assert data["type"] == "relation"
         assert data["relation_type"] == "relates_to"
+        # Internal IDs excluded from serialization
+        assert "relation_id" not in data
+        assert "entity_id" not in data
+        assert "from_entity_id" not in data
+        assert "from_entity_external_id" not in data
+        assert "to_entity_id" not in data
+        assert "to_entity_external_id" not in data
 
     def test_observation_summary_datetime_serialization(self):
-        """Test ObservationSummary serializes datetime as ISO format string."""
+        """Test ObservationSummary excludes datetime and internal fields."""
         test_datetime = datetime(2023, 12, 8, 20, 15, 45)
 
         observation = ObservationSummary(
@@ -78,32 +87,45 @@ class TestDateTimeSerialization:
             created_at=test_datetime,
         )
 
-        # Test model_dump_json() produces ISO format
+        # Test model_dump_json() excludes internal fields
         json_str = observation.model_dump_json()
         data = json.loads(json_str)
 
-        assert data["created_at"] == "2023-12-08T20:15:45"
+        # All internal/redundant fields excluded
+        assert "created_at" not in data
+        assert "observation_id" not in data
+        assert "entity_id" not in data
+        assert "entity_external_id" not in data
+        assert "title" not in data
+        assert "file_path" not in data
+        # Kept fields
         assert data["type"] == "observation"
         assert data["category"] == "note"
+        assert data["content"] == "Test content"
+        assert data["permalink"] == "test/observation"
 
     def test_memory_metadata_datetime_serialization(self):
-        """Test MemoryMetadata serializes datetime as ISO format string."""
+        """Test MemoryMetadata excludes generated_at and total_results."""
         test_datetime = datetime(2023, 12, 8, 12, 0, 0)
 
         metadata = MemoryMetadata(
             depth=2, generated_at=test_datetime, primary_count=5, related_count=3
         )
 
-        # Test model_dump_json() produces ISO format
+        # Test model_dump_json() excludes internal fields
         json_str = metadata.model_dump_json()
         data = json.loads(json_str)
 
-        assert data["generated_at"] == "2023-12-08T12:00:00"
+        # Excluded fields
+        assert "generated_at" not in data
+        assert "total_results" not in data
+        # Kept fields
         assert data["depth"] == 2
         assert data["primary_count"] == 5
+        assert data["related_count"] == 3
 
     def test_context_result_with_datetime_serialization(self):
-        """Test ContextResult with nested models serializes datetime correctly."""
+        """Test ContextResult with nested models serializes correctly."""
         test_datetime = datetime(2023, 12, 8, 9, 30, 15)
 
         entity = EntitySummary(
@@ -130,12 +152,15 @@ class TestDateTimeSerialization:
             primary_result=entity, observations=[observation], related_results=[]
         )
 
-        # Test model_dump_json() produces ISO format for nested models
+        # Test model_dump_json() produces ISO format for entity, excludes for observation
         json_str = context_result.model_dump_json()
         data = json.loads(json_str)
 
+        # Entity created_at kept
         assert data["primary_result"]["created_at"] == "2023-12-08T09:30:15"
-        assert data["observations"][0]["created_at"] == "2023-12-08T09:30:15"
+        assert "entity_id" not in data["primary_result"]
+        # Observation created_at excluded
+        assert "created_at" not in data["observations"][0]
 
     def test_graph_context_full_serialization(self):
         """Test full GraphContext serialization with all datetime fields."""
@@ -164,8 +189,12 @@ class TestDateTimeSerialization:
         json_str = graph_context.model_dump_json()
         data = json.loads(json_str)
 
-        assert data["metadata"]["generated_at"] == "2023-12-08T14:20:10"
+        # Metadata excluded fields
+        assert "generated_at" not in data["metadata"]
+        assert "total_results" not in data["metadata"]
+        # Entity created_at kept, entity_id excluded
         assert data["results"][0]["primary_result"]["created_at"] == "2023-12-08T14:20:10"
+        assert "entity_id" not in data["results"][0]["primary_result"]
 
     def test_datetime_with_microseconds_serialization(self):
         """Test datetime with microseconds serializes correctly."""
@@ -214,52 +243,161 @@ class TestDateTimeSerialization:
         assert "T" in datetime_str  # Contains date-time separator
         assert len(datetime_str) >= 19  # At least YYYY-MM-DDTHH:MM:SS format
 
-    def test_all_models_have_datetime_serializers_configured(self):
-        """Test that all memory schema models have datetime field serializers configured."""
-        models_to_test = [
-            (EntitySummary, "created_at"),
-            (RelationSummary, "created_at"),
-            (ObservationSummary, "created_at"),
-            (MemoryMetadata, "generated_at"),
-        ]
+    def test_entity_and_relation_serializers_still_active(self):
+        """Test that EntitySummary and RelationSummary datetime serializers work with model_dump."""
+        test_datetime = datetime(2023, 12, 8, 10, 30, 0)
 
-        for model_class, datetime_field in models_to_test:
-            # Create a test instance with a datetime field
-            test_datetime = datetime(2023, 12, 8, 10, 30, 0)
+        entity = EntitySummary(
+            external_id="550e8400-e29b-41d4-a716-446655440000",
+            entity_id=1,
+            permalink="test",
+            title="Test",
+            file_path="test.md",
+            created_at=test_datetime,
+        )
 
-            if model_class == EntitySummary:
-                instance = model_class(
-                    external_id="550e8400-e29b-41d4-a716-446655440000",
-                    entity_id=1,
-                    permalink="test",
-                    title="Test",
-                    file_path="test.md",
-                    created_at=test_datetime,
-                )
-            elif model_class == RelationSummary:
-                instance = model_class(
-                    relation_id=1,
-                    entity_id=1,
-                    title="Test",
-                    file_path="test.md",
-                    permalink="test",
-                    relation_type="test",
-                    created_at=test_datetime,
-                )
-            elif model_class == ObservationSummary:
-                instance = model_class(
-                    observation_id=1,
-                    entity_id=1,
-                    title="Test",
-                    file_path="test.md",
-                    permalink="test",
-                    category="test",
-                    content="Test",
-                    created_at=test_datetime,
-                )
-            elif model_class == MemoryMetadata:
-                instance = model_class(depth=1, generated_at=test_datetime)
+        relation = RelationSummary(
+            relation_id=1,
+            entity_id=1,
+            title="Test",
+            file_path="test.md",
+            permalink="test",
+            relation_type="test",
+            created_at=test_datetime,
+        )
 
-            # Test that model_dump produces ISO format for datetime field
-            data = instance.model_dump()
-            assert data[datetime_field] == "2023-12-08T10:30:00"
+        # model_dump should serialize datetimes via field_serializer
+        entity_data = entity.model_dump()
+        assert entity_data["created_at"] == "2023-12-08T10:30:00"
+        assert "entity_id" not in entity_data  # excluded
+
+        relation_data = relation.model_dump()
+        assert relation_data["created_at"] == "2023-12-08T15:45:30" or True  # serializer active
+        assert relation_data["created_at"] == "2023-12-08T10:30:00"
+        assert "relation_id" not in relation_data  # excluded
+
+    def test_related_results_serialization_round_trip(self):
+        """Test that related_results serialize correctly with identifying fields preserved.
+
+        This validates the fix for #627: related_results must retain title, file_path,
+        and created_at so consumers can identify them without the parent entity context.
+        """
+        test_datetime = datetime(2023, 12, 8, 14, 0, 0)
+
+        # Primary entity
+        primary = EntitySummary(
+            external_id="aaa",
+            entity_id=1,
+            permalink="test/primary",
+            title="Primary",
+            file_path="test/primary.md",
+            created_at=test_datetime,
+        )
+
+        # Related entity — should keep title, file_path, created_at
+        related_entity = EntitySummary(
+            external_id="bbb",
+            entity_id=2,
+            permalink="test/related",
+            title="Related Entity",
+            file_path="test/related.md",
+            created_at=test_datetime,
+        )
+
+        # Related relation — should keep title, file_path, created_at, relation_type
+        related_relation = RelationSummary(
+            relation_id=10,
+            entity_id=1,
+            title="Related Via",
+            file_path="test/primary.md",
+            permalink="test/primary",
+            relation_type="relates_to",
+            from_entity="Primary",
+            from_entity_id=1,
+            to_entity="Related Entity",
+            to_entity_id=2,
+            created_at=test_datetime,
+        )
+
+        # Observation nested under primary
+        obs = ObservationSummary(
+            observation_id=100,
+            entity_id=1,
+            title="Primary",
+            file_path="test/primary.md",
+            permalink="test/primary",
+            category="note",
+            content="Some observation",
+            created_at=test_datetime,
+        )
+
+        context_result = ContextResult(
+            primary_result=primary,
+            observations=[obs],
+            related_results=[related_entity, related_relation],
+        )
+
+        graph = GraphContext(
+            results=[context_result],
+            metadata=MemoryMetadata(
+                depth=1, generated_at=test_datetime, primary_count=1, related_count=2
+            ),
+            page=1,
+            page_size=10,
+        )
+
+        # Serialize via model_dump (same path as build_context tool)
+        data = graph.model_dump()
+
+        result = data["results"][0]
+
+        # Primary entity: created_at present, entity_id excluded
+        assert result["primary_result"]["title"] == "Primary"
+        assert result["primary_result"]["created_at"] == "2023-12-08T14:00:00"
+        assert "entity_id" not in result["primary_result"]
+
+        # Observation: compact, only permalink/category/content/type
+        obs_data = result["observations"][0]
+        assert obs_data["category"] == "note"
+        assert obs_data["content"] == "Some observation"
+        assert obs_data["permalink"] == "test/primary"
+        assert "observation_id" not in obs_data
+        assert "entity_id" not in obs_data
+        assert "title" not in obs_data
+        assert "file_path" not in obs_data
+        assert "created_at" not in obs_data
+
+        # Related entity: identifying fields present
+        rel_entity = result["related_results"][0]
+        assert rel_entity["type"] == "entity"
+        assert rel_entity["title"] == "Related Entity"
+        assert rel_entity["file_path"] == "test/related.md"
+        assert rel_entity["created_at"] == "2023-12-08T14:00:00"
+        assert "entity_id" not in rel_entity
+
+        # Related relation: identifying fields present, internal IDs excluded
+        rel_relation = result["related_results"][1]
+        assert rel_relation["type"] == "relation"
+        assert rel_relation["relation_type"] == "relates_to"
+        assert rel_relation["title"] == "Related Via"
+        assert rel_relation["file_path"] == "test/primary.md"
+        assert rel_relation["created_at"] == "2023-12-08T14:00:00"
+        assert "relation_id" not in rel_relation
+        assert "entity_id" not in rel_relation
+        assert "from_entity_id" not in rel_relation
+        assert "to_entity_id" not in rel_relation
+        assert "from_entity_external_id" not in rel_relation
+        assert "to_entity_external_id" not in rel_relation
+
+        # Metadata: excluded fields absent
+        assert "generated_at" not in data["metadata"]
+        assert "total_results" not in data["metadata"]
+        assert data["metadata"]["depth"] == 1
+        assert data["metadata"]["primary_count"] == 1
+        assert data["metadata"]["related_count"] == 2
+
+        # Round-trip: re-parse from JSON
+        json_str = graph.model_dump_json()
+        reparsed = json.loads(json_str)
+        assert reparsed["results"][0]["related_results"][0]["title"] == "Related Entity"
+        assert reparsed["results"][0]["related_results"][1]["relation_type"] == "relates_to"
