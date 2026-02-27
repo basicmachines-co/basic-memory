@@ -8,6 +8,7 @@ from basic_memory.schema.parser import (
     parse_schema_note,
     _parse_field_key,
     _parse_type_and_description,
+    _parse_enum_string,
     _is_entity_ref_type,
     SCALAR_TYPES,
 )
@@ -105,6 +106,26 @@ class TestIsEntityRefType:
         assert _is_entity_ref_type("") is False
 
 
+# --- _parse_enum_string ---
+
+
+class TestParseEnumString:
+    def test_bracketed_list_with_description(self):
+        values, desc = _parse_enum_string("[active, blocked, done, abandoned], current state")
+        assert values == ["active", "blocked", "done", "abandoned"]
+        assert desc == "current state"
+
+    def test_bracketed_list_without_description(self):
+        values, desc = _parse_enum_string("[active, blocked]")
+        assert values == ["active", "blocked"]
+        assert desc is None
+
+    def test_plain_string(self):
+        values, desc = _parse_enum_string("active")
+        assert values == ["active"]
+        assert desc is None
+
+
 # --- parse_picoschema ---
 
 
@@ -152,6 +173,21 @@ class TestParsePicoschema:
     def test_enum_values_coerced_to_string(self):
         fields = parse_picoschema({"year?(enum)": [2020, 2021, 2022]})
         assert fields[0].enum_values == ["2020", "2021", "2022"]
+
+    def test_enum_string_with_brackets_and_description(self):
+        """Quoted picoschema enum string parsed from YAML frontmatter."""
+        fields = parse_picoschema(
+            {"status?(enum)": "[active, blocked, done, abandoned], current state"}
+        )
+        assert fields[0].is_enum is True
+        assert fields[0].enum_values == ["active", "blocked", "done", "abandoned"]
+        assert fields[0].description == "current state"
+
+    def test_enum_string_with_brackets_no_description(self):
+        fields = parse_picoschema({"status?(enum)": "[active, blocked]"})
+        assert fields[0].is_enum is True
+        assert fields[0].enum_values == ["active", "blocked"]
+        assert fields[0].description is None
 
     def test_object_field(self):
         fields = parse_picoschema(

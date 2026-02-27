@@ -14,6 +14,7 @@ Syntax reference:
   EntityName as type (capitalized)  # entity reference
 """
 
+import re
 from dataclasses import dataclass, field
 
 
@@ -124,6 +125,31 @@ def _is_entity_ref_type(type_str: str) -> bool:
     return len(type_str) > 0 and type_str[0].isupper()
 
 
+# --- Enum String Parsing ---
+
+
+def _parse_enum_string(value: str) -> tuple[list[str], str | None]:
+    """Parse a string-typed enum value into enum values and optional description.
+
+    When picoschema enum values are quoted in YAML frontmatter (required when a
+    description follows the list), YAML parses the whole thing as a string. This
+    function extracts the enum values and description from that string.
+
+    Examples:
+        "[active, blocked, done], current state" -> (['active', 'blocked', 'done'], 'current state')
+        "[active, blocked]"                      -> (['active', 'blocked'], None)
+        "active"                                 -> (['active'], None)
+    """
+    # Match bracketed list with optional trailing description
+    m = re.match(r"\[([^\]]+)\](?:\s*,\s*(.+))?", value)
+    if m:
+        items = [item.strip() for item in m.group(1).split(",")]
+        description = m.group(2).strip() if m.group(2) else None
+        return items, description
+    # Plain string — single enum value
+    return [value.strip()], None
+
+
 # --- Main Parser ---
 
 
@@ -147,18 +173,25 @@ def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
         name, required, is_array, is_enum, is_object = _parse_field_key(key)
 
         # --- Enum fields ---
-        # Trigger: value is a list (e.g., [active, inactive])
-        # Why: enums declare allowed values directly as a YAML list
+        # Trigger: value is a list or a string containing bracketed enum values
+        # Why: enums declare allowed values directly as a YAML list, or as a quoted
+        #   string when a description follows (e.g., "[a, b], desc" must be quoted
+        #   in YAML to avoid parse errors)
         # Outcome: SchemaField with is_enum=True and enum_values populated
         if is_enum:
-            enum_values = value if isinstance(value, list) else [str(value)]
+            description = None
+            if isinstance(value, list):
+                enum_values = [str(v) for v in value]
+            else:
+                enum_values, description = _parse_enum_string(str(value))
             fields.append(
                 SchemaField(
                     name=name,
                     type="enum",
                     required=required,
                     is_enum=True,
-                    enum_values=[str(v) for v in enum_values],
+                    enum_values=enum_values,
+                    description=description,
                 )
             )
             continue
