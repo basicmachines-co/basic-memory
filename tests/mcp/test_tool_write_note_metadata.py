@@ -114,6 +114,7 @@ async def test_metadata_survives_update(app, test_project):
         directory="meta-tests",
         content="# Version 2",
         metadata={"author": "Bob", "version": 2},
+        overwrite=True,
     )
 
     assert "# Updated note" in result
