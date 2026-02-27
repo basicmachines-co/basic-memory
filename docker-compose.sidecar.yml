@@ -1,6 +1,8 @@
 services:
   basic-memory:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.sidecar
     platform: linux/amd64
     container_name: basic-memory-sidecar
     volumes:

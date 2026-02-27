@@ -30,9 +30,24 @@ Get a Basic Memory instance running on Railway with a persistent volume, accessi
 - [x] Task 11: Test docker compose up with the sidecar compose file
 - [x] Task 12: Verify sidecar compose works end-to-end (write/read/SSE all work)
 
-### Phase 00-C: Railway Deployment (manual — requires dashboard)
-- [x] Task 13: Document Railway env vars and volume config for easy copy-paste
-- [x] Task 14: Commit all changes
+### Phase 00-C: Railway Deployment
+- [x] Task 13: Create `Dockerfile.sidecar` (runs as root for Railway volume permissions, entrypoint.sh for dir creation)
+- [x] Task 14: Link Railway project and service (`exemplary-renewal` / `bm-sync`)
+- [x] Task 15: Set env vars via `railway variables --set`
+- [x] Task 16: Deploy via `railway up --detach`
+- [x] Task 17: Create persistent volume at `/app/data` (50GB)
+- [x] Task 18: Assign public domain (`robust-creation-production-70db.up.railway.app`)
+- [x] Task 19: Verify SSE endpoint returns HTTP 200 with `text/event-stream`
+- [x] Task 20: Commit all changes
+
+### Railway Deployment Details
+
+- **Project**: exemplary-renewal
+- **Service**: bm-sync (formerly robust-creation)
+- **URL**: https://robust-creation-production-70db.up.railway.app
+- **MCP Endpoint**: https://robust-creation-production-70db.up.railway.app/mcp
+- **Volume**: 50GB at `/app/data`
+- **Dockerfile**: `Dockerfile.sidecar`
 
 ---
 
@@ -243,6 +258,9 @@ basic-memory status
 5. **CLI write-note uses `--folder` not `--directory`**: The MCP tool parameter is `directory` but the CLI flag is `--folder`.
 6. **`BASIC_MEMORY_DEFAULT_PROJECT` doesn't rename auto-created project**: The auto-bootstrap always creates a project named "main". The env var just sets which project is default.
 7. **Semantic search disabled for sidecar**: `sqlite_vec` has ELF compatibility issues under emulation. Set `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false` for local testing. Railway runs native amd64 so this can be re-enabled there.
+8. **Railway volumes mount as root**: The `USER appuser` directive conflicts with Railway volumes. `Dockerfile.sidecar` runs as root with an entrypoint that creates dirs.
+9. **`PORT=8000` env var required**: Railway needs explicit PORT to route traffic to the container.
+10. **`RAILWAY_DOCKERFILE_PATH=Dockerfile.sidecar`**: Tells Railway to use the sidecar Dockerfile instead of the default one.
 
 ## Confidence Level: 95%
 
