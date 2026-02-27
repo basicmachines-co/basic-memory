@@ -13,7 +13,7 @@
 - **Cloud is optional.** The local-first open-source workflow continues as always.
 - **OSS discount:** use code `BMFOSS` for 20% off for 3 months.
 
-[Sign up now →](https://basicmemory.com)
+[Sign up now →](https://basicmemory.com?utm_source=github&utm_medium=referral&utm_campaign=readme)
 
 with a 7 day free trial
 
@@ -23,8 +23,9 @@ Basic Memory lets you build persistent knowledge through natural conversations w
 Claude, while keeping everything in simple Markdown files on your computer. It uses the Model Context Protocol (MCP) to
 enable any compatible LLM to read and write to your local knowledge base.
 
-- Website: https://basicmemory.com
-- Documentation: https://docs.basicmemory.com
+- Website: [basicmemory.com](https://basicmemory.com?utm_source=github&utm_medium=referral&utm_campaign=readme)
+- Documentation: [docs.basicmemory.com](https://docs.basicmemory.com?utm_source=github&utm_medium=referral&utm_campaign=readme)
+- Community: [Discord](https://discord.gg/tyvKNccgqN?utm_source=github&utm_medium=referral&utm_campaign=readme)
 
 ## Pick up your conversation right where you left off
 
@@ -475,13 +476,13 @@ canvas(nodes, edges, title, folder) - Generate knowledge visualizations
 
 ## Futher info
 
-See the [Documentation](https://docs.basicmemory.com) for more info, including:
+See the [Documentation](https://docs.basicmemory.com?utm_source=github&utm_medium=referral&utm_campaign=readme) for more info, including:
 
-- [Complete User Guide](https://docs.basicmemory.com/user-guide/)
-- [CLI tools](https://docs.basicmemory.com/guides/cli-reference/)
-- [Cloud CLI and Sync](https://docs.basicmemory.com/guides/cloud-cli/)
-- [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/#project)
-- [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/#import)
+- [Complete User Guide](https://docs.basicmemory.com/user-guide/?utm_source=github&utm_medium=referral&utm_campaign=readme)
+- [CLI tools](https://docs.basicmemory.com/guides/cli-reference/?utm_source=github&utm_medium=referral&utm_campaign=readme)
+- [Cloud CLI and Sync](https://docs.basicmemory.com/guides/cloud-cli/?utm_source=github&utm_medium=referral&utm_campaign=readme)
+- [Managing multiple Projects](https://docs.basicmemory.com/guides/cli-reference/?utm_source=github&utm_medium=referral&utm_campaign=readme#project)
+- [Importing data from OpenAI/Claude Projects](https://docs.basicmemory.com/guides/cli-reference/?utm_source=github&utm_medium=referral&utm_campaign=readme#import)
 
 ## Telemetry
 
@@ -634,4 +635,4 @@ and submitting PRs.
  </picture>
 </a>
 
-Built with ♥️ by Basic Machines
+Built with ♥️ by [Basic Machines](https://basicmachines.co?utm_source=github&utm_medium=referral&utm_campaign=readme)
