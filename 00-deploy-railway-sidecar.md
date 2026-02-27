@@ -12,6 +12,30 @@ Get a Basic Memory instance running on Railway with a persistent volume, accessi
 
 ---
 
+## Task List
+
+### Phase 00-A: Local Docker Verification
+- [x] Task 1: Build Docker image locally (must use `--platform linux/amd64` on Apple Silicon)
+- [x] Task 2: Run container with sidecar env vars
+- [x] Task 3: Verify container starts (check logs for startup sequence)
+- [x] Task 4: Verify `basic-memory --version` works inside container (v0.18.5)
+- [x] Task 5: Verify `basic-memory status` shows a project with no errors
+- [x] Task 6: Write a test note inside the container (CLI flag is `--folder` not `--directory`)
+- [x] Task 7: Read the test note back to confirm persistence
+- [x] Task 8: Verify SSE endpoint responds on port 8000 (path is `/mcp` not `/sse` in FastMCP 3.x)
+- [x] Task 9: Clean up local container and volumes
+
+### Phase 00-B: Create Sidecar Docker Compose
+- [x] Task 10: Create `docker-compose.sidecar.yml` with sidecar-specific config
+- [x] Task 11: Test docker compose up with the sidecar compose file
+- [x] Task 12: Verify sidecar compose works end-to-end (write/read/SSE all work)
+
+### Phase 00-C: Railway Deployment (manual — requires dashboard)
+- [x] Task 13: Document Railway env vars and volume config for easy copy-paste
+- [x] Task 14: Commit all changes
+
+---
+
 ## Step 1: Verify the Docker Image Locally
 
 The existing Dockerfile works. Test it before deploying.
@@ -95,7 +119,9 @@ docker volume rm bm-data bm-config
 **Environment Variables** (set in Railway dashboard):
 
 ```
-BASIC_MEMORY_DEFAULT_PROJECT=shared
+BASIC_MEMORY_HOME=/app/data/shared
+BASIC_MEMORY_DEFAULT_PROJECT=main
+BASIC_MEMORY_CONFIG_DIR=/app/data/.config
 BASIC_MEMORY_SYNC_CHANGES=true
 BASIC_MEMORY_SYNC_DELAY=1000
 BASIC_MEMORY_LOG_LEVEL=INFO
@@ -104,17 +130,8 @@ BASIC_MEMORY_LOG_LEVEL=INFO
 **Volume** (create in Railway dashboard):
 
 - Mount path: `/app/data`
-- This persists markdown files across deploys
-
-**Note on config volume**: The config and SQLite DB live at `/app/.basic-memory/`. Railway allows one volume per service. Two options:
-1. Mount at `/app/data` only — config/DB regenerate on each deploy (safe, DB rebuilds from files)
-2. Use a custom `BASIC_MEMORY_CONFIG_DIR=/app/data/.config` to store config alongside files in the same volume
-
-Recommended: Option 2 — keeps everything in one volume:
-
-```
-BASIC_MEMORY_CONFIG_DIR=/app/data/.config
-```
+- This single volume persists markdown files, config, and SQLite DB
+- Config stored at `/app/data/.config` via `BASIC_MEMORY_CONFIG_DIR`
 
 **Port**: Railway auto-detects port 8000 from the Dockerfile `EXPOSE` directive.
 
@@ -216,6 +233,16 @@ basic-memory status
 **Port not reachable on Railway**: Ensure Railway sees the `EXPOSE 8000` in the Dockerfile. Check the service's networking settings in Railway dashboard.
 
 ---
+
+## Learnings from Implementation
+
+1. **Apple Silicon requires `--platform linux/amd64`**: The `sqlite_vec` binary is x86-only. Build with `docker build --platform linux/amd64` or set `platform: linux/amd64` in compose.
+2. **Config lives at `~appuser/.basic-memory/`**: The Dockerfile creates `/app/.basic-memory/` but the appuser's home is `/home/appuser/`. Use `BASIC_MEMORY_CONFIG_DIR=/app/data/.config` to put config in the persistent volume.
+3. **Single volume is best**: Put config, DB, and data in one volume at `/app/data`. Avoids permission issues and Railway's one-volume-per-service limit.
+4. **SSE path is `/mcp` not `/sse`**: FastMCP 3.x changed the endpoint path.
+5. **CLI write-note uses `--folder` not `--directory`**: The MCP tool parameter is `directory` but the CLI flag is `--folder`.
+6. **`BASIC_MEMORY_DEFAULT_PROJECT` doesn't rename auto-created project**: The auto-bootstrap always creates a project named "main". The env var just sets which project is default.
+7. **Semantic search disabled for sidecar**: `sqlite_vec` has ELF compatibility issues under emulation. Set `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false` for local testing. Railway runs native amd64 so this can be re-enabled there.
 
 ## Confidence Level: 95%
 

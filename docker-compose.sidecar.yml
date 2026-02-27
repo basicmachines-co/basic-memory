@@ -1,0 +1,29 @@
+services:
+  basic-memory:
+    build: .
+    platform: linux/amd64
+    container_name: basic-memory-sidecar
+    volumes:
+      - basic-memory-data:/app/data
+    environment:
+      - BASIC_MEMORY_HOME=/app/data/shared
+      - BASIC_MEMORY_DEFAULT_PROJECT=main
+      - BASIC_MEMORY_CONFIG_DIR=/app/data/.config
+      - BASIC_MEMORY_SYNC_CHANGES=true
+      - BASIC_MEMORY_SYNC_DELAY=1000
+      - BASIC_MEMORY_LOG_LEVEL=INFO
+      - BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false
+    ports:
+      - "8000:8000"
+    command: ["basic-memory", "mcp", "--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "basic-memory", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  basic-memory-data:
+    driver: local
