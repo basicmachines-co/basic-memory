@@ -11,7 +11,7 @@ from fastmcp import Context
 
 from basic_memory.mcp.project_context import get_project_client
 from basic_memory.mcp.server import mcp
-from basic_memory.schemas.schema import ValidationReport, InferenceReport, DriftReport
+from basic_memory.schemas.schema import DriftReport, InferenceReport, ValidationReport
 
 
 def _format_validation_report(report: ValidationReport) -> str:
@@ -40,6 +40,108 @@ def _format_validation_report(report: ValidationReport) -> str:
             lines.append(f"  - warning: {w}")
         for e in r.errors:
             lines.append(f"  - error: {e}")
+
+    return "\n".join(lines)
+
+
+def _format_inference_report(report: InferenceReport) -> str:
+    """Render an InferenceReport as readable markdown.
+
+    Without this formatter the LLM receives raw JSON and renders
+    field names as "undefined".
+    """
+    lines: list[str] = []
+
+    # --- Header ---
+    lines.append(f"# Schema Inference: {report.note_type}")
+    lines.append("")
+    lines.append(f"Notes analyzed: {report.notes_analyzed}")
+    lines.append("")
+
+    # --- Suggested schema YAML ---
+    if report.suggested_schema:
+        lines.append("## Suggested Schema")
+        lines.append("")
+        lines.append("```yaml")
+        lines.append("---")
+        lines.append(f"title: {report.note_type.title()}")
+        lines.append("type: schema")
+        lines.append(f"entity: {report.note_type}")
+        lines.append("version: 1")
+        lines.append("schema:")
+        for field_name, field_def in report.suggested_schema.items():
+            lines.append(f"  {field_name}: {field_def}")
+        lines.append("---")
+        lines.append("```")
+        lines.append("")
+
+    # --- Field frequency table ---
+    if report.field_frequencies:
+        lines.append("## Field Frequencies")
+        lines.append("")
+        for f in report.field_frequencies:
+            pct = f"{f.percentage:.0%}"
+            req_marker = "required" if f.name in report.suggested_required else "optional"
+            samples = ", ".join(f.sample_values[:3]) if f.sample_values else ""
+            sample_str = f" (e.g. {samples})" if samples else ""
+            lines.append(f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total}) "
+                         f"[{req_marker}]{sample_str}")
+        lines.append("")
+
+    # --- Excluded fields ---
+    if report.excluded:
+        lines.append("## Excluded (below threshold)")
+        lines.append("")
+        for name in report.excluded:
+            lines.append(f"- {name}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _format_drift_report(report: DriftReport) -> str:
+    """Render a DriftReport as readable markdown.
+
+    Without this formatter the LLM receives raw JSON and renders
+    field names as "undefined".
+    """
+    lines: list[str] = []
+
+    # --- Header ---
+    lines.append(f"# Schema Drift: {report.note_type}")
+    lines.append("")
+
+    has_drift = report.new_fields or report.dropped_fields or report.cardinality_changes
+
+    if not has_drift:
+        lines.append("No drift detected — schema matches actual usage.")
+        return "\n".join(lines)
+
+    # --- New fields ---
+    if report.new_fields:
+        lines.append("## New Fields (in notes but not in schema)")
+        lines.append("")
+        for f in report.new_fields:
+            pct = f"{f.percentage:.0%}"
+            lines.append(f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total})")
+        lines.append("")
+
+    # --- Dropped fields ---
+    if report.dropped_fields:
+        lines.append("## Dropped Fields (in schema but rare in notes)")
+        lines.append("")
+        for f in report.dropped_fields:
+            pct = f"{f.percentage:.0%}"
+            lines.append(f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total})")
+        lines.append("")
+
+    # --- Cardinality changes ---
+    if report.cardinality_changes:
+        lines.append("## Cardinality Changes")
+        lines.append("")
+        for change in report.cardinality_changes:
+            lines.append(f"- {change}")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -217,7 +319,7 @@ async def schema_infer(
     workspace: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> InferenceReport | str | dict:
+) -> str | dict:
     """Analyze existing notes and suggest a schema definition.
 
     Examines observation categories and relation types across all notes
@@ -305,7 +407,7 @@ async def schema_infer(
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
 
-            return result
+            return _format_inference_report(result)
 
         except Exception as e:
             logger.error(f"Schema inference failed: {e}, project: {active_project.name}")
@@ -331,7 +433,7 @@ async def schema_diff(
     workspace: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> DriftReport | str | dict:
+) -> str | dict:
     """Detect drift between a schema definition and actual note usage.
 
     Compares the existing schema for a note type against how notes of
@@ -393,7 +495,7 @@ async def schema_diff(
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
 
-            return result
+            return _format_drift_report(result)
 
         except Exception as e:
             logger.error(f"Schema diff failed: {e}, project: {active_project.name}")

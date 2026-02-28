@@ -12,7 +12,6 @@ import pytest
 
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 from basic_memory.mcp.tools.write_note import write_note
-from basic_memory.schemas.schema import InferenceReport, DriftReport
 
 
 # --- Helpers ---
@@ -221,9 +220,12 @@ async def test_schema_infer(app, test_project, sync_service):
         project=test_project.name,
     )
 
-    assert isinstance(result, InferenceReport)
-    assert result.note_type == "person"
-    assert result.notes_analyzed >= 3
+    assert isinstance(result, str)
+    assert "Schema Inference: person" in result
+    assert "Notes analyzed: 3" in result
+    assert "Field Frequencies" in result
+    assert "**name**" in result
+    assert "**role**" in result
 
 
 @pytest.mark.asyncio
@@ -260,8 +262,10 @@ permalink: people/dave
         project=test_project.name,
     )
 
-    assert isinstance(result, DriftReport)
-    assert result.note_type == "person"
+    assert isinstance(result, str)
+    assert "Schema Drift: person" in result
+    # Dave has a "hobby" field not in the schema, so drift should be detected
+    assert "**hobby**" in result
 
 
 # --- write_note metadata → schema workflow ---
