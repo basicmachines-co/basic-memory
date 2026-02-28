@@ -361,8 +361,11 @@ class EntityService(BaseService[EntityModel]):
         # in the existing file. Setting it unconditionally preserves the correct value.
         existing_markdown.frontmatter.metadata["permalink"] = new_permalink
 
-        # Create a new post with merged metadata
-        merged_post = frontmatter.Post(post.content, **existing_markdown.frontmatter.metadata)
+        # Create a new post with merged metadata.
+        # Avoid **metadata unpacking — user frontmatter may contain reserved keys
+        # like 'content' or 'handler' that conflict with Post.__init__ (cloud#375).
+        merged_post = frontmatter.Post(post.content)
+        merged_post.metadata.update(existing_markdown.frontmatter.metadata)
 
         # write file
         final_content = dump_frontmatter(merged_post)

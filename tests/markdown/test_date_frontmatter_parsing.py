@@ -311,3 +311,35 @@ async def test_parse_file_with_datetime_objects(tmp_path):
     assert "2025-10-24" in updated_at and "00:00:00" in updated_at, (
         f"Datetime at midnight should be normalized to ISO format, got: {updated_at}"
     )
+
+
+@pytest.mark.asyncio
+async def test_parse_file_with_reserved_frontmatter_field_content(tmp_path):
+    """Test that a 'content' field in frontmatter doesn't break parsing.
+
+    Reproduces basic-memory-cloud#375 where frontmatter containing a field named
+    'content' causes frontmatter.Post.__init__() to receive multiple values for
+    the 'content' positional argument.
+    """
+    test_file = tmp_path / "topic-note-template.md"
+    test_file.write_text(dedent("""\
+        ---
+        title: Topic Note Template
+        content: Template for topic notes
+        handler: some-handler-value
+        ---
+
+        # Template Body
+
+        Actual body content here.
+    """))
+
+    parser = EntityParser(tmp_path)
+    entity_markdown = await parser.parse_file(test_file)
+
+    assert entity_markdown.frontmatter.title == "Topic Note Template"
+    # The 'content' and 'handler' fields should be preserved in metadata
+    assert entity_markdown.frontmatter.metadata.get("content") == "Template for topic notes"
+    assert entity_markdown.frontmatter.metadata.get("handler") == "some-handler-value"
+    # The actual body content should be parsed correctly
+    assert "Template Body" in entity_markdown.content

@@ -249,9 +249,15 @@ class EntityParser:
 
         content = strip_bom(content)
 
-        # Parse frontmatter with proper error handling for malformed YAML
+        # Parse frontmatter with proper error handling for malformed YAML.
+        # We use frontmatter.parse() instead of frontmatter.loads() because
+        # loads() does Post(content, handler, **metadata), which crashes when
+        # the YAML contains reserved keys like 'content' or 'handler'.
+        # See basic-memory-cloud#375.
         try:
-            post = frontmatter.loads(content)
+            fm_metadata, fm_content = frontmatter.parse(content)
+            post = frontmatter.Post(fm_content)
+            post.metadata.update(fm_metadata)
         except yaml.YAMLError as e:
             logger.warning(
                 f"Failed to parse YAML frontmatter in {file_path}: {e}. "
