@@ -19,7 +19,11 @@ from basic_memory.file_utils import (
     dump_frontmatter,
 )
 from basic_memory.markdown import EntityMarkdown
-from basic_memory.markdown.entity_parser import EntityParser, normalize_frontmatter_metadata
+from basic_memory.markdown.entity_parser import (
+    EntityParser,
+    _coerce_to_string,
+    normalize_frontmatter_metadata,
+)
 from basic_memory.markdown.utils import entity_model_from_markdown, schema_to_markdown
 from basic_memory.models import Entity as EntityModel
 from basic_memory.models import Observation, Relation
@@ -501,10 +505,11 @@ class EntityService(BaseService[EntityModel]):
         if has_frontmatter(new_content):
             content_frontmatter = parse_frontmatter(new_content)
 
+            # Coerce to string — YAML may parse these as lists (cloud#376)
             if "title" in content_frontmatter:
-                update_data["title"] = content_frontmatter["title"]
+                update_data["title"] = _coerce_to_string(content_frontmatter["title"])
             if "type" in content_frontmatter:
-                update_data["note_type"] = content_frontmatter["type"]
+                update_data["note_type"] = _coerce_to_string(content_frontmatter["type"])
 
             if "permalink" in content_frontmatter:
                 content_markdown = self._build_frontmatter_markdown(
