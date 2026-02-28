@@ -14,6 +14,36 @@ from basic_memory.mcp.server import mcp
 from basic_memory.schemas.schema import ValidationReport, InferenceReport, DriftReport
 
 
+def _format_validation_report(report: ValidationReport) -> str:
+    """Render a ValidationReport as readable markdown.
+
+    Produces output the LLM can display directly instead of trying to
+    interpret raw JSON, which leads to "undefined — invalid" rendering.
+    """
+    lines: list[str] = []
+
+    # --- Header ---
+    type_label = report.note_type or "all"
+    lines.append(f"# Schema Validation: {type_label}")
+    lines.append("")
+    lines.append(
+        f"Notes: {report.total_notes} | Valid: {report.valid_count} "
+        f"| Warnings: {report.warning_count} | Errors: {report.error_count}"
+    )
+    lines.append("")
+
+    # --- Per-note results ---
+    for r in report.results:
+        status = "valid" if r.passed else "INVALID"
+        lines.append(f"- **{r.note_identifier}** — {status}")
+        for w in r.warnings:
+            lines.append(f"  - warning: {w}")
+        for e in r.errors:
+            lines.append(f"  - error: {e}")
+
+    return "\n".join(lines)
+
+
 def _no_notes_guidance(note_type: str, tool_name: str) -> str:
     """Build guidance string when no notes of a given type exist.
 
@@ -142,24 +172,25 @@ async def schema_validate(
             # Trigger: no entities of this type exist in the project
             # Why: can't validate notes that don't exist yet
             # Outcome: return guidance on creating notes of this type
-            if note_type and result.total_entities == 0:
+            effective_type = note_type or result.note_type or "unknown"
+            if result.total_entities == 0:
                 if output_format == "json":
-                    return {"error": f"No notes found of type '{note_type}'"}
-                return _no_notes_guidance(note_type, "schema_validate")
+                    return {"error": f"No notes found of type '{effective_type}'"}
+                return _no_notes_guidance(effective_type, "schema_validate")
 
             # --- No schema guard ---
             # Trigger: entities exist but none were validated (no schema found)
             # Why: notes of this type exist but no schema was found, so none were validated
             # Outcome: return guidance on how to create a schema
-            if note_type and result.total_notes == 0:
+            if result.total_notes == 0:
                 if output_format == "json":
-                    return {"error": f"No schema found for type '{note_type}'"}
-                return _no_schema_guidance(note_type, "schema_validate")
+                    return {"error": f"No schema found for type '{effective_type}'"}
+                return _no_schema_guidance(effective_type, "schema_validate")
 
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
 
-            return result
+            return _format_validation_report(result)
 
         except Exception as e:
             logger.error(f"Schema validation failed: {e}, project: {active_project.name}")

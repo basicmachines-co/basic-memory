@@ -12,7 +12,7 @@ import pytest
 
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 from basic_memory.mcp.tools.write_note import write_note
-from basic_memory.schemas.schema import ValidationReport, InferenceReport, DriftReport
+from basic_memory.schemas.schema import InferenceReport, DriftReport
 
 
 # --- Helpers ---
@@ -82,8 +82,39 @@ async def test_schema_validate_by_type(app, test_project, sync_service):
         project=test_project.name,
     )
 
-    assert isinstance(result, ValidationReport)
-    assert result.total_notes >= 1
+    assert isinstance(result, str)
+    assert "Schema Validation: person" in result
+    assert "Notes: 1" in result
+    assert "**Alice**" in result
+    assert "valid" in result
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_json_output(app, test_project, sync_service):
+    """JSON output returns a dict with full structured data."""
+    project_path = Path(test_project.path)
+
+    _write_schema_file(project_path, "schemas/Person.md", PERSON_SCHEMA)
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await sync_service.sync(project_path)
+
+    result = await schema_validate(
+        note_type="person",
+        project=test_project.name,
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["total_notes"] == 1
+    assert result["valid_count"] == 1
+    assert len(result["results"]) == 1
+    assert result["results"][0]["note_identifier"] == "Alice"
+    assert result["results"][0]["passed"] is True
 
 
 @pytest.mark.asyncio
@@ -105,8 +136,70 @@ async def test_schema_validate_by_identifier(app, test_project, sync_service):
         project=test_project.name,
     )
 
-    assert isinstance(result, ValidationReport)
-    assert result.total_notes >= 1
+    assert isinstance(result, str)
+    assert "**Alice**" in result
+    assert "valid" in result
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_by_title(app, test_project, sync_service):
+    """Validate a specific note by title (not permalink).
+
+    Regression test for issue #33: schema_validate(identifier="Note Title")
+    returned 0 notes because the router only searched by permalink.
+    """
+    project_path = Path(test_project.path)
+
+    _write_schema_file(project_path, "schemas/Person.md", PERSON_SCHEMA)
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await sync_service.sync(project_path)
+
+    # Use the title "Alice" instead of the permalink "people/alice"
+    result = await schema_validate(
+        identifier="Alice",
+        project=test_project.name,
+    )
+
+    assert isinstance(result, str)
+    assert "**Alice**" in result
+    assert "Notes: 1" in result
+    assert "valid" in result
+
+
+@pytest.mark.asyncio
+async def test_schema_validate_identifier_no_schema_returns_guidance(
+    app, test_project, sync_service
+):
+    """When a note exists but no schema is defined, return guidance.
+
+    Regression test for issue #33: when validating a single note by identifier
+    and no schema exists, the tool should return guidance instead of an empty report.
+    """
+    project_path = Path(test_project.path)
+
+    # Create a person note but no schema note
+    _write_schema_file(
+        project_path,
+        "people/Alice.md",
+        PERSON_NOTE.format(name="Alice", permalink="alice"),
+    )
+
+    await sync_service.sync(project_path)
+
+    result = await schema_validate(
+        identifier="Alice",
+        project=test_project.name,
+    )
+
+    # Should return guidance string about missing schema
+    assert isinstance(result, str)
+    assert "No Schema Found" in result
+    assert "person" in result
 
 
 @pytest.mark.asyncio
@@ -214,8 +307,9 @@ async def test_write_note_metadata_creates_schema_note(app, test_project, sync_s
         project=test_project.name,
     )
 
-    assert isinstance(result, ValidationReport)
-    assert result.total_notes >= 2
+    assert isinstance(result, str)
+    assert "Schema Validation: person" in result
+    assert "valid" in result
 
 
 @pytest.mark.asyncio
@@ -279,10 +373,13 @@ permalink: employees/{name.lower()}
         project=test_project.name,
     )
 
-    assert isinstance(result, ValidationReport)
-    assert result.total_notes == 2
+    assert isinstance(result, str)
+    assert "Schema Validation: employee" in result
+    assert "Notes: 2" in result
+    assert "Valid: 2" in result
     # Both notes have name + department, schema requires name and optionally department
-    assert result.valid_count == 2
+    assert "**Alice**" in result
+    assert "**Bob**" in result
 
 
 # --- Empty schema guard ---

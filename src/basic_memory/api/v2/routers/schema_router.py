@@ -12,7 +12,7 @@ from pathlib import Path as FilePath
 
 from fastapi import APIRouter, Path, Query
 
-from basic_memory.deps import EntityRepositoryV2ExternalDep
+from basic_memory.deps import EntityRepositoryV2ExternalDep, LinkResolverV2ExternalDep
 from basic_memory.models.knowledge import Entity
 from basic_memory.schemas.schema import (
     ValidationReport,
@@ -80,6 +80,7 @@ def _entity_frontmatter(entity: Entity) -> dict:
 @router.post("/schema/validate", response_model=ValidationReport)
 async def validate_schema(
     entity_repository: EntityRepositoryV2ExternalDep,
+    link_resolver: LinkResolverV2ExternalDep,
     project_id: str = Path(..., description="Project external UUID"),
     note_type: str | None = Query(None, description="Note type to validate"),
     identifier: str | None = Query(None, description="Specific note identifier"),
@@ -93,9 +94,11 @@ async def validate_schema(
 
     # --- Single note validation ---
     if identifier:
-        entity = await entity_repository.get_by_permalink(identifier)
+        # Resolve identifier flexibly (permalink, title, path, fuzzy)
+        # to match how read_note and other tools resolve identifiers
+        entity = await link_resolver.resolve_link(identifier)
         if not entity:
-            return ValidationReport(note_type=note_type, total_notes=0, results=[])
+            return ValidationReport(note_type=note_type, total_notes=0, total_entities=0)
 
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
@@ -111,7 +114,7 @@ async def validate_schema(
         schema_def = await resolve_schema(frontmatter, search_fn)
         if schema_def:
             result = validate_note(
-                entity.permalink or identifier,
+                entity.title or entity.permalink or identifier,
                 schema_def,
                 _entity_observations(entity),
                 _entity_relations(entity),
@@ -121,7 +124,8 @@ async def validate_schema(
 
         return ValidationReport(
             note_type=note_type or entity.note_type,
-            total_notes=1,
+            total_notes=len(results),
+            total_entities=1,
             valid_count=1 if (results and results[0].passed) else 0,
             warning_count=sum(len(r.warnings) for r in results),
             error_count=sum(len(r.errors) for r in results),
@@ -146,7 +150,7 @@ async def validate_schema(
         schema_def = await resolve_schema(frontmatter, search_fn)
         if schema_def:
             result = validate_note(
-                entity.permalink or entity.file_path,
+                entity.title or entity.permalink or entity.file_path,
                 schema_def,
                 _entity_observations(entity),
                 _entity_relations(entity),
