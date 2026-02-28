@@ -98,7 +98,20 @@ async def _schema_frontmatter_from_file(
     try:
         content = await file_service.read_file_content(entity.file_path)
         post = frontmatter.loads(content)
-        return dict(post.metadata)
+        metadata = dict(post.metadata)
+
+        # Trigger: file is mid-edit and missing required schema fields
+        # Why: parse_schema_note() raises ValueError for missing entity/schema,
+        #   which would turn validation into a 500 response
+        # Outcome: fall back to last-known-good database metadata
+        if not metadata.get("entity") or not isinstance(metadata.get("schema"), dict):
+            logger.warning(
+                "Schema file has incomplete frontmatter, falling back to database metadata",
+                file_path=entity.file_path,
+            )
+            return _entity_frontmatter(entity)
+
+        return metadata
     except Exception:
         # Trigger: file is missing, unreadable, or has malformed frontmatter
         # Why: fall back to database metadata rather than failing validation entirely
