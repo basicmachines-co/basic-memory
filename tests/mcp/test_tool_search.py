@@ -1119,3 +1119,86 @@ async def test_search_notes_explicit_entity_types_overrides_default(monkeypatch)
 
     # Explicit entity_types should be used, not the default
     assert captured_payload["entity_types"] == ["observation"]
+
+
+# --- Tests for tag: prefix parsing (issue #30) ---------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_notes_tag_prefix_converts_to_tags_filter(monkeypatch):
+    """query='tag:security' should be converted to a tags filter with no text query."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    result = await search_mod.search_notes(
+        project="test-project",
+        query="tag:security",
+    )
+
+    assert isinstance(result, SearchResponse)
+    assert captured_payload["tags"] == ["security"]
+    # No text query should be set — tag: prefix was consumed
+    assert captured_payload.get("text") is None
+
+
+@pytest.mark.asyncio
+async def test_search_notes_tag_prefix_merges_with_explicit_tags(monkeypatch):
+    """query='tag:security' with tags=['oauth'] should merge both tag values."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    result = await search_mod.search_notes(
+        project="test-project",
+        query="tag:security",
+        tags=["oauth"],
+    )
+
+    assert isinstance(result, SearchResponse)
+    assert set(captured_payload["tags"]) == {"security", "oauth"}
+    assert captured_payload.get("text") is None

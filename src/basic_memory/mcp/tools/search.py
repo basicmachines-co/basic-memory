@@ -1,5 +1,6 @@
 """Search tools for Basic Memory MCP server."""
 
+import re
 from textwrap import dedent
 from typing import List, Optional, Dict, Any, Literal
 
@@ -302,9 +303,9 @@ async def search_notes(
     - `search_notes("work-project", "category:observation")` - Filter by observation categories
     - `search_notes("team-docs", "author:username")` - Find content by author (if metadata available)
 
-    **Note:** `tag:` shorthand requires `search_type="text"` when semantic search is enabled
-    (the default is hybrid). Alternatively, use the `tags` parameter for tag filtering with
-    any search type: `search_notes("project", "query", tags=["my-tag"])`
+    **Note:** `tag:` shorthand is automatically converted to a `tags` filter, so it works
+    with any search type (text, hybrid, vector). You can also use the `tags` parameter
+    directly: `search_notes("project", "query", tags=["my-tag"])`
 
     ### Search Type Examples
     - `search_notes("my-project", "Meeting", search_type="title")` - Search only in titles
@@ -437,6 +438,16 @@ async def search_notes(
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
     note_types = note_types or []
     entity_types = entity_types or []
+
+    # Parse tag:<value> shorthand at tool level so it works with all search modes.
+    # Without this, hybrid/vector modes fail because they require non-empty text,
+    # but the service-layer tag: parser clears the text after the mode is set.
+    if query and query.strip().lower().startswith("tag:"):
+        tag_values = [t for t in re.split(r"[,\s]+", query.strip()[4:].strip()) if t]
+        if tag_values:
+            # Merge with any explicitly provided tags
+            tags = list(set((tags or []) + tag_values))
+            query = None
 
     # Detect project from memory URL prefix before routing
     if project is None and query is not None:
