@@ -10,9 +10,15 @@ Flow: Entity loaded with eager observations/relations -> convert to tuples -> co
 
 from pathlib import Path as FilePath
 
+import frontmatter
 from fastapi import APIRouter, Path, Query
+from loguru import logger
 
-from basic_memory.deps import EntityRepositoryV2ExternalDep, LinkResolverV2ExternalDep
+from basic_memory.deps import (
+    EntityRepositoryV2ExternalDep,
+    FileServiceV2ExternalDep,
+    LinkResolverV2ExternalDep,
+)
 from basic_memory.models.knowledge import Entity
 from basic_memory.schemas.schema import (
     ValidationReport,
@@ -67,11 +73,41 @@ def _entity_to_note_data(entity: Entity) -> NoteData:
 
 
 def _entity_frontmatter(entity: Entity) -> dict:
-    """Build a frontmatter dict from an entity for schema resolution."""
-    frontmatter = dict(entity.entity_metadata) if entity.entity_metadata else {}
+    """Build a frontmatter dict from an entity's database metadata.
+
+    Used for the notes being validated — their type and schema ref are
+    unlikely to change between syncs.
+    """
+    fm = dict(entity.entity_metadata) if entity.entity_metadata else {}
     if entity.note_type:
-        frontmatter.setdefault("type", entity.note_type)
-    return frontmatter
+        fm.setdefault("type", entity.note_type)
+    return fm
+
+
+async def _schema_frontmatter_from_file(
+    file_service: FileServiceV2ExternalDep,
+    entity: Entity,
+) -> dict:
+    """Read a schema entity's frontmatter directly from its file.
+
+    Schema definitions (field declarations, validation mode) are the source
+    of truth for validation. Reading from the file ensures schema-validate
+    always uses the latest settings, even when the file watcher hasn't
+    synced changes to entity_metadata in the database.
+    """
+    try:
+        content = await file_service.read_file_content(entity.file_path)
+        post = frontmatter.loads(content)
+        return dict(post.metadata)
+    except Exception:
+        # Trigger: file is missing, unreadable, or has malformed frontmatter
+        # Why: fall back to database metadata rather than failing validation entirely
+        # Outcome: behaves like before this change — uses potentially stale data
+        logger.warning(
+            "Failed to read schema file, falling back to database metadata",
+            file_path=entity.file_path,
+        )
+        return _entity_frontmatter(entity)
 
 
 # --- Validation ---
@@ -80,6 +116,7 @@ def _entity_frontmatter(entity: Entity) -> dict:
 @router.post("/schema/validate", response_model=ValidationReport)
 async def validate_schema(
     entity_repository: EntityRepositoryV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
     link_resolver: LinkResolverV2ExternalDep,
     project_id: str = Path(..., description="Project external UUID"),
     note_type: str | None = Query(None, description="Note type to validate"),
@@ -89,6 +126,10 @@ async def validate_schema(
 
     Validates a specific note (by identifier) or all notes of a given type.
     Returns warnings/errors based on the schema's validation mode.
+
+    Schema definitions are read directly from their files to ensure the
+    latest settings (validation mode, field declarations) are always used,
+    even when file changes haven't been synced to the database yet.
     """
     results: list[NoteValidationResponse] = []
 
@@ -109,7 +150,7 @@ async def validate_schema(
                 query,
                 allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
             )
-            return [_entity_frontmatter(e) for e in entities]
+            return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
 
         schema_def = await resolve_schema(frontmatter, search_fn)
         if schema_def:
@@ -145,7 +186,7 @@ async def validate_schema(
                 query,
                 allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
             )
-            return [_entity_frontmatter(e) for e in entities]
+            return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
 
         schema_def = await resolve_schema(frontmatter, search_fn)
         if schema_def:
@@ -219,6 +260,7 @@ async def infer_schema_endpoint(
 @router.get("/schema/diff/{note_type}", response_model=DriftReport)
 async def diff_schema_endpoint(
     entity_repository: EntityRepositoryV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
     note_type: str = Path(..., description="Note type to check for drift"),
     project_id: str = Path(..., description="Project external UUID"),
 ):
@@ -231,7 +273,7 @@ async def diff_schema_endpoint(
 
     async def search_fn(query: str) -> list[dict]:
         entities = await _find_schema_entities(entity_repository, query)
-        return [_entity_frontmatter(e) for e in entities]
+        return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
 
     # Resolve schema by note type
     schema_frontmatter = {"type": note_type}
