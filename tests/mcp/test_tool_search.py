@@ -1023,3 +1023,99 @@ async def test_search_notes_defaults_to_fts_when_container_not_initialized_and_s
 
     assert captured_payload["retrieval_mode"] == "fts"
     assert captured_payload["text"] == "test query"
+
+
+# --- Tests for default entity_types (issue #31) --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_notes_defaults_entity_types_to_entity(monkeypatch):
+    """search_notes defaults entity_types to ['entity'] when not explicitly provided.
+
+    This prevents individual observations/relations from appearing as separate
+    search results, since the entity row already indexes full file content.
+    """
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    async def fake_resolve_project_and_path(
+        client, identifier, project=None, context=None, headers=None
+    ):
+        return StubProject(), identifier, False
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    await search_mod.search_notes(
+        project="test-project",
+        query="test",
+    )
+
+    # entity_types should default to ["entity"]
+    assert captured_payload["entity_types"] == ["entity"]
+
+
+@pytest.mark.asyncio
+async def test_search_notes_explicit_entity_types_overrides_default(monkeypatch):
+    """Explicit entity_types parameter overrides the default ['entity'] filter."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    async def fake_resolve_project_and_path(
+        client, identifier, project=None, context=None, headers=None
+    ):
+        return StubProject(), identifier, False
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    await search_mod.search_notes(
+        project="test-project",
+        query="test",
+        entity_types=["observation"],
+    )
+
+    # Explicit entity_types should be used, not the default
+    assert captured_payload["entity_types"] == ["observation"]

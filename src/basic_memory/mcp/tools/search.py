@@ -518,6 +518,13 @@ async def search_notes(
                     "`tags`, `status`, `note_types`, `entity_types`, or `after_date`."
                 )
 
+            # Default to entity-level results to avoid returning individual
+            # observations/relations as separate search results (see issue #31).
+            # Applied after no_criteria() so that the implicit default doesn't
+            # mask a truly empty search request.
+            if not search_query.entity_types:
+                search_query.entity_types = [SearchItemType("entity")]
+
             logger.debug(f"Searching for {search_query} in project {active_project.name}")
             # Import here to avoid circular import (tools → clients → utils → tools)
             from basic_memory.mcp.clients import SearchClient
