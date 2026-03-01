@@ -217,7 +217,7 @@ jobs:
       - name: Run tests with coverage
         if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres tests' || test $? -eq 137
+          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests' || test $? -eq 137
 
       - name: Run tests
         if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
@@ -277,7 +277,7 @@ jobs:
       - name: Run tests with coverage
         if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m postgres test-int' || test $? -eq 137
+          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m "not semantic" test-int' || test $? -eq 137
 
       - name: Run tests
         if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
