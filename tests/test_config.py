@@ -625,6 +625,69 @@ class TestConfigManager:
             assert "cloud_mode" not in raw
 
 
+    def test_migration_creates_backup_of_old_config(self):
+        """Config migration should create a .bak backup before overwriting."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            import json
+
+            old_config_data = {
+                "env": "dev",
+                "projects": {"main": str(temp_path / "main")},
+                "default_project": "main",
+            }
+            config_manager.config_file.write_text(json.dumps(old_config_data, indent=2))
+            original_content = config_manager.config_file.read_text()
+
+            import basic_memory.config
+
+            basic_memory.config._CONFIG_CACHE = None
+
+            config_manager.load_config()
+
+            # Backup should exist with the original content
+            backup_path = config_manager.config_file.with_suffix(".json.bak")
+            assert backup_path.exists(), "Migration should create a backup file"
+            assert backup_path.read_text() == original_content
+
+    def test_no_backup_when_config_is_current_format(self):
+        """No backup should be created when config is already in the current format."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            import json
+
+            # Write config in the current ProjectEntry format — no migration needed
+            current_config_data = {
+                "env": "dev",
+                "projects": {
+                    "main": {"path": str(temp_path / "main"), "mode": "local"}
+                },
+                "default_project": "main",
+            }
+            config_manager.config_file.write_text(json.dumps(current_config_data, indent=2))
+
+            import basic_memory.config
+
+            basic_memory.config._CONFIG_CACHE = None
+
+            config_manager.load_config()
+
+            backup_path = config_manager.config_file.with_suffix(".json.bak")
+            assert not backup_path.exists(), "No backup should be created for current-format config"
+
+
 class TestPlatformNativePathSeparators:
     """Test that config uses platform-native path separators."""
 

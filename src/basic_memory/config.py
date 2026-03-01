@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -705,7 +706,12 @@ class ConfigManager:
 
                 # Re-save to normalize legacy config into current format
                 if needs_resave:
-                    logger.info("Migrating config to current format")
+                    # Create backup before overwriting so users can revert if needed
+                    backup_path = self.config_file.with_suffix(".json.bak")
+                    shutil.copy2(self.config_file, backup_path)
+                    logger.info(
+                        f"Migrating config to current format (backup: {backup_path})"
+                    )
                     save_basic_memory_config(self.config_file, _CONFIG_CACHE)
 
                 return _CONFIG_CACHE
