@@ -9,7 +9,7 @@ compatibility with existing MCP tools.
 """
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Optional, List, Tuple
+from typing import AsyncIterator, Awaitable, Callable, Optional, List, Tuple
 
 from httpx import AsyncClient
 from httpx._types import (
@@ -26,6 +26,18 @@ from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import generate_permalink, normalize_project_reference
+
+# --- Workspace provider injection ---
+# Mirrors the set_client_factory() pattern in async_client.py.
+# The cloud MCP server sets a provider that queries its own database directly,
+# avoiding the control-plane HTTP round-trip that requires local credentials.
+_workspace_provider: Optional[Callable[[], Awaitable[list[WorkspaceInfo]]]] = None
+
+
+def set_workspace_provider(provider: Callable[[], Awaitable[list[WorkspaceInfo]]]) -> None:
+    """Override workspace discovery (for cloud app, testing, etc)."""
+    global _workspace_provider
+    _workspace_provider = provider
 
 
 async def resolve_project_parameter(
@@ -102,6 +114,19 @@ async def get_available_workspaces(context: Optional[Context] = None) -> list[Wo
         cached_raw = await context.get_state("available_workspaces")
         if isinstance(cached_raw, list):
             return [WorkspaceInfo.model_validate(item) for item in cached_raw]
+
+    # Trigger: workspace provider was injected (e.g., by cloud MCP server)
+    # Why: the cloud server IS the cloud — it can query its own database
+    #   directly instead of making an HTTP round-trip that requires local credentials
+    # Outcome: use provider result, cache in context, skip control-plane client
+    if _workspace_provider is not None:
+        workspaces = await _workspace_provider()
+        if context:
+            await context.set_state(
+                "available_workspaces",
+                [ws.model_dump() for ws in workspaces],
+            )
+        return workspaces
 
     from basic_memory.mcp.async_client import get_cloud_control_plane_client
     from basic_memory.mcp.tools.utils import call_get
