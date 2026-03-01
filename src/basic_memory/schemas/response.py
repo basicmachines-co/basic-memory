@@ -14,7 +14,7 @@ Key Features:
 from datetime import datetime
 from typing import List, Optional, Dict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from basic_memory.schemas.base import Relation, Permalink, NoteType, ContentType, Observation
 
@@ -192,6 +192,13 @@ class EntityResponse(SQLAlchemyModel):
     title: str
     file_path: str
     note_type: NoteType
+
+    # COMPAT(v0.18): old clients expect entity_type; remove when no longer needed
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def entity_type(self) -> str:
+        return self.note_type
+
     entity_metadata: Optional[Dict] = None
     checksum: Optional[str] = None
     content_type: ContentType
