@@ -59,7 +59,6 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.12"
-            coverage: true
           - os: ubuntu-latest
             python-version: "3.13"
           - os: ubuntu-latest
@@ -93,23 +92,9 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests with coverage
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.sqlite-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests
-
       - name: Run tests
-        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
         run: |
           just test-unit-sqlite
-
-      - name: Upload coverage data
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-sqlite-unit
-          path: .coverage.sqlite-unit
-          retention-days: 1
 
   test-sqlite-integration:
     name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
@@ -121,7 +106,6 @@ jobs:
         include:
           - os: ubuntu-latest
             python-version: "3.12"
-            coverage: true
           - os: ubuntu-latest
             python-version: "3.13"
           - os: ubuntu-latest
@@ -155,23 +139,9 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests with coverage
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.sqlite-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m "not semantic" test-int
-
       - name: Run tests
-        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
         run: |
           just test-int-sqlite
-
-      - name: Upload coverage data
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-sqlite-int
-          path: .coverage.sqlite-int
-          retention-days: 1
 
   test-postgres-unit:
     name: Test Postgres Unit (Python ${{ matrix.python-version }})
@@ -182,7 +152,6 @@ jobs:
       matrix:
         include:
           - python-version: "3.12"
-            coverage: true
           - python-version: "3.13"
           - python-version: "3.14"
     runs-on: ubuntu-latest
@@ -214,24 +183,9 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests with coverage
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-unit --source=basic_memory -m pytest -p pytest_mock -v --no-cov tests' || test $? -eq 137
-
       - name: Run tests
-        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
         run: |
           just test-unit-postgres
-
-      - name: Upload coverage data
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-postgres-unit
-          path: .coverage.postgres-unit
-          retention-days: 1
-          if-no-files-found: warn
 
   test-postgres-integration:
     name: Test Postgres Integration (Python ${{ matrix.python-version }})
@@ -242,7 +196,6 @@ jobs:
       matrix:
         include:
           - python-version: "3.12"
-            coverage: true
           - python-version: "3.13"
           - python-version: "3.14"
     runs-on: ubuntu-latest
@@ -274,24 +227,9 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests with coverage
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          timeout --signal=KILL 600 bash -c 'BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run coverage run --data-file=.coverage.postgres-int --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m "not semantic" test-int' || test $? -eq 137
-
       - name: Run tests
-        if: "!(matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main')"
         run: |
           just test-int-postgres
-
-      - name: Upload coverage data
-        if: matrix.coverage && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-postgres-int
-          path: .coverage.postgres-int
-          retention-days: 1
-          if-no-files-found: warn
 
   test-semantic:
     name: Test Semantic (Python 3.12)
@@ -324,86 +262,6 @@ jobs:
         run: |
           uv pip install -e ".[dev]"
 
-      - name: Run tests with coverage
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          BASIC_MEMORY_ENV=test uv run coverage run --data-file=.coverage.semantic --source=basic_memory -m pytest -p pytest_mock -v --no-cov -m semantic test-int/semantic/
-
       - name: Run tests
-        if: "!(github.event_name == 'push' && github.ref == 'refs/heads/main')"
         run: |
           just test-semantic
-
-      - name: Upload coverage data
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-semantic
-          path: .coverage.semantic
-          retention-days: 1
-
-  coverage:
-    name: Coverage Summary
-    timeout-minutes: 10
-    needs:
-      - test-sqlite-unit
-      - test-sqlite-integration
-      - test-postgres-unit
-      - test-postgres-integration
-      - test-semantic
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.12"
-          cache: "pip"
-
-      - name: Install uv
-        run: |
-          pip install uv
-
-      - name: Create virtual env
-        run: |
-          uv venv
-
-      - name: Install dependencies
-        run: |
-          uv pip install -e ".[dev]"
-
-      - name: Download all coverage artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          merge-multiple: true
-
-      - name: Combine coverage and report
-        run: |
-          ls -la .coverage.* || echo "No coverage files found"
-          uv run coverage combine .coverage.*
-          uv run coverage report -m
-          uv run coverage html
-
-      - name: Add coverage report to job summary
-        if: always()
-        run: |
-          {
-            echo "## Coverage"
-            echo ""
-            echo '```'
-            uv run coverage report -m
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: htmlcov
-          path: htmlcov/
