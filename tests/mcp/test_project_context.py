@@ -515,9 +515,7 @@ class TestGetProjectClientRoutingOrder:
 
         # Patch workspace resolution to fail if called — factory mode should skip it
         async def fail_if_called(**kwargs):  # pragma: no cover
-            raise AssertionError(
-                "resolve_workspace_parameter must not be called in factory mode"
-            )
+            raise AssertionError("resolve_workspace_parameter must not be called in factory mode")
 
         monkeypatch.setattr(
             "basic_memory.mcp.project_context.resolve_workspace_parameter",

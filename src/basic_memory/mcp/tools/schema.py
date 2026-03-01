@@ -84,8 +84,10 @@ def _format_inference_report(report: InferenceReport) -> str:
             req_marker = "required" if f.name in report.suggested_required else "optional"
             samples = ", ".join(f.sample_values[:3]) if f.sample_values else ""
             sample_str = f" (e.g. {samples})" if samples else ""
-            lines.append(f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total}) "
-                         f"[{req_marker}]{sample_str}")
+            lines.append(
+                f"- **{f.name}** ({f.source}) — {pct} ({f.count}/{f.total}) "
+                f"[{req_marker}]{sample_str}"
+            )
         lines.append("")
 
     # --- Excluded fields ---

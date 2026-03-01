@@ -144,8 +144,7 @@ async def write_note(
     # Trigger: caller omitted the parameter (None)
     # Why: lets users set a global default without breaking per-call overrides
     effective_overwrite = (
-        overwrite if overwrite is not None
-        else ConfigManager().config.write_note_overwrite_default
+        overwrite if overwrite is not None else ConfigManager().config.write_note_overwrite_default
     )
 
     async with get_project_client(project, workspace, context) as (client, active_project):
@@ -230,9 +229,7 @@ async def write_note(
                             "action": "conflict",
                             "error": "NOTE_ALREADY_EXISTS",
                         }
-                    return _format_overwrite_error(
-                        title, entity.permalink, active_project.name
-                    )
+                    return _format_overwrite_error(title, entity.permalink, active_project.name)
 
                 logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
                 try:

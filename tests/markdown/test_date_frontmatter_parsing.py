@@ -16,7 +16,8 @@ from basic_memory.markdown.entity_parser import EntityParser
 def test_file_with_date(tmp_path):
     """Create a test file with date fields in frontmatter."""
     test_file = tmp_path / "test_note.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title: Test Note
         date: 2025-10-24
@@ -29,7 +30,8 @@ def test_file_with_date(tmp_path):
         # Test Content
 
         This file has date fields in frontmatter that PyYAML will parse as datetime.date objects.
-    """))
+    """)
+    )
     return test_file
 
 
@@ -37,7 +39,8 @@ def test_file_with_date(tmp_path):
 def test_file_with_date_in_tags(tmp_path):
     """Create a test file with a date value in tags (edge case)."""
     test_file = tmp_path / "test_note_date_tags.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title: Test Note with Date Tags
         tags: 2025-10-24
@@ -46,7 +49,8 @@ def test_file_with_date_in_tags(tmp_path):
         # Test Content
 
         This file has a date value as tags, which will be parsed as datetime.date.
-    """))
+    """)
+    )
     return test_file
 
 
@@ -54,7 +58,8 @@ def test_file_with_date_in_tags(tmp_path):
 def test_file_with_dates_in_tag_list(tmp_path):
     """Create a test file with dates in a tag list (edge case)."""
     test_file = tmp_path / "test_note_dates_in_list.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title: Test Note with Dates in Tags List
         tags:
@@ -66,7 +71,8 @@ def test_file_with_dates_in_tag_list(tmp_path):
         # Test Content
 
         This file has date values mixed into tags list.
-    """))
+    """)
+    )
     return test_file
 
 
@@ -141,7 +147,8 @@ async def test_parse_file_with_list_frontmatter_fields(tmp_path):
     to be strings, causing 'list' object has no attribute 'strip'.
     """
     test_file = tmp_path / "test_list_fields.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title:
           - Week 2 Discussion Post
@@ -160,7 +167,8 @@ async def test_parse_file_with_list_frontmatter_fields(tmp_path):
         # Content
 
         Some body text.
-    """))
+    """)
+    )
 
     parser = EntityParser(tmp_path)
     entity_markdown = await parser.parse_file(test_file)
@@ -192,14 +200,16 @@ async def test_parse_file_with_list_frontmatter_fields(tmp_path):
 async def test_parse_file_with_list_title_single_item(tmp_path):
     """Test that a single-item list title is coerced to a plain string."""
     test_file = tmp_path / "test_single_list_title.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title:
           - My Single Title
         ---
 
         # Content
-    """))
+    """)
+    )
 
     parser = EntityParser(tmp_path)
     entity_markdown = await parser.parse_file(test_file)
@@ -218,7 +228,8 @@ async def test_parse_file_with_various_yaml_types(tmp_path):
     when code expects strings and calls .strip().
     """
     test_file = tmp_path / "test_yaml_types.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title: Test YAML Types
         date: 2025-10-24
@@ -235,7 +246,8 @@ async def test_parse_file_with_various_yaml_types(tmp_path):
         # Test Content
 
         This file has various YAML types that need to be normalized.
-    """))
+    """)
+    )
 
     parser = EntityParser(tmp_path)
     entity_markdown = await parser.parse_file(test_file)
@@ -282,7 +294,8 @@ async def test_parse_file_with_datetime_objects(tmp_path):
     with time components (as parsed by PyYAML), ensuring they're converted to ISO format strings.
     """
     test_file = tmp_path / "test_datetime.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title: Test Datetime
         created_at: 2025-10-24 14:30:00
@@ -292,7 +305,8 @@ async def test_parse_file_with_datetime_objects(tmp_path):
         # Test Content
 
         This file has datetime values in frontmatter that PyYAML will parse as datetime objects.
-    """))
+    """)
+    )
 
     parser = EntityParser(tmp_path)
     entity_markdown = await parser.parse_file(test_file)
@@ -322,7 +336,8 @@ async def test_parse_file_with_reserved_frontmatter_field_content(tmp_path):
     the 'content' positional argument.
     """
     test_file = tmp_path / "topic-note-template.md"
-    test_file.write_text(dedent("""\
+    test_file.write_text(
+        dedent("""\
         ---
         title: Topic Note Template
         content: Template for topic notes
@@ -332,7 +347,8 @@ async def test_parse_file_with_reserved_frontmatter_field_content(tmp_path):
         # Template Body
 
         Actual body content here.
-    """))
+    """)
+    )
 
     parser = EntityParser(tmp_path)
     entity_markdown = await parser.parse_file(test_file)
