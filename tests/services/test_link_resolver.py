@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -10,6 +11,7 @@ import pytest_asyncio
 from basic_memory.models.knowledge import Entity as EntityModel
 from basic_memory.repository import EntityRepository
 from basic_memory.schemas.base import Entity as EntitySchema
+from basic_memory.schemas.search import SearchItemType, SearchResult
 from basic_memory.services.link_resolver import LinkResolver
 
 
@@ -901,3 +903,50 @@ async def test_resolve_link_non_uuid_falls_through(link_resolver, test_entities,
     result = await link_resolver.resolve_link("Core Service")
     assert result is not None
     assert result.permalink == f"{project_prefix}/components/core-service"
+
+
+# ============================================================================
+# Regression tests: search fallback score selection (Issue #640)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_search_fallback_selects_best_match_not_worst(
+    link_resolver, search_service, test_entities, project_prefix
+):
+    """Regression test for GitHub Issue #640.
+
+    The search fallback (strategy 5) must select the highest-scoring match
+    using max(), not the lowest-scoring match using min().
+
+    Scenario: Searching for a partial title triggers FTS which returns multiple
+    results with different scores. The result with the highest score (best match)
+    must be returned, not the result with the lowest score (worst match).
+    """
+    better_permalink = f"{project_prefix}/components/auth-service"
+    worse_permalink = f"{project_prefix}/specs/core-features"
+
+    # Construct two mock search results with controlled scores
+    better_result = SearchResult(
+        title="Auth Service",
+        type=SearchItemType.ENTITY,
+        score=0.9,  # High score = better match
+        permalink=better_permalink,
+        file_path="components/Auth Service.md",
+    )
+    worse_result = SearchResult(
+        title="Core Features",
+        type=SearchItemType.ENTITY,
+        score=0.1,  # Low score = worse match
+        permalink=worse_permalink,
+        file_path="specs/Core Features.md",
+    )
+
+    # "Auth Serv" has no exact title or permalink match, so strategy 5 is triggered.
+    # Mock search to return both results in worst-first order to ensure max() is tested.
+    with patch.object(search_service, "search", new=AsyncMock(return_value=[worse_result, better_result])):
+        result = await link_resolver.resolve_link("Auth Serv", use_search=True, strict=False)
+
+    assert result is not None
+    # Must return the entity with the HIGHEST score, not the lowest
+    assert result.permalink == better_permalink

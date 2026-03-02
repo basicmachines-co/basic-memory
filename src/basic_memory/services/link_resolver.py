@@ -302,7 +302,7 @@ class LinkResolver:
 
             if results:
                 # Look for best match
-                best_match = min(results, key=lambda x: x.score)  # pyright: ignore
+                best_match = max(results, key=lambda x: x.score)  # pyright: ignore
                 logger.trace(
                     f"Selected best match from {len(results)} results: {best_match.permalink}"
                 )
