@@ -332,6 +332,22 @@ class BasicMemoryConfig(BaseSettings):
         description="Most recent cloud promo version shown in CLI.",
     )
 
+    auto_update: bool = Field(
+        default=True,
+        description="Enable automatic CLI update checks and installs when supported.",
+    )
+
+    update_check_interval: int = Field(
+        default=86400,
+        description="Seconds between automatic update checks.",
+        gt=0,
+    )
+
+    auto_update_last_checked_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of the last attempted automatic update check.",
+    )
+
     cloud_api_key: Optional[str] = Field(
         default=None,
         description="API key for cloud access (bmc_ prefixed). Account-level, not per-project.",
@@ -709,9 +725,7 @@ class ConfigManager:
                     # Create backup before overwriting so users can revert if needed
                     backup_path = self.config_file.with_suffix(".json.bak")
                     shutil.copy2(self.config_file, backup_path)
-                    logger.info(
-                        f"Migrating config to current format (backup: {backup_path})"
-                    )
+                    logger.info(f"Migrating config to current format (backup: {backup_path})")
                     save_basic_memory_config(self.config_file, _CONFIG_CACHE)
 
                 return _CONFIG_CACHE

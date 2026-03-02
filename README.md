@@ -63,6 +63,36 @@ uv tool install basic-memory
 
 You can view shared context via files in `~/basic-memory` (default directory location).
 
+## Automatic Updates
+
+Basic Memory includes a default-on auto-update flow for CLI installs.
+
+- **Auto-install supported:** `uv tool` and Homebrew installs
+- **Default check interval:** every 24 hours (`86400` seconds)
+- **MCP-safe behavior:** update checks run silently in `basic-memory mcp` mode
+- **`uvx` behavior:** skipped (runtime is ephemeral and managed by `uvx`)
+
+Manual update commands:
+
+```bash
+# Check now and install if supported
+bm update
+
+# Check only, do not install
+bm update --check
+```
+
+Config options in `~/.basic-memory/config.json`:
+
+```json
+{
+  "auto_update": true,
+  "update_check_interval": 86400
+}
+```
+
+To disable automatic updates, set `"auto_update": false`.
+
 ## Why Basic Memory?
 
 Most LLM interactions are ephemeral - you ask a question, get an answer, and everything is forgotten. Each conversation

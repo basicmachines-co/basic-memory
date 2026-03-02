@@ -1,12 +1,14 @@
 """MCP server command with streamable HTTP transport."""
 
 import os
+import threading
 from typing import Any, Optional
 
 import typer
 from loguru import logger
 
 from basic_memory.cli.app import app
+from basic_memory.cli.auto_update import AutoUpdateStatus, run_auto_update
 from basic_memory.config import ConfigManager, init_mcp_logging
 
 
@@ -79,6 +81,17 @@ def mcp(
         # Set env var with validated project name
         os.environ["BASIC_MEMORY_MCP_PROJECT"] = project_name
         logger.info(f"MCP server constrained to project: {project_name}")
+
+    def _run_background_auto_update() -> None:
+        result = run_auto_update(force=False, check_only=False, silent=True)
+        if result.restart_recommended:
+            logger.info(
+                "A newer Basic Memory version was installed and will apply on next restart."
+            )
+        elif result.status == AutoUpdateStatus.FAILED and result.error:
+            logger.warning(f"MCP background auto-update failed: {result.error}")
+
+    threading.Thread(target=_run_background_auto_update, daemon=True).start()
 
     # Run the MCP server (blocks)
     # Lifespan handles: initialization, migrations, file sync, cleanup
