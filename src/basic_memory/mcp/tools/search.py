@@ -23,6 +23,46 @@ from basic_memory.schemas.search import (
 )
 
 
+def _format_search_markdown(result: SearchResponse, project: str) -> str:
+    """Format SearchResponse as compact human-readable markdown.
+
+    Produces a readable representation suitable for LLM consumption,
+    mirroring the pattern used by build_context and recent_activity.
+    """
+    if not result.results:
+        return f"No results found in project '{project}'."
+
+    lines = [f"# Search Results ({len(result.results)} found)"]
+    lines.append("")
+
+    for item in result.results:
+        lines.append(f"## {item.title}")
+        if item.permalink:
+            lines.append(f"permalink: {item.permalink}")
+        if item.file_path:
+            lines.append(f"file: {item.file_path}")
+        if item.matched_chunk:
+            lines.append("")
+            lines.append(item.matched_chunk)
+        elif item.content:
+            lines.append("")
+            # Truncate long content for readability
+            content = item.content
+            if len(content) > 500:
+                content = content[:497] + "..."
+            lines.append(content)
+        lines.append("")
+
+    # Pagination footer
+    page_info = f"page {result.current_page}"
+    if result.has_more:
+        page_info += f" | use page={result.current_page + 1} for more"
+    lines.append(f"---")
+    lines.append(f"*{len(result.results)} results | {page_info} | project: {project}*")
+
+    return "\n".join(lines)
+
+
 def _semantic_search_enabled_for_text_search() -> bool:
     """Resolve semantic-search enablement in both MCP and CLI invocation paths."""
     try:
@@ -273,7 +313,7 @@ async def search_notes(
     status: Optional[str] = None,
     min_similarity: Optional[float] = None,
     context: Context | None = None,
-) -> SearchResponse | dict | str:
+) -> dict | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
 
     This tool searches the knowledge base using full-text search, pattern matching,
@@ -565,7 +605,7 @@ async def search_notes(
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
 
-            return result
+            return _format_search_markdown(result, active_project.name)
 
         except Exception as e:
             logger.error(

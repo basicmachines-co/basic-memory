@@ -23,14 +23,17 @@ async def test_search_text(client, test_project):
     assert result
 
     # Search for it
-    response = await search_notes(project=test_project.name, query="searchable")
+    response = await search_notes(
+        project=test_project.name, query="searchable", output_format="json"
+    )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
-        # Success case - verify SearchResponse
-        assert len(response.results) > 0
+    if isinstance(response, dict):
+        # Success case - verify SearchResponse dict
+        assert len(response["results"]) > 0
         assert any(
-            r.permalink == f"{test_project.name}/test/test-search-note" for r in response.results
+            r["permalink"] == f"{test_project.name}/test/test-search-note"
+            for r in response["results"]
         )
     else:
         # If search failed and returned error message, test should fail with informative message
@@ -52,7 +55,7 @@ async def test_search_title(client, test_project):
 
     # Search for it
     response = await search_notes(
-        project=test_project.name, query="Search Note", search_type="title"
+        project=test_project.name, query="Search Note", search_type="title", output_format="json"
     )
 
     # Verify results - handle both success and error cases
@@ -60,10 +63,11 @@ async def test_search_title(client, test_project):
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
     else:
-        # Success case - verify SearchResponse
-        assert len(response.results) > 0
+        # Success case - verify SearchResponse dict
+        assert len(response["results"]) > 0
         assert any(
-            r.permalink == f"{test_project.name}/test/test-search-note" for r in response.results
+            r["permalink"] == f"{test_project.name}/test/test-search-note"
+            for r in response["results"]
         )
 
 
@@ -85,14 +89,16 @@ async def test_search_permalink(client, test_project):
         project=test_project.name,
         query=f"{test_project.name}/test/test-search-note",
         search_type="permalink",
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
-        # Success case - verify SearchResponse
-        assert len(response.results) > 0
+    if isinstance(response, dict):
+        # Success case - verify SearchResponse dict
+        assert len(response["results"]) > 0
         assert any(
-            r.permalink == f"{test_project.name}/test/test-search-note" for r in response.results
+            r["permalink"] == f"{test_project.name}/test/test-search-note"
+            for r in response["results"]
         )
     else:
         # If search failed and returned error message, test should fail with informative message
@@ -117,14 +123,16 @@ async def test_search_permalink_match(client, test_project):
         project=test_project.name,
         query=f"{test_project.name}/test/test-search-*",
         search_type="permalink",
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
-        # Success case - verify SearchResponse
-        assert len(response.results) > 0
+    if isinstance(response, dict):
+        # Success case - verify SearchResponse dict
+        assert len(response["results"]) > 0
         assert any(
-            r.permalink == f"{test_project.name}/test/test-search-note" for r in response.results
+            r["permalink"] == f"{test_project.name}/test/test-search-note"
+            for r in response["results"]
         )
     else:
         # If search failed and returned error message, test should fail with informative message
@@ -142,13 +150,16 @@ async def test_search_memory_url_with_project_prefix(client, test_project):
     )
     assert result
 
-    response = await search_notes(query=f"memory://{test_project.name}/test/memory-url-search-note")
+    response = await search_notes(
+        query=f"memory://{test_project.name}/test/memory-url-search-note",
+        output_format="json",
+    )
 
-    if isinstance(response, SearchResponse):
-        assert len(response.results) > 0
+    if isinstance(response, dict):
+        assert len(response["results"]) > 0
         assert any(
-            r.permalink == f"{test_project.name}/test/memory-url-search-note"
-            for r in response.results
+            r["permalink"] == f"{test_project.name}/test/memory-url-search-note"
+            for r in response["results"]
         )
     else:
         pytest.fail(f"Search failed with error: {response}")
@@ -169,15 +180,16 @@ async def test_search_pagination(client, test_project):
 
     # Search for it
     response = await search_notes(
-        project=test_project.name, query="searchable", page=1, page_size=1
+        project=test_project.name, query="searchable", page=1, page_size=1, output_format="json"
     )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
-        # Success case - verify SearchResponse
-        assert len(response.results) == 1
+    if isinstance(response, dict):
+        # Success case - verify SearchResponse dict
+        assert len(response["results"]) == 1
         assert any(
-            r.permalink == f"{test_project.name}/test/test-search-note" for r in response.results
+            r["permalink"] == f"{test_project.name}/test/test-search-note"
+            for r in response["results"]
         )
     else:
         # If search failed and returned error message, test should fail with informative message
@@ -196,12 +208,14 @@ async def test_search_with_type_filter(client, test_project):
     )
 
     # Search with note type filter
-    response = await search_notes(project=test_project.name, query="type", note_types=["note"])
+    response = await search_notes(
+        project=test_project.name, query="type", note_types=["note"], output_format="json"
+    )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
+    if isinstance(response, dict):
         # Success case - verify all results are entities
-        assert all(r.type == "entity" for r in response.results)
+        assert all(r["type"] == "entity" for r in response["results"])
     else:
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
@@ -219,12 +233,14 @@ async def test_search_with_entity_type_filter(client, test_project):
     )
 
     # Search with entity_types (SearchItemType) filter
-    response = await search_notes(project=test_project.name, query="type", entity_types=["entity"])
+    response = await search_notes(
+        project=test_project.name, query="type", entity_types=["entity"], output_format="json"
+    )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
+    if isinstance(response, dict):
         # Success case - verify all results are entities
-        assert all(r.type == "entity" for r in response.results)
+        assert all(r["type"] == "entity" for r in response["results"])
     else:
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
@@ -244,13 +260,16 @@ async def test_search_with_date_filter(client, test_project):
     # Search with date filter
     one_hour_ago = datetime.now() - timedelta(hours=1)
     response = await search_notes(
-        project=test_project.name, query="recent", after_date=one_hour_ago.isoformat()
+        project=test_project.name,
+        query="recent",
+        after_date=one_hour_ago.isoformat(),
+        output_format="json",
     )
 
     # Verify results - handle both success and error cases
-    if isinstance(response, SearchResponse):
+    if isinstance(response, dict):
         # Success case - verify we get results within timeframe
-        assert len(response.results) > 0
+        assert len(response["results"]) > 0
     else:
         # If search failed and returned error message, test should fail with informative message
         pytest.fail(f"Search failed with error: {response}")
@@ -468,7 +487,7 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
         search_type=search_type,
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert captured_payload["text"] == "semantic lookup"
     # "semantic" is an alias for "vector" retrieval mode
     expected_mode = "vector" if search_type in ("vector", "semantic") else search_type
@@ -563,7 +582,7 @@ async def test_search_notes_filter_only_metadata(monkeypatch):
         metadata_filters={"status": "in-progress"},
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert captured_payload["metadata_filters"] == {"status": "in-progress"}
     # No text/title/permalink should be set
     assert captured_payload.get("text") is None
@@ -605,7 +624,7 @@ async def test_search_notes_filter_only_tags(monkeypatch):
         tags=["security", "oauth"],
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert captured_payload["tags"] == ["security", "oauth"]
     assert captured_payload.get("text") is None
 
@@ -1158,7 +1177,7 @@ async def test_search_notes_tag_prefix_converts_to_tags_filter(monkeypatch):
         query="tag:security",
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert captured_payload["tags"] == ["security"]
     # No text query should be set — tag: prefix was consumed
     assert captured_payload.get("text") is None
@@ -1199,7 +1218,7 @@ async def test_search_notes_tag_prefix_merges_with_explicit_tags(monkeypatch):
         tags=["oauth"],
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert set(captured_payload["tags"]) == {"security", "oauth"}
     assert captured_payload.get("text") is None
 
@@ -1238,7 +1257,7 @@ async def test_search_notes_multiple_tag_prefixes(monkeypatch):
         query="tag:coffee AND tag:brewing",
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert set(captured_payload["tags"]) == {"coffee", "brewing"}
     # Boolean connector AND should be stripped, leaving no text query
     assert captured_payload.get("text") is None
@@ -1283,7 +1302,7 @@ async def test_search_notes_tag_prefix_with_remaining_text(monkeypatch):
         query="authentication tag:security",
     )
 
-    assert isinstance(result, SearchResponse)
+    assert isinstance(result, str)
     assert captured_payload["tags"] == ["security"]
     # Remaining text should be preserved as the query
     assert captured_payload["text"] == "authentication"

@@ -18,6 +18,7 @@ from basic_memory.mcp.tools import (
     recent_activity,
     write_note,
 )
+from basic_memory.mcp.tools.search import search_notes
 
 
 @pytest.mark.asyncio
@@ -361,3 +362,32 @@ async def test_build_context_json_default_and_text_mode(client, test_graph, test
     )
     assert isinstance(text_result, str)
     assert "# Context:" in text_result
+
+
+@pytest.mark.asyncio
+async def test_search_notes_text_and_json_modes(app, test_project):
+    """search_notes with output_format='text' must return markdown, not a JSON object."""
+    await write_note(
+        project=test_project.name,
+        title="Mode Search Note",
+        directory="mode-tests",
+        content="# Mode Search Note\n\nsearchable content for output mode test",
+    )
+
+    text_result = await search_notes(
+        query="searchable",
+        project=test_project.name,
+        output_format="text",
+    )
+    assert isinstance(text_result, str), "output_format='text' must return str, not a Pydantic model or dict"
+    assert "# Search Results" in text_result
+    assert "Mode Search Note" in text_result
+
+    json_result = await search_notes(
+        query="searchable",
+        project=test_project.name,
+        output_format="json",
+    )
+    assert isinstance(json_result, dict), "output_format='json' must return dict"
+    assert "results" in json_result
+    assert any(r["title"] == "Mode Search Note" for r in json_result["results"])
