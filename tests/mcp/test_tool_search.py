@@ -1202,3 +1202,88 @@ async def test_search_notes_tag_prefix_merges_with_explicit_tags(monkeypatch):
     assert isinstance(result, SearchResponse)
     assert set(captured_payload["tags"]) == {"security", "oauth"}
     assert captured_payload.get("text") is None
+
+
+@pytest.mark.asyncio
+async def test_search_notes_multiple_tag_prefixes(monkeypatch):
+    """query='tag:coffee AND tag:brewing' should extract both tags."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    result = await search_mod.search_notes(
+        project="test-project",
+        query="tag:coffee AND tag:brewing",
+    )
+
+    assert isinstance(result, SearchResponse)
+    assert set(captured_payload["tags"]) == {"coffee", "brewing"}
+    # Boolean connector AND should be stripped, leaving no text query
+    assert captured_payload.get("text") is None
+
+
+@pytest.mark.asyncio
+async def test_search_notes_tag_prefix_with_remaining_text(monkeypatch):
+    """query='authentication tag:security' should keep text and extract tag."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    # Remaining text query triggers resolve_project_and_path, so stub it too
+    async def fake_resolve(client, query, project, context):
+        return project, query, False
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    result = await search_mod.search_notes(
+        project="test-project",
+        query="authentication tag:security",
+    )
+
+    assert isinstance(result, SearchResponse)
+    assert captured_payload["tags"] == ["security"]
+    # Remaining text should be preserved as the query
+    assert captured_payload["text"] == "authentication"

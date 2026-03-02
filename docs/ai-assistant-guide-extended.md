@@ -427,6 +427,8 @@ await write_note(
 )
 ```
 
+> **Important**: `write_note` errors if the note already exists. Use `edit_note` for incremental changes, or pass `overwrite=True` to replace.
+
 **Well-structured note**:
 
 ```python
@@ -760,6 +762,9 @@ notes = await read_note(
     identifier="memory://specs/*",
     project="main"
 )
+
+# Cross-project URL (auto-routes to the correct project)
+note = await read_note(identifier="memory://research/specs/api-design")
 ```
 
 ```python
@@ -1069,7 +1074,10 @@ results = await search_notes(
 
 ### Search Types
 
-**Text search (default)**:
+Available types: `"text"`, `"title"`, `"permalink"`, `"vector"`/`"semantic"`, `"hybrid"`.
+Default is `"hybrid"` when semantic search is enabled, `"text"` otherwise.
+
+**Text search**:
 
 ```python
 # Full-text search across all content
@@ -1080,15 +1088,50 @@ results = await search_notes(
 )
 ```
 
-**Semantic search**:
+**Title and permalink search**:
+
+```python
+# Search by title only
+results = await search_notes(query="API Design", search_type="title", project="main")
+
+# Search by permalink
+results = await search_notes(query="specs/api-design", search_type="permalink", project="main")
+```
+
+**Semantic/vector search**:
 
 ```python
 # Semantic/vector search (if enabled)
 results = await search_notes(
     query="user login security",
-    search_type="semantic",
+    search_type="semantic",  # or "vector"
     project="main"
 )
+
+# Override similarity threshold
+results = await search_notes(
+    query="user login security",
+    search_type="semantic",
+    min_similarity=0.5,
+    project="main"
+)
+```
+
+**Hybrid search** (combines text + semantic):
+
+```python
+results = await search_notes(
+    query="authentication best practices",
+    search_type="hybrid",
+    project="main"
+)
+```
+
+**Tag shorthand in query**:
+
+```python
+# Use tag: prefix as shorthand
+results = await search_notes(query="tag:security", project="main")
 ```
 
 ### Search Response
@@ -2161,6 +2204,31 @@ active_project = projects[0]["name"]
 results = await search_notes(query="test", project=active_project)
 ```
 
+### Note Already Exists
+
+**Error**: `write_note` called for a note that already exists
+
+**Solution**:
+
+```python
+# Preferred: use edit_note for incremental updates
+await edit_note(
+    identifier="Existing Topic",
+    operation="append",
+    content="\n- [update] new information",
+    project="main"
+)
+
+# Alternative: replace the entire note
+await write_note(
+    title="Existing Topic",
+    content="# Existing Topic\n...",
+    folder="notes",
+    overwrite=True,
+    project="main"
+)
+```
+
 ### Entity Not Found
 
 **Error**: Note doesn't exist
@@ -2716,14 +2784,15 @@ await write_note(
 
 ### Content Management
 
-**write_note(title, content, folder, tags, note_type, project)**
-- Create or update markdown notes
+**write_note(title, content, folder, tags, note_type, overwrite, project)**
+- Create new markdown notes (errors if note already exists unless overwrite=True)
 - Parameters:
   - `title` (required): Note title
   - `content` (required): Markdown content
   - `folder` (required): Destination folder
   - `tags` (optional): List of tags
   - `note_type` (optional): Type of note (stored in frontmatter). Can be "note", "person", "meeting", "guide", etc.
+  - `overwrite` (optional): Set to True to replace an existing note (default: error if exists)
   - `project` (required unless default_project_mode): Target project
 - Returns: Created/updated entity with permalink
 - Example:
@@ -2890,19 +2959,20 @@ contents = await list_directory(
 
 ### Search & Discovery
 
-**search_notes(query, page, page_size, search_type, types, entity_types, after_date, metadata_filters, tags, status, project)**
+**search_notes(query, page, page_size, search_type, types, entity_types, after_date, metadata_filters, tags, status, min_similarity, project)**
 - Search across knowledge base
 - Parameters:
-  - `query` (required): Search query
+  - `query` (optional): Search query (not required for filter-only searches)
   - `page` (optional): Page number (default: 1)
   - `page_size` (optional): Results per page (default: 10)
-  - `search_type` (optional): "text" or "semantic"
+  - `search_type` (optional): "text", "title", "permalink", "vector"/"semantic", "hybrid" (default: "hybrid" when semantic enabled, "text" otherwise)
   - `types` (optional): Entity type filter
   - `entity_types` (optional): Observation category filter
   - `after_date` (optional): Date filter (ISO format)
-  - `metadata_filters` (optional): Structured frontmatter filters (dict)
-  - `tags` (optional): Frontmatter tags filter (list)
+  - `metadata_filters` (optional): Structured frontmatter filters (dict, supports `$in`, `$gt`, `$gte`, `$lt`, `$lte`, `$between` operators)
+  - `tags` (optional): Frontmatter tags filter (list); also available via `tag:` query shorthand
   - `status` (optional): Frontmatter status filter (string)
+  - `min_similarity` (optional): Override similarity threshold for vector/hybrid search
   - `project` (required unless default_project_mode): Target project
 - Returns: Matching entities with scores
 - Example:
@@ -2969,6 +3039,15 @@ await delete_project(project_name="old-project")
 - Example:
 ```python
 status = await sync_status(project="main")
+```
+
+**list_workspaces()**
+- List available workspaces (cloud)
+- Parameters: None
+- Returns: List of workspaces with metadata
+- Example:
+```python
+workspaces = await list_workspaces()
 ```
 
 ### Visualization
@@ -3239,8 +3318,8 @@ await edit_note(
     project="main"
 )
 
-# Avoid: Complete rewrite
-# (unless necessary for major restructuring)
+# When full rewrite is needed, use overwrite=True
+await write_note(title="Note", content="...", folder="notes", overwrite=True)
 ```
 
 ### 14. Tagging Strategy

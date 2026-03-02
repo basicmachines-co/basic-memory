@@ -57,6 +57,16 @@ await write_note(
 )
 ```
 
+> **Important**: `write_note` errors if the note already exists. Use `edit_note` for incremental changes, or pass `overwrite=True` to replace.
+
+```python
+# Preferred: update an existing note incrementally
+await edit_note(identifier="Topic", operation="append", content="\n- [category] new fact")
+
+# Alternative: replace the entire note
+await write_note(title="Topic", content="...", folder="notes", overwrite=True)
+```
+
 ### Reading Knowledge
 
 ```python
@@ -70,11 +80,27 @@ content = await read_note("memory://folder/topic", project="main")
 ### Searching
 
 ```python
+# Basic text search
+results = await search_notes(query="authentication", project="main")
+
+# Search types: "text" (default), "title", "permalink", "vector"/"semantic", "hybrid"
+# Default is "hybrid" when semantic search is enabled, "text" otherwise
+results = await search_notes(query="auth flow", search_type="hybrid")
+
+# Tag shorthand in query (multiple tags: "tag:x AND tag:y" or "tag:x tag:y")
+results = await search_notes(query="tag:security")
+results = await search_notes(query="tag:coffee AND tag:brewing")
+
+# Filter-only search (no query needed)
+results = await search_notes(tags=["security", "auth"], status="active")
+
+# Metadata filters with operators: $in, $gt, $gte, $lt, $lte, $between
 results = await search_notes(
-    query="authentication",
-    project="main",
-    page_size=10
+    metadata_filters={"priority": {"$in": ["high", "critical"]}}
 )
+
+# Override similarity threshold for vector/hybrid search
+results = await search_notes(query="auth", search_type="hybrid", min_similarity=0.5)
 ```
 
 ### Building Context
@@ -162,6 +188,8 @@ activity = await recent_activity(project="main")
 - 2-3 relations per note
 - Meaningful categories and relation types
 
+**Prefer `edit_note` for updates** — use `write_note` only for new notes.
+
 **Search before creating:**
 ```python
 # Find existing entities to reference
@@ -199,6 +227,14 @@ except:
     projects = await list_memory_projects()
     # Then retry with project
     results = await search_notes(query="test", project=projects[0].name)
+```
+
+**Note already exists:**
+```python
+# write_note returns an error if the note exists — use edit_note or overwrite
+await edit_note(identifier="Existing Topic", operation="append", content="\n- [update] new info")
+# Or replace entirely:
+await write_note(title="Existing Topic", content="...", folder="notes", overwrite=True)
 ```
 
 **Forward references:**
@@ -256,13 +292,14 @@ context = await build_context(url=f"memory://{results[0].permalink}", project="m
 
 | Tool | Purpose | Key Params |
 |------|---------|------------|
-| `write_note` | Create/update | title, content, folder, project |
+| `write_note` | Create new | title, content, folder, project, overwrite |
 | `read_note` | Read content | identifier, project |
 | `edit_note` | Modify existing | identifier, operation, content, project |
-| `search_notes` | Find notes | query, project |
+| `search_notes` | Find notes | query, search_type, tags, metadata_filters, project |
 | `build_context` | Graph traversal | url, depth, project |
 | `recent_activity` | Recent changes | timeframe, project |
 | `list_memory_projects` | Show projects | (none) |
+| `list_workspaces` | Show workspaces | (none) |
 
 ## memory:// URL Format
 
@@ -270,6 +307,7 @@ context = await build_context(url=f"memory://{results[0].permalink}", project="m
 - `memory://folder/title` - By folder + title
 - `memory://permalink` - By permalink
 - `memory://folder/*` - All in folder
+- `memory://project-name/folder/title` - Cross-project (auto-routes to the correct project)
 
 For full documentation: https://docs.basicmemory.com
 

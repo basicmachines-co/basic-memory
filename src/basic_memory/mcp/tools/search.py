@@ -440,14 +440,20 @@ async def search_notes(
     entity_types = entity_types or []
 
     # Parse tag:<value> shorthand at tool level so it works with all search modes.
+    # Handles "tag:security", "tag:coffee tag:brewing", "tag:coffee AND tag:brewing".
     # Without this, hybrid/vector modes fail because they require non-empty text,
     # but the service-layer tag: parser clears the text after the mode is set.
-    if query and query.strip().lower().startswith("tag:"):
-        tag_values = [t for t in re.split(r"[,\s]+", query.strip()[4:].strip()) if t]
+    if query and "tag:" in query.lower():
+        # Extract tag values, splitting comma-separated lists (e.g. "tag:coffee,brewing")
+        raw_values = re.findall(r"tag:(\S+)", query, flags=re.IGNORECASE)
+        tag_values = [v for raw in raw_values for v in raw.split(",") if v]
         if tag_values:
             # Merge with any explicitly provided tags
             tags = list(set((tags or []) + tag_values))
-            query = None
+            # Remove tag: tokens and boolean connectors, keep remaining text as query
+            remainder = re.sub(r"tag:\S+", "", query, flags=re.IGNORECASE)
+            remainder = re.sub(r"\b(AND|OR|NOT)\b", "", remainder).strip()
+            query = remainder or None
 
     # Detect project from memory URL prefix before routing
     if project is None and query is not None:
