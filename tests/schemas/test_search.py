@@ -102,6 +102,54 @@ def test_relation_result():
     assert result.relation_type == "depends_on"
 
 
+def test_metadata_filters_note_type_routed_to_note_types():
+    """metadata_filters with note_type should be intercepted and routed to note_types.
+
+    note_type lives in search_index.metadata, NOT entity.entity_metadata.
+    Passing it through metadata_filters would query the wrong column and return
+    empty results. The validator intercepts it and moves it to note_types.
+    """
+    query = SearchQuery(metadata_filters={"note_type": "note"})
+    assert query.note_types == ["note"]
+    assert query.metadata_filters is None
+
+
+def test_metadata_filters_note_type_list_routed_to_note_types():
+    """metadata_filters with note_type as list is normalized and merged into note_types."""
+    query = SearchQuery(metadata_filters={"note_type": ["note", "spec"]})
+    assert query.note_types == ["note", "spec"]
+    assert query.metadata_filters is None
+
+
+def test_metadata_filters_note_type_merges_with_existing_note_types():
+    """note_type from metadata_filters is merged with existing note_types, deduped."""
+    query = SearchQuery(note_types=["spec"], metadata_filters={"note_type": "note"})
+    assert "spec" in query.note_types
+    assert "note" in query.note_types
+    assert query.metadata_filters is None
+
+
+def test_metadata_filters_note_type_deduplicates():
+    """note_type already in note_types is not added twice."""
+    query = SearchQuery(note_types=["note"], metadata_filters={"note_type": "note"})
+    assert query.note_types.count("note") == 1
+    assert query.metadata_filters is None
+
+
+def test_metadata_filters_non_system_fields_untouched():
+    """metadata_filters with non-system fields are passed through unchanged."""
+    query = SearchQuery(metadata_filters={"status": "active", "priority": "high"})
+    assert query.metadata_filters == {"status": "active", "priority": "high"}
+    assert query.note_types is None
+
+
+def test_metadata_filters_mixed_system_and_user_fields():
+    """note_type is extracted; remaining metadata_filters are preserved."""
+    query = SearchQuery(metadata_filters={"note_type": "spec", "status": "active"})
+    assert query.note_types == ["spec"]
+    assert query.metadata_filters == {"status": "active"}
+
+
 def test_search_response():
     """Test search response wrapper."""
     results = [

@@ -9,7 +9,7 @@ The search system supports three primary modes:
 from typing import Optional, List, Union, Any
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from basic_memory.schemas.base import Permalink
 
@@ -69,6 +69,36 @@ class SearchQuery(BaseModel):
     status: Optional[str] = None  # Convenience status filter
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
     min_similarity: Optional[float] = None  # Per-query override for semantic_min_similarity
+
+    @model_validator(mode="after")
+    def intercept_system_fields_in_metadata_filters(self) -> "SearchQuery":
+        """Route system fields from metadata_filters to their dedicated parameters.
+
+        `note_type` is stored in search_index.metadata (set during indexing), NOT in
+        entity.entity_metadata. The metadata_filters parameter queries entity.entity_metadata,
+        so passing note_type there always returns empty results. Intercept it here and
+        move it to the note_types parameter which correctly queries search_index.metadata.
+        """
+        if not self.metadata_filters:
+            return self
+
+        note_type_value = self.metadata_filters.pop("note_type", None)
+        if note_type_value is not None:
+            # Normalize to list — note_type_value may be a single string or a list
+            if isinstance(note_type_value, list):
+                new_note_types = note_type_value
+            else:
+                new_note_types = [note_type_value]
+
+            # Merge with any existing note_types values
+            existing = self.note_types or []
+            self.note_types = existing + [t for t in new_note_types if t not in existing]
+
+        # If metadata_filters is now empty, set it to None so no_criteria() works correctly
+        if not self.metadata_filters:
+            self.metadata_filters = None
+
+        return self
 
     @field_validator("after_date")
     @classmethod
