@@ -725,7 +725,9 @@ class ConfigManager:
                     # Create backup before overwriting so users can revert if needed
                     backup_path = self.config_file.with_suffix(".json.bak")
                     shutil.copy2(self.config_file, backup_path)
-                    logger.info(f"Migrating config to current format (backup: {backup_path})")
+                    logger.info(
+                        f"Migrating config to current format (backup: {backup_path})"
+                    )
                     save_basic_memory_config(self.config_file, _CONFIG_CACHE)
 
                 return _CONFIG_CACHE
