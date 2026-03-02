@@ -85,13 +85,13 @@ def logout():
 
 @cloud_app.command("status")
 def status() -> None:
-    """Check cloud authentication state and cloud instance health."""
+    """Check cloud authentication and connection status."""
     config_manager = ConfigManager()
     config = config_manager.load_config()
     auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
     tokens = auth.load_tokens()
 
-    console.print("[bold blue]Cloud Authentication Status[/bold blue]")
+    console.print("[bold blue]Cloud Status[/bold blue]")
     console.print(f"  Host: {config.cloud_host}")
     console.print(
         f"  API Key: {'[green]configured[/green]' if config.cloud_api_key else '[yellow]not set[/yellow]'}"
@@ -99,16 +99,11 @@ def status() -> None:
 
     oauth_status = "[yellow]not logged in[/yellow]"
     if tokens:
-        oauth_status = (
-            "[green]token valid[/green]"
-            if auth.is_token_valid(tokens)
-            else "[yellow]token expired[/yellow]"
-        )
+        if auth.is_token_valid(tokens):
+            oauth_status = "[green]token valid[/green]"
+        else:
+            oauth_status = "[yellow]token expired[/yellow]"
     console.print(f"  OAuth: {oauth_status}")
-
-    # Get cloud configuration
-    _, _, host_url = get_cloud_config()
-    host_url = host_url.rstrip("/")
 
     has_credentials = bool(config.cloud_api_key) or tokens is not None
     if not has_credentials:
@@ -117,33 +112,20 @@ def status() -> None:
         )
         return
 
+    # Quick connection check — just verify we can reach the cloud
+    _, _, host_url = get_cloud_config()
+    host_url = host_url.rstrip("/")
+
     try:
-        console.print("\n[blue]Checking cloud instance health...[/blue]")
-
-        # Make API request to check health
-        response = run_with_cleanup(make_api_request(method="GET", url=f"{host_url}/proxy/health"))
-
-        health_data = response.json()
-
-        console.print("[green]Cloud instance is healthy[/green]")
-
-        # Display status details
-        if "status" in health_data:
-            console.print(f"  Status: {health_data['status']}")
-        if "version" in health_data:
-            console.print(f"  Version: {health_data['version']}")
-        if "timestamp" in health_data:
-            console.print(f"  Timestamp: {health_data['timestamp']}")
-
-        console.print("\n[dim]To sync projects, use: bm project bisync --name <project>[/dim]")
-
-    except CloudAPIError as e:
-        console.print(f"[yellow]Cloud health check failed: {e}[/yellow]")
+        run_with_cleanup(make_api_request(method="GET", url=f"{host_url}/proxy/health"))
+        console.print("\n[green]Cloud connected[/green]")
+    except CloudAPIError:
+        console.print("\n[yellow]Cloud not connected[/yellow]")
         console.print(
-            "[dim]Try re-authenticating with 'bm cloud login' or setting API key with 'bm cloud api-key save'.[/dim]"
+            "[dim]Try re-authenticating with 'bm cloud login' or 'bm cloud api-key save'.[/dim]"
         )
-    except Exception as e:
-        console.print(f"[yellow]Unexpected health check error: {e}[/yellow]")
+    except Exception:
+        console.print("\n[yellow]Cloud not connected[/yellow]")
 
 
 @cloud_app.command("setup")

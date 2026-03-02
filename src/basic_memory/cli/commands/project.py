@@ -228,8 +228,11 @@ def list_projects(
         console.print(table)
         if cloud_error is not None:
             console.print(
-                "[yellow]Cloud project discovery failed. "
-                "Showing local projects only. Run 'bm cloud login' or 'bm cloud api-key save <key>'.[/yellow]"
+                f"[yellow]Cloud project discovery failed: {cloud_error}[/yellow]"
+            )
+            console.print(
+                "[dim]Showing local projects only. "
+                "Run 'bm cloud login' or 'bm cloud api-key save <key>' if this is a credentials issue.[/dim]"
             )
     except Exception as e:
         console.print(f"[red]Error listing projects: {str(e)}[/red]")

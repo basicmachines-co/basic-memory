@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, ProjectMode
 from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import reconcile_projects_with_config
 from basic_memory.sync.sync_service import get_sync_service
@@ -169,7 +169,16 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
         if project:
             projects = [p for p in projects if p.name == project]
             if not projects:
-                console.print(f"[red]Project '{project}' not found.[/red]")
+                # Check if it's a cloud-only project — those can't be reindexed locally
+                project_mode = app_config.get_project_mode(project)
+                if project_mode == ProjectMode.CLOUD:
+                    console.print(
+                        f"[yellow]Project '{project}' is a cloud project.[/yellow]\n"
+                        "Reindexing is a local operation — cloud projects are "
+                        "indexed on the server."
+                    )
+                else:
+                    console.print(f"[red]Project '{project}' not found.[/red]")
                 raise typer.Exit(1)
 
         for proj in projects:
