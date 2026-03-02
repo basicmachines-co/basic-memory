@@ -901,3 +901,21 @@ async def test_resolve_link_non_uuid_falls_through(link_resolver, test_entities,
     result = await link_resolver.resolve_link("Core Service")
     assert result is not None
     assert result.permalink == f"{project_prefix}/components/core-service"
+
+
+# ============================================================================
+# Fuzzy search best-match selection tests (#640)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_fuzzy_search_selects_first_result(link_resolver, project_prefix):
+    """Test that fuzzy search uses results[0] (best-ranked by the DB) regardless of score sign.
+
+    Both SQLite (BM25, negative scores, ASC) and Postgres (ts_rank, positive scores, DESC)
+    return the best match first. Using results[0] is backend-agnostic and correct.
+    """
+    result = await link_resolver.resolve_link("Auth Serv")
+    assert result is not None
+    # The best match for "Auth Serv" should be Auth Service
+    assert result.permalink == f"{project_prefix}/components/auth-service"

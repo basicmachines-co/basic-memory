@@ -362,9 +362,9 @@ async def test_search_pagination(mcp_server, app, test_project):
         )
 
         result_text = search_result.content[0].text
-        # Should contain 5 results and pagination info
-        assert '"current_page":1' in result_text
-        assert '"page_size":5' in result_text
+        # Text format includes pagination info in footer
+        assert "page 1" in result_text
+        assert "page_size 5" in result_text
 
         # Search page 2
         search_result = await client.call_tool(
@@ -378,7 +378,7 @@ async def test_search_pagination(mcp_server, app, test_project):
         )
 
         result_text = search_result.content[0].text
-        assert '"current_page":2' in result_text
+        assert "page 2" in result_text
 
 
 @pytest.mark.asyncio
@@ -407,8 +407,9 @@ async def test_search_no_results(mcp_server, app, test_project):
             },
         )
 
+        # Default text format returns "No results found" when empty
         result_text = search_result.content[0].text
-        assert '"results": []' in result_text or '"results":[]' in result_text
+        assert "No results found" in result_text
 
 
 @pytest.mark.asyncio

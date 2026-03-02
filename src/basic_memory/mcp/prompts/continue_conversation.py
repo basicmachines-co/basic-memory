@@ -13,7 +13,6 @@ from pydantic import Field
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.search import search_notes
-from basic_memory.schemas.search import SearchResponse
 
 
 @mcp.prompt(
@@ -42,15 +41,12 @@ async def continue_conversation(
     logger.info(f"Continuing session, topic: {topic}, timeframe: {timeframe}")
 
     if topic:
-        # Search for the topic using the search tool directly
-        result = await search_notes(query=topic, after_date=timeframe)
+        # Use json format to get structured data for result counting and branching
+        result = await search_notes(query=topic, after_date=timeframe, output_format="json")
 
-        if isinstance(result, SearchResponse):
-            context_text = _format_continuation_results(result, topic)
-            result_count = len(result.results)
-        elif isinstance(result, dict):
+        if isinstance(result, dict):
             results = result.get("results", [])
-            context_text = str(result)
+            context_text = _format_continuation_results(results, topic)
             result_count = len(results)
         else:
             # Error string
@@ -111,23 +107,24 @@ async def continue_conversation(
     return prompt
 
 
-def _format_continuation_results(result: SearchResponse, topic: str) -> str:
-    """Format search results for conversation continuation context."""
-    if not result.results:
+def _format_continuation_results(results: list[dict], topic: str) -> str:
+    """Format search result dicts for conversation continuation context."""
+    if not results:
         return f"No previous context found for '{topic}'."
 
     lines = [f"## Previous Context for '{topic}'\n"]
 
-    for item in result.results:
-        title = item.title or "Untitled"
-        permalink = item.permalink or ""
+    for item in results:
+        title = item.get("title", "Untitled")
+        permalink = item.get("permalink", "")
 
         lines.append(f"### {title}")
         if permalink:
             lines.append(f"permalink: {permalink}")
             lines.append(f'Read with: `read_note("{permalink}")`')
-        if item.content:
-            content = item.content[:300] + "..." if len(item.content) > 300 else item.content
+        content = item.get("content")
+        if content:
+            content = content[:300] + "..." if len(content) > 300 else content
             lines.append(f"\n{content}")
         lines.append("")
 

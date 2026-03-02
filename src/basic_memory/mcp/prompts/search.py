@@ -11,7 +11,6 @@ from pydantic import Field
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
-from basic_memory.schemas.search import SearchResponse
 
 
 @mcp.prompt(
@@ -39,18 +38,14 @@ async def search_prompt(
     """
     logger.info(f"Searching knowledge base, query: {query}, timeframe: {timeframe}")
 
-    # Call the search tool directly — it returns SearchResponse, dict, or error string
-    result = await search_notes(query=query, after_date=timeframe)
+    # Use json format to get structured data for result counting and formatting
+    result = await search_notes(query=query, after_date=timeframe, output_format="json")
 
     # Format the tool output into a prompt with guidance
-    if isinstance(result, SearchResponse):
-        result_count = len(result.results)
-        result_text = _format_search_results(result, query)
-    elif isinstance(result, dict):
-        # json output format
+    if isinstance(result, dict):
         results = result.get("results", [])
         result_count = len(results)
-        result_text = str(result)
+        result_text = _format_search_results(results, query)
     else:
         # Error string from search tool
         result_count = 0
@@ -76,28 +71,27 @@ async def search_prompt(
     """)
 
 
-def _format_search_results(result: SearchResponse, query: str) -> str:
-    """Format SearchResponse into readable markdown."""
-    if not result.results:
+def _format_search_results(results: list[dict], query: str) -> str:
+    """Format search result dicts into readable markdown."""
+    if not results:
         return f"No results found for '{query}'."
 
-    lines = [f"Found {len(result.results)} results:\n"]
+    lines = [f"Found {len(results)} results:\n"]
 
-    for item in result.results:
-        title = item.title or "Untitled"
-        permalink = item.permalink or ""
-        score = f" (score: {item.score:.2f})" if item.score else ""
+    for item in results:
+        title = item.get("title", "Untitled")
+        permalink = item.get("permalink", "")
+        score = item.get("score")
+        score_text = f" (score: {score:.2f})" if score else ""
 
-        lines.append(f"- **{title}**{score}")
+        lines.append(f"- **{title}**{score_text}")
         if permalink:
             lines.append(f"  permalink: {permalink}")
-        if item.content:
+        content = item.get("content")
+        if content:
             # Truncate content snippet
-            content = item.content[:200] + "..." if len(item.content) > 200 else item.content
+            content = content[:200] + "..." if len(content) > 200 else content
             lines.append(f"  {content}")
         lines.append("")
-
-    if result.has_more:
-        lines.append("*More results available. Use page=2 to see next page.*")
 
     return "\n".join(lines)

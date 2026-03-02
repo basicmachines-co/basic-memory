@@ -251,6 +251,46 @@ Error searching for '{query}': {error_message}
 - **Patterns**: `tag:example`, `category:observation`"""
 
 
+def _format_search_markdown(result: SearchResponse, project: str, query: str | None) -> str:
+    """Format SearchResponse as compact markdown text.
+
+    Produces a human-readable markdown representation suitable for LLM
+    consumption when structured data isn't needed.
+    """
+    if not result.results:
+        return f"No results found for '{query or ''}' in project '{project}'."
+
+    parts = []
+
+    # --- Header ---
+    if query:
+        parts.append(f"# Search Results: {query}")
+    else:
+        parts.append("# Search Results")
+    parts.append(f"*project: {project}*")
+    parts.append("")
+
+    # --- Result blocks ---
+    for r in result.results:
+        parts.append(f"### {r.title}")
+        parts.append(f"- permalink: {r.permalink}")
+        parts.append(f"- score: {r.score:.4f}")
+        if r.matched_chunk:
+            parts.append(f"- match: {r.matched_chunk[:200]}")
+        parts.append("")
+
+    # --- Footer with pagination ---
+    parts.append("---")
+    count = len(result.results)
+    parts.append(
+        f"*{count} result{'s' if count != 1 else ''}"
+        f" | page {result.current_page}, page_size {result.page_size}"
+        f"{' | more available' if result.has_more else ''}*"
+    )
+
+    return "\n".join(parts)
+
+
 @mcp.tool(
     description="Search across all content in the knowledge base with advanced syntax support.",
     # TODO: re-enable once MCP client rendering is working
@@ -273,7 +313,7 @@ async def search_notes(
     status: Optional[str] = None,
     min_similarity: Optional[float] = None,
     context: Context | None = None,
-) -> SearchResponse | dict | str:
+) -> dict | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
 
     This tool searches the knowledge base using full-text search, pattern matching,
@@ -373,7 +413,8 @@ async def search_notes(
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        SearchResponse with results and pagination info, or helpful error guidance if search fails
+        Formatted markdown text (output_format="text"), dict (output_format="json"),
+        or helpful error guidance string if search fails
 
     Examples:
         # Basic text search
@@ -519,6 +560,13 @@ async def search_notes(
             if after_date:
                 search_query.after_date = after_date
             if metadata_filters:
+                # Alias common column/model names to their frontmatter key equivalents.
+                # Users often pass "note_type" (the entity model column) when the
+                # frontmatter field is actually "type".
+                _METADATA_KEY_ALIASES = {"note_type": "type"}
+                metadata_filters = {
+                    _METADATA_KEY_ALIASES.get(k, k): v for k, v in metadata_filters.items()
+                }
                 search_query.metadata_filters = metadata_filters
             if tags:
                 search_query.tags = tags
@@ -565,7 +613,7 @@ async def search_notes(
             if output_format == "json":
                 return result.model_dump(mode="json", exclude_none=True)
 
-            return result
+            return _format_search_markdown(result, active_project.name, query)
 
         except Exception as e:
             logger.error(

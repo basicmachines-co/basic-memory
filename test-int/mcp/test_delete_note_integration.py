@@ -105,11 +105,8 @@ async def test_delete_note_by_permalink(mcp_server, app, test_project):
             },
         )
 
-        # Should have no results
-        assert (
-            '"results": []' in search_result.content[0].text
-            or '"results":[]' in search_result.content[0].text
-        )
+        # Default text format returns "No results found" when empty
+        assert "No results found" in search_result.content[0].text
 
 
 @pytest.mark.asyncio
@@ -387,11 +384,8 @@ async def test_delete_multiple_notes_sequentially(mcp_server, app, test_project)
             },
         )
 
-        # Should have no results
-        assert (
-            '"results": []' in search_result.content[0].text
-            or '"results":[]' in search_result.content[0].text
-        )
+        # Default text format returns "No results found" when empty
+        assert "No results found" in search_result.content[0].text
 
 
 @pytest.mark.asyncio

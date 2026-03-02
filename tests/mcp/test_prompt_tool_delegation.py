@@ -9,7 +9,6 @@ import pytest
 
 from basic_memory.mcp.prompts.search import search_prompt
 from basic_memory.mcp.prompts.continue_conversation import continue_conversation
-from basic_memory.schemas.search import SearchResponse, SearchResult
 
 
 # --- search_prompt ---
@@ -20,19 +19,20 @@ async def test_search_prompt_delegates_to_search_notes(monkeypatch):
     """Search prompt should call search_notes tool and wrap output."""
     captured_kwargs = {}
 
-    fake_result = SearchResponse(
-        results=[
-            SearchResult(
-                type="entity",
-                title="Test Note",
-                permalink="test-note",
-                file_path="test-note.md",
-                score=0.95,
-            )
+    # Prompts use output_format="json", so mock returns a dict
+    fake_result = {
+        "results": [
+            {
+                "type": "entity",
+                "title": "Test Note",
+                "permalink": "test-note",
+                "file_path": "test-note.md",
+                "score": 0.95,
+            }
         ],
-        current_page=1,
-        page_size=10,
-    )
+        "current_page": 1,
+        "page_size": 10,
+    }
 
     async def fake_search_notes(**kwargs):
         captured_kwargs.update(kwargs)
@@ -45,6 +45,7 @@ async def test_search_prompt_delegates_to_search_notes(monkeypatch):
     # Verify delegation
     assert captured_kwargs["query"] == "my query"
     assert captured_kwargs["after_date"] == "1w"
+    assert captured_kwargs["output_format"] == "json"
 
     # Verify output wrapping
     assert 'Search Results: "my query"' in out
@@ -55,7 +56,7 @@ async def test_search_prompt_delegates_to_search_notes(monkeypatch):
 @pytest.mark.asyncio
 async def test_search_prompt_handles_no_results(monkeypatch):
     """Search prompt should handle empty results gracefully."""
-    fake_result = SearchResponse(results=[], current_page=1, page_size=10)
+    fake_result = {"results": [], "current_page": 1, "page_size": 10}
 
     async def fake_search_notes(**kwargs):
         return fake_result
@@ -91,19 +92,20 @@ async def test_continue_conversation_delegates_to_search_notes(monkeypatch):
     """Continue conversation with topic should call search_notes."""
     captured_kwargs = {}
 
-    fake_result = SearchResponse(
-        results=[
-            SearchResult(
-                type="entity",
-                title="Previous Discussion",
-                permalink="discussions/previous",
-                file_path="discussions/previous.md",
-                score=0.9,
-            )
+    # Prompts use output_format="json", so mock returns a dict
+    fake_result = {
+        "results": [
+            {
+                "type": "entity",
+                "title": "Previous Discussion",
+                "permalink": "discussions/previous",
+                "file_path": "discussions/previous.md",
+                "score": 0.9,
+            }
         ],
-        current_page=1,
-        page_size=10,
-    )
+        "current_page": 1,
+        "page_size": 10,
+    }
 
     async def fake_search_notes(**kwargs):
         captured_kwargs.update(kwargs)
@@ -117,6 +119,7 @@ async def test_continue_conversation_delegates_to_search_notes(monkeypatch):
 
     assert captured_kwargs["query"] == "my topic"
     assert captured_kwargs["after_date"] == "3d"
+    assert captured_kwargs["output_format"] == "json"
 
     assert "'my topic'" in out
     assert "Previous Discussion" in out
@@ -164,7 +167,7 @@ async def test_continue_conversation_no_topic_default_timeframe(monkeypatch):
 @pytest.mark.asyncio
 async def test_continue_conversation_no_results_for_topic(monkeypatch):
     """Continue conversation should show capture opportunity when no results found."""
-    fake_result = SearchResponse(results=[], current_page=1, page_size=10)
+    fake_result = {"results": [], "current_page": 1, "page_size": 10}
 
     async def fake_search_notes(**kwargs):
         return fake_result

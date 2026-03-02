@@ -301,8 +301,10 @@ class LinkResolver:
             )
 
             if results:
-                # Look for best match
-                best_match = min(results, key=lambda x: x.score)  # pyright: ignore
+                # Both SQLite and Postgres return results sorted best-first in SQL
+                # (SQLite: ORDER BY score ASC for negative BM25, Postgres: ORDER BY score DESC
+                # for positive ts_rank). Using results[0] is backend-agnostic and correct.
+                best_match = results[0]
                 logger.trace(
                     f"Selected best match from {len(results)} results: {best_match.permalink}"
                 )
