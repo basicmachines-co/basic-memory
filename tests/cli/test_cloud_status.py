@@ -63,9 +63,7 @@ def _patch_status_deps(monkeypatch, *, tokens=None, api_side_effect=None):
     monkeypatch.setattr(
         "basic_memory.cli.commands.cloud.core_commands.ConfigManager", FakeConfigManager
     )
-    monkeypatch.setattr(
-        "basic_memory.cli.commands.cloud.core_commands.CLIAuth", FakeAuth
-    )
+    monkeypatch.setattr("basic_memory.cli.commands.cloud.core_commands.CLIAuth", FakeAuth)
     monkeypatch.setattr(
         "basic_memory.cli.commands.cloud.core_commands.get_cloud_config",
         lambda: ("cid", "domain", "https://cloud.example.com"),

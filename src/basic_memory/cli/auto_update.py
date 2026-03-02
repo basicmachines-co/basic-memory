@@ -70,7 +70,7 @@ def detect_install_source(executable: str | None = None) -> InstallSource:
         return InstallSource.HOMEBREW
     if "uv/tools/basic-memory" in normalized:
         return InstallSource.UV_TOOL
-    if "/uv/archive-" in normalized or "/uv/archive-v" in normalized:
+    if "/uv/archive-" in normalized:
         return InstallSource.UVX
     return InstallSource.UNKNOWN
 
@@ -94,39 +94,18 @@ def _run_subprocess(
     capture_output: bool,
 ) -> subprocess.CompletedProcess[str]:
     """Run a subprocess with explicit stdio behavior for protocol safety."""
-    # Trigger: caller needs command output for decision-making (e.g., brew outdated).
-    # Why: update-availability checks parse command output.
-    # Outcome: stdout/stderr are captured in-memory (never forwarded to terminal).
-    if capture_output:
-        return subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
-
-    if silent:
-        # Trigger: silent operation (MCP/background) with no need for subprocess output.
-        # Why: prevent protocol/terminal pollution from child process output.
-        # Outcome: stdout/stderr are discarded.
-        return subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
+    # Trigger: silent operation (MCP/background) with no need for subprocess output.
+    # Why: prevent protocol/terminal pollution from child process output.
+    # Outcome: stdout/stderr are discarded unless explicit capture is requested.
+    use_devnull = silent and not capture_output
+    stdout_target = subprocess.DEVNULL if use_devnull else subprocess.PIPE
+    stderr_target = subprocess.DEVNULL if use_devnull else subprocess.PIPE
 
     return subprocess.run(
         command,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout_target,
+        stderr=stderr_target,
         text=True,
         timeout=timeout_seconds,
         check=False,
@@ -240,7 +219,7 @@ def run_auto_update(
             # Trigger: mixed naive/aware datetimes from manual config edits.
             # Why: datetime subtraction fails for mixed tz-awareness.
             # Outcome: ignore the gate once and continue with a forced check path.
-            logger.warning("Auto-update interval gate skipped due incompatible timestamp format")
+            logger.warning("Auto-update interval gate skipped due to incompatible timestamp format")
         else:
             if elapsed < timedelta(seconds=config.update_check_interval):
                 return AutoUpdateResult(
@@ -349,6 +328,7 @@ def run_auto_update(
     except (
         RuntimeError,
         urllib.error.URLError,
+        ValueError,
         TimeoutError,
         subprocess.SubprocessError,
         OSError,

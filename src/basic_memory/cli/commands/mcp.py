@@ -91,7 +91,12 @@ def mcp(
         elif result.status == AutoUpdateStatus.FAILED and result.error:
             logger.warning(f"MCP background auto-update failed: {result.error}")
 
-    threading.Thread(target=_run_background_auto_update, daemon=True).start()
+    # Trigger: stdio transport corresponds to local user installs.
+    # Why: server transports (HTTP/SSE) run in managed environments where
+    # package-manager self-upgrades are inappropriate.
+    # Outcome: background auto-update runs only for local stdio MCP sessions.
+    if transport == "stdio":
+        threading.Thread(target=_run_background_auto_update, daemon=True).start()
 
     # Run the MCP server (blocks)
     # Lifespan handles: initialization, migrations, file sync, cleanup

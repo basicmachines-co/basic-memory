@@ -9,8 +9,10 @@ from io import StringIO
 from rich.console import Console
 
 from basic_memory.cli.auto_update import (
+    AutoUpdateResult,
     AutoUpdateStatus,
     InstallSource,
+    _is_interactive_session,
     detect_install_source,
     maybe_run_periodic_auto_update,
     run_auto_update,
@@ -41,6 +43,25 @@ def _capture_console() -> tuple[Console, StringIO]:
 
 def _base_config(tmp_path) -> BasicMemoryConfig:
     return BasicMemoryConfig(projects={"main": {"path": str(tmp_path / "main")}})
+
+
+def _result(
+    status: AutoUpdateStatus,
+    *,
+    message: str | None,
+    error: str | None = None,
+) -> AutoUpdateResult:
+    return AutoUpdateResult(
+        status=status,
+        source=InstallSource.UV_TOOL,
+        checked=True,
+        update_available=status in {AutoUpdateStatus.UPDATE_AVAILABLE, AutoUpdateStatus.UPDATED},
+        updated=status == AutoUpdateStatus.UPDATED,
+        latest_version="9.9.9",
+        message=message,
+        error=error,
+        restart_recommended=status == AutoUpdateStatus.UPDATED,
+    )
 
 
 def test_detect_install_source_variants():
@@ -271,3 +292,83 @@ def test_maybe_run_periodic_auto_update_non_interactive_has_no_console_output():
     )
     assert result is None
     assert buf.getvalue() == ""
+
+
+def test_maybe_run_periodic_auto_update_prints_updated(monkeypatch):
+    console, buf = _capture_console()
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update.run_auto_update",
+        lambda **kwargs: _result(
+            AutoUpdateStatus.UPDATED,
+            message="Basic Memory was updated successfully.",
+        ),
+    )
+
+    result = maybe_run_periodic_auto_update("status", is_interactive=True, console=console)
+    assert result is not None
+    assert result.status == AutoUpdateStatus.UPDATED
+    assert "updated successfully" in buf.getvalue().lower()
+
+
+def test_maybe_run_periodic_auto_update_prints_available(monkeypatch):
+    console, buf = _capture_console()
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update.run_auto_update",
+        lambda **kwargs: _result(
+            AutoUpdateStatus.UPDATE_AVAILABLE,
+            message="Update available (latest: 9.9.9).",
+        ),
+    )
+
+    result = maybe_run_periodic_auto_update("status", is_interactive=True, console=console)
+    assert result is not None
+    assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
+    assert "update available" in buf.getvalue().lower()
+
+
+def test_maybe_run_periodic_auto_update_prints_failed_with_error(monkeypatch):
+    console, buf = _capture_console()
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update.run_auto_update",
+        lambda **kwargs: _result(
+            AutoUpdateStatus.FAILED,
+            message="Automatic update check failed.",
+            error="network timeout",
+        ),
+    )
+
+    result = maybe_run_periodic_auto_update("status", is_interactive=True, console=console)
+    assert result is not None
+    assert result.status == AutoUpdateStatus.FAILED
+    output = buf.getvalue().lower()
+    assert "automatic update check failed" in output
+    assert "network timeout" in output
+
+
+def test_maybe_run_periodic_auto_update_uses_interactive_probe_when_not_overridden(monkeypatch):
+    console, buf = _capture_console()
+    monkeypatch.setattr("basic_memory.cli.auto_update._is_interactive_session", lambda: True)
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update.run_auto_update",
+        lambda **kwargs: _result(
+            AutoUpdateStatus.UP_TO_DATE,
+            message="Basic Memory is up to date.",
+        ),
+    )
+
+    result = maybe_run_periodic_auto_update("status", console=console)
+    assert result is not None
+    assert result.status == AutoUpdateStatus.UP_TO_DATE
+    # UP_TO_DATE is intentionally silent for periodic checks.
+    assert buf.getvalue() == ""
+
+
+def test_is_interactive_session_handles_closed_stdio(monkeypatch):
+    class _BrokenStream:
+        def isatty(self) -> bool:
+            raise ValueError("I/O operation on closed file")
+
+    monkeypatch.setattr("basic_memory.cli.auto_update.sys.stdin", _BrokenStream())
+    monkeypatch.setattr("basic_memory.cli.auto_update.sys.stdout", _BrokenStream())
+
+    assert _is_interactive_session() is False

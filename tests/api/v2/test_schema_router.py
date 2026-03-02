@@ -668,7 +668,8 @@ async def test_validate_reads_schema_from_file_not_database(
 
     # Overwrite the file on disk with validation=strict
     file_path = Path(file_service.base_path) / schema_entity.file_path
-    file_path.write_text(dedent("""\
+    file_path.write_text(
+        dedent("""\
         ---
         title: Editable Schema
         permalink: schemas/editable-schema
@@ -685,7 +686,8 @@ async def test_validate_reads_schema_from_file_not_database(
 
         ## Observations
         - [note] Schema that will be edited on disk
-    """))
+    """)
+    )
 
     # Create a note missing "role" — strict mode should produce errors, not warnings
     note_entity, _ = await entity_service.create_or_update_entity(
@@ -749,7 +751,8 @@ async def test_validate_falls_back_to_db_on_incomplete_frontmatter(
 
     # Overwrite file with frontmatter missing the 'schema' key
     file_path = Path(file_service.base_path) / schema_entity.file_path
-    file_path.write_text(dedent("""\
+    file_path.write_text(
+        dedent("""\
         ---
         title: Incomplete Schema
         permalink: schemas/incomplete-schema
@@ -761,7 +764,8 @@ async def test_validate_falls_back_to_db_on_incomplete_frontmatter(
 
         ## Observations
         - [note] Mid-edit state
-    """))
+    """)
+    )
 
     # Create a note to validate against this schema
     note_entity, _ = await entity_service.create_or_update_entity(
