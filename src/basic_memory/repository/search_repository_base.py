@@ -571,6 +571,17 @@ class SearchRepositoryBase(ABC):
         self._assert_semantic_available()
         await self._ensure_vector_tables()
         assert self._embedding_provider is not None
+        sync_start = time.perf_counter()
+        embed_seconds = 0.0
+        write_seconds = 0.0
+        source_rows_count = 0
+        embedding_jobs_count = 0
+
+        logger.info(
+            "Vector sync start: project_id={project_id} entity_id={entity_id}",
+            project_id=self.project_id,
+            entity_id=entity_id,
+        )
 
         async with db.scoped_session(self.session_maker) as session:
             await self._prepare_vector_session(session)
@@ -597,17 +608,94 @@ class SearchRepositoryBase(ABC):
                 },
             )
             rows = row_result.fetchall()
+            source_rows_count = len(rows)
+            built_chunk_records_count = 0
 
             # No search_index rows → delete all chunk/embedding data for this entity.
             if not rows:
+                logger.info(
+                    "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
+                    "source_rows_count={source_rows_count} "
+                    "built_chunk_records_count={built_chunk_records_count}",
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    source_rows_count=source_rows_count,
+                    built_chunk_records_count=built_chunk_records_count,
+                )
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
+                total_seconds = time.perf_counter() - sync_start
+                logger.info(
+                    "Vector sync complete: project_id={project_id} entity_id={entity_id} "
+                    "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                    "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                    "embedding_jobs_count={embedding_jobs_count}",
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    total_seconds=total_seconds,
+                    embed_seconds=embed_seconds,
+                    write_seconds=write_seconds,
+                    source_rows_count=source_rows_count,
+                    embedding_jobs_count=embedding_jobs_count,
+                )
+                if total_seconds > 10:
+                    logger.warning(
+                        "Vector sync slow entity: project_id={project_id} entity_id={entity_id} "
+                        "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                        "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                        "embedding_jobs_count={embedding_jobs_count}",
+                        project_id=self.project_id,
+                        entity_id=entity_id,
+                        total_seconds=total_seconds,
+                        embed_seconds=embed_seconds,
+                        write_seconds=write_seconds,
+                        source_rows_count=source_rows_count,
+                        embedding_jobs_count=embedding_jobs_count,
+                    )
                 return
 
             chunk_records = self._build_chunk_records(rows)
+            built_chunk_records_count = len(chunk_records)
+            logger.info(
+                "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
+                "source_rows_count={source_rows_count} "
+                "built_chunk_records_count={built_chunk_records_count}",
+                project_id=self.project_id,
+                entity_id=entity_id,
+                source_rows_count=source_rows_count,
+                built_chunk_records_count=built_chunk_records_count,
+            )
             if not chunk_records:
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
+                total_seconds = time.perf_counter() - sync_start
+                logger.info(
+                    "Vector sync complete: project_id={project_id} entity_id={entity_id} "
+                    "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                    "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                    "embedding_jobs_count={embedding_jobs_count}",
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    total_seconds=total_seconds,
+                    embed_seconds=embed_seconds,
+                    write_seconds=write_seconds,
+                    source_rows_count=source_rows_count,
+                    embedding_jobs_count=embedding_jobs_count,
+                )
+                if total_seconds > 10:
+                    logger.warning(
+                        "Vector sync slow entity: project_id={project_id} entity_id={entity_id} "
+                        "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                        "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                        "embedding_jobs_count={embedding_jobs_count}",
+                        project_id=self.project_id,
+                        entity_id=entity_id,
+                        total_seconds=total_seconds,
+                        embed_seconds=embed_seconds,
+                        write_seconds=write_seconds,
+                        source_rows_count=source_rows_count,
+                        embedding_jobs_count=embedding_jobs_count,
+                    )
                 return
 
             # --- Diff existing chunks against incoming ---
@@ -620,6 +708,7 @@ class SearchRepositoryBase(ABC):
                 {"project_id": self.project_id, "entity_id": entity_id},
             )
             existing_by_key = {row.chunk_key: row for row in existing_rows_result.fetchall()}
+            existing_chunks_count = len(existing_by_key)
             incoming_hashes = {
                 record["chunk_key"]: record["source_hash"] for record in chunk_records
             }
@@ -628,6 +717,7 @@ class SearchRepositoryBase(ABC):
                 for chunk_key, row in existing_by_key.items()
                 if chunk_key not in incoming_hashes
             ]
+            stale_chunks_count = len(stale_ids)
 
             if stale_ids:
                 await self._delete_stale_chunks(session, stale_ids, entity_id)
@@ -641,6 +731,8 @@ class SearchRepositoryBase(ABC):
                 {"project_id": self.project_id, "entity_id": entity_id},
             )
             orphan_rows = orphan_result.fetchall()
+            orphan_ids = {int(row.id) for row in orphan_rows}
+            orphan_chunks_count = len(orphan_ids)
 
             # --- Upsert changed / new chunks, collect embedding jobs ---
             timestamp_expr = self._timestamp_now_expr()
@@ -651,7 +743,7 @@ class SearchRepositoryBase(ABC):
                 # Trigger: chunk exists and hash matches (no content change)
                 # but chunk has no embedding (orphan from crash).
                 # Outcome: schedule re-embedding without touching chunk metadata.
-                is_orphan = current and any(o.id == current.id for o in orphan_rows)
+                is_orphan = current and int(current.id) in orphan_ids
                 if current and current.source_hash == record["source_hash"] and not is_orphan:
                     continue
 
@@ -694,20 +786,111 @@ class SearchRepositoryBase(ABC):
                 row_id = int(inserted.scalar_one())
                 embedding_jobs.append((row_id, record["chunk_text"]))
 
+            embedding_jobs_count = len(embedding_jobs)
+            logger.info(
+                "Vector sync diff complete: project_id={project_id} entity_id={entity_id} "
+                "existing_chunks_count={existing_chunks_count} "
+                "stale_chunks_count={stale_chunks_count} "
+                "orphan_chunks_count={orphan_chunks_count} "
+                "embedding_jobs_count={embedding_jobs_count}",
+                project_id=self.project_id,
+                entity_id=entity_id,
+                existing_chunks_count=existing_chunks_count,
+                stale_chunks_count=stale_chunks_count,
+                orphan_chunks_count=orphan_chunks_count,
+                embedding_jobs_count=embedding_jobs_count,
+            )
             await session.commit()
 
         if not embedding_jobs:
+            total_seconds = time.perf_counter() - sync_start
+            logger.info(
+                "Vector sync complete: project_id={project_id} entity_id={entity_id} "
+                "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                "embedding_jobs_count={embedding_jobs_count}",
+                project_id=self.project_id,
+                entity_id=entity_id,
+                total_seconds=total_seconds,
+                embed_seconds=embed_seconds,
+                write_seconds=write_seconds,
+                source_rows_count=source_rows_count,
+                embedding_jobs_count=embedding_jobs_count,
+            )
+            if total_seconds > 10:
+                logger.warning(
+                    "Vector sync slow entity: project_id={project_id} entity_id={entity_id} "
+                    "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                    "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                    "embedding_jobs_count={embedding_jobs_count}",
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    total_seconds=total_seconds,
+                    embed_seconds=embed_seconds,
+                    write_seconds=write_seconds,
+                    source_rows_count=source_rows_count,
+                    embedding_jobs_count=embedding_jobs_count,
+                )
             return
 
+        embed_start = time.perf_counter()
         texts = [t for _, t in embedding_jobs]
         embeddings = await self._embedding_provider.embed_documents(texts)
+        embed_seconds = time.perf_counter() - embed_start
+        logger.info(
+            "Vector sync embedding phase: project_id={project_id} entity_id={entity_id} "
+            "embed_seconds={embed_seconds:.3f} embedded_chunk_count={embedded_chunk_count}",
+            project_id=self.project_id,
+            entity_id=entity_id,
+            embed_seconds=embed_seconds,
+            embedded_chunk_count=len(embeddings),
+        )
         if len(embeddings) != len(embedding_jobs):
             raise RuntimeError("Embedding provider returned an unexpected number of vectors.")
 
+        write_start = time.perf_counter()
         async with db.scoped_session(self.session_maker) as session:
             await self._prepare_vector_session(session)
             await self._write_embeddings(session, embedding_jobs, embeddings)
             await session.commit()
+        write_seconds = time.perf_counter() - write_start
+        logger.info(
+            "Vector sync write phase: project_id={project_id} entity_id={entity_id} "
+            "write_seconds={write_seconds:.3f} written_chunk_count={written_chunk_count}",
+            project_id=self.project_id,
+            entity_id=entity_id,
+            write_seconds=write_seconds,
+            written_chunk_count=len(embedding_jobs),
+        )
+
+        total_seconds = time.perf_counter() - sync_start
+        logger.info(
+            "Vector sync complete: project_id={project_id} entity_id={entity_id} "
+            "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+            "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+            "embedding_jobs_count={embedding_jobs_count}",
+            project_id=self.project_id,
+            entity_id=entity_id,
+            total_seconds=total_seconds,
+            embed_seconds=embed_seconds,
+            write_seconds=write_seconds,
+            source_rows_count=source_rows_count,
+            embedding_jobs_count=embedding_jobs_count,
+        )
+        if total_seconds > 10:
+            logger.warning(
+                "Vector sync slow entity: project_id={project_id} entity_id={entity_id} "
+                "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
+                "embedding_jobs_count={embedding_jobs_count}",
+                project_id=self.project_id,
+                entity_id=entity_id,
+                total_seconds=total_seconds,
+                embed_seconds=embed_seconds,
+                write_seconds=write_seconds,
+                source_rows_count=source_rows_count,
+                embedding_jobs_count=embedding_jobs_count,
+            )
 
     async def _prepare_vector_session(self, session: AsyncSession) -> None:
         """Hook for per-session setup (e.g. loading sqlite-vec extension).
@@ -852,6 +1035,7 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
+        _emit_observability_log: bool = True,
     ) -> List[SearchIndexRow]:
         """Run vector-only search returning chunk-level results.
 
@@ -862,16 +1046,65 @@ class SearchRepositoryBase(ABC):
         self._assert_semantic_available()
         await self._ensure_vector_tables()
         assert self._embedding_provider is not None
-        query_embedding = await self._embedding_provider.embed_query(search_text.strip())
+        query_text = search_text.strip()
         candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
+        query_start = time.perf_counter()
+        embed_start = time.perf_counter()
+        query_embedding = await self._embedding_provider.embed_query(query_text)
+        embed_ms = (time.perf_counter() - embed_start) * 1000
+        vector_query_start = time.perf_counter()
 
         async with db.scoped_session(self.session_maker) as session:
             await self._prepare_vector_session(session)
             vector_rows = await self._run_vector_query(session, query_embedding, candidate_limit)
+        vector_query_ms = (time.perf_counter() - vector_query_start) * 1000
+        vector_row_count = len(vector_rows)
+        hydrate_ms = 0.0
+
+        def _log_vector_summary() -> None:
+            if not _emit_observability_log:
+                return
+
+            total_ms = (time.perf_counter() - query_start) * 1000
+            logger.info(
+                "Semantic query timing: project_id={project_id} retrieval_mode={retrieval_mode} "
+                "query_length={query_length} candidate_limit={candidate_limit} "
+                "vector_row_count={vector_row_count} embed_ms={embed_ms:.2f} "
+                "vector_query_ms={vector_query_ms:.2f} hydrate_ms={hydrate_ms:.2f} "
+                "total_ms={total_ms:.2f}",
+                project_id=self.project_id,
+                retrieval_mode="vector",
+                query_length=len(query_text),
+                candidate_limit=candidate_limit,
+                vector_row_count=vector_row_count,
+                embed_ms=embed_ms,
+                vector_query_ms=vector_query_ms,
+                hydrate_ms=hydrate_ms,
+                total_ms=total_ms,
+            )
+            if total_ms > 2000:
+                logger.warning(
+                    "[SEMANTIC_SLOW_QUERY] Semantic query timing: project_id={project_id} "
+                    "retrieval_mode={retrieval_mode} query_length={query_length} "
+                    "candidate_limit={candidate_limit} vector_row_count={vector_row_count} "
+                    "embed_ms={embed_ms:.2f} vector_query_ms={vector_query_ms:.2f} "
+                    "hydrate_ms={hydrate_ms:.2f} total_ms={total_ms:.2f}",
+                    project_id=self.project_id,
+                    retrieval_mode="vector",
+                    query_length=len(query_text),
+                    candidate_limit=candidate_limit,
+                    vector_row_count=vector_row_count,
+                    embed_ms=embed_ms,
+                    vector_query_ms=vector_query_ms,
+                    hydrate_ms=hydrate_ms,
+                    total_ms=total_ms,
+                )
 
         if not vector_rows:
+            _log_vector_summary()
             return []
 
+        hydrate_start = time.perf_counter()
         # Build per-search_index_row similarity scores from chunk-level results.
         # Each chunk_key encodes the search_index row type and id.
         # Track the best similarity per row (for ranking) and all chunks (for context).
@@ -893,6 +1126,8 @@ class SearchRepositoryBase(ABC):
             chunks_by_si_id.setdefault(si_id, []).append((similarity, chunk_text))
 
         if not similarity_by_si_id:
+            hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
+            _log_vector_summary()
             return []
 
         # Filter out results below the minimum similarity threshold.
@@ -905,6 +1140,8 @@ class SearchRepositoryBase(ABC):
                 k: v for k, v in similarity_by_si_id.items() if v >= effective_min_similarity
             }
             if not similarity_by_si_id:
+                hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
+                _log_vector_summary()
                 return []
 
         # Fetch the actual search_index rows
@@ -971,6 +1208,8 @@ class SearchRepositoryBase(ABC):
             )
 
         ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
+        hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
+        _log_vector_summary()
         return ranked_rows[offset : offset + limit]
 
     async def _fetch_entity_rows_by_ids(self, entity_ids: list[int]) -> dict[int, SearchIndexRow]:
@@ -1093,7 +1332,10 @@ class SearchRepositoryBase(ABC):
         the dominant signal and rewards dual-source agreement.
         """
         self._assert_semantic_available()
+        query_text = search_text.strip()
+        query_start = time.perf_counter()
         candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
+        fts_start = time.perf_counter()
         fts_results = await self.search(
             search_text=search_text,
             permalink=permalink,
@@ -1107,6 +1349,8 @@ class SearchRepositoryBase(ABC):
             limit=candidate_limit,
             offset=0,
         )
+        fts_ms = (time.perf_counter() - fts_start) * 1000
+        vector_start = time.perf_counter()
         vector_results = await self._search_vector_only(
             search_text=search_text,
             permalink=permalink,
@@ -1119,7 +1363,10 @@ class SearchRepositoryBase(ABC):
             min_similarity=min_similarity,
             limit=candidate_limit,
             offset=0,
+            _emit_observability_log=False,
         )
+        vector_ms = (time.perf_counter() - vector_start) * 1000
+        fusion_start = time.perf_counter()
 
         # --- Score-based fusion keyed on search_index row id ---
         # FTS scores are normalized to [0, 1] (BM25 is unbounded).
@@ -1171,4 +1418,40 @@ class SearchRepositoryBase(ABC):
             if row.matched_chunk_text is None and row.content_snippet:
                 row = replace(row, matched_chunk_text=row.content_snippet)
             output.append(replace(row, score=fused_score))
+        fusion_ms = (time.perf_counter() - fusion_start) * 1000
+        total_ms = (time.perf_counter() - query_start) * 1000
+        logger.info(
+            "Semantic query timing: project_id={project_id} retrieval_mode={retrieval_mode} "
+            "query_length={query_length} candidate_limit={candidate_limit} "
+            "fts_count={fts_count} vector_count={vector_count} fts_ms={fts_ms:.2f} "
+            "vector_ms={vector_ms:.2f} fusion_ms={fusion_ms:.2f} total_ms={total_ms:.2f}",
+            project_id=self.project_id,
+            retrieval_mode="hybrid",
+            query_length=len(query_text),
+            candidate_limit=candidate_limit,
+            fts_count=len(fts_results),
+            vector_count=len(vector_results),
+            fts_ms=fts_ms,
+            vector_ms=vector_ms,
+            fusion_ms=fusion_ms,
+            total_ms=total_ms,
+        )
+        if total_ms > 2500:
+            logger.warning(
+                "[SEMANTIC_SLOW_QUERY] Semantic query timing: project_id={project_id} "
+                "retrieval_mode={retrieval_mode} query_length={query_length} "
+                "candidate_limit={candidate_limit} fts_count={fts_count} "
+                "vector_count={vector_count} fts_ms={fts_ms:.2f} vector_ms={vector_ms:.2f} "
+                "fusion_ms={fusion_ms:.2f} total_ms={total_ms:.2f}",
+                project_id=self.project_id,
+                retrieval_mode="hybrid",
+                query_length=len(query_text),
+                candidate_limit=candidate_limit,
+                fts_count=len(fts_results),
+                vector_count=len(vector_results),
+                fts_ms=fts_ms,
+                vector_ms=vector_ms,
+                fusion_ms=fusion_ms,
+                total_ms=total_ms,
+            )
         return output

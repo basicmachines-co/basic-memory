@@ -32,12 +32,9 @@ class _StubTextEmbedding:
         }
         _StubTextEmbedding.init_count += 1
 
-    def embed(self, texts: list[str], batch_size: int = 64, parallel: int | None = None):
+    def embed(self, texts: list[str], batch_size: int = 64, **kwargs):
         self.embed_calls += 1
-        _StubTextEmbedding.last_embed_kwargs = {
-            "batch_size": batch_size,
-            "parallel": parallel,
-        }
+        _StubTextEmbedding.last_embed_kwargs = {"batch_size": batch_size, **kwargs}
         for text in texts:
             if "wide" in text:
                 yield _StubVector([1.0, 0.0, 0.0, 0.0, 0.5])
@@ -123,3 +120,31 @@ async def test_fastembed_provider_passes_runtime_knobs_to_fastembed(monkeypatch)
         "threads": 3,
     }
     assert _StubTextEmbedding.last_embed_kwargs == {"batch_size": 8, "parallel": 2}
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_parallel_one_disables_multiprocessing(monkeypatch):
+    """parallel=1 should not pass FastEmbed multiprocessing kwargs."""
+    module = type(sys)("fastembed")
+    module.TextEmbedding = _StubTextEmbedding
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+    _StubTextEmbedding.last_embed_kwargs = {}
+
+    provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4, parallel=1)
+    await provider.embed_documents(["parallel guardrail"])
+
+    assert _StubTextEmbedding.last_embed_kwargs == {"batch_size": 64}
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_parallel_two_passes_multiprocessing(monkeypatch):
+    """parallel>1 should keep passing FastEmbed multiprocessing kwargs."""
+    module = type(sys)("fastembed")
+    module.TextEmbedding = _StubTextEmbedding
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+    _StubTextEmbedding.last_embed_kwargs = {}
+
+    provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4, parallel=2)
+    await provider.embed_documents(["parallel enabled"])
+
+    assert _StubTextEmbedding.last_embed_kwargs == {"batch_size": 64, "parallel": 2}

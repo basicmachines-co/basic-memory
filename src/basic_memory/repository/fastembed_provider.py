@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
@@ -18,6 +20,9 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
     _MODEL_ALIASES = {
         "bge-small-en-v1.5": "BAAI/bge-small-en-v1.5",
     }
+
+    def _effective_parallel(self) -> int | None:
+        return self.parallel if self.parallel is not None and self.parallel > 1 else None
 
     def __init__(
         self,
@@ -71,6 +76,16 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                 return TextEmbedding(model_name=resolved_model_name)
 
             self._model = await asyncio.to_thread(_create_model)
+            logger.info(
+                "FastEmbed model loaded: model_name={model_name} batch_size={batch_size} "
+                "threads={threads} configured_parallel={configured_parallel} "
+                "effective_parallel={effective_parallel}",
+                model_name=self._MODEL_ALIASES.get(self.model_name, self.model_name),
+                batch_size=self.batch_size,
+                threads=self.threads,
+                configured_parallel=self.parallel,
+                effective_parallel=self._effective_parallel(),
+            )
             return self._model
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -78,11 +93,22 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
             return []
 
         model = await self._load_model()
+        effective_parallel = self._effective_parallel()
+        logger.debug(
+            "FastEmbed embed_documents call: text_count={text_count} batch_size={batch_size} "
+            "threads={threads} configured_parallel={configured_parallel} "
+            "effective_parallel={effective_parallel}",
+            text_count=len(texts),
+            batch_size=self.batch_size,
+            threads=self.threads,
+            configured_parallel=self.parallel,
+            effective_parallel=effective_parallel,
+        )
 
         def _embed_batch() -> list[list[float]]:
             embed_kwargs: dict[str, int] = {"batch_size": self.batch_size}
-            if self.parallel is not None:
-                embed_kwargs["parallel"] = self.parallel
+            if effective_parallel is not None:
+                embed_kwargs["parallel"] = effective_parallel
             vectors = list(model.embed(texts, **embed_kwargs))
             normalized: list[list[float]] = []
             for vector in vectors:
