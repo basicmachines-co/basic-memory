@@ -173,6 +173,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Batch size for embedding generation.",
         gt=0,
     )
+    semantic_embedding_sync_batch_size: int = Field(
+        default=64,
+        description="Batch size for vector sync orchestration flushes.",
+        gt=0,
+    )
     semantic_embedding_cache_dir: str | None = Field(
         default=None,
         description="Optional cache directory for FastEmbed model artifacts.",

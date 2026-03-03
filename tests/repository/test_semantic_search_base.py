@@ -11,6 +11,7 @@ import pytest
 from basic_memory.repository.search_repository_base import (
     MAX_VECTOR_CHUNK_CHARS,
     SearchRepositoryBase,
+    _PreparedEntityVectorSync,
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
@@ -50,6 +51,7 @@ class _ConcreteRepo(SearchRepositoryBase):
     _semantic_enabled = False
     _semantic_vector_k = 100
     _embedding_provider = None
+    _semantic_embedding_sync_batch_size = 64
     _vector_dimensions = 4
     _vector_tables_initialized = False
 
@@ -269,3 +271,82 @@ async def test_sqlite_hybrid_search_raises_disabled_error(search_repository):
             limit=5,
             offset=0,
         )
+
+
+@pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeypatch):
+    """Batch sync should flush queued jobs at semantic_embedding_sync_batch_size boundaries."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+    repo._semantic_embedding_sync_batch_size = 2
+
+    prepared_by_entity = {
+        1: _PreparedEntityVectorSync(1, 1.0, 1, [(101, "chunk-1")]),
+        2: _PreparedEntityVectorSync(2, 2.0, 1, [(102, "chunk-2")]),
+        3: _PreparedEntityVectorSync(3, 3.0, 1, [(103, "chunk-3")]),
+    }
+    flush_sizes: list[int] = []
+
+    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+        return prepared_by_entity[entity_id]
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        flush_sizes.append(len(flush_jobs))
+        for job in flush_jobs:
+            runtime = entity_runtime[job.entity_id]
+            runtime.remaining_jobs -= 1
+            if runtime.remaining_jobs <= 0:
+                synced_entity_ids.add(job.entity_id)
+                entity_runtime.pop(job.entity_id, None)
+        return (0.1, 0.2)
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+
+    result = await repo.sync_entity_vectors_batch([1, 2, 3])
+
+    assert flush_sizes == [2, 1]
+    assert result.entities_total == 3
+    assert result.entities_synced == 3
+    assert result.entities_failed == 0
+    assert result.failed_entity_ids == []
+    assert result.embedding_jobs_total == 3
+    assert result.embed_seconds_total == pytest.approx(0.2)
+    assert result.write_seconds_total == pytest.approx(0.4)
+
+
+@pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
+    """Batch sync should continue after per-entity and per-flush failures."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+    repo._semantic_embedding_sync_batch_size = 1
+
+    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+        if entity_id == 2:
+            raise RuntimeError("prepare failed")
+        return _PreparedEntityVectorSync(
+            entity_id, float(entity_id), 1, [(100 + entity_id, "chunk")]
+        )
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        entity_id = flush_jobs[0].entity_id
+        if entity_id == 3:
+            raise RuntimeError("flush failed")
+        runtime = entity_runtime[entity_id]
+        runtime.remaining_jobs = 0
+        synced_entity_ids.add(entity_id)
+        entity_runtime.pop(entity_id, None)
+        return (0.05, 0.05)
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+
+    result = await repo.sync_entity_vectors_batch([1, 2, 3])
+
+    assert result.entities_total == 3
+    assert result.entities_synced == 1
+    assert result.entities_failed == 2
+    assert result.failed_entity_ids == [2, 3]

@@ -319,8 +319,20 @@ async def test_semantic_embedding_backfill_syncs_each_entity(
         def __init__(self, _session_maker, project_id: int, app_config=None):
             self.project_id = project_id
 
-        async def sync_entity_vectors(self, entity_id: int) -> None:
-            synced_pairs.append((self.project_id, entity_id))
+        async def sync_entity_vectors_batch(self, entity_ids: list[int], progress_callback=None):
+            for entity_id in entity_ids:
+                synced_pairs.append((self.project_id, entity_id))
+            from basic_memory.repository.search_repository_base import VectorSyncBatchResult
+
+            return VectorSyncBatchResult(
+                entities_total=len(entity_ids),
+                entities_synced=len(entity_ids),
+                entities_failed=0,
+                failed_entity_ids=[],
+                embedding_jobs_total=0,
+                embed_seconds_total=0.0,
+                write_seconds_total=0.0,
+            )
 
     monkeypatch.setattr("basic_memory.db.SQLiteSearchRepository", StubSearchRepository)
     monkeypatch.setattr("basic_memory.db.PostgresSearchRepository", StubSearchRepository)
@@ -347,8 +359,18 @@ async def test_semantic_embedding_backfill_skips_when_semantic_disabled(
             nonlocal called
             called = True
 
-        async def sync_entity_vectors(self, entity_id: int) -> None:  # pragma: no cover
-            return None
+        async def sync_entity_vectors_batch(self, entity_ids: list[int], progress_callback=None):
+            from basic_memory.repository.search_repository_base import VectorSyncBatchResult
+
+            return VectorSyncBatchResult(
+                entities_total=len(entity_ids),
+                entities_synced=len(entity_ids),
+                entities_failed=0,
+                failed_entity_ids=[],
+                embedding_jobs_total=0,
+                embed_seconds_total=0.0,
+                write_seconds_total=0.0,
+            )
 
     monkeypatch.setattr("basic_memory.db.SQLiteSearchRepository", StubSearchRepository)
     monkeypatch.setattr("basic_memory.db.PostgresSearchRepository", StubSearchRepository)

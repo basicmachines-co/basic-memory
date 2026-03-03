@@ -52,6 +52,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self._semantic_enabled = self._app_config.semantic_search_enabled
         self._semantic_vector_k = self._app_config.semantic_vector_k
         self._semantic_min_similarity = self._app_config.semantic_min_similarity
+        self._semantic_embedding_sync_batch_size = (
+            self._app_config.semantic_embedding_sync_batch_size
+        )
         self._embedding_provider = embedding_provider
         self._sqlite_vec_lock = asyncio.Lock()
         self._vector_tables_initialized = False

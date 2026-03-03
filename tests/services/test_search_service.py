@@ -1172,14 +1172,16 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
 
 
 @pytest.mark.asyncio
-async def test_reindex_vectors(search_service, session_maker, test_project):
+async def test_reindex_vectors(search_service, session_maker, test_project, monkeypatch):
     """Test that reindex_vectors processes all entities and reports stats."""
     from basic_memory.repository import EntityRepository
+    from basic_memory.repository.search_repository_base import VectorSyncBatchResult
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
 
     # Create some entities
+    created_entity_ids: list[int] = []
     for i in range(3):
         entity = await entity_repo.create(
             {
@@ -1194,7 +1196,29 @@ async def test_reindex_vectors(search_service, session_maker, test_project):
                 "updated_at": datetime.now(),
             }
         )
+        created_entity_ids.append(entity.id)
         await search_service.index_entity(entity, content=f"Content for entity {i}")
+
+    async def _stub_sync_entity_vectors_batch(entity_ids: list[int], progress_callback=None):
+        assert entity_ids == created_entity_ids
+        if progress_callback:
+            for i, entity_id in enumerate(entity_ids):
+                progress_callback(entity_id, i, len(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+            failed_entity_ids=[],
+            embedding_jobs_total=9,
+            embed_seconds_total=1.2,
+            write_seconds_total=0.4,
+        )
+
+    monkeypatch.setattr(
+        search_service.repository,
+        "sync_entity_vectors_batch",
+        _stub_sync_entity_vectors_batch,
+    )
 
     # Track progress calls
     progress_calls = []
@@ -1217,9 +1241,12 @@ async def test_reindex_vectors(search_service, session_maker, test_project):
 
 
 @pytest.mark.asyncio
-async def test_reindex_vectors_no_callback(search_service, session_maker, test_project):
+async def test_reindex_vectors_no_callback(
+    search_service, session_maker, test_project, monkeypatch
+):
     """Test reindex_vectors works without a progress callback."""
     from basic_memory.repository import EntityRepository
+    from basic_memory.repository.search_repository_base import VectorSyncBatchResult
     from datetime import datetime
 
     entity_repo = EntityRepository(session_maker, project_id=test_project.id)
@@ -1237,6 +1264,24 @@ async def test_reindex_vectors_no_callback(search_service, session_maker, test_p
         }
     )
     await search_service.index_entity(entity, content="Test content")
+
+    async def _stub_sync_entity_vectors_batch(entity_ids: list[int], progress_callback=None):
+        assert progress_callback is None
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+            failed_entity_ids=[],
+            embedding_jobs_total=3,
+            embed_seconds_total=0.5,
+            write_seconds_total=0.1,
+        )
+
+    monkeypatch.setattr(
+        search_service.repository,
+        "sync_entity_vectors_batch",
+        _stub_sync_entity_vectors_batch,
+    )
 
     stats = await search_service.reindex_vectors()
     assert stats["total_entities"] >= 1

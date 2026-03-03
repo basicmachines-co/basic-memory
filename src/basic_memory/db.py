@@ -128,8 +128,13 @@ async def _run_semantic_embedding_backfill(
             project_id=project_id,
             app_config=app_config,
         )
-        for entity_id in entity_ids:
-            await search_repository.sync_entity_vectors(entity_id)
+        batch_result = await search_repository.sync_entity_vectors_batch(entity_ids)
+        if batch_result.entities_failed > 0:
+            logger.warning(
+                "Automatic semantic embedding backfill encountered entity failures: "
+                f"project={project_name}, failed={batch_result.entities_failed}, "
+                f"failed_entity_ids={batch_result.failed_entity_ids}"
+            )
 
     logger.info(
         "Automatic semantic embedding backfill complete: "

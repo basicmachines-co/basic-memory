@@ -7,7 +7,7 @@ The actual repository implementations are backend-specific:
 """
 
 from datetime import datetime
-from typing import List, Optional, Protocol
+from typing import Any, Callable, List, Optional, Protocol
 
 from sqlalchemy import Result
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_repository_base import VectorSyncBatchResult
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -67,6 +68,14 @@ class SearchRepository(Protocol):
 
     async def sync_entity_vectors(self, entity_id: int) -> None:
         """Sync semantic vector chunks for an entity."""
+        ...
+
+    async def sync_entity_vectors_batch(
+        self,
+        entity_ids: list[int],
+        progress_callback: Optional[Callable[[int, int, int], Any]] = None,
+    ) -> VectorSyncBatchResult:
+        """Sync semantic vector chunks for a batch of entities."""
         ...
 
     async def execute_query(self, query, params: dict) -> Result:
