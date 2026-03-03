@@ -7,7 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.repository.embedding_provider_factory import create_embedding_provider
+from basic_memory.repository.embedding_provider_factory import (
+    create_embedding_provider,
+    reset_embedding_provider_cache,
+)
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.openai_provider import OpenAIEmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -35,6 +38,13 @@ class _StubAsyncOpenAI:
         self.timeout = timeout
         self.embeddings = _StubEmbeddingsApi()
         _StubAsyncOpenAI.init_count += 1
+
+
+@pytest.fixture(autouse=True)
+def _reset_embedding_provider_cache_fixture():
+    reset_embedding_provider_cache()
+    yield
+    reset_embedding_provider_cache()
 
 
 @pytest.mark.asyncio
@@ -204,3 +214,89 @@ def test_embedding_provider_factory_uses_provider_defaults_when_dimensions_not_s
     openai_provider = create_embedding_provider(openai_config)
     assert isinstance(openai_provider, OpenAIEmbeddingProvider)
     assert openai_provider.dimensions == 1536
+
+
+def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():
+    """Factory should forward FastEmbed runtime tuning config fields."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_cache_dir="/tmp/fastembed-cache",
+        semantic_embedding_threads=3,
+        semantic_embedding_parallel=2,
+    )
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.cache_dir == "/tmp/fastembed-cache"
+    assert provider.threads == 3
+    assert provider.parallel == 2
+
+
+def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
+    """Factory should reuse the same provider instance for identical config values."""
+    config_a = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=2,
+    )
+    config_b = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=2,
+    )
+
+    provider_a = create_embedding_provider(config_a)
+    provider_b = create_embedding_provider(config_b)
+
+    assert provider_a is provider_b
+
+
+def test_embedding_provider_factory_creates_new_provider_for_different_cache_key():
+    """Factory should create distinct providers when cache key fields differ."""
+    config_a = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=2,
+    )
+    config_b = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=4,
+    )
+
+    provider_a = create_embedding_provider(config_a)
+    provider_b = create_embedding_provider(config_b)
+
+    assert provider_a is not provider_b
+
+
+def test_embedding_provider_factory_reset_clears_cache():
+    """Cache reset helper should force provider recreation for the same config."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+    )
+
+    provider_first = create_embedding_provider(config)
+    reset_embedding_provider_cache()
+    provider_second = create_embedding_provider(config)
+
+    assert provider_first is not provider_second

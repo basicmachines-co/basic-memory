@@ -173,6 +173,20 @@ class BasicMemoryConfig(BaseSettings):
         description="Batch size for embedding generation.",
         gt=0,
     )
+    semantic_embedding_cache_dir: str | None = Field(
+        default=None,
+        description="Optional cache directory for FastEmbed model artifacts.",
+    )
+    semantic_embedding_threads: int | None = Field(
+        default=None,
+        description="Optional FastEmbed runtime thread count override.",
+        gt=0,
+    )
+    semantic_embedding_parallel: int | None = Field(
+        default=None,
+        description="Optional FastEmbed embed() parallelism override.",
+        gt=0,
+    )
     semantic_vector_k: int = Field(
         default=100,
         description="Vector candidate count for vector and hybrid retrieval.",
@@ -709,9 +723,7 @@ class ConfigManager:
                     # Create backup before overwriting so users can revert if needed
                     backup_path = self.config_file.with_suffix(".json.bak")
                     shutil.copy2(self.config_file, backup_path)
-                    logger.info(
-                        f"Migrating config to current format (backup: {backup_path})"
-                    )
+                    logger.info(f"Migrating config to current format (backup: {backup_path})")
                     save_basic_memory_config(self.config_file, _CONFIG_CACHE)
 
                 return _CONFIG_CACHE

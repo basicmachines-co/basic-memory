@@ -25,10 +25,16 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
         *,
         batch_size: int = 64,
         dimensions: int = 384,
+        cache_dir: str | None = None,
+        threads: int | None = None,
+        parallel: int | None = None,
     ) -> None:
         self.model_name = model_name
         self.dimensions = dimensions
         self.batch_size = batch_size
+        self.cache_dir = cache_dir
+        self.threads = threads
+        self.parallel = parallel
         self._model: TextEmbedding | None = None
         self._model_lock = asyncio.Lock()
 
@@ -52,6 +58,16 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
                         "pip install -U basic-memory"
                     ) from exc
                 resolved_model_name = self._MODEL_ALIASES.get(self.model_name, self.model_name)
+                if self.cache_dir is not None and self.threads is not None:
+                    return TextEmbedding(
+                        model_name=resolved_model_name,
+                        cache_dir=self.cache_dir,
+                        threads=self.threads,
+                    )
+                if self.cache_dir is not None:
+                    return TextEmbedding(model_name=resolved_model_name, cache_dir=self.cache_dir)
+                if self.threads is not None:
+                    return TextEmbedding(model_name=resolved_model_name, threads=self.threads)
                 return TextEmbedding(model_name=resolved_model_name)
 
             self._model = await asyncio.to_thread(_create_model)
@@ -64,7 +80,10 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
         model = await self._load_model()
 
         def _embed_batch() -> list[list[float]]:
-            vectors = list(model.embed(texts, batch_size=self.batch_size))
+            embed_kwargs: dict[str, int] = {"batch_size": self.batch_size}
+            if self.parallel is not None:
+                embed_kwargs["parallel"] = self.parallel
+            vectors = list(model.embed(texts, **embed_kwargs))
             normalized: list[list[float]] = []
             for vector in vectors:
                 values = vector.tolist() if hasattr(vector, "tolist") else vector

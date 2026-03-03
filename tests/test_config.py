@@ -624,7 +624,6 @@ class TestConfigManager:
             raw = json.loads(config_manager.config_file.read_text(encoding="utf-8"))
             assert "cloud_mode" not in raw
 
-
     def test_migration_creates_backup_of_old_config(self):
         """Config migration should create a .bak backup before overwriting."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -671,9 +670,7 @@ class TestConfigManager:
             # Write config in the current ProjectEntry format — no migration needed
             current_config_data = {
                 "env": "dev",
-                "projects": {
-                    "main": {"path": str(temp_path / "main"), "mode": "local"}
-                },
+                "projects": {"main": {"path": str(temp_path / "main"), "mode": "local"}},
                 "default_project": "main",
             }
             config_manager.config_file.write_text(json.dumps(current_config_data, indent=2))
