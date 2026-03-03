@@ -76,7 +76,7 @@ class TestTrack:
 
         captured_target = None
 
-        def fake_thread(target, daemon):
+        def fake_thread(target):
             nonlocal captured_target
             captured_target = target
             mock = MagicMock()
@@ -103,7 +103,7 @@ class TestTrack:
         with patch("basic_memory.cli.analytics.urllib.request.urlopen", fake_urlopen):
             with patch("basic_memory.cli.analytics.threading.Thread") as mock_thread:
                 # Capture the target function and call it directly
-                def run_target(target, daemon):
+                def run_target(target):
                     target()  # Execute synchronously
                     return MagicMock()
 
@@ -113,6 +113,7 @@ class TestTrack:
         assert captured_request is not None
         assert captured_request.full_url == "https://analytics.example.com/api/send"
         body = json.loads(captured_request.data)
+        assert body["type"] == "event"
         assert body["payload"]["name"] == "cli-cloud-login-started"
         assert body["payload"]["website"] == "test-site-id"
         assert body["payload"]["hostname"] == "cli.basicmemory.com"
@@ -129,7 +130,7 @@ class TestTrack:
         with patch("basic_memory.cli.analytics.urllib.request.urlopen", fake_urlopen):
             with patch("basic_memory.cli.analytics.threading.Thread") as mock_thread:
 
-                def run_target(target, daemon):
+                def run_target(target):
                     target()  # Should not raise
                     return MagicMock()
 
