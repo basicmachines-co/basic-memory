@@ -25,7 +25,7 @@ import basic_memory
 # Configuration — defaults baked in, overridable via environment
 # ---------------------------------------------------------------------------
 
-_DEFAULT_UMAMI_HOST = "https://cloud.umami.is"
+_DEFAULT_UMAMI_HOST = "https://api-gateway.umami.dev"
 _DEFAULT_UMAMI_SITE_ID = "f6479898-ebaf-4e60-bce2-6dc60a3f6c5c"
 
 
@@ -76,7 +76,9 @@ def track(event_name: str, data: Optional[dict] = None) -> None:
     host = _umami_host()
     site_id = _umami_site_id()
 
+    # Umami v2 /api/send requires "type" at top level alongside "payload"
     payload = {
+        "type": "event",
         "payload": {
             "hostname": "cli.basicmemory.com",
             "language": "en",
@@ -87,7 +89,7 @@ def track(event_name: str, data: Optional[dict] = None) -> None:
                 "version": basic_memory.__version__,
                 **(data or {}),
             },
-        }
+        },
     }
 
     def _send():
@@ -97,11 +99,16 @@ def track(event_name: str, data: Optional[dict] = None) -> None:
                 data=json.dumps(payload).encode("utf-8"),
                 headers={
                     "Content-Type": "application/json",
-                    "User-Agent": f"basic-memory-cli/{basic_memory.__version__}",
+                    # Umami's bot detection rejects non-browser User-Agents
+                    "User-Agent": "Mozilla/5.0 (compatible; BasicMemoryCLI/"
+                    f"{basic_memory.__version__})",
                 },
             )
             urllib.request.urlopen(req, timeout=3)
         except Exception:
             pass  # Never break the CLI for analytics
 
-    threading.Thread(target=_send, daemon=True).start()
+    # Non-daemon so the process waits for the request to complete.
+    # The 3s urllib timeout caps the worst-case exit delay.
+    t = threading.Thread(target=_send)
+    t.start()
