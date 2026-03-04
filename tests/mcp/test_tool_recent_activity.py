@@ -128,69 +128,16 @@ async def test_recent_activity_type_invalid(client, test_project, test_graph):
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_discovery_mode(client, test_project, test_graph, config_manager):
-    """Test that recent_activity discovery mode works without project parameter."""
-    # Clear default_project to test discovery mode
-    cfg = config_manager.load_config()
-    cfg.default_project = None
-    config_manager.save_config(cfg)
-
-    # Test discovery mode (no project parameter)
+async def test_recent_activity_uses_default_project(client, test_project, test_graph):
+    """When no project parameter is given, recent_activity uses the default project."""
+    # Call without explicit project — should resolve to the default
     result = await recent_activity()
     assert result is not None
     assert isinstance(result, str)
 
-    # Check that we get a formatted summary
-    assert "Recent Activity Summary" in result
-    assert "Most Active Project:" in result or "Other Active Projects:" in result
-    assert "Summary:" in result
-    assert "active projects" in result
-
-    # Should contain project discovery guidance
-    assert "Suggested project:" in result or "Multiple active projects" in result
-    assert "Session reminder:" in result
-
-
-@pytest.mark.asyncio
-async def test_recent_activity_discovery_mode_no_activity(client, test_project, config_manager):
-    """If there is no activity in any project, discovery mode should say so."""
-    # Clear default_project to test discovery mode
-    cfg = config_manager.load_config()
-    cfg.default_project = None
-    config_manager.save_config(cfg)
-
-    result = await recent_activity()
-    assert "Recent Activity Summary" in result
-    assert "No recent activity found in any project." in result
-
-
-@pytest.mark.asyncio
-async def test_recent_activity_discovery_mode_multiple_active_projects(
-    app, client, test_project, tmp_path_factory, config_manager
-):
-    """Discovery mode should use the multi-project guidance when multiple projects have activity."""
-    # Clear default_project to test discovery mode
-    cfg = config_manager.load_config()
-    cfg.default_project = None
-    config_manager.save_config(cfg)
-
-    from basic_memory.mcp.tools import create_memory_project, write_note
-
-    second_root = tmp_path_factory.mktemp("second-project-home")
-
-    result = await create_memory_project(
-        project_name="second-project",
-        project_path=str(second_root),
-        set_default=False,
-    )
-    assert result.startswith("✓")
-
-    await write_note(project=test_project.name, title="One", directory="notes", content="one")
-    await write_note(project="second-project", title="Two", directory="notes", content="two")
-
-    out = await recent_activity()
-    assert "Recent Activity Summary" in out
-    assert "or would you prefer a different project" in out
+    # Should return project-specific output for the default project
+    assert "Recent Activity:" in result
+    assert "Activity Summary:" in result
 
 
 def test_recent_activity_format_relative_time_and_truncate_helpers():

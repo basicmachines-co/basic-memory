@@ -40,6 +40,29 @@ def set_workspace_provider(provider: Callable[[], Awaitable[list[WorkspaceInfo]]
     _workspace_provider = provider
 
 
+async def _resolve_default_project_from_api() -> Optional[str]:
+    """Query the projects API for the default project.
+
+    Used as a fallback when ConfigManager has no local config (cloud mode).
+    """
+    from basic_memory.mcp.async_client import get_client
+
+    try:
+        async with get_client() as client:
+            response = await client.get("/v2/projects/")
+            if response.status_code == 200:
+                project_list = ProjectList.model_validate(response.json())
+                if project_list.default_project:
+                    return project_list.default_project
+                # Fallback: find project with is_default=True
+                for p in project_list.projects:
+                    if p.is_default:
+                        return p.name
+    except Exception:
+        pass
+    return None
+
+
 async def resolve_project_parameter(
     project: Optional[str] = None,
     allow_discovery: bool = False,
@@ -66,10 +89,15 @@ async def resolve_project_parameter(
     Returns:
         Resolved project name or None if no resolution possible
     """
-    # Load config for any values not explicitly provided
+    # Load config for any values not explicitly provided.
+    # ConfigManager reads from the local config file, which doesn't exist in cloud mode.
+    # When it returns None, fall back to querying the projects API for the is_default flag.
     if default_project is None:
         config = ConfigManager().config
         default_project = config.default_project
+
+    if default_project is None:
+        default_project = await _resolve_default_project_from_api()
 
     # Create resolver with configuration and resolve
     resolver = ProjectResolver.from_env(
