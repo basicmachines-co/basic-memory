@@ -93,31 +93,32 @@ async def test_explicit_project_overrides_default(
 
 
 @pytest.mark.asyncio
-async def test_no_default_project_requires_project(mcp_server, app, test_project):
-    """Test that tools require project parameter when no default_project is configured."""
+async def test_no_config_default_falls_back_to_db(mcp_server, app, test_project):
+    """When ConfigManager has no default_project, tools fall back to the database is_default flag."""
 
     mock_config = BasicMemoryConfig(
-        default_project=None,  # No default
+        default_project=None,  # No config default
         projects={test_project.name: test_project.path},
     )
 
+    # test_project has is_default=True in the database, so write_note should
+    # resolve to it via the API fallback in resolve_project_parameter.
     with patch.object(ConfigManager, "config", mock_config):
         async with Client(mcp_server) as client:
-            with pytest.raises(Exception) as exc_info:
-                await client.call_tool(
-                    "write_note",
-                    {
-                        "title": "Should Fail",
-                        "directory": "test",
-                        "content": "# Should Fail\n\nThis should fail because no project specified.",
-                    },
-                )
-
-            error_message = str(exc_info.value)
-            assert (
-                "No project specified" in error_message
-                or "project parameter" in error_message.lower()
+            result = await client.call_tool(
+                "write_note",
+                {
+                    "title": "DB Fallback Test",
+                    "directory": "test",
+                    "content": "# DB Fallback Test\n\nShould resolve to the database default project.",
+                },
             )
+
+            assert len(result.content) == 1
+            response_text = result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+
+            assert f"project: {test_project.name}" in response_text
+            assert "# Created note" in response_text
 
 
 @pytest.mark.asyncio
