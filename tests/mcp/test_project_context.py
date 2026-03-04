@@ -31,17 +31,33 @@ async def test_returns_none_when_no_default_and_no_project(config_manager, monke
     config_manager.save_config(cfg)
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+    # Prevent API fallback from returning a project via stale dependency overrides
+    async def _no_api_fallback():
+        return None
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._resolve_default_project_from_api",
+        _no_api_fallback,
+    )
     assert await resolve_project_parameter(project=None, allow_discovery=False) is None
 
 
 @pytest.mark.asyncio
-async def test_allows_discovery_when_enabled(config_manager):
+async def test_allows_discovery_when_enabled(config_manager, monkeypatch):
     from basic_memory.mcp.project_context import resolve_project_parameter
 
     cfg = config_manager.load_config()
     cfg.default_project = None
     config_manager.save_config(cfg)
 
+    # Prevent API fallback from returning a project via stale dependency overrides
+    async def _no_api_fallback():
+        return None
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._resolve_default_project_from_api",
+        _no_api_fallback,
+    )
     assert await resolve_project_parameter(project=None, allow_discovery=True) is None
 
 
@@ -101,6 +117,14 @@ async def test_returns_none_when_no_default(config_manager, monkeypatch):
     config_manager.save_config(cfg)
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+    # Prevent API fallback from returning a project via stale dependency overrides
+    async def _no_api_fallback():
+        return None
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context._resolve_default_project_from_api",
+        _no_api_fallback,
+    )
     assert await resolve_project_parameter(project=None) is None
 
 
