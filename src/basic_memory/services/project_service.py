@@ -82,6 +82,21 @@ class ProjectService:
         """
         return self.config_manager.default_project
 
+    async def get_default_project_name(self) -> str:
+        """Get the default project name, falling back to the database.
+
+        ConfigManager reads from the local config file, which doesn't exist
+        in cloud mode. When it returns None, fall back to the is_default
+        flag stored in the database.
+        """
+        default = self.config_manager.default_project
+        if default is not None:
+            return default
+        db_default = await self.repository.get_default_project()
+        if db_default is not None:
+            return db_default.name
+        raise ValueError("No default project configured")
+
     @property
     def current_project(self) -> Optional[str]:
         """Get the name of the currently active project.

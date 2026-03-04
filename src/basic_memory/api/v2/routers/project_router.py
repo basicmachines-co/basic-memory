@@ -48,7 +48,7 @@ async def list_projects(
         A list of all projects with metadata
     """
     projects = await project_service.list_projects()
-    default_project = project_service.default_project
+    default_project = await project_service.get_default_project_name()
 
     project_items = [
         ProjectItem(
