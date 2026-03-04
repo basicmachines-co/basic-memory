@@ -7,13 +7,13 @@ a list containing a single `{"type": "text", "text": "{...json...}"}` item.
 
 import json
 from typing import Any, Dict, List, Optional
-from loguru import logger
+
 from fastmcp import Context
+from loguru import logger
 
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.search import search_notes
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.config import ConfigManager
+from basic_memory.mcp.tools.search import search_notes
 from basic_memory.schemas.search import SearchResponse, SearchResult
 
 
@@ -113,16 +113,12 @@ async def search(
     logger.info(f"ChatGPT search request: query='{query}'")
 
     try:
-        # ChatGPT tools don't expose project parameter, so use default project
-        config = ConfigManager().config
-        default_project = config.default_project
-
-        # Call underlying search_notes with sensible defaults for ChatGPT
+        # Let search_notes resolve the default project via get_project_client(),
+        # which works in both local mode (ConfigManager) and cloud mode (database).
         results = await search_notes(
             query=query,
-            project=default_project,  # Use default project for ChatGPT
             page=1,
-            page_size=10,  # Reasonable default for ChatGPT consumption
+            page_size=10,
             output_format="json",
             context=context,
         )
@@ -180,17 +176,13 @@ async def fetch(
     logger.info(f"ChatGPT fetch request: id='{id}'")
 
     try:
-        # ChatGPT tools don't expose project parameter, so use default project
-        config = ConfigManager().config
-        default_project = config.default_project
-
-        # Call underlying read_note function (default output_format="text" returns str)
+        # Let read_note resolve the default project via get_project_client(),
+        # which works in both local mode (ConfigManager) and cloud mode (database).
         content = str(
             await read_note(
                 identifier=id,
-                project=default_project,  # Use default project for ChatGPT
                 page=1,
-                page_size=10,  # Default pagination
+                page_size=10,
                 context=context,
             )
         )
