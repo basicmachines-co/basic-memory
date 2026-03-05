@@ -888,6 +888,22 @@ class EntityService(BaseService[EntityModel]):
                 raise ValueError("section cannot be empty or whitespace only")
             return self.replace_section_content(current_content, section, content)
 
+        elif operation == "insert_before_section":
+            if not section:
+                raise ValueError("section is required for insert_before_section operation")
+            if not section.strip():
+                raise ValueError("section cannot be empty or whitespace only")
+            return self.insert_relative_to_section(current_content, section, content, before=True)
+
+        elif operation == "insert_after_section":
+            if not section:
+                raise ValueError("section is required for insert_after_section operation")
+            if not section.strip():
+                raise ValueError("section cannot be empty or whitespace only")
+            return self.insert_relative_to_section(
+                current_content, section, content, before=False
+            )
+
         else:
             raise ValueError(f"Unsupported operation: {operation}")
 
@@ -976,6 +992,71 @@ class EntityService(BaseService[EntityModel]):
             # Add all other lines (including subsequent sections)
             result_lines.append(line)
             i += 1
+
+        return "\n".join(result_lines)
+
+    def insert_relative_to_section(
+        self,
+        current_content: str,
+        section_header: str,
+        content: str,
+        before: bool = True,
+    ) -> str:
+        """Insert content before or after a section heading without modifying existing content.
+
+        Unlike find_replace and replace_section, this operation never consumes or replaces
+        any existing text. The section heading is used purely as a positional anchor.
+
+        Args:
+            current_content: The current markdown content
+            section_header: The section header to insert relative to (e.g., "## Section Name")
+            content: The content to insert
+            before: If True, insert before the heading. If False, insert after the heading line.
+
+        Returns:
+            The updated content with inserted material
+
+        Raises:
+            ValueError: If section not found or multiple sections with same header
+        """
+        # Normalize the section header (ensure it starts with #)
+        if not section_header.startswith("#"):
+            section_header = "## " + section_header
+
+        # Find matching sections
+        lines = current_content.split("\n")
+        matching_sections = []
+
+        for i, line in enumerate(lines):
+            if line.strip() == section_header.strip():
+                matching_sections.append(i)
+
+        # Handle multiple sections error
+        if len(matching_sections) > 1:
+            raise ValueError(
+                f"Multiple sections found with header '{section_header}'. "
+                f"Insert operations require unique headers."
+            )
+
+        # Section must exist for insert operations
+        if len(matching_sections) == 0:
+            raise ValueError(f"Section '{section_header}' not found in note.")
+
+        section_idx = matching_sections[0]
+
+        # Ensure content has proper line endings
+        insert_text = content.rstrip("\n")
+
+        if before:
+            # Insert content before the section heading
+            result_lines = lines[:section_idx]
+            result_lines.append(insert_text)
+            result_lines.extend(lines[section_idx:])
+        else:
+            # Insert content after the section heading line
+            result_lines = lines[: section_idx + 1]
+            result_lines.append(insert_text)
+            result_lines.extend(lines[section_idx + 1 :])
 
         return "\n".join(result_lines)
 
