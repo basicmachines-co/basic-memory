@@ -160,7 +160,7 @@ def _no_notes_guidance(note_type: str, tool_name: str) -> str:
         f"## Next Steps\n\n"
         f"1. **Create notes of this type** — use `write_note` with "
         f'`note_type="{note_type}"` to create notes\n'
-        f"2. **Check existing types** — use `search_notes` with `entity_types` "
+        f"2. **Check existing types** — use `search_notes` with `note_types` "
         f"filter to see what types exist\n"
         f"3. **Browse content** — use `list_directory` or `recent_activity` to "
         f"see what's in the project\n"
@@ -397,7 +397,7 @@ async def schema_infer(
                     f"share a consistent structure.\n\n"
                     f"## Suggestions\n"
                     f"1. **Use a more specific type** — try `search_notes` with "
-                    f"`entity_types` filter to see what types exist\n"
+                    f"`note_types` filter to see what types exist\n"
                     f"2. **Lower the threshold** — "
                     f'`schema_infer("{note_type}", threshold=0.1)` to include '
                     f"rarer fields\n"

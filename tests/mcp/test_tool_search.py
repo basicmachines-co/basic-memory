@@ -1146,6 +1146,54 @@ async def test_search_notes_explicit_entity_types_overrides_default(monkeypatch)
     assert captured_payload["entity_types"] == ["observation"]
 
 
+# --- Tests for note_types case-insensitivity ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_notes_note_types_lowercased(monkeypatch):
+    """note_types values are lowercased so 'Chapter' matches stored 'chapter'."""
+    import importlib
+
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class StubProject:
+        name = "test-project"
+        external_id = "test-external-id"
+
+    @asynccontextmanager
+    async def fake_get_project_client(*args, **kwargs):
+        yield (object(), StubProject())
+
+    async def fake_resolve_project_and_path(
+        client, identifier, project=None, context=None, headers=None
+    ):
+        return StubProject(), identifier, False
+
+    captured_payload: dict = {}
+
+    class MockSearchClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def search(self, payload, page, page_size):
+            captured_payload.update(payload)
+            return SearchResponse(results=[], current_page=page, page_size=page_size)
+
+    monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
+    monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    await search_mod.search_notes(
+        project="test-project",
+        query="test",
+        note_types=["Chapter", "Person"],
+    )
+
+    # note_types should be lowercased
+    assert captured_payload["note_types"] == ["chapter", "person"]
+
+
 # --- Tests for tag: prefix parsing (issue #30) ---------------------------------
 
 

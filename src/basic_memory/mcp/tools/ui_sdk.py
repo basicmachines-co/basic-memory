@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastmcp import Context
 from mcp.types import ContentBlock, TextContent
@@ -28,8 +28,17 @@ async def search_notes_ui(
     page: int = 1,
     page_size: int = 10,
     search_type: Optional[str] = None,
-    note_types: List[str] | None = None,
-    entity_types: List[str] | None = None,
+    note_types: Annotated[
+        List[str] | None,
+        "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
+        "Case-insensitive.",
+    ] = None,
+    entity_types: Annotated[
+        List[str] | None,
+        "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
+        "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
+        "'Chapter' here — use note_types instead.",
+    ] = None,
     after_date: Optional[str] = None,
     metadata_filters: Optional[Dict[str, Any]] = None,
     tags: Optional[List[str]] = None,

@@ -2,7 +2,7 @@
 
 import re
 from textwrap import dedent
-from typing import List, Optional, Dict, Any, Literal
+from typing import Annotated, List, Optional, Dict, Any, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -165,7 +165,7 @@ def _format_search_error_response(
                - Remove restrictive terms: Focus on the most important keywords
 
             5. **Use filtering to narrow scope**:
-               - By content type: `search_notes("{project}","{query}", note_types=["note"])`
+               - By note type in frontmatter: `search_notes("{project}","{query}", note_types=["note"])`
                - By recent content: `search_notes("{project}","{query}", after_date="1 week")`
                - By entity type: `search_notes("{project}","{query}", entity_types=["observation"])`
 
@@ -305,8 +305,17 @@ async def search_notes(
     page_size: int = 10,
     search_type: str | None = None,
     output_format: Literal["text", "json"] = "text",
-    note_types: List[str] | None = None,
-    entity_types: List[str] | None = None,
+    note_types: Annotated[
+        List[str] | None,
+        "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
+        "Case-insensitive.",
+    ] = None,
+    entity_types: Annotated[
+        List[str] | None,
+        "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
+        "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
+        "'Chapter' here — use note_types instead.",
+    ] = None,
     after_date: Optional[str] = None,
     metadata_filters: Optional[Dict[str, Any]] = None,
     tags: Optional[List[str]] = None,
@@ -350,6 +359,7 @@ async def search_notes(
     ### Search Type Examples
     - `search_notes("my-project", "Meeting", search_type="title")` - Search only in titles
     - `search_notes("work-docs", "docs/meeting-*", search_type="permalink")` - Pattern match permalinks
+      Note: Permalink patterns match the full path (e.g., "project/folder/chapter-13*", not just "chapter-13*").
     - `search_notes("research", "keyword")` - Default search (hybrid when semantic is enabled,
       text when disabled)
 
@@ -436,7 +446,7 @@ async def search_notes(
         # Exact phrase search
         results = await search_notes("\"weekly standup meeting\"")
 
-        # Search with note type filter
+        # Search with note type filter - type property in frontmatter
         results = await search_notes(
             "meeting notes",
             note_types=["note"],
@@ -477,7 +487,8 @@ async def search_notes(
         results = await search_notes("project planning", project="my-project")
     """
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
-    note_types = note_types or []
+    # Lowercase note_types so "Chapter" matches the stored "chapter".
+    note_types = [t.lower() for t in note_types] if note_types else []
     entity_types = entity_types or []
 
     # Parse tag:<value> shorthand at tool level so it works with all search modes.

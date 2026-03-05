@@ -12,7 +12,7 @@ from basic_memory.config import ConfigManager
 
 OSS_DISCOUNT_CODE = "BMFOSS"
 CLOUD_LEARN_MORE_URL = (
-    "https://basicmemory.com?utm_source=bm-cli&utm_medium=promo&utm_campaign=cloud-upsell"
+    "https://basicmemory.com?utm_source=bm-foss&utm_medium=promo&utm_campaign=cloud-upsell"
 )
 
 
