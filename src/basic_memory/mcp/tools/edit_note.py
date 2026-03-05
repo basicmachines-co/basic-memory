@@ -158,7 +158,7 @@ Error editing note '{identifier}': {error_message}
 
 
 @mcp.tool(
-    description="Edit an existing markdown note using various operations like append, prepend, find_replace, or replace_section.",
+    description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section.",
     annotations={"destructiveHint": False, "openWorldHint": False},
 )
 async def edit_note(
@@ -190,6 +190,8 @@ async def edit_note(
                   - "prepend": Add content to the beginning of the note (creates the note if it doesn't exist)
                   - "find_replace": Replace occurrences of find_text with content (note must exist)
                   - "replace_section": Replace content under a specific markdown header (note must exist)
+                  - "insert_before_section": Insert content before a section heading without modifying existing content (note must exist)
+                  - "insert_after_section": Insert content after a section heading line without modifying existing content (note must exist)
         content: The content to add or use for replacement
         project: Project name to edit in. Optional - server will resolve using hierarchy.
                 If unknown, use list_memory_projects() to discover available projects.
@@ -257,7 +259,7 @@ async def edit_note(
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
 
         # Validate operation
-        valid_operations = ["append", "prepend", "find_replace", "replace_section"]
+        valid_operations = ["append", "prepend", "find_replace", "replace_section", "insert_before_section", "insert_after_section"]
         if operation not in valid_operations:
             raise ValueError(
                 f"Invalid operation '{operation}'. Must be one of: {', '.join(valid_operations)}"
@@ -266,8 +268,8 @@ async def edit_note(
         # Validate required parameters for specific operations
         if operation == "find_replace" and not find_text:
             raise ValueError("find_text parameter is required for find_replace operation")
-        if operation == "replace_section" and not section:
-            raise ValueError("section parameter is required for replace_section operation")
+        if operation in ("replace_section", "insert_before_section", "insert_after_section") and not section:
+            raise ValueError("section parameter is required for section-based operations")
 
         # Use the PATCH endpoint to edit the entity
         try:
@@ -389,6 +391,12 @@ async def edit_note(
                     summary.append("operation: Find and replace operation completed")
                 elif operation == "replace_section":
                     summary.append(f"operation: Replaced content under section '{section}'")
+                elif operation == "insert_before_section":
+                    lines_added = len(content.split("\n"))
+                    summary.append(f"operation: Inserted {lines_added} lines before section '{section}'")
+                elif operation == "insert_after_section":
+                    lines_added = len(content.split("\n"))
+                    summary.append(f"operation: Inserted {lines_added} lines after section '{section}'")
 
             # Count observations by category (reuse logic from write_note)
             categories = {}
