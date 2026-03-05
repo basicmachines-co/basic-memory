@@ -39,6 +39,8 @@ from basic_memory.deps.repositories import (
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.services import EntityService, ProjectService
+from basic_memory.services.fcm_service import FCMService
+from basic_memory.services.graph_intelligence_service import GraphIntelligenceService
 from basic_memory.services.context_service import ContextService
 from basic_memory.services.directory_service import DirectoryService
 from basic_memory.services.file_service import FileService
@@ -358,6 +360,30 @@ async def get_context_service_v2_external(
 ContextServiceV2ExternalDep = Annotated[ContextService, Depends(get_context_service_v2_external)]
 
 
+# --- Graph Intelligence Service ---
+
+
+async def get_graph_intelligence_service_v2_external() -> GraphIntelligenceService:
+    """Create GraphIntelligenceService for v2 API (uses external_id routing)."""
+    return GraphIntelligenceService()
+
+
+GraphIntelligenceServiceV2ExternalDep = Annotated[
+    GraphIntelligenceService, Depends(get_graph_intelligence_service_v2_external)
+]
+
+
+# --- FCM Service ---
+
+
+async def get_fcm_service_v2_external() -> FCMService:
+    """Create FCMService for v2 API (uses external_id routing)."""
+    return FCMService()
+
+
+FCMServiceV2ExternalDep = Annotated[FCMService, Depends(get_fcm_service_v2_external)]
+
+
 # --- Sync Service ---
 
 
@@ -535,6 +561,21 @@ async def get_task_scheduler(
     async def _reindex_project(**_: Any) -> None:
         await search_service.reindex_all()
 
+    async def _sync_graph_entity(entity_id: int, **extra_payload: Any) -> None:
+        # Trigger: graph-entity sync task is scheduled from graph lifecycle hooks.
+        # Why: keep scheduler contract stable while graph index provider work lands in later phases.
+        # Outcome: no-op in phase 1; task name remains valid for API and tool contracts.
+        del entity_id, extra_payload
+
+    async def _sync_graph_project(force_full: bool = False, **_: Any) -> None:
+        await _sync_project(force_full=force_full)
+
+    async def _reindex_graph_project(**_: Any) -> None:
+        # Trigger: graph reindex requested.
+        # Why: phase 1 has no dedicated graph index worker yet.
+        # Outcome: run project sync path so writes stay coherent while graph provider ships.
+        await _sync_project(force_full=True)
+
     scheduler = LocalTaskScheduler(
         {
             "reindex_entity": _reindex_entity,
@@ -542,6 +583,9 @@ async def get_task_scheduler(
             "sync_entity_vectors": _sync_entity_vectors,
             "sync_project": _sync_project,
             "reindex_project": _reindex_project,
+            "sync_graph_entity": _sync_graph_entity,
+            "sync_graph_project": _sync_graph_project,
+            "reindex_graph_project": _reindex_graph_project,
         },
         test_mode=app_config.is_test_env,
     )

@@ -19,6 +19,8 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
     schema_router as v2_schema,
+    graph_router as v2_graph,
+    fcm_router as v2_fcm,
 )
 from basic_memory.api.v2.routers.project_router import (
     add_project,
@@ -86,6 +88,8 @@ app.include_router(v2_directory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_schema, prefix="/v2/projects/{project_id}")
+app.include_router(v2_graph, prefix="/v2/projects/{project_id}")
+app.include_router(v2_fcm, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
 
 # Legacy web app proxy paths (compat with /proxy/projects/projects)

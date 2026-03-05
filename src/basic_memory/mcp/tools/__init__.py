@@ -24,6 +24,16 @@ from basic_memory.mcp.tools.list_directory import list_directory
 from basic_memory.mcp.tools.edit_note import edit_note
 from basic_memory.mcp.tools.move_note import move_note
 from basic_memory.mcp.tools.workspaces import list_workspaces
+from basic_memory.mcp.tools.graph_intelligence import (
+    graph_lineage,
+    graph_impact,
+    graph_health,
+    graph_reindex,
+    fcm_simulate,
+    fcm_rank_actions,
+    fcm_import_model,
+    fcm_export_model,
+)
 from basic_memory.mcp.tools.project_management import (
     list_memory_projects,
     create_memory_project,
@@ -44,7 +54,15 @@ __all__ = [
     "delete_note",
     "delete_project",
     "edit_note",
+    "fcm_export_model",
+    "fcm_import_model",
+    "fcm_rank_actions",
+    "fcm_simulate",
     "fetch",
+    "graph_health",
+    "graph_impact",
+    "graph_lineage",
+    "graph_reindex",
     "list_directory",
     "list_memory_projects",
     "list_workspaces",

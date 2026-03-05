@@ -18,6 +18,8 @@ from basic_memory.mcp.clients.directory import DirectoryClient
 from basic_memory.mcp.clients.resource import ResourceClient
 from basic_memory.mcp.clients.project import ProjectClient
 from basic_memory.mcp.clients.schema import SchemaClient
+from basic_memory.mcp.clients.graph import GraphClient
+from basic_memory.mcp.clients.fcm import FCMClient
 
 __all__ = [
     "KnowledgeClient",
@@ -27,4 +29,6 @@ __all__ = [
     "ResourceClient",
     "ProjectClient",
     "SchemaClient",
+    "GraphClient",
+    "FCMClient",
 ]

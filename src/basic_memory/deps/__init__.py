@@ -131,6 +131,10 @@ from basic_memory.deps.services import (
     DirectoryServiceV2Dep,
     get_directory_service_v2_external,
     DirectoryServiceV2ExternalDep,
+    get_graph_intelligence_service_v2_external,
+    GraphIntelligenceServiceV2ExternalDep,
+    get_fcm_service_v2_external,
+    FCMServiceV2ExternalDep,
 )
 
 from basic_memory.deps.importers import (
@@ -269,6 +273,10 @@ __all__ = [
     "DirectoryServiceV2Dep",
     "get_directory_service_v2_external",
     "DirectoryServiceV2ExternalDep",
+    "get_graph_intelligence_service_v2_external",
+    "GraphIntelligenceServiceV2ExternalDep",
+    "get_fcm_service_v2_external",
+    "FCMServiceV2ExternalDep",
     # Importers
     "get_chatgpt_importer",
     "ChatGPTImporterDep",

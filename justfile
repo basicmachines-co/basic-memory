@@ -69,6 +69,24 @@ testmon *args:
 test-smoke:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov -m smoke test-int/mcp/test_smoke_integration.py
 
+# Run graph intelligence API contract tests only
+test-graph-intel-api:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov tests/api/v2/test_graph_intelligence_router.py
+
+# Run graph intelligence MCP tests only
+test-graph-intel-mcp:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov tests/mcp/clients/test_graph_clients.py tests/mcp/test_tool_graph_intelligence.py tests/mcp/test_tool_contracts.py
+
+# Run graph intelligence CLI passthrough tests only
+test-graph-intel-cli:
+    BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov tests/cli/test_cli_tool_graph_intelligence_json_output.py
+
+# Run the full graph intelligence fast iteration slice
+test-graph-intel:
+    just test-graph-intel-api
+    just test-graph-intel-mcp
+    just test-graph-intel-cli
+
 # Fast local loop: lint, format, typecheck, impacted tests
 fast-check:
     just fix

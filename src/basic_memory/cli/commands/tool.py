@@ -16,6 +16,13 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.mcp.tools import build_context as mcp_build_context
 from basic_memory.mcp.tools import edit_note as mcp_edit_note
+from basic_memory.mcp.tools import fcm_export_model as mcp_fcm_export_model
+from basic_memory.mcp.tools import fcm_import_model as mcp_fcm_import_model
+from basic_memory.mcp.tools import fcm_rank_actions as mcp_fcm_rank_actions
+from basic_memory.mcp.tools import fcm_simulate as mcp_fcm_simulate
+from basic_memory.mcp.tools import graph_health as mcp_graph_health
+from basic_memory.mcp.tools import graph_impact as mcp_graph_impact
+from basic_memory.mcp.tools import graph_lineage as mcp_graph_lineage
 from basic_memory.mcp.tools import list_memory_projects as mcp_list_projects
 from basic_memory.mcp.tools import list_workspaces as mcp_list_workspaces
 from basic_memory.mcp.tools import read_note as mcp_read_note
@@ -38,6 +45,17 @@ VALID_EDIT_OPERATIONS = ["append", "prepend", "find_replace", "replace_section"]
 def _print_json(result: Any) -> None:
     """Print a result as formatted JSON."""
     print(json.dumps(result, indent=2, ensure_ascii=True, default=str))
+
+
+def _parse_json_option(raw_value: Optional[str], option_name: str) -> Any:
+    """Parse a JSON CLI option with deterministic error handling."""
+    if raw_value is None:
+        return None
+    try:
+        return json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Invalid JSON for {option_name}: {exc}", err=True)
+        raise typer.Exit(1)
 
 
 # --- Commands ---
@@ -362,6 +380,372 @@ def recent_activity(
     except Exception as e:  # pragma: no cover
         if not isinstance(e, typer.Exit):
             typer.echo(f"Error during recent_activity: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("graph-lineage")
+def graph_lineage(
+    start: Annotated[str, typer.Argument(help="Start node identifier or memory:// reference")],
+    goal: Annotated[
+        Optional[str],
+        typer.Option("--goal", help="Optional goal node identifier for targeted lineage"),
+    ] = None,
+    max_hops: int = typer.Option(4, "--max-hops", help="Maximum traversal hops (1-6)"),
+    relation_filters: Annotated[
+        Optional[List[str]],
+        typer.Option("--relation-filter", help="Relation filters (repeatable)"),
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Get graph lineage paths from a start node."""
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_graph_lineage(
+                    start=start,
+                    goal=goal,
+                    max_hops=max_hops,
+                    relation_filters=relation_filters or [],
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during graph_lineage: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("graph-impact")
+def graph_impact(
+    target: Annotated[str, typer.Argument(help="Target node identifier or memory:// reference")],
+    horizon: int = typer.Option(2, "--horizon", help="Impact horizon in hops (1-4)"),
+    relation_filters: Annotated[
+        Optional[List[str]],
+        typer.Option("--relation-filter", help="Relation filters (repeatable)"),
+    ] = None,
+    include_reasons: bool = typer.Option(
+        True,
+        "--include-reasons/--no-include-reasons",
+        help="Include reason strings in impact output",
+    ),
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Get impact radius for a target node."""
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_graph_impact(
+                    target=target,
+                    horizon=horizon,
+                    relation_filters=relation_filters or [],
+                    include_reasons=include_reasons,
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during graph_impact: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("graph-health")
+def graph_health(
+    scope: Annotated[Optional[str], typer.Option("--scope", help="Optional scope prefix")] = None,
+    timeframe: Annotated[
+        Optional[str], typer.Option("--timeframe", help="Optional timeframe filter")
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Get graph health metrics and issue candidates."""
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_graph_health(
+                    scope=scope,
+                    timeframe=timeframe,
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during graph_health: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("fcm-simulate")
+def fcm_simulate(
+    actions_json: Annotated[
+        str,
+        typer.Option(
+            "--actions-json",
+            help='JSON array of actions, e.g. [{"node_id":"n1","delta":0.2}]',
+        ),
+    ],
+    scenario_json: Annotated[
+        Optional[str],
+        typer.Option("--scenario-json", help="Optional JSON scenario object"),
+    ] = None,
+    clamp_rules_json: Annotated[
+        Optional[str],
+        typer.Option("--clamp-rules-json", help="Optional JSON array of clamp rules"),
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Run an FCM simulation."""
+    actions = _parse_json_option(actions_json, "--actions-json")
+    scenario = _parse_json_option(scenario_json, "--scenario-json")
+    clamp_rules = _parse_json_option(clamp_rules_json, "--clamp-rules-json")
+    if not isinstance(actions, list):
+        typer.echo("Invalid JSON for --actions-json: expected a JSON array", err=True)
+        raise typer.Exit(1)
+    if scenario is not None and not isinstance(scenario, dict):
+        typer.echo("Invalid JSON for --scenario-json: expected a JSON object", err=True)
+        raise typer.Exit(1)
+    if clamp_rules is not None and not isinstance(clamp_rules, list):
+        typer.echo("Invalid JSON for --clamp-rules-json: expected a JSON array", err=True)
+        raise typer.Exit(1)
+
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_fcm_simulate(
+                    actions=actions,
+                    scenario=scenario,
+                    clamp_rules=clamp_rules,
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during fcm_simulate: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("fcm-rank-actions")
+def fcm_rank_actions(
+    goal: Annotated[str, typer.Argument(help="Goal node identifier")],
+    constraints_json: Annotated[
+        Optional[str],
+        typer.Option("--constraints-json", help="Optional JSON object of ranking constraints"),
+    ] = None,
+    top_k: int = typer.Option(10, "--top-k", help="Number of recommendations to return"),
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Rank intervention actions for an FCM goal."""
+    constraints = _parse_json_option(constraints_json, "--constraints-json")
+    if constraints is not None and not isinstance(constraints, dict):
+        typer.echo("Invalid JSON for --constraints-json: expected a JSON object", err=True)
+        raise typer.Exit(1)
+
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_fcm_rank_actions(
+                    goal=goal,
+                    constraints=constraints,
+                    top_k=top_k,
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during fcm_rank_actions: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("fcm-import-model")
+def fcm_import_model(
+    source: Annotated[str, typer.Argument(help="Source path or URI for import payload")],
+    format: Annotated[
+        str,
+        typer.Option("--format", help="Import format (currently csv_bundle_v1)"),
+    ] = "csv_bundle_v1",
+    merge_mode: Annotated[
+        str,
+        typer.Option("--merge-mode", help="Merge strategy: replace or upsert"),
+    ] = "upsert",
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Import an FCM model."""
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_fcm_import_model(
+                    source=source,
+                    format=format,  # pyright: ignore[reportArgumentType]
+                    merge_mode=merge_mode,  # pyright: ignore[reportArgumentType]
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during fcm_import_model: {e}", err=True)
+            raise typer.Exit(1)
+        raise
+
+
+@tool_app.command("fcm-export-model")
+def fcm_export_model(
+    format: Annotated[
+        str,
+        typer.Option("--format", help="Export format (currently csv_bundle_v1)"),
+    ] = "csv_bundle_v1",
+    selection_json: Annotated[
+        Optional[str],
+        typer.Option("--selection-json", help="Optional JSON object selection payload"),
+    ] = None,
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use. If not provided, the default project will be used."),
+    ] = None,
+    workspace: Annotated[
+        Optional[str],
+        typer.Option(help="Cloud workspace tenant ID or unique name to route this request."),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+):
+    """Export an FCM model."""
+    selection = _parse_json_option(selection_json, "--selection-json")
+    if selection is not None and not isinstance(selection, dict):
+        typer.echo("Invalid JSON for --selection-json: expected a JSON object", err=True)
+        raise typer.Exit(1)
+
+    try:
+        validate_routing_flags(local, cloud)
+        with force_routing(local=local, cloud=cloud):
+            result = run_with_cleanup(
+                mcp_fcm_export_model(
+                    format=format,  # pyright: ignore[reportArgumentType]
+                    selection=selection,
+                    project=project,
+                    workspace=workspace,
+                    output_format="json",
+                )
+            )
+        _print_json(result)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    except Exception as e:  # pragma: no cover
+        if not isinstance(e, typer.Exit):
+            typer.echo(f"Error during fcm_export_model: {e}", err=True)
             raise typer.Exit(1)
         raise
 

@@ -9,6 +9,8 @@ from basic_memory.api.v2.routers.directory_router import router as directory_rou
 from basic_memory.api.v2.routers.prompt_router import router as prompt_router
 from basic_memory.api.v2.routers.importer_router import router as importer_router
 from basic_memory.api.v2.routers.schema_router import router as schema_router
+from basic_memory.api.v2.routers.graph_router import router as graph_router
+from basic_memory.api.v2.routers.fcm_router import router as fcm_router
 
 __all__ = [
     "knowledge_router",
@@ -20,4 +22,6 @@ __all__ = [
     "prompt_router",
     "importer_router",
     "schema_router",
+    "graph_router",
+    "fcm_router",
 ]

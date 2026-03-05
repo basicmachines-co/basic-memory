@@ -21,6 +21,8 @@ from basic_memory.api.v2.routers import (
     directory_router,
     prompt_router,
     importer_router,
+    graph_router,
+    fcm_router,
 )
 
 __all__ = [
@@ -32,4 +34,6 @@ __all__ = [
     "directory_router",
     "prompt_router",
     "importer_router",
+    "graph_router",
+    "fcm_router",
 ]
