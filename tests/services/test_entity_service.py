@@ -1628,6 +1628,41 @@ async def test_edit_entity_insert_after_section_at_end_of_document(
     assert "Some content here" in file_content
 
 
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_preserves_paragraph_separation(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test that insert_after_section adds blank line so inserted text doesn't merge
+    with existing section content into a single markdown paragraph."""
+    content = dedent("""
+        # Main Title
+
+        ## Section
+        Existing paragraph text
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Paragraph Sep Test",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="insert_after_section",
+        content="Inserted line",
+        section="## Section",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    # The inserted line and existing content should be separated by a blank line
+    assert "Inserted line\n\nExisting paragraph text" in file_content
+
+
 # Move entity tests
 @pytest.mark.asyncio
 async def test_move_entity_success(

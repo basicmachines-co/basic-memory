@@ -1048,6 +1048,10 @@ class EntityService(BaseService[EntityModel]):
             before = lines[: idx + 1]
             after = lines[idx + 1 :]
             insert_lines = new_content.rstrip("\n").split("\n")
+            # Ensure blank line separation so inserted text doesn't merge
+            # with existing section content into a single paragraph
+            if after and after[0].strip() != "":
+                insert_lines = insert_lines + [""]
             return "\n".join(before + insert_lines + after)
 
     def _prepend_after_frontmatter(self, current_content: str, content: str) -> str:
