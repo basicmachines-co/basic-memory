@@ -1402,6 +1402,232 @@ async def test_edit_entity_replace_section_strips_duplicate_header(
     assert "## Another Section" in file_content  # Other sections preserved
 
 
+# Insert before/after section tests
+@pytest.mark.asyncio
+async def test_edit_entity_insert_before_section(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test inserting content before a section heading."""
+    content = dedent("""
+        # Main Title
+
+        ## Section 1
+        Section 1 content
+
+        ## Section 2
+        Section 2 content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Insert Before Test",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="insert_before_section",
+        content="Inserted before section 2",
+        section="## Section 2",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Inserted before section 2" in file_content
+    assert "## Section 2" in file_content
+    assert "Section 2 content" in file_content
+    # Inserted content should appear before the section heading
+    assert file_content.index("Inserted before section 2") < file_content.index("## Section 2")
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test inserting content after a section heading."""
+    content = dedent("""
+        # Main Title
+
+        ## Section 1
+        Section 1 content
+
+        ## Section 2
+        Section 2 content
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Insert After Test",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="insert_after_section",
+        content="Inserted after section 1 heading",
+        section="## Section 1",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Inserted after section 1 heading" in file_content
+    assert "## Section 1" in file_content
+    assert "Section 1 content" in file_content
+    # Inserted content should appear after the heading but content is also preserved
+    assert file_content.index("## Section 1") < file_content.index(
+        "Inserted after section 1 heading"
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_before_section_not_found(entity_service: EntityService):
+    """Test insert_before_section raises ValueError when section not found."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            directory="test",
+            note_type="note",
+            content="# Main Title\n\nSome content",
+        )
+    )
+
+    with pytest.raises(ValueError, match="Section '## Missing' not found"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="insert_before_section",
+            content="new content",
+            section="## Missing",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_not_found(entity_service: EntityService):
+    """Test insert_after_section raises ValueError when section not found."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            directory="test",
+            note_type="note",
+            content="# Main Title\n\nSome content",
+        )
+    )
+
+    with pytest.raises(ValueError, match="Section '## Missing' not found"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="insert_after_section",
+            content="new content",
+            section="## Missing",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_before_section_multiple_sections_error(
+    entity_service: EntityService,
+):
+    """Test insert_before_section raises ValueError with duplicate sections."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            directory="test",
+            note_type="note",
+            content="# Title\n\n## Dup\nFirst\n\n## Dup\nSecond",
+        )
+    )
+
+    with pytest.raises(ValueError, match="Multiple sections found"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="insert_before_section",
+            content="new content",
+            section="## Dup",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_before_section_missing_section_param(
+    entity_service: EntityService,
+):
+    """Test insert_before_section raises ValueError when section param is missing."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            directory="test",
+            note_type="note",
+            content="# Title\n\nContent",
+        )
+    )
+
+    with pytest.raises(ValueError, match="section is required"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="insert_before_section",
+            content="new content",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_before_section_empty_section(entity_service: EntityService):
+    """Test insert_before_section raises ValueError when section is empty/whitespace."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Test Note",
+            directory="test",
+            note_type="note",
+            content="# Title\n\nContent",
+        )
+    )
+
+    with pytest.raises(ValueError, match="section cannot be empty"):
+        await entity_service.edit_entity(
+            identifier=entity.permalink,
+            operation="insert_before_section",
+            content="new content",
+            section="   ",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_insert_after_section_at_end_of_document(
+    entity_service: EntityService, file_service: FileService
+):
+    """Test inserting after the last section in a document."""
+    content = dedent("""
+        # Main Title
+
+        ## Only Section
+        Some content here
+        """).strip()
+
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Insert End Test",
+            directory="docs",
+            note_type="note",
+            content=content,
+        )
+    )
+
+    updated = await entity_service.edit_entity(
+        identifier=entity.permalink,
+        operation="insert_after_section",
+        content="Inserted after the last section heading",
+        section="## Only Section",
+    )
+
+    file_path = file_service.get_entity_path(updated)
+    file_content, _ = await file_service.read_file(file_path)
+    assert "Inserted after the last section heading" in file_content
+    assert "## Only Section" in file_content
+    assert "Some content here" in file_content
+
+
 # Move entity tests
 @pytest.mark.asyncio
 async def test_move_entity_success(
