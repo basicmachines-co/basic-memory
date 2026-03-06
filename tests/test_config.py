@@ -1237,3 +1237,47 @@ class TestLocalSyncPathMigration:
         assert result["projects"]["local-proj"]["path"] == local_path
         assert result["projects"]["cloud-only"]["path"] == "cloud-only"
         assert result["projects"]["cloud-bisync"]["path"] == bisync_path
+
+
+class TestAutoUpdateConfig:
+    """Test auto-update configuration fields."""
+
+    def test_auto_update_defaults(self):
+        """Auto-update should default on with a daily check interval."""
+        config = BasicMemoryConfig()
+        assert config.auto_update is True
+        assert config.update_check_interval == 86400
+        assert config.auto_update_last_checked_at is None
+
+    def test_auto_update_env_overrides(self, monkeypatch):
+        """Environment variables should override auto-update defaults."""
+        monkeypatch.setenv("BASIC_MEMORY_AUTO_UPDATE", "false")
+        monkeypatch.setenv("BASIC_MEMORY_UPDATE_CHECK_INTERVAL", "3600")
+
+        config = BasicMemoryConfig()
+        assert config.auto_update is False
+        assert config.update_check_interval == 3600
+
+    def test_auto_update_round_trip_persistence(self):
+        """Auto-update values should survive save/load cycle."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            checked_at = datetime.now()
+            test_config = BasicMemoryConfig(
+                projects={"main": {"path": str(temp_path / "main")}},
+                auto_update=False,
+                update_check_interval=7200,
+                auto_update_last_checked_at=checked_at,
+            )
+            config_manager.save_config(test_config)
+
+            loaded = config_manager.load_config()
+            assert loaded.auto_update is False
+            assert loaded.update_check_interval == 7200
+            assert loaded.auto_update_last_checked_at == checked_at

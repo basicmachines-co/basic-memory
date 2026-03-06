@@ -54,6 +54,22 @@ Or for a one-time sync:
 basic-memory sync
 ```
 
+### 4. Updating Basic Memory
+
+Basic Memory supports automatic updates by default for `uv tool` and Homebrew installs.
+
+For manual checks and upgrades:
+
+```bash
+# Check now and install if supported
+bm update
+
+# Check only, do not install
+bm update --check
+```
+
+To disable automatic updates, set `"auto_update": false` in `~/.basic-memory/config.json`.
+
 ## Configuration Options
 
 ### Custom Directory

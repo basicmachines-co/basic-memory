@@ -351,6 +351,22 @@ class BasicMemoryConfig(BaseSettings):
         description="Most recent cloud promo version shown in CLI.",
     )
 
+    auto_update: bool = Field(
+        default=True,
+        description="Enable automatic CLI update checks and installs when supported.",
+    )
+
+    update_check_interval: int = Field(
+        default=86400,
+        description="Seconds between automatic update checks.",
+        gt=0,
+    )
+
+    auto_update_last_checked_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp of the last attempted automatic update check.",
+    )
+
     cloud_api_key: Optional[str] = Field(
         default=None,
         description="API key for cloud access (bmc_ prefixed). Account-level, not per-project.",
