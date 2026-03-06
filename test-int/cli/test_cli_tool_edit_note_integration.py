@@ -208,7 +208,7 @@ def test_edit_note_replace_section_fails_without_section(
     )
 
     assert result.exit_code != 0
-    assert "section parameter is required for replace_section operation" in result.output
+    assert "section parameter is required for section-based operations" in result.output
 
 
 def test_edit_note_append_creates_nonexistent_note_cli(
