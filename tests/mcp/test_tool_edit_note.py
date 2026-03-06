@@ -320,7 +320,7 @@ async def test_edit_note_replace_section_missing_section(client, test_project):
             content="new content",
         )
 
-    assert "section parameter is required for replace_section operation" in str(exc_info.value)
+    assert "section parameter is required for section-based operations" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -611,3 +611,96 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     assert f"permalink: {test_project.name}/test/test-note" in second_result
     assert f"[Session: Using project '{test_project.name}']" in second_result
     # The edit should succeed without validation errors
+
+
+@pytest.mark.asyncio
+async def test_edit_note_insert_before_section_operation(client, test_project):
+    """Test inserting content before a section heading."""
+    # Create initial note with sections
+    await write_note(
+        project=test_project.name,
+        title="Insert Before Doc",
+        directory="docs",
+        content="# Doc\n\n## Overview\nOverview content.\n\n## Details\nDetail content.",
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="docs/insert-before-doc",
+        operation="insert_before_section",
+        content="--- inserted divider ---",
+        section="## Details",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (insert_before_section)" in result
+    assert f"project: {test_project.name}" in result
+    assert "Inserted content before section '## Details'" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_insert_after_section_operation(client, test_project):
+    """Test inserting content after a section heading."""
+    # Create initial note with sections
+    await write_note(
+        project=test_project.name,
+        title="Insert After Doc",
+        directory="docs",
+        content="# Doc\n\n## Overview\nOverview content.\n\n## Details\nDetail content.",
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="docs/insert-after-doc",
+        operation="insert_after_section",
+        content="Inserted after overview heading",
+        section="## Overview",
+    )
+
+    assert isinstance(result, str)
+    assert "Edited note (insert_after_section)" in result
+    assert f"project: {test_project.name}" in result
+    assert "Inserted content after section '## Overview'" in result
+    assert f"[Session: Using project '{test_project.name}']" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_insert_before_section_missing_section(client, test_project):
+    """Test insert_before_section without section parameter raises ValueError."""
+    await write_note(
+        project=test_project.name,
+        title="Test Note",
+        directory="test",
+        content="# Test\nContent here.",
+    )
+
+    with pytest.raises(ValueError, match="section parameter is required"):
+        await edit_note(
+            project=test_project.name,
+            identifier="test/test-note",
+            operation="insert_before_section",
+            content="new content",
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_note_insert_before_section_not_found(client, test_project):
+    """Test insert_before_section when section doesn't exist returns error."""
+    await write_note(
+        project=test_project.name,
+        title="Test Note",
+        directory="test",
+        content="# Test\n\n## Existing\nContent here.",
+    )
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="test/test-note",
+        operation="insert_before_section",
+        content="new content",
+        section="## Nonexistent",
+    )
+
+    assert isinstance(result, str)
+    assert "# Edit Failed" in result
