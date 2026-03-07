@@ -43,40 +43,37 @@ if sys.platform == "win32":  # pragma: no cover
 _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
-# Alembic revision that enables one-time automatic embedding backfill.
-SEMANTIC_EMBEDDING_BACKFILL_REVISION = "i2c3d4e5f6g7"
 
-
-async def _load_applied_alembic_revisions(
+async def _needs_semantic_embedding_backfill(
+    app_config: BasicMemoryConfig,
     session_maker: async_sessionmaker[AsyncSession],
-) -> set[str]:
-    """Load applied Alembic revisions from alembic_version.
+) -> bool:
+    """Check if entities exist but vector embeddings are empty.
 
-    Returns an empty set when the version table does not exist yet
-    (fresh database before first migration).
+    This is the reliable way to detect that embeddings need to be generated,
+    regardless of how migrations were applied (fresh DB, upgrade, reset, etc.).
     """
+    if not app_config.semantic_search_enabled:
+        return False
+
     try:
         async with scoped_session(session_maker) as session:
-            result = await session.execute(text("SELECT version_num FROM alembic_version"))
-            return {str(row[0]) for row in result.fetchall() if row[0]}
+            entity_count = (
+                await session.execute(text("SELECT COUNT(*) FROM entity"))
+            ).scalar() or 0
+            if entity_count == 0:
+                return False
+
+            # Check if vector chunks table exists and is empty
+            embedding_count = (
+                await session.execute(text("SELECT COUNT(*) FROM search_vector_chunks"))
+            ).scalar() or 0
+
+            return embedding_count == 0
     except Exception as exc:
-        error_message = str(exc).lower()
-        if "alembic_version" in error_message and (
-            "no such table" in error_message or "does not exist" in error_message
-        ):
-            return set()
-        raise
-
-
-def _should_run_semantic_embedding_backfill(
-    revisions_before_upgrade: set[str],
-    revisions_after_upgrade: set[str],
-) -> bool:
-    """Check if this migration run newly applied the backfill-trigger revision."""
-    return (
-        SEMANTIC_EMBEDDING_BACKFILL_REVISION in revisions_after_upgrade
-        and SEMANTIC_EMBEDDING_BACKFILL_REVISION not in revisions_before_upgrade
-    )
+        # Table might not exist yet (pre-migration)
+        logger.debug(f"Could not check embedding status: {exc}")
+        return False
 
 
 async def _run_semantic_embedding_backfill(
@@ -480,26 +477,9 @@ async def run_migrations(
     Note: Alembic tracks which migrations have been applied via the alembic_version table,
     so it's safe to call this multiple times - it will only run pending migrations.
     """
-    logger.debug("Running database migrations...")
+    logger.info("Running database migrations...")
     temp_engine: AsyncEngine | None = None
     try:
-        revisions_before_upgrade: set[str] = set()
-        # Trigger: run_migrations() can be invoked before module-level session maker is set.
-        # Why: we still need reliable before/after revision detection for one-time backfill.
-        # Outcome: create a short-lived session maker when needed, then dispose it immediately.
-        if _session_maker is None:
-            precheck_engine, temp_session_maker = _create_engine_and_session(
-                app_config.database_path,
-                database_type,
-                app_config,
-            )
-            try:
-                revisions_before_upgrade = await _load_applied_alembic_revisions(temp_session_maker)
-            finally:
-                await precheck_engine.dispose()
-        else:
-            revisions_before_upgrade = await _load_applied_alembic_revisions(_session_maker)
-
         # Get the absolute path to the alembic directory relative to this file
         alembic_dir = Path(__file__).parent / "alembic"
         config = Config()
@@ -519,7 +499,7 @@ async def run_migrations(
         config.set_main_option("sqlalchemy.url", db_url)
 
         command.upgrade(config, "head")
-        logger.debug("Migrations completed successfully")
+        logger.info("Migrations completed successfully")
 
         # Get session maker - ensure we don't trigger recursive migration calls
         if _session_maker is None:
@@ -541,12 +521,14 @@ async def run_migrations(
         else:
             await SQLiteSearchRepository(session_maker, 1).init_search_index()
 
-        revisions_after_upgrade = await _load_applied_alembic_revisions(session_maker)
-        if _should_run_semantic_embedding_backfill(
-            revisions_before_upgrade,
-            revisions_after_upgrade,
-        ):
-            await _run_semantic_embedding_backfill(app_config, session_maker)
+        # Check if backfill is needed — actual backfill runs in background
+        # from the MCP server lifespan to avoid blocking startup.
+        if await _needs_semantic_embedding_backfill(app_config, session_maker):
+            logger.info(
+                "Semantic embeddings missing — backfill will run in background after startup"
+            )
+        else:
+            logger.info("Semantic embeddings: up to date")
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise

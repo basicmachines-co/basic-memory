@@ -31,6 +31,7 @@ async def test_returns_none_when_no_default_and_no_project(config_manager, monke
     config_manager.save_config(cfg)
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+
     # Prevent API fallback from returning a project via stale dependency overrides
     async def _no_api_fallback():
         return None
@@ -117,6 +118,7 @@ async def test_returns_none_when_no_default(config_manager, monkeypatch):
     config_manager.save_config(cfg)
 
     monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+
     # Prevent API fallback from returning a project via stale dependency overrides
     async def _no_api_fallback():
         return None

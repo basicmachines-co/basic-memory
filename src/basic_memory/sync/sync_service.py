@@ -293,12 +293,16 @@ class SyncService:
         for path in report.deleted:
             await self.handle_delete(path)
 
-        # then new and modified
+        # then new and modified — collect entity IDs for batch vector embedding
+        synced_entity_ids: list[int] = []
+
         for path in report.new:
             entity, _ = await self.sync_file(path, new=True)
 
+            if entity is not None:
+                synced_entity_ids.append(entity.id)
             # Track if file was skipped
-            if entity is None and await self._should_skip_file(path):
+            elif await self._should_skip_file(path):
                 failure_info = self._file_failures[path]
                 report.skipped_files.append(
                     SkippedFile(
@@ -312,8 +316,10 @@ class SyncService:
         for path in report.modified:
             entity, _ = await self.sync_file(path, new=False)
 
+            if entity is not None:
+                synced_entity_ids.append(entity.id)
             # Track if file was skipped
-            if entity is None and await self._should_skip_file(path):
+            elif await self._should_skip_file(path):
                 failure_info = self._file_failures[path]
                 report.skipped_files.append(
                     SkippedFile(
@@ -330,6 +336,26 @@ class SyncService:
             await self.resolve_relations()
         else:
             logger.info("Skipping relation resolution - no file changes detected")
+
+        # Batch-generate vector embeddings for all synced entities
+        if synced_entity_ids and self.app_config.semantic_search_enabled:
+            try:
+                logger.info(
+                    f"Generating semantic embeddings for {len(synced_entity_ids)} entities..."
+                )
+                batch_result = await self.search_service.sync_entity_vectors_batch(
+                    synced_entity_ids
+                )
+                logger.info(
+                    f"Semantic embeddings complete: "
+                    f"synced={batch_result.entities_synced}, "
+                    f"failed={batch_result.entities_failed}"
+                )
+            except SemanticDependenciesMissingError:
+                logger.warning(
+                    "Semantic search dependencies missing — vector embeddings skipped. "
+                    "Run 'bm reindex --embeddings' after resolving the dependency issue."
+                )
 
         # Update scan watermark after successful sync
         # Use the timestamp from sync start (not end) to ensure we catch files

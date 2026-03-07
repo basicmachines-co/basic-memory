@@ -200,10 +200,10 @@ async def test_initialize_app_no_precedence_warning_when_not_conflicting(
 
 
 @pytest.mark.asyncio
-async def test_run_migrations_triggers_embedding_backfill_on_new_revision(
+async def test_run_migrations_triggers_embedding_backfill_when_entities_exist_but_no_embeddings(
     monkeypatch, app_config: BasicMemoryConfig
 ):
-    """When the trigger revision is newly applied, run automatic embedding backfill once."""
+    """run_migrations checks for missing embeddings (actual backfill runs in background from MCP)."""
 
     class StubSearchRepository:
         def __init__(self, *args, **kwargs):
@@ -224,29 +224,24 @@ async def test_run_migrations_triggers_embedding_backfill_on_new_revision(
         monkeypatch.setattr("basic_memory.db.SQLiteSearchRepository", StubSearchRepository)
         monkeypatch.setattr("basic_memory.db.PostgresSearchRepository", StubSearchRepository)
 
-        load_revisions_mock = AsyncMock(
-            side_effect=[
-                set(),
-                {db.SEMANTIC_EMBEDDING_BACKFILL_REVISION},
-            ]
+        needs_backfill_mock = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            "basic_memory.db._needs_semantic_embedding_backfill", needs_backfill_mock
         )
-        backfill_mock = AsyncMock()
-        monkeypatch.setattr("basic_memory.db._load_applied_alembic_revisions", load_revisions_mock)
-        monkeypatch.setattr("basic_memory.db._run_semantic_embedding_backfill", backfill_mock)
 
         await db.run_migrations(app_config)
 
-        assert load_revisions_mock.await_count == 2
-        backfill_mock.assert_awaited_once_with(app_config, session_marker)
+        # Verifies the check runs — backfill itself is launched by MCP lifespan
+        needs_backfill_mock.assert_awaited_once_with(app_config, session_marker)
     finally:
         db._session_maker = original_session_maker  # pyright: ignore [reportPrivateUsage]
 
 
 @pytest.mark.asyncio
-async def test_run_migrations_skips_embedding_backfill_when_revision_already_applied(
+async def test_run_migrations_skips_embedding_backfill_when_embeddings_already_exist(
     monkeypatch, app_config: BasicMemoryConfig
 ):
-    """If the trigger revision was already present before upgrade, skip backfill."""
+    """When embeddings already exist, no backfill is needed."""
 
     class StubSearchRepository:
         def __init__(self, *args, **kwargs):
@@ -267,20 +262,14 @@ async def test_run_migrations_skips_embedding_backfill_when_revision_already_app
         monkeypatch.setattr("basic_memory.db.SQLiteSearchRepository", StubSearchRepository)
         monkeypatch.setattr("basic_memory.db.PostgresSearchRepository", StubSearchRepository)
 
-        load_revisions_mock = AsyncMock(
-            side_effect=[
-                {db.SEMANTIC_EMBEDDING_BACKFILL_REVISION},
-                {db.SEMANTIC_EMBEDDING_BACKFILL_REVISION},
-            ]
+        needs_backfill_mock = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "basic_memory.db._needs_semantic_embedding_backfill", needs_backfill_mock
         )
-        backfill_mock = AsyncMock()
-        monkeypatch.setattr("basic_memory.db._load_applied_alembic_revisions", load_revisions_mock)
-        monkeypatch.setattr("basic_memory.db._run_semantic_embedding_backfill", backfill_mock)
 
         await db.run_migrations(app_config)
 
-        assert load_revisions_mock.await_count == 2
-        assert backfill_mock.await_count == 0
+        needs_backfill_mock.assert_awaited_once_with(app_config, session_marker)
     finally:
         db._session_maker = original_session_maker  # pyright: ignore [reportPrivateUsage]
 
@@ -378,3 +367,54 @@ async def test_semantic_embedding_backfill_skips_when_semantic_disabled(
     app_config.semantic_search_enabled = False
     await db._run_semantic_embedding_backfill(app_config, session_maker)  # pyright: ignore [reportPrivateUsage]
     assert called is False
+
+
+@pytest.mark.asyncio
+async def test_needs_semantic_embedding_backfill_true_when_entities_exist_no_embeddings(
+    app_config: BasicMemoryConfig,
+    session_maker,
+    test_project,
+):
+    """Should return True when entities exist but vector chunks table is empty."""
+    from basic_memory.repository.entity_repository import EntityRepository
+
+    entity_repository = EntityRepository(session_maker, project_id=test_project.id)
+    await entity_repository.create(
+        {
+            "title": "Test Entity",
+            "note_type": "note",
+            "entity_metadata": {},
+            "content_type": "text/markdown",
+            "file_path": "test/backfill-check.md",
+            "permalink": "test/backfill-check",
+            "project_id": test_project.id,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
+        }
+    )
+
+    app_config.semantic_search_enabled = True
+    result = await db._needs_semantic_embedding_backfill(app_config, session_maker)  # pyright: ignore [reportPrivateUsage]
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_needs_semantic_embedding_backfill_false_when_no_entities(
+    app_config: BasicMemoryConfig,
+    session_maker,
+):
+    """Should return False when no entities exist (nothing to backfill)."""
+    app_config.semantic_search_enabled = True
+    result = await db._needs_semantic_embedding_backfill(app_config, session_maker)  # pyright: ignore [reportPrivateUsage]
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_needs_semantic_embedding_backfill_false_when_semantic_disabled(
+    app_config: BasicMemoryConfig,
+    session_maker,
+):
+    """Should return False when semantic search is disabled."""
+    app_config.semantic_search_enabled = False
+    result = await db._needs_semantic_embedding_backfill(app_config, session_maker)  # pyright: ignore [reportPrivateUsage]
+    assert result is False
