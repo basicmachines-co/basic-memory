@@ -2,13 +2,139 @@
 
 ## Unreleased
 
+## v0.19.0 (2026-03-07)
+
+### Highlights
+
+- **Semantic vector search** for SQLite and Postgres with FastEmbed embeddings
+- **Schema system** for validating and inferring knowledge base structure
+- **Per-project cloud routing** with API key authentication
+- **Upgraded to FastMCP 3.0** with tool annotations
+- **CLI overhaul** with JSON output, workspace awareness, and project dashboard
+
 ### Features
 
+- **#550**: Add semantic vector search for SQLite and Postgres
+  - FastEmbed-based embeddings with automatic backfill
+  - Hybrid search combining full-text and vector similarity
+  - Score-based fusion replacing RRF for better ranking
+  - `min_similarity` override for tuning search precision
+  - Semantic dependencies are now default, with optional extras fallback
+
+- **#549**: Schema system for Basic Memory
+  - `schema_infer` — infer schema from existing notes
+  - `schema_validate` — validate notes against a schema definition
+  - `schema_diff` — compare schemas across projects
+  - Frontmatter validation support (#597)
+  - Read schema definitions from file instead of stale DB metadata (#635)
+
+- **#555**: Per-project local/cloud routing with API key auth
+  - Individual projects route through cloud while others stay local
+  - `basic-memory cloud set-key` and `basic-memory project set-cloud/set-local`
+  - Stdio MCP honors per-project cloud routing (#590)
+
+- **#598**: Upgrade FastMCP 2.12.3 to 3.0.1 with tool annotations
+
+- **#585**: Add JSON output mode for MCP tools (default text)
+  - `--json` output for CLI commands for scripting and CI
+
+- **#576**: Add workspace selection flow for MCP and CLI
+  - Workspace-aware cloud project listing
+  - CLI refactoring for workspace support
+
+- **#544**: Project-prefixed permalinks and memory URL routing
+
+- **#632**: Add overwrite guard to `write_note` tool
+
+- **#614**: `edit_note` append/prepend auto-creates note if not found
+
+- **#609**: Richer content context in search results
+  - Return matched chunk text in search results (#601)
+  - Improved content hit rate
+
+- **#602**: Add `created_by` and `last_updated_by` user tracking to Entity
+
+- **#600**: Rename `entity_type` to `note_type` across codebase
+
+- **#574**: Add `display_name` and `is_private` to ProjectItem
+
+- **#569**: Expose `external_id` in EntityResponse and link resolver
+
+- **#567**: Isolate default SQLite DB by config dir
+
+- **#560**: Enable `default_project_mode` by default
+
+- **#559**: Add `basic-memory watch` CLI command
+
+- **#546**: Add cloud discovery touchpoints to CLI and MCP
+
+- **#572**: CLI analytics via Umami event collector
+
+- Replace project info with htop-inspired dashboard
+
+- Merge `search_by_metadata` into `search_notes` with optional query
+
 - Add `--strip-frontmatter` to `basic-memory tool read-note`
-  - Default behavior is unchanged: `content` still includes raw markdown with frontmatter.
-  - With `--strip-frontmatter`, both text and JSON modes return body-only markdown content.
-  - JSON output now includes an additive `frontmatter` field with parsed YAML metadata (or `null`
-    when no valid opening frontmatter block exists).
+
+- Add `destination_folder` parameter to `move_note` tool
+
+### Bug Fixes
+
+- **#644**: Fix default project resolution in cloud mode
+  - ChatGPT search/fetch tools broken in cloud mode
+  - `resolve_project_parameter` falls back to projects API
+
+- **#638**: Restore API backward compatibility for v0.18.x clients
+
+- **#637**: Create backup before config migration overwrites old format
+
+- **#636**: `list_workspaces` bypasses factory pattern on cloud MCP server
+
+- **#631**: `build_context` related_results schema validation failure
+
+- **#613**: Reduce excessive log volume by demoting per-request noise to DEBUG
+
+- **#612**: Handle quoted picoschema enum strings in YAML frontmatter
+
+- **#607**: Guard against closed streams in promo and missing vector tables
+
+- **#606**: Accept null for `expected_replacements` in `edit_note`
+
+- **#595**: `recent_activity` dedup and pagination across MCP tools
+
+- **#593**: Backend-specific distance-to-similarity conversion
+
+- **#582**: Use LinkResolver fallback in `build_context` for flexible identifier matching
+
+- **#577**: Replace RRF with score-based fusion in hybrid search
+
+- **#575**: Remove hardcoded "main" default from `default_project`
+
+- **#534**: Speed up `bm --version` startup
+
+- Fix semantic embeddings not generated on fresh DB or upgrade
+
+- Clarify `search_notes` parameter naming and fix `note_types` case sensitivity
+
+- Parse `tag:` prefix at MCP tool level to avoid hybrid search failure
+
+- Cap sqlite-vec knn k parameter at 4096 limit
+
+- Parameterize SQL queries in search repository type filters
+
+- Coerce list frontmatter values to strings for title and type fields
+
+- Avoid `Post(**metadata)` crash when frontmatter contains 'content' or 'handler' keys
+
+- Upgrade cryptography and python-multipart for security advisories
+
+### Internal
+
+- **#594**: Add `ty` as supplemental type checker
+- Batched vector sync orchestration across repositories
+- FastEmbed parallel guardrails and provider caching
+- Improved cloud CLI status and error messages
+- CI coverage and Postgres test fixes
 
 ## v0.18.5 (2026-02-13)
 
