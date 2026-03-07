@@ -393,6 +393,10 @@ async def test_needs_semantic_embedding_backfill_true_when_entities_exist_no_emb
         }
     )
 
+    # Clear any embeddings left by other tests in the shared DB
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(db.text("DELETE FROM search_vector_chunks"))
+
     app_config.semantic_search_enabled = True
     result = await db._needs_semantic_embedding_backfill(app_config, session_maker)  # pyright: ignore [reportPrivateUsage]
     assert result is True
