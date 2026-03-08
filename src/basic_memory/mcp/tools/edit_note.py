@@ -283,7 +283,7 @@ async def edit_note(
 
             # Try to resolve the entity; for append/prepend, create it if not found
             try:
-                entity_id = await knowledge_client.resolve_entity(identifier)
+                entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
             except Exception as resolve_error:
                 # Trigger: entity does not exist yet
                 # Why: append/prepend can meaningfully create a new note from the content,

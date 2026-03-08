@@ -1,6 +1,10 @@
 """Tests for delete_note MCP tool."""
 
-from basic_memory.mcp.tools.delete_note import _format_delete_error_response
+import pytest
+
+from basic_memory.mcp.tools.delete_note import delete_note, _format_delete_error_response
+from basic_memory.mcp.tools.read_note import read_note
+from basic_memory.mcp.tools.write_note import write_note
 
 
 class TestDeleteNoteErrorFormatting:
@@ -94,5 +98,25 @@ class TestDeleteNoteErrorFormatting:
         assert "folder/note-title" in result  # Permalink format
 
 
-# Integration tests removed to focus on error formatting coverage
-# The error formatting tests above provide the necessary coverage for MCP tool error messaging
+@pytest.mark.asyncio
+async def test_delete_note_rejects_fuzzy_match(client, test_project):
+    """delete_note must reject nonexistent identifiers, not fuzzy-match to a similar note."""
+    await write_note(
+        project=test_project.name,
+        title="Delete Target Note",
+        directory="test",
+        content="# Delete Target Note\nShould not be deleted.",
+    )
+
+    # Attempt to delete a nonexistent note — should return False, not silently delete the existing note
+    result = await delete_note(
+        project=test_project.name,
+        identifier="Delete Target NONEXISTENT",
+    )
+
+    # Should indicate not found (False or error string)
+    assert result is False or (isinstance(result, str) and "not found" in result.lower())
+
+    # Verify the existing note was NOT deleted
+    content = await read_note("Delete Target Note", project=test_project.name)
+    assert "Should not be deleted" in content

@@ -318,7 +318,7 @@ delete_note("path/to/file.md")
         note_file_path = None
         try:
             # Resolve identifier to entity ID
-            entity_id = await knowledge_client.resolve_entity(identifier)
+            entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
             if output_format == "json":
                 entity = await knowledge_client.get_entity(entity_id)
                 note_title = entity.title

@@ -637,7 +637,7 @@ move_note("path/to/file.md", "{destination_path}/file.md")
             """Resolve and cache the source entity ID for the duration of this move."""
             nonlocal resolved_entity_id
             if resolved_entity_id is None:
-                resolved_entity_id = await knowledge_client.resolve_entity(identifier)
+                resolved_entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
             return resolved_entity_id
 
         try:

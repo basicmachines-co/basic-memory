@@ -710,3 +710,81 @@ async def test_edit_note_using_different_identifiers(mcp_server, app, test_proje
         assert "Edited by title." in content
         assert "Edited by permalink." in content
         assert "Edited by folder/title." in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_strict_resolution_rejects_fuzzy_match(mcp_server, app, test_project):
+    """Reproduces #649: edit_note must not fuzzy-match a nonexistent identifier to an existing note.
+
+    Creates two notes, then attempts to edit a nonexistent identifier.
+    The tool should return an error, and neither note should be modified.
+    """
+
+    async with Client(mcp_server) as client:
+        # Create two notes that could be fuzzy-matched
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Routing Test A",
+                "directory": "test",
+                "content": "# Routing Test A\n\nContent A.",
+            },
+        )
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Routing Test B",
+                "directory": "test",
+                "content": "# Routing Test B\n\nContent B.",
+            },
+        )
+
+        # Attempt to edit a nonexistent note — should error, not silently edit A or B
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "Routing Test NONEXISTENT",
+                "operation": "append",
+                "content": "\n\nThis should NOT appear in any note.",
+            },
+        )
+
+        edit_text = edit_result.content[0].text
+        # append to nonexistent creates a new note — verify it did NOT edit A or B
+        assert "Created note (append)" in edit_text
+        assert "fileCreated: true" in edit_text
+
+        # Verify neither A nor B was modified
+        read_a = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "Routing Test A"},
+        )
+        content_a = read_a.content[0].text
+        assert "Content A" in content_a
+        assert "This should NOT appear" not in content_a
+
+        read_b = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "Routing Test B"},
+        )
+        content_b = read_b.content[0].text
+        assert "Content B" in content_b
+        assert "This should NOT appear" not in content_b
+
+        # Now test find_replace on nonexistent — should error
+        edit_result2 = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "Routing Test NONEXISTENT AGAIN",
+                "operation": "find_replace",
+                "content": "replaced",
+                "find_text": "Content",
+            },
+        )
+
+        error_text = edit_result2.content[0].text
+        assert "Edit Failed" in error_text

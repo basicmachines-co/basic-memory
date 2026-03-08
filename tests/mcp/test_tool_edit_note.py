@@ -1,8 +1,10 @@
 """Tests for the edit_note MCP tool."""
 
+
 import pytest
 
 from basic_memory.mcp.tools.edit_note import edit_note
+from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
 
 
@@ -611,3 +613,67 @@ async def test_edit_note_preserves_permalink_when_frontmatter_missing(client, te
     assert f"permalink: {test_project.name}/test/test-note" in second_result
     assert f"[Session: Using project '{test_project.name}']" in second_result
     # The edit should succeed without validation errors
+
+
+@pytest.mark.asyncio
+async def test_edit_note_find_replace_rejects_fuzzy_match(client, test_project):
+    """find_replace must reject nonexistent identifiers, not fuzzy-match to a similar note."""
+    # Create two notes that could be fuzzy-matched
+    await write_note(
+        project=test_project.name,
+        title="Routing Test A",
+        directory="test",
+        content="# Routing Test A\nContent A.",
+    )
+    await write_note(
+        project=test_project.name,
+        title="Routing Test B",
+        directory="test",
+        content="# Routing Test B\nContent B.",
+    )
+
+    # Attempt to edit a nonexistent note — should error, not silently edit A or B
+    result = await edit_note(
+        project=test_project.name,
+        identifier="Routing Test NONEXISTENT",
+        operation="find_replace",
+        content="replaced",
+        find_text="Content",
+    )
+
+    assert isinstance(result, str)
+    assert "# Edit Failed" in result
+
+    # Verify neither A nor B was modified
+    content_a = await read_note("Routing Test A", project=test_project.name)
+    assert "Content A" in content_a
+    content_b = await read_note("Routing Test B", project=test_project.name)
+    assert "Content B" in content_b
+
+
+@pytest.mark.asyncio
+async def test_edit_note_append_autocreate_not_fuzzy_match(client, test_project):
+    """append to a nonexistent note should auto-create it, not fuzzy-match an existing note."""
+    await write_note(
+        project=test_project.name,
+        title="Existing Note Alpha",
+        directory="test",
+        content="# Existing Note Alpha\nOriginal content.",
+    )
+
+    # Append to a nonexistent note — should create a new note, not edit "Existing Note Alpha"
+    result = await edit_note(
+        project=test_project.name,
+        identifier="Existing Note ZZZZZ",
+        operation="append",
+        content="# New Note\nBrand new content.",
+    )
+
+    assert isinstance(result, str)
+    assert "Created note (append)" in result
+    assert "fileCreated: true" in result
+
+    # Verify original note was NOT modified
+    content = await read_note("Existing Note Alpha", project=test_project.name)
+    assert "Original content" in content
+    assert "Brand new content" not in content

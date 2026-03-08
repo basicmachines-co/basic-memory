@@ -590,6 +590,31 @@ async def test_move_note_preserves_frontmatter(app, client, test_project):
     assert "Content with custom metadata" in content
 
 
+@pytest.mark.asyncio
+async def test_move_note_rejects_fuzzy_match(client, test_project):
+    """move_note must reject nonexistent identifiers, not fuzzy-match to a similar note."""
+    await write_note(
+        project=test_project.name,
+        title="Move Target Note",
+        directory="source",
+        content="# Move Target Note\nShould not be moved.",
+    )
+
+    # Attempt to move a nonexistent note — should error, not silently move the existing note
+    result = await move_note(
+        project=test_project.name,
+        identifier="Move Target NONEXISTENT",
+        destination_path="target/Moved.md",
+    )
+
+    assert isinstance(result, str)
+    assert "# Move Failed" in result
+
+    # Verify the existing note was NOT moved
+    content = await read_note("Move Target Note", project=test_project.name)
+    assert "Should not be moved" in content
+
+
 class TestMoveNoteErrorFormatting:
     """Test move note error formatting for better user experience."""
 
