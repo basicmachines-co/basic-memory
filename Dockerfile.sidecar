@@ -1,0 +1,31 @@
+FROM python:3.12-slim-bookworm
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_PYTHON_INSTALL_DIR=/python \
+    UV_PYTHON_PREFERENCE=only-managed
+
+ADD . /app
+WORKDIR /app
+
+RUN uv python install 3.13
+RUN uv sync --locked --python 3.13
+
+# Create directories and ensure entrypoint is executable
+RUN mkdir -p /app/data /app/data/.config /app/data/shared && \
+    chmod +x /app/entrypoint.sh
+
+ENV BASIC_MEMORY_HOME=/app/data/shared \
+    BASIC_MEMORY_PROJECT_ROOT=/app/data \
+    BASIC_MEMORY_CONFIG_DIR=/app/data/.config \
+    PATH="/app/.venv/bin:$PATH"
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD basic-memory --version || exit 1
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["basic-memory", "mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
