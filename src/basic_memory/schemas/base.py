@@ -140,10 +140,12 @@ def validate_timeframe(timeframe: str) -> str:
     if parsed > now:
         raise ValueError("Timeframe cannot be in the future")  # pragma: no cover
 
-    # Could format the duration back to our standard format
-    days = (now - parsed).days
+    # Round to nearest day to handle DST transitions where an hour shift
+    # can cause e.g. "7d" to compute as 6 days + 23 hours
+    total_seconds = (now - parsed).total_seconds()
+    days = round(total_seconds / 86400)
 
-    # Could enforce reasonable limits
+    # Enforce reasonable limits
     if days > 365:
         raise ValueError("Timeframe should be <= 1 year")
 
