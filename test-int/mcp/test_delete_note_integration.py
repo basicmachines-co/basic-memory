@@ -307,8 +307,13 @@ async def test_delete_note_by_file_path(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_case_insensitive(mcp_server, app, test_project):
-    """Test that note deletion is case insensitive for titles."""
+async def test_delete_note_rejects_case_mismatch(mcp_server, app, test_project):
+    """Test that delete_note with wrong case does not fuzzy-match to an existing note.
+
+    Strict resolution (#649) prevents destructive operations from silently
+    resolving to a different note via fuzzy search. Case-mismatched titles
+    should be rejected, not resolved to the nearest match.
+    """
 
     async with Client(mcp_server) as client:
         # Create a note with mixed case
@@ -323,7 +328,7 @@ async def test_delete_note_case_insensitive(mcp_server, app, test_project):
             },
         )
 
-        # Try to delete with different case
+        # Try to delete with different case — should NOT find the note
         delete_result = await client.call_tool(
             "delete_note",
             {
@@ -332,8 +337,28 @@ async def test_delete_note_case_insensitive(mcp_server, app, test_project):
             },
         )
 
-        # Should return True for successful deletion
-        assert "true" in delete_result.content[0].text.lower()
+        # Should return False (not found) — strict mode rejects fuzzy matches
+        assert "false" in delete_result.content[0].text.lower()
+
+        # Verify the note still exists using the exact title
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "CamelCase Note Title",
+            },
+        )
+        assert "Testing case sensitivity" in read_result.content[0].text
+
+        # Delete with exact title should succeed
+        delete_result2 = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": "CamelCase Note Title",
+            },
+        )
+        assert "true" in delete_result2.content[0].text.lower()
 
 
 @pytest.mark.asyncio
