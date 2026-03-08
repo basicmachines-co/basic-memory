@@ -713,11 +713,11 @@ async def test_edit_note_using_different_identifiers(mcp_server, app, test_proje
 
 
 @pytest.mark.asyncio
-async def test_edit_note_strict_resolution_rejects_fuzzy_match(mcp_server, app, test_project):
-    """Reproduces #649: edit_note must not fuzzy-match a nonexistent identifier to an existing note.
+async def test_edit_note_append_autocreate_does_not_fuzzy_match(mcp_server, app, test_project):
+    """Reproduces #649: edit_note append must auto-create, not fuzzy-match to an existing note.
 
-    Creates two notes, then attempts to edit a nonexistent identifier.
-    The tool should return an error, and neither note should be modified.
+    Creates two notes, then attempts to append to a nonexistent identifier.
+    The tool should create a new note, and neither existing note should be modified.
     """
 
     async with Client(mcp_server) as client:

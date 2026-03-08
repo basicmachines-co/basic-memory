@@ -716,3 +716,56 @@ async def test_move_note_destination_folder_mutually_exclusive(mcp_server, app, 
         error_text = move_result.content[0].text
         assert "# Move Failed - Invalid Parameters" in error_text
         assert "Cannot specify both" in error_text
+
+
+@pytest.mark.asyncio
+async def test_move_note_strict_resolution_rejects_fuzzy_match(mcp_server, app, test_project):
+    """move_note must not fuzzy-match a nonexistent identifier to an existing note (#649)."""
+
+    async with Client(mcp_server) as client:
+        # Create two notes that could be fuzzy-matched
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Move Strict Test A",
+                "directory": "test",
+                "content": "# Move Strict Test A\n\nContent A.",
+            },
+        )
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Move Strict Test B",
+                "directory": "test",
+                "content": "# Move Strict Test B\n\nContent B.",
+            },
+        )
+
+        # Attempt to move a nonexistent note — should error, not move A or B
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Move Strict Test NONEXISTENT",
+                "destination_path": "archive/Moved.md",
+            },
+        )
+
+        assert len(move_result.content) == 1
+        error_text = move_result.content[0].text
+        assert "# Move Failed" in error_text
+
+        # Verify neither A nor B was moved
+        read_a = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "Move Strict Test A"},
+        )
+        assert "Content A" in read_a.content[0].text
+
+        read_b = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "Move Strict Test B"},
+        )
+        assert "Content B" in read_b.content[0].text

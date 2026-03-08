@@ -6,6 +6,7 @@ from typing import Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
+from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client
@@ -645,8 +646,26 @@ move_note("path/to/file.md", "{destination_path}/file.md")
             source_entity = await knowledge_client.get_entity(resolved_entity_id)
             if "." in source_entity.file_path:
                 source_ext = source_entity.file_path.split(".")[-1]
+        except ToolError as e:
+            # Trigger: strict=True resolve_entity raised because the entity was not found.
+            # Why: fail fast with a formatted error instead of silently falling through
+            #      to extension defaults and failing later with a confusing message.
+            # Outcome: move_note returns a user-facing not-found error immediately.
+            logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
+            if output_format == "json":
+                return {
+                    "moved": False,
+                    "title": None,
+                    "permalink": None,
+                    "file_path": None,
+                    "source": identifier,
+                    "destination": destination_path,
+                    "error": str(e),
+                }
+            return _format_move_error_response(str(e), identifier, destination_path)
         except Exception as e:
-            # If we can't fetch source metadata, continue with extension defaults.
+            # If we can't fetch source metadata (e.g. get_entity or file_path parsing fails),
+            # continue with extension defaults — the entity was at least resolved.
             logger.debug(f"Could not fetch source entity for extension check: {e}")
 
         # --- Resolve destination_folder into destination_path ---
