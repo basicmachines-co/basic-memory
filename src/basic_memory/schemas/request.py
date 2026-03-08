@@ -65,7 +65,14 @@ class EditEntityRequest(BaseModel):
     Supports various operation types for different editing scenarios.
     """
 
-    operation: Literal["append", "prepend", "find_replace", "replace_section"]
+    operation: Literal[
+        "append",
+        "prepend",
+        "find_replace",
+        "replace_section",
+        "insert_before_section",
+        "insert_after_section",
+    ]
     content: str
     section: Optional[str] = None
     find_text: Optional[str] = None
@@ -75,8 +82,16 @@ class EditEntityRequest(BaseModel):
     @classmethod
     def validate_section_for_replace_section(cls, v, info):
         """Ensure section is provided for replace_section operation."""
-        if info.data.get("operation") == "replace_section" and not v:
-            raise ValueError("section parameter is required for replace_section operation")
+        if (
+            info.data.get("operation")
+            in (
+                "replace_section",
+                "insert_before_section",
+                "insert_after_section",
+            )
+            and not v
+        ):
+            raise ValueError("section parameter is required for section-based operations")
         return v
 
     @field_validator("find_text")

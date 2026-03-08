@@ -345,13 +345,53 @@ def test_edit_entity_request_find_replace_empty_find_text():
 def test_edit_entity_request_replace_section_empty_section():
     """Test that replace_section operation requires non-empty section parameter."""
     with pytest.raises(
-        ValueError, match="section parameter is required for replace_section operation"
+        ValueError, match="section parameter is required for section-based operations"
     ):
         EditEntityRequest.model_validate(
             {
                 "operation": "replace_section",
                 "content": "new content",
                 "section": "",  # Empty string triggers validation
+            }
+        )
+
+
+def test_edit_entity_request_insert_before_section():
+    """Test insert_before_section is a valid operation."""
+    edit_request = EditEntityRequest.model_validate(
+        {
+            "operation": "insert_before_section",
+            "content": "content to insert",
+            "section": "## Target Section",
+        }
+    )
+    assert edit_request.operation == "insert_before_section"
+    assert edit_request.section == "## Target Section"
+
+
+def test_edit_entity_request_insert_after_section():
+    """Test insert_after_section is a valid operation."""
+    edit_request = EditEntityRequest.model_validate(
+        {
+            "operation": "insert_after_section",
+            "content": "content to insert",
+            "section": "## Target Section",
+        }
+    )
+    assert edit_request.operation == "insert_after_section"
+    assert edit_request.section == "## Target Section"
+
+
+def test_edit_entity_request_insert_before_section_empty_section():
+    """Test that insert_before_section requires non-empty section parameter."""
+    with pytest.raises(
+        ValueError, match="section parameter is required for section-based operations"
+    ):
+        EditEntityRequest.model_validate(
+            {
+                "operation": "insert_before_section",
+                "content": "content",
+                "section": "",
             }
         )
 
