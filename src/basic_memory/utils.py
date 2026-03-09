@@ -251,7 +251,7 @@ def setup_logging(
     log_to_file: bool = False,
     log_to_stdout: bool = False,
     structured_context: bool = False,
-) -> None:  # pragma: no cover
+) -> None:
     """Configure logging with explicit settings.
 
     This function provides a simple, explicit interface for configuring logging.
@@ -334,7 +334,7 @@ def _cleanup_windows_log_files(log_dir: Path, current_log_name: str) -> None:
         try:
             stale_log.unlink()
         except OSError:
-            logger.debug(f"Failed to delete stale Windows log file: {stale_log}")
+            logger.debug("Failed to delete stale Windows log file: {path}", path=stale_log)
 
 
 def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
