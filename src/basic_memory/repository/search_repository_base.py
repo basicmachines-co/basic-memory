@@ -451,21 +451,36 @@ class SearchRepositoryBase(ABC):
         return "\n\n".join(part for part in row_parts if part)
 
     def _build_chunk_records(self, rows) -> list[dict[str, str]]:
-        records: list[dict[str, str]] = []
+        records_by_key: dict[str, dict[str, str]] = {}
+        duplicate_chunk_keys = 0
         for row in rows:
             source_text = self._compose_row_source_text(row)
             chunks = self._split_text_into_chunks(source_text)
             for chunk_index, chunk_text in enumerate(chunks):
                 chunk_key = f"{row.type}:{row.id}:{chunk_index}"
                 source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-                records.append(
-                    {
-                        "chunk_key": chunk_key,
-                        "chunk_text": chunk_text,
-                        "source_hash": source_hash,
-                    }
-                )
-        return records
+                # Trigger: SQLite FTS5 can accumulate duplicate logical rows for the
+                # same search_index id because it does not enforce relational uniqueness.
+                # Why: duplicate chunk keys would schedule duplicate writes for the same
+                # chunk row and eventually trip UNIQUE(rowid) in search_vector_embeddings.
+                # Outcome: collapse chunk work to one deterministic record per chunk key.
+                if chunk_key in records_by_key:
+                    duplicate_chunk_keys += 1
+                records_by_key[chunk_key] = {
+                    "chunk_key": chunk_key,
+                    "chunk_text": chunk_text,
+                    "source_hash": source_hash,
+                }
+
+        if duplicate_chunk_keys:
+            logger.warning(
+                "Collapsed duplicate vector chunk keys before embedding sync: "
+                "project_id={project_id} duplicate_chunk_keys={duplicate_chunk_keys}",
+                project_id=self.project_id,
+                duplicate_chunk_keys=duplicate_chunk_keys,
+            )
+
+        return list(records_by_key.values())
 
     # --- Text splitting ---
 

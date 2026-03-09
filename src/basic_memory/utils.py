@@ -273,7 +273,11 @@ def setup_logging(
 
     # Add file handler with rotation
     if log_to_file:
-        log_path = Path.home() / ".basic-memory" / "basic-memory.log"
+        # Trigger: Windows does not allow renaming an open file held by another process.
+        # Why: multiple basic-memory processes can share the same log directory at once.
+        # Outcome: use per-process log files on Windows so log rotation stays local.
+        log_filename = f"basic-memory-{os.getpid()}.log" if os.name == "nt" else "basic-memory.log"
+        log_path = Path.home() / ".basic-memory" / log_filename
         log_path.parent.mkdir(parents=True, exist_ok=True)
         # Keep logging synchronous (enqueue=False) to avoid background logging threads.
         # Background threads are a common source of "hang on exit" issues in CLI/test runs.

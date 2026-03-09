@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError
 
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -1004,56 +1005,81 @@ class ProjectService:
         )
         total_indexed_entities = si_result.scalar() or 0
 
-        chunks_result = await self.repository.execute_query(
-            text("SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :project_id"),
-            {"project_id": project_id},
-        )
-        total_chunks = chunks_result.scalar() or 0
-
-        entities_with_chunks_result = await self.repository.execute_query(
-            text(
-                "SELECT COUNT(DISTINCT entity_id) FROM search_vector_chunks "
-                "WHERE project_id = :project_id"
-            ),
-            {"project_id": project_id},
-        )
-        total_entities_with_chunks = entities_with_chunks_result.scalar() or 0
-
-        # Embeddings count — join pattern differs between SQLite and Postgres
-        if is_postgres:
-            embeddings_sql = text(
-                "SELECT COUNT(*) FROM search_vector_chunks c "
-                "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                "WHERE c.project_id = :project_id"
+        try:
+            chunks_result = await self.repository.execute_query(
+                text("SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :project_id"),
+                {"project_id": project_id},
             )
-        else:
-            embeddings_sql = text(
-                "SELECT COUNT(*) FROM search_vector_chunks c "
-                "JOIN search_vector_embeddings e ON e.rowid = c.id "
-                "WHERE c.project_id = :project_id"
-            )
+            total_chunks = chunks_result.scalar() or 0
 
-        embeddings_result = await self.repository.execute_query(
-            embeddings_sql, {"project_id": project_id}
-        )
-        total_embeddings = embeddings_result.scalar() or 0
-
-        # Orphaned chunks (chunks without embeddings — indicates interrupted indexing)
-        if is_postgres:
-            orphan_sql = text(
-                "SELECT COUNT(*) FROM search_vector_chunks c "
-                "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                "WHERE c.project_id = :project_id AND e.chunk_id IS NULL"
+            entities_with_chunks_result = await self.repository.execute_query(
+                text(
+                    "SELECT COUNT(DISTINCT entity_id) FROM search_vector_chunks "
+                    "WHERE project_id = :project_id"
+                ),
+                {"project_id": project_id},
             )
-        else:
-            orphan_sql = text(
-                "SELECT COUNT(*) FROM search_vector_chunks c "
-                "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
-                "WHERE c.project_id = :project_id AND e.rowid IS NULL"
-            )
+            total_entities_with_chunks = entities_with_chunks_result.scalar() or 0
 
-        orphan_result = await self.repository.execute_query(orphan_sql, {"project_id": project_id})
-        orphaned_chunks = orphan_result.scalar() or 0
+            # Embeddings count — join pattern differs between SQLite and Postgres
+            if is_postgres:
+                embeddings_sql = text(
+                    "SELECT COUNT(*) FROM search_vector_chunks c "
+                    "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
+                    "WHERE c.project_id = :project_id"
+                )
+            else:
+                embeddings_sql = text(
+                    "SELECT COUNT(*) FROM search_vector_chunks c "
+                    "JOIN search_vector_embeddings e ON e.rowid = c.id "
+                    "WHERE c.project_id = :project_id"
+                )
+
+            embeddings_result = await self.repository.execute_query(
+                embeddings_sql, {"project_id": project_id}
+            )
+            total_embeddings = embeddings_result.scalar() or 0
+
+            # Orphaned chunks (chunks without embeddings — indicates interrupted indexing)
+            if is_postgres:
+                orphan_sql = text(
+                    "SELECT COUNT(*) FROM search_vector_chunks c "
+                    "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
+                    "WHERE c.project_id = :project_id AND e.chunk_id IS NULL"
+                )
+            else:
+                orphan_sql = text(
+                    "SELECT COUNT(*) FROM search_vector_chunks c "
+                    "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
+                    "WHERE c.project_id = :project_id AND e.rowid IS NULL"
+                )
+
+            orphan_result = await self.repository.execute_query(
+                orphan_sql, {"project_id": project_id}
+            )
+            orphaned_chunks = orphan_result.scalar() or 0
+        except SAOperationalError as exc:
+            # Trigger: sqlite_master can list vec0 virtual tables even when sqlite-vec
+            # is not loaded in the current Python runtime.
+            # Why: project info should degrade gracefully instead of crashing on stats queries.
+            # Outcome: report vector tables as unavailable and point the user to install the
+            # missing dependency before rebuilding embeddings.
+            if is_postgres or "no such module: vec0" not in str(exc).lower():
+                raise
+
+            return EmbeddingStatus(
+                semantic_search_enabled=True,
+                embedding_provider=provider,
+                embedding_model=model,
+                embedding_dimensions=dimensions,
+                total_indexed_entities=total_indexed_entities,
+                vector_tables_exist=False,
+                reindex_recommended=True,
+                reindex_reason=(
+                    "SQLite vector tables exist but sqlite-vec is unavailable in this Python "
+                    "environment — install/update basic-memory, then run: bm reindex --embeddings"
+                ),
+            )
 
         # --- Reindex recommendation logic (priority order) ---
         reindex_recommended = False

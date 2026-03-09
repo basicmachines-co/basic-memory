@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError
 
 from basic_memory.schemas.project_info import EmbeddingStatus
 from basic_memory.services.project_service import ProjectService
@@ -140,6 +141,40 @@ async def test_embedding_status_orphaned_chunks(
     assert status.orphaned_chunks == 1
     assert status.reindex_recommended is True
     assert "orphaned chunks" in (status.reindex_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_handles_sqlite_vec_unavailable(
+    project_service: ProjectService, test_graph, test_project
+):
+    """Unreadable vec0 tables should degrade to unavailable status instead of crashing."""
+    original_execute_query = project_service.repository.execute_query
+
+    async def _execute_query_with_vec0_failure(query, params):
+        query_text = str(query)
+        if "JOIN search_vector_embeddings" in query_text:
+            raise SAOperationalError(query_text, params, Exception("no such module: vec0"))
+        return await original_execute_query(query, params)
+
+    with patch.object(
+        type(project_service),
+        "config_manager",
+        new_callable=lambda: property(
+            lambda self: _config_manager_with(semantic_search_enabled=True)
+        ),
+    ):
+        with patch.object(
+            project_service.repository,
+            "execute_query",
+            side_effect=_execute_query_with_vec0_failure,
+        ):
+            status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.semantic_search_enabled is True
+    assert status.total_indexed_entities > 0
+    assert status.vector_tables_exist is False
+    assert status.reindex_recommended is True
+    assert "sqlite-vec is unavailable" in (status.reindex_reason or "")
 
 
 @pytest.mark.asyncio

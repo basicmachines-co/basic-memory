@@ -237,6 +237,29 @@ class TestBuildChunkRecords:
         records = self.repo._build_chunk_records(rows)
         assert any("99" in r["chunk_key"] for r in records)
 
+    def test_duplicate_rows_collapse_to_unique_chunk_keys(self):
+        rows = [
+            _make_row(
+                row_type=SearchItemType.ENTITY.value,
+                title="Spec",
+                permalink="spec",
+                content_snippet="shared content",
+                row_id=77,
+            ),
+            _make_row(
+                row_type=SearchItemType.ENTITY.value,
+                title="Spec",
+                permalink="spec",
+                content_snippet="shared content",
+                row_id=77,
+            ),
+        ]
+
+        records = self.repo._build_chunk_records(rows)
+
+        assert len(records) == 1
+        assert records[0]["chunk_key"] == "entity:77:0"
+
 
 # --- SQLite SemanticSearchDisabledError ---
 
