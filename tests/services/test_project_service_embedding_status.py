@@ -148,6 +148,12 @@ async def test_embedding_status_handles_sqlite_vec_unavailable(
     project_service: ProjectService, test_graph, test_project
 ):
     """Unreadable vec0 tables should degrade to unavailable status instead of crashing."""
+    # Trigger: Postgres test matrix executes the same unit suite.
+    # Why: sqlite-vec loading failures are specific to SQLite virtual tables, not Postgres joins.
+    # Outcome: keep the regression focused on the backend that can actually hit this path.
+    if _is_postgres():
+        pytest.skip("sqlite-vec unavailable handling is SQLite-specific.")
+
     original_execute_query = project_service.repository.execute_query
 
     async def _execute_query_with_vec0_failure(query, params):
