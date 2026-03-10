@@ -26,6 +26,7 @@ def isolated_home(tmp_path, monkeypatch) -> Path:
 
     config_module._CONFIG_CACHE = None
     config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
 
     monkeypatch.setenv("HOME", str(tmp_path))
     if os.name == "nt":

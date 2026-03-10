@@ -779,6 +779,7 @@ async def test_add_project_with_project_root_sanitizes_paths(
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
 
         test_cases = [
             # (project_name, user_path, expected_sanitized_name)
@@ -847,6 +848,7 @@ async def test_add_project_with_project_root_rejects_escape_attempts(
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
 
         # All of these should succeed by being sanitized to paths under project_root
         # The sanitization removes dangerous patterns, so they don't escape
@@ -934,6 +936,7 @@ async def test_add_project_with_project_root_normalizes_case(
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
 
         test_cases = [
             # (input_path, expected_normalized_path)
@@ -989,6 +992,7 @@ async def test_add_project_with_project_root_detects_case_collisions(
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
 
         # First, create a project with lowercase path
         first_project = "documents-project"
@@ -1164,6 +1168,7 @@ async def test_add_project_nested_validation_with_project_root(
 
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
 
         parent_project_name = f"cloud-parent-{os.urandom(4).hex()}"
         child_project_name = f"cloud-child-{os.urandom(4).hex()}"

@@ -259,6 +259,7 @@ def config_manager(app_config: BasicMemoryConfig, config_home) -> ConfigManager:
 
     config_module._CONFIG_CACHE = None
     config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
 
     config_manager = ConfigManager()
     # Update its paths to use the test directory

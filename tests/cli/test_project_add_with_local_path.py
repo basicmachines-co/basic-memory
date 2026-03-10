@@ -28,6 +28,7 @@ def mock_config(tmp_path, monkeypatch):
 
     config_module._CONFIG_CACHE = None
     config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
 
     config_dir = tmp_path / ".basic-memory"
     config_dir.mkdir(parents=True, exist_ok=True)

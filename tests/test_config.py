@@ -214,6 +214,7 @@ class TestBasicMemoryConfig:
         config_manager.config_file.write_text(json.dumps(config_data, indent=2))
         basic_memory.config._CONFIG_CACHE = None
         basic_memory.config._CONFIG_MTIME = None
+        basic_memory.config._CONFIG_SIZE = None
 
         loaded = config_manager.load_config()
         assert loaded.default_project == "research"
@@ -240,6 +241,7 @@ class TestBasicMemoryConfig:
         config_manager.config_file.write_text(json.dumps(config_data, indent=2))
         basic_memory.config._CONFIG_CACHE = None
         basic_memory.config._CONFIG_MTIME = None
+        basic_memory.config._CONFIG_SIZE = None
 
         loaded = config_manager.load_config()
         assert loaded.default_project == "work"
@@ -548,6 +550,7 @@ class TestConfigManager:
 
             basic_memory.config._CONFIG_CACHE = None
             basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
 
             # Should load successfully with migration to ProjectEntry
             config = config_manager.load_config()
@@ -589,6 +592,7 @@ class TestConfigManager:
 
             basic_memory.config._CONFIG_CACHE = None
             basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
 
             config = config_manager.load_config()
 
@@ -622,6 +626,7 @@ class TestConfigManager:
 
             basic_memory.config._CONFIG_CACHE = None
             basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
 
             loaded = config_manager.load_config()
             assert isinstance(loaded, BasicMemoryConfig)
@@ -653,6 +658,7 @@ class TestConfigManager:
 
             basic_memory.config._CONFIG_CACHE = None
             basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
 
             config_manager.load_config()
 
@@ -685,6 +691,7 @@ class TestConfigManager:
 
             basic_memory.config._CONFIG_CACHE = None
             basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
 
             config_manager.load_config()
 
@@ -1107,6 +1114,7 @@ class TestProjectMode:
 
             basic_memory.config._CONFIG_CACHE = None
             basic_memory.config._CONFIG_MTIME = None
+            basic_memory.config._CONFIG_SIZE = None
 
             # Should load successfully with migration
             config = config_manager.load_config()
@@ -1191,6 +1199,7 @@ class TestConfigCacheMtimeInvalidation:
 
         basic_memory.config._CONFIG_CACHE = None
         basic_memory.config._CONFIG_MTIME = None
+        basic_memory.config._CONFIG_SIZE = None
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1223,6 +1232,7 @@ class TestConfigCacheMtimeInvalidation:
 
         basic_memory.config._CONFIG_CACHE = None
         basic_memory.config._CONFIG_MTIME = None
+        basic_memory.config._CONFIG_SIZE = None
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1263,6 +1273,7 @@ class TestConfigCacheMtimeInvalidation:
 
         basic_memory.config._CONFIG_CACHE = None
         basic_memory.config._CONFIG_MTIME = None
+        basic_memory.config._CONFIG_SIZE = None
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1280,11 +1291,13 @@ class TestConfigCacheMtimeInvalidation:
             config_manager.load_config()
             assert basic_memory.config._CONFIG_CACHE is not None
             assert basic_memory.config._CONFIG_MTIME is not None
+            assert basic_memory.config._CONFIG_SIZE is not None
 
-            # Save should clear both
+            # Save should clear all cache state
             config_manager.save_config(test_config)
             assert basic_memory.config._CONFIG_CACHE is None
             assert basic_memory.config._CONFIG_MTIME is None
+            assert basic_memory.config._CONFIG_SIZE is None
 
 
 class TestLocalSyncPathMigration:
