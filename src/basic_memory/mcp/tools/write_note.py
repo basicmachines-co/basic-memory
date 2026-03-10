@@ -1,16 +1,17 @@
 """Write note tool for Basic Memory MCP server."""
 
 import textwrap
-from typing import List, Union, Optional, Literal
+from typing import Annotated, List, Union, Optional, Literal
 
 from loguru import logger
+from pydantic import BeforeValidator
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
-from basic_memory.utils import parse_tags, validate_project_path
+from basic_memory.utils import coerce_dict, parse_tags, validate_project_path
 
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]
@@ -28,7 +29,7 @@ async def write_note(
     workspace: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
-    metadata: dict | None = None,
+    metadata: Annotated[dict | None, BeforeValidator(coerce_dict)] = None,
     overwrite: bool | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,

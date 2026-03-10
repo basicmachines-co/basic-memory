@@ -6,8 +6,10 @@ from typing import Annotated, List, Optional, Dict, Any, Literal
 
 from loguru import logger
 from fastmcp import Context
+from pydantic import BeforeValidator
 
 from basic_memory.config import ConfigManager
+from basic_memory.utils import coerce_dict, coerce_list
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.project_context import (
     detect_project_from_url_prefix,
@@ -307,18 +309,26 @@ async def search_notes(
     output_format: Literal["text", "json"] = "text",
     note_types: Annotated[
         List[str] | None,
+        BeforeValidator(coerce_list),
         "Filter by the 'type' field in note frontmatter (e.g. 'note', 'chapter', 'person'). "
         "Case-insensitive.",
     ] = None,
     entity_types: Annotated[
         List[str] | None,
+        BeforeValidator(coerce_list),
         "Filter by knowledge graph item type: 'entity' (whole notes), 'observation', or "
         "'relation'. Defaults to 'entity'. Do NOT pass schema/frontmatter types like "
         "'Chapter' here — use note_types instead.",
     ] = None,
     after_date: Optional[str] = None,
-    metadata_filters: Optional[Dict[str, Any]] = None,
-    tags: Optional[List[str]] = None,
+    metadata_filters: Annotated[
+        Dict[str, Any] | None,
+        BeforeValidator(coerce_dict),
+    ] = None,
+    tags: Annotated[
+        List[str] | None,
+        BeforeValidator(coerce_list),
+    ] = None,
     status: Optional[str] = None,
     min_similarity: Optional[float] = None,
     context: Context | None = None,

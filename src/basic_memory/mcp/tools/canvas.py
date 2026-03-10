@@ -4,12 +4,14 @@ This tool creates Obsidian canvas files (.canvas) using the JSON Canvas 1.0 spec
 """
 
 import json
-from typing import Dict, List, Any, Optional
+from typing import Annotated, Dict, List, Any, Optional
 
 from loguru import logger
 from fastmcp import Context
+from pydantic import BeforeValidator
 
 from basic_memory.mcp.project_context import get_project_client
+from basic_memory.utils import coerce_list
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
 
@@ -19,8 +21,8 @@ from basic_memory.mcp.tools.utils import call_put, call_post, resolve_entity_id
     annotations={"destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 async def canvas(
-    nodes: List[Dict[str, Any]],
-    edges: List[Dict[str, Any]],
+    nodes: Annotated[List[Dict[str, Any]], BeforeValidator(coerce_list)],
+    edges: Annotated[List[Dict[str, Any]], BeforeValidator(coerce_list)],
     title: str,
     directory: str,
     project: Optional[str] = None,

@@ -1,5 +1,6 @@
 """Utility functions for basic-memory."""
 
+import json
 import os
 
 import logging
@@ -7,7 +8,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, Union, runtime_checkable, List, Optional
+from typing import Any, Protocol, Union, runtime_checkable, List, Optional
 
 from loguru import logger
 from unidecode import unidecode
@@ -354,6 +355,36 @@ def parse_tags(tags: Union[List[str], str, None]) -> List[str]:
     except (ValueError, TypeError):  # pragma: no cover
         logger.warning(f"Couldn't parse tags from input of type {type(tags)}: {tags}")
         return []
+
+
+def coerce_list(v: Any) -> Any:
+    """Coerce string input to list for MCP clients that serialize lists as strings."""
+    if v is None:
+        return v
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Single string value — wrap in a list
+        return [v]
+    return v
+
+
+def coerce_dict(v: Any) -> Any:
+    """Coerce string input to dict for MCP clients that serialize dicts as strings."""
+    if v is None:
+        return v
+    if isinstance(v, str):
+        try:
+            parsed = json.loads(v)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return v
 
 
 def normalize_newlines(multiline: str) -> str:
