@@ -189,11 +189,11 @@ def list_projects(
             has_sync = bool(entry and entry.local_sync_path)
             # Determine MCP transport based on project routing mode
             if entry and entry.mode == ProjectMode.CLOUD:
-                mcp_stdio_target = "https"
+                mcp_transport = "https"
             elif cloud_project is not None and local_project is None:
-                mcp_stdio_target = "https"
+                mcp_transport = "https"
             else:
-                mcp_stdio_target = "stdio"
+                mcp_transport = "stdio"
 
             # Show workspace name (type) for cloud-sourced projects
             ws_label = ""
@@ -206,7 +206,7 @@ def list_projects(
                 "local_path": local_path,
                 "cloud_path": cloud_path,
                 "cli_route": cli_route,
-                "mcp_stdio": mcp_stdio_target,
+                "mcp_stdio": mcp_transport,
                 "sync": has_sync,
                 "is_default": is_default,
             }
