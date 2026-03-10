@@ -128,7 +128,7 @@ def list_projects(
         table.add_column("Cloud Path", style="green")
         table.add_column("Workspace", style="green")
         table.add_column("CLI Route", style="blue")
-        table.add_column("MCP (stdio)", style="blue")
+        table.add_column("MCP", style="blue")
         table.add_column("Sync", style="green")
         table.add_column("Default", style="magenta")
 
@@ -182,7 +182,18 @@ def list_projects(
             is_default = config.default_project == project_name
 
             has_sync = bool(entry and entry.local_sync_path)
-            mcp_stdio_target = "local" if local_project is not None else "n/a"
+
+            # Determine MCP transport type based on project routing mode.
+            # Trigger: entry.mode or cloud-only project presence
+            # Why: the original "local"/"n/a" only reflected local DB presence, not transport
+            # Outcome: column now shows the actual MCP transport (stdio vs http)
+            if entry and entry.mode == ProjectMode.CLOUD:
+                mcp_stdio_target = "http"
+            elif cloud_project is not None and local_project is None and entry is None:
+                # Cloud-only project with no local config entry
+                mcp_stdio_target = "http"
+            else:
+                mcp_stdio_target = "stdio"
 
             # Show workspace name (type) for cloud-sourced projects
             ws_label = ""
