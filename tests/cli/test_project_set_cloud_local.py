@@ -22,6 +22,7 @@ def mock_config(tmp_path, monkeypatch):
     from basic_memory import config as config_module
 
     config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
 
     config_dir = tmp_path / ".basic-memory"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -68,6 +69,7 @@ class TestSetCloud:
         from basic_memory import config as config_module
 
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         config_dir = tmp_path / ".basic-memory"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -91,6 +93,7 @@ class TestSetCloud:
         from basic_memory import config as config_module
 
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         config_dir = tmp_path / ".basic-memory"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -161,11 +164,13 @@ class TestSetLocal:
 
         # Manually set workspace_id on the project
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
         config_data = json.loads(mock_config.read_text())
         config_data["projects"]["research"]["mode"] = "cloud"
         config_data["projects"]["research"]["workspace_id"] = "11111111-1111-1111-1111-111111111111"
         mock_config.write_text(json.dumps(config_data, indent=2))
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         # Set back to local
         result = runner.invoke(app, ["project", "set-local", "research"])
@@ -173,6 +178,7 @@ class TestSetLocal:
 
         # Verify workspace_id was cleared
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
         updated_data = json.loads(mock_config.read_text())
         assert updated_data["projects"]["research"]["workspace_id"] is None
         assert updated_data["projects"]["research"]["mode"] == "local"
@@ -187,6 +193,7 @@ class TestSetCloudWithWorkspace:
         from basic_memory.schemas.cloud import WorkspaceInfo
 
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         async def fake_get_available_workspaces():
             return [
@@ -210,6 +217,7 @@ class TestSetCloudWithWorkspace:
 
         # Verify workspace_id was persisted
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
         updated_data = json.loads(mock_config.read_text())
         assert (
             updated_data["projects"]["research"]["workspace_id"]
@@ -222,6 +230,7 @@ class TestSetCloudWithWorkspace:
         from basic_memory.schemas.cloud import WorkspaceInfo
 
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         async def fake_get_available_workspaces():
             return [
@@ -249,17 +258,20 @@ class TestSetCloudWithWorkspace:
         from basic_memory import config as config_module
 
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         # Set default_workspace in config
         config_data = json.loads(mock_config.read_text())
         config_data["default_workspace"] = "global-default-tenant-id"
         mock_config.write_text(json.dumps(config_data, indent=2))
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
 
         result = runner.invoke(app, ["project", "set-cloud", "research"])
         assert result.exit_code == 0
 
         # Verify workspace_id was set from default
         config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
         updated_data = json.loads(mock_config.read_text())
         assert updated_data["projects"]["research"]["workspace_id"] == "global-default-tenant-id"

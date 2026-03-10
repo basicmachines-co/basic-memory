@@ -629,6 +629,10 @@ class BasicMemoryConfig(BaseSettings):
 
 # Module-level cache for configuration
 _CONFIG_CACHE: Optional[BasicMemoryConfig] = None
+# Track config file mtime so cross-process changes (e.g. `bm project set-cloud`
+# in a separate terminal) invalidate the cache in long-lived processes like the
+# MCP stdio server.
+_CONFIG_MTIME: Optional[float] = None
 
 
 class ConfigManager:
@@ -662,13 +666,30 @@ class ConfigManager:
         Environment variables take precedence over file config values,
         following Pydantic Settings best practices.
 
-        Uses module-level cache for performance across ConfigManager instances.
+        Uses module-level cache with file mtime validation so that
+        cross-process config changes (e.g. `bm project set-cloud` in a
+        separate terminal) are picked up by long-lived processes like
+        the MCP stdio server.
         """
-        global _CONFIG_CACHE
+        global _CONFIG_CACHE, _CONFIG_MTIME
 
-        # Return cached config if available
+        # Trigger: cached config exists but the on-disk file may have been
+        # modified by another process (CLI command in a different terminal).
+        # Why: the MCP server is long-lived; without this check it would
+        # serve stale project routing forever.
+        # Outcome: cheap os.stat() per access; re-read only when mtime differs.
         if _CONFIG_CACHE is not None:
-            return _CONFIG_CACHE
+            try:
+                current_mtime = self.config_file.stat().st_mtime
+            except OSError:
+                current_mtime = None
+
+            if current_mtime is not None and current_mtime == _CONFIG_MTIME:
+                return _CONFIG_CACHE
+
+            # mtime changed or file gone — invalidate and fall through to re-read
+            _CONFIG_CACHE = None
+            _CONFIG_MTIME = None
 
         if self.config_file.exists():
             try:
@@ -723,6 +744,12 @@ class ConfigManager:
 
                 _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
 
+                # Record mtime so subsequent calls detect cross-process changes
+                try:
+                    _CONFIG_MTIME = self.config_file.stat().st_mtime
+                except OSError:
+                    _CONFIG_MTIME = None
+
                 # Re-save to normalize legacy config into current format
                 if needs_resave:
                     # Create backup before overwriting so users can revert if needed
@@ -753,10 +780,11 @@ class ConfigManager:
 
     def save_config(self, config: BasicMemoryConfig) -> None:
         """Save configuration to file and invalidate cache."""
-        global _CONFIG_CACHE
+        global _CONFIG_CACHE, _CONFIG_MTIME
         save_basic_memory_config(self.config_file, config)
         # Invalidate cache so next load_config() reads fresh data
         _CONFIG_CACHE = None
+        _CONFIG_MTIME = None
 
     @property
     def projects(self) -> Dict[str, str]:

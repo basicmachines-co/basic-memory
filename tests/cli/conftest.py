@@ -25,6 +25,7 @@ def isolated_home(tmp_path, monkeypatch) -> Path:
     from basic_memory import config as config_module
 
     config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
 
     monkeypatch.setenv("HOME", str(tmp_path))
     if os.name == "nt":

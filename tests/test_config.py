@@ -213,6 +213,7 @@ class TestBasicMemoryConfig:
         }
         config_manager.config_file.write_text(json.dumps(config_data, indent=2))
         basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_MTIME = None
 
         loaded = config_manager.load_config()
         assert loaded.default_project == "research"
@@ -238,6 +239,7 @@ class TestBasicMemoryConfig:
         }
         config_manager.config_file.write_text(json.dumps(config_data, indent=2))
         basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_MTIME = None
 
         loaded = config_manager.load_config()
         assert loaded.default_project == "work"
@@ -545,6 +547,7 @@ class TestConfigManager:
             import basic_memory.config
 
             basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
 
             # Should load successfully with migration to ProjectEntry
             config = config_manager.load_config()
@@ -585,6 +588,7 @@ class TestConfigManager:
             import basic_memory.config
 
             basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
 
             config = config_manager.load_config()
 
@@ -617,6 +621,7 @@ class TestConfigManager:
             import basic_memory.config
 
             basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
 
             loaded = config_manager.load_config()
             assert isinstance(loaded, BasicMemoryConfig)
@@ -647,6 +652,7 @@ class TestConfigManager:
             import basic_memory.config
 
             basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
 
             config_manager.load_config()
 
@@ -678,6 +684,7 @@ class TestConfigManager:
             import basic_memory.config
 
             basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
 
             config_manager.load_config()
 
@@ -1099,6 +1106,7 @@ class TestProjectMode:
             import basic_memory.config
 
             basic_memory.config._CONFIG_CACHE = None
+            basic_memory.config._CONFIG_MTIME = None
 
             # Should load successfully with migration
             config = config_manager.load_config()
@@ -1172,6 +1180,111 @@ class TestProjectMode:
                 loaded.projects["research"].workspace_id == "11111111-1111-1111-1111-111111111111"
             )
             assert loaded.projects["main"].workspace_id is None
+
+
+class TestConfigCacheMtimeInvalidation:
+    """Test that config cache is invalidated when file is modified externally."""
+
+    def test_cache_returns_same_config_when_file_unchanged(self, config_home):
+        """Verify cache hit when config file mtime has not changed."""
+        import basic_memory.config
+
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_MTIME = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            test_config = BasicMemoryConfig(
+                projects={"main": {"path": str(temp_path / "main")}},
+                default_project="main",
+            )
+            config_manager.save_config(test_config)
+
+            # First load populates cache
+            config1 = config_manager.load_config()
+            assert config1.default_project == "main"
+
+            # Second load should return cached config (same object)
+            config2 = config_manager.load_config()
+            assert config1 is config2
+
+    def test_cache_invalidated_when_file_modified(self, config_home):
+        """Verify cache miss when config file is modified by another process."""
+        import json
+        import os
+        import time
+
+        import basic_memory.config
+
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_MTIME = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            test_config = BasicMemoryConfig(
+                projects={"main": {"path": str(temp_path / "main")}},
+                default_project="main",
+            )
+            config_manager.save_config(test_config)
+
+            # First load populates cache
+            config1 = config_manager.load_config()
+            assert config1.get_project_mode("main") == ProjectMode.LOCAL
+
+            # Simulate external process modifying the config file
+            config_data = json.loads(config_manager.config_file.read_text())
+            config_data["projects"]["main"]["mode"] = "cloud"
+
+            # Ensure mtime actually changes (some filesystems have 1s granularity)
+            time.sleep(0.05)
+            config_manager.config_file.write_text(json.dumps(config_data, indent=2))
+            # Force mtime change on filesystems with coarse granularity
+            new_mtime = os.path.getmtime(config_manager.config_file) + 1
+            os.utime(config_manager.config_file, (new_mtime, new_mtime))
+
+            # Next load should detect mtime change and re-read
+            config2 = config_manager.load_config()
+            assert config2.get_project_mode("main") == ProjectMode.CLOUD
+            assert config1 is not config2
+
+    def test_save_config_resets_mtime(self, config_home):
+        """Verify save_config clears both cache and mtime."""
+        import basic_memory.config
+
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_MTIME = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            config_manager = ConfigManager()
+            config_manager.config_dir = temp_path / "basic-memory"
+            config_manager.config_file = config_manager.config_dir / "config.json"
+            config_manager.config_dir.mkdir(parents=True, exist_ok=True)
+
+            test_config = BasicMemoryConfig(
+                projects={"main": {"path": str(temp_path / "main")}},
+            )
+            config_manager.save_config(test_config)
+
+            # Load to populate cache
+            config_manager.load_config()
+            assert basic_memory.config._CONFIG_CACHE is not None
+            assert basic_memory.config._CONFIG_MTIME is not None
+
+            # Save should clear both
+            config_manager.save_config(test_config)
+            assert basic_memory.config._CONFIG_CACHE is None
+            assert basic_memory.config._CONFIG_MTIME is None
 
 
 class TestLocalSyncPathMigration:
