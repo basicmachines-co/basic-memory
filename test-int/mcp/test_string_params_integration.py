@@ -130,3 +130,38 @@ async def test_write_note_metadata_as_string(mcp_server, app, test_project):
         )
         text = result.content[0].text
         assert "Created note" in text or "Updated note" in text
+
+
+@pytest.mark.asyncio
+async def test_canvas_nodes_edges_as_string(mcp_server, app, test_project):
+    """canvas should accept nodes and edges as JSON strings via MCP protocol."""
+    import json
+
+    nodes = [
+        {
+            "id": "n1",
+            "type": "text",
+            "text": "Hello",
+            "x": 0,
+            "y": 0,
+            "width": 200,
+            "height": 100,
+        }
+    ]
+    edges = [
+        {"id": "e1", "fromNode": "n1", "toNode": "n1", "label": "self"}
+    ]
+
+    async with Client(mcp_server) as client:
+        result = await client.call_tool(
+            "canvas",
+            {
+                "project": test_project.name,
+                "title": "Coerce Canvas Test",
+                "directory": "test",
+                "nodes": json.dumps(nodes),
+                "edges": json.dumps(edges),
+            },
+        )
+        text = result.content[0].text
+        assert "Created" in text or "Updated" in text
