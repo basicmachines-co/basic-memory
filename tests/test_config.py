@@ -1237,3 +1237,142 @@ class TestLocalSyncPathMigration:
         assert result["projects"]["local-proj"]["path"] == local_path
         assert result["projects"]["cloud-only"]["path"] == "cloud-only"
         assert result["projects"]["cloud-bisync"]["path"] == bisync_path
+
+
+class TestConfigCacheMtimeInvalidation:
+    """Test that the config cache is invalidated when the file changes on disk.
+
+    This covers the MCP stdio server scenario where a long-lived process must
+    pick up `bm project set-cloud` / `set-local` changes made by a separate
+    CLI process without requiring a server restart.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_cache(self):
+        """Ensure the module-level cache is clean before and after each test."""
+        import basic_memory.config
+
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_CACHE_MTIME = None
+        yield
+        basic_memory.config._CONFIG_CACHE = None
+        basic_memory.config._CONFIG_CACHE_MTIME = None
+
+    def _make_manager(self, tmp_path):
+        """Create a ConfigManager pointing at a temp directory."""
+        manager = ConfigManager()
+        manager.config_dir = tmp_path / ".basic-memory"
+        manager.config_file = manager.config_dir / "config.json"
+        manager.config_dir.mkdir(parents=True, exist_ok=True)
+        return manager
+
+    def test_cache_is_populated_after_first_load(self, tmp_path, monkeypatch):
+        """First load should populate the cache and record the file mtime."""
+        import basic_memory.config
+
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        manager = self._make_manager(tmp_path)
+        project_path = tmp_path / "main"
+
+        import json
+
+        manager.config_file.write_text(
+            json.dumps({"projects": {"main": {"path": str(project_path)}}})
+        )
+
+        manager.load_config()
+
+        assert basic_memory.config._CONFIG_CACHE is not None
+        assert basic_memory.config._CONFIG_CACHE_MTIME == manager.config_file.stat().st_mtime
+
+    def test_unchanged_file_returns_same_cached_object(self, tmp_path, monkeypatch):
+        """Repeated loads with no file change should return the identical cached object."""
+        import json
+
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        manager = self._make_manager(tmp_path)
+        project_path = tmp_path / "main"
+
+        manager.config_file.write_text(
+            json.dumps({"projects": {"main": {"path": str(project_path)}}})
+        )
+
+        first = manager.load_config()
+        second = manager.load_config()
+
+        assert first is second
+
+    def test_modified_file_invalidates_cache(self, tmp_path, monkeypatch):
+        """When the config file mtime changes, load_config() must reload from disk.
+
+        This is the core scenario: a CLI command (set-cloud / set-local) runs in
+        a separate process, writes a new config.json, and the long-lived MCP
+        stdio server should detect the mtime change and return updated routing.
+        """
+        import json
+        import os
+        import basic_memory.config
+
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        manager = self._make_manager(tmp_path)
+        project_path = tmp_path / "main"
+
+        # --- Initial state: project is LOCAL ---
+        manager.config_file.write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        "main": {"path": str(project_path), "mode": "local"},
+                    }
+                }
+            )
+        )
+        first = manager.load_config()
+        assert first.get_project_mode("main") == ProjectMode.LOCAL
+
+        # --- Simulate external process writing updated config (set-cloud) ---
+        # Advance mtime by 1 second so the stat() check detects the change even
+        # on filesystems with 1-second mtime resolution.
+        manager.config_file.write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        "main": {"path": str(project_path), "mode": "cloud"},
+                    }
+                }
+            )
+        )
+        current_mtime = manager.config_file.stat().st_mtime
+        os.utime(manager.config_file, (current_mtime + 1.0, current_mtime + 1.0))
+
+        # Re-load — must detect the mtime change and reload from disk
+        second = manager.load_config()
+
+        assert second is not first
+        assert second.get_project_mode("main") == ProjectMode.CLOUD
+        assert basic_memory.config._CONFIG_CACHE_MTIME == manager.config_file.stat().st_mtime
+
+    def test_save_config_resets_mtime_cache(self, tmp_path, monkeypatch):
+        """save_config() must clear both _CONFIG_CACHE and _CONFIG_CACHE_MTIME."""
+        import json
+        import basic_memory.config
+
+        monkeypatch.delenv("BASIC_MEMORY_HOME", raising=False)
+        manager = self._make_manager(tmp_path)
+        project_path = tmp_path / "main"
+
+        manager.config_file.write_text(
+            json.dumps({"projects": {"main": {"path": str(project_path)}}})
+        )
+        manager.load_config()
+
+        # Both should be populated after a load
+        assert basic_memory.config._CONFIG_CACHE is not None
+        assert basic_memory.config._CONFIG_CACHE_MTIME is not None
+
+        # save_config() should clear both
+        config = manager.load_config()
+        manager.save_config(config)
+
+        assert basic_memory.config._CONFIG_CACHE is None
+        assert basic_memory.config._CONFIG_CACHE_MTIME is None

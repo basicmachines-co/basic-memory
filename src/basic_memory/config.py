@@ -629,6 +629,10 @@ class BasicMemoryConfig(BaseSettings):
 
 # Module-level cache for configuration
 _CONFIG_CACHE: Optional[BasicMemoryConfig] = None
+# mtime of the config file when the cache was last populated.
+# Used to detect out-of-process changes (e.g. CLI set-cloud/set-local while
+# the MCP stdio server is running) so the long-lived process picks up updates.
+_CONFIG_CACHE_MTIME: Optional[float] = None
 
 
 class ConfigManager:
@@ -663,10 +667,29 @@ class ConfigManager:
         following Pydantic Settings best practices.
 
         Uses module-level cache for performance across ConfigManager instances.
+        The cache is validated against the config file's mtime on every call so
+        that long-lived processes (MCP stdio server) automatically pick up
+        changes made by external commands like `bm project set-cloud`.
         """
-        global _CONFIG_CACHE
+        global _CONFIG_CACHE, _CONFIG_CACHE_MTIME
 
-        # Return cached config if available
+        # --- Detect out-of-process config changes via mtime ---
+        # Trigger: another process (CLI set-cloud/set-local) wrote a new config
+        #          while this process was running and has a cached copy.
+        # Why: _CONFIG_CACHE is never invalidated across process boundaries;
+        #      a cheap stat() call lets us detect the change without polling.
+        # Outcome: stale cache is dropped and the file is re-read below.
+        if _CONFIG_CACHE is not None and self.config_file.exists():
+            current_mtime = self.config_file.stat().st_mtime
+            if current_mtime != _CONFIG_CACHE_MTIME:
+                logger.debug(
+                    f"Config file modified since last load (mtime changed), "
+                    f"invalidating cache: {self.config_file}"
+                )
+                _CONFIG_CACHE = None
+                _CONFIG_CACHE_MTIME = None
+
+        # Return cached config if still valid
         if _CONFIG_CACHE is not None:
             return _CONFIG_CACHE
 
@@ -722,6 +745,8 @@ class ConfigManager:
                         merged_data[field_name] = env_dict[field_name]
 
                 _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
+                # Record mtime so we can detect future out-of-process changes.
+                _CONFIG_CACHE_MTIME = self.config_file.stat().st_mtime
 
                 # Re-save to normalize legacy config into current format
                 if needs_resave:
@@ -753,10 +778,13 @@ class ConfigManager:
 
     def save_config(self, config: BasicMemoryConfig) -> None:
         """Save configuration to file and invalidate cache."""
-        global _CONFIG_CACHE
+        global _CONFIG_CACHE, _CONFIG_CACHE_MTIME
         save_basic_memory_config(self.config_file, config)
-        # Invalidate cache so next load_config() reads fresh data
+        # Invalidate cache so next load_config() reads fresh data.
+        # Also reset mtime so the in-process re-read after save picks up the
+        # new file rather than seeing the newly-written mtime as "unchanged".
         _CONFIG_CACHE = None
+        _CONFIG_CACHE_MTIME = None
 
     @property
     def projects(self) -> Dict[str, str]:
