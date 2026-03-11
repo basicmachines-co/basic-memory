@@ -141,4 +141,4 @@ If you encounter issues:
    cat ~/.basic-memory/basic-memory.log
    ```
 
-For more detailed information, refer to the [full documentation](https://memory.basicmachines.co/).
+For more detailed information, refer to the [full documentation](https://docs.basicmemory.com/).
