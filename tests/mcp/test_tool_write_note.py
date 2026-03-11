@@ -1257,6 +1257,11 @@ class TestWriteNoteOverwriteGuard:
         # Set config to allow overwrites by default
         app_config.write_note_overwrite_default = True
         config_module._CONFIG_CACHE = app_config
+        # Pin mtime+size to the on-disk file so the cache guard sees a match
+        # and keeps our injected config instead of re-reading from disk.
+        _st = config_manager.config_file.stat()
+        config_module._CONFIG_MTIME = _st.st_mtime
+        config_module._CONFIG_SIZE = _st.st_size
 
         try:
             await write_note(
@@ -1281,6 +1286,9 @@ class TestWriteNoteOverwriteGuard:
             # Restore config
             app_config.write_note_overwrite_default = False
             config_module._CONFIG_CACHE = app_config
+            _st = config_manager.config_file.stat()
+            config_module._CONFIG_MTIME = _st.st_mtime
+            config_module._CONFIG_SIZE = _st.st_size
 
     @pytest.mark.asyncio
     async def test_write_note_new_note_unaffected(self, app, test_project):
