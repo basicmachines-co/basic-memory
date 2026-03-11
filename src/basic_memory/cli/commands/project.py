@@ -190,7 +190,7 @@ def list_projects(
             # Determine MCP transport based on project routing mode
             if entry and entry.mode == ProjectMode.CLOUD:
                 mcp_transport = "https"
-            elif cloud_project is not None and local_project is None:
+            elif entry is None and cloud_project is not None:
                 mcp_transport = "https"
             else:
                 mcp_transport = "stdio"
