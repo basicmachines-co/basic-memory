@@ -5,7 +5,12 @@ from typing import Optional, Literal
 from loguru import logger
 from fastmcp import Context
 
-from basic_memory.mcp.project_context import get_project_client, add_project_metadata
+from basic_memory.config import ConfigManager
+from basic_memory.mcp.project_context import (
+    detect_project_from_url_prefix,
+    get_project_client,
+    add_project_metadata,
+)
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.response import EntityResponse
@@ -254,6 +259,12 @@ async def edit_note(
     """
     # Resolve effective default: allow MCP clients to send null for optional int field
     effective_replacements = expected_replacements if expected_replacements is not None else 1
+
+    # Detect project from memory URL prefix before routing
+    if project is None:
+        detected = detect_project_from_url_prefix(identifier, ConfigManager().config)
+        if detected:
+            project = detected
 
     async with get_project_client(project, workspace, context) as (client, active_project):
         logger.info("MCP tool call", tool="edit_note", identifier=identifier, operation=operation)
