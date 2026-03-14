@@ -1,6 +1,5 @@
 """Tests for the edit_note MCP tool."""
 
-
 import pytest
 
 from basic_memory.mcp.tools.edit_note import edit_note

@@ -148,9 +148,7 @@ async def test_canvas_nodes_edges_as_string(mcp_server, app, test_project):
             "height": 100,
         }
     ]
-    edges = [
-        {"id": "e1", "fromNode": "n1", "toNode": "n1", "label": "self"}
-    ]
+    edges = [{"id": "e1", "fromNode": "n1", "toNode": "n1", "label": "self"}]
 
     async with Client(mcp_server) as client:
         result = await client.call_tool(

@@ -54,6 +54,9 @@ async def run_doctor() -> None:
                 if not status.new_project:
                     raise ValueError("Failed to create doctor project")
                 project_id = status.new_project.external_id
+                # Use the resolved path from the server — when project_root is configured,
+                # the actual project directory differs from the requested temp_path
+                project_path = Path(status.new_project.path)
                 console.print(f"[green]OK[/green] Created doctor project: {project_name}")
 
                 # --- DB -> File: create an entity via API ---
@@ -68,7 +71,7 @@ async def run_doctor() -> None:
                 )
                 api_result = await knowledge_client.create_entity(api_note.model_dump(), fast=False)
 
-                api_file = temp_path / api_result.file_path
+                api_file = project_path / api_result.file_path
                 if not api_file.exists():
                     raise ValueError(f"API note file missing: {api_result.file_path}")
 
@@ -79,7 +82,7 @@ async def run_doctor() -> None:
                 console.print("[green]OK[/green] API write created file")
 
                 # --- File -> DB: write markdown file directly, then sync ---
-                parser = EntityParser(temp_path)
+                parser = EntityParser(project_path)
                 processor = MarkdownProcessor(parser)
                 manual_markdown = EntityMarkdown(
                     frontmatter=EntityFrontmatter(
@@ -93,7 +96,7 @@ async def run_doctor() -> None:
                     content=f"# {manual_note_title}\n\n- [note] File to DB check",
                 )
 
-                manual_path = temp_path / "doctor" / "manual-note.md"
+                manual_path = project_path / "doctor" / "manual-note.md"
                 await processor.write_file(manual_path, manual_markdown)
                 console.print("[green]OK[/green] Manual file written")
 
