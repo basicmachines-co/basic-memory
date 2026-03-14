@@ -1,5 +1,7 @@
 """Tests for the edit_note MCP tool."""
 
+from unittest.mock import patch
+
 import pytest
 
 from basic_memory.mcp.tools.edit_note import edit_note
@@ -769,3 +771,61 @@ async def test_edit_note_insert_before_section_not_found(client, test_project):
 
     assert isinstance(result, str)
     assert "# Edit Failed" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_detects_project_from_memory_url(client, test_project):
+    """edit_note should detect project from memory:// URL prefix when project=None."""
+    # Create a note first
+    await write_note(
+        project=test_project.name,
+        title="URL Detection Note",
+        directory="test",
+        content="# URL Detection Note\nOriginal content.",
+    )
+
+    # Edit using memory:// URL with project=None — should auto-detect project
+    # The memory URL uses the permalink (which includes project prefix)
+    result = await edit_note(
+        identifier=f"memory://{test_project.name}/test/url-detection-note",
+        operation="append",
+        content="\nAppended via memory URL.",
+        project=None,
+    )
+
+    assert isinstance(result, str)
+    # Should route to the correct project and succeed (either edit or create)
+    assert f"project: {test_project.name}" in result
+
+
+@pytest.mark.asyncio
+async def test_edit_note_skips_detection_for_plain_path(client, test_project):
+    """edit_note should NOT call detect_project_from_url_prefix for plain path identifiers.
+
+    A plain path like 'research/note' should not be misrouted to a project
+    named 'research' — the 'research' segment is a directory, not a project.
+    """
+    with patch("basic_memory.mcp.tools.edit_note.detect_project_from_url_prefix") as mock_detect:
+        # Use a plain path (no memory:// prefix) — detection should not be called
+        await edit_note(
+            identifier="test/some-note",
+            operation="append",
+            content="content",
+            project=None,
+        )
+
+        mock_detect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_edit_note_skips_detection_when_project_provided(client, test_project):
+    """edit_note should skip URL detection when project is explicitly provided."""
+    with patch("basic_memory.mcp.tools.edit_note.detect_project_from_url_prefix") as mock_detect:
+        await edit_note(
+            identifier=f"memory://{test_project.name}/test/some-note",
+            operation="append",
+            content="content",
+            project=test_project.name,
+        )
+
+        mock_detect.assert_not_called()
