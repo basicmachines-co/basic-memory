@@ -997,9 +997,14 @@ class ProjectService:
             )
 
         # --- Count queries (tables exist) ---
+        # Filter by entity existence to exclude stale rows from deleted entities
+        # that remain in derived search tables (search_index, search_vector_chunks)
+        entity_exists = "AND entity_id IN (SELECT id FROM entity WHERE project_id = :project_id)"
+
         si_result = await self.repository.execute_query(
             text(
-                "SELECT COUNT(DISTINCT entity_id) FROM search_index WHERE project_id = :project_id"
+                "SELECT COUNT(DISTINCT entity_id) FROM search_index "
+                f"WHERE project_id = :project_id {entity_exists}"
             ),
             {"project_id": project_id},
         )
@@ -1007,7 +1012,10 @@ class ProjectService:
 
         try:
             chunks_result = await self.repository.execute_query(
-                text("SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :project_id"),
+                text(
+                    "SELECT COUNT(*) FROM search_vector_chunks "
+                    f"WHERE project_id = :project_id {entity_exists}"
+                ),
                 {"project_id": project_id},
             )
             total_chunks = chunks_result.scalar() or 0
@@ -1015,7 +1023,7 @@ class ProjectService:
             entities_with_chunks_result = await self.repository.execute_query(
                 text(
                     "SELECT COUNT(DISTINCT entity_id) FROM search_vector_chunks "
-                    "WHERE project_id = :project_id"
+                    f"WHERE project_id = :project_id {entity_exists}"
                 ),
                 {"project_id": project_id},
             )

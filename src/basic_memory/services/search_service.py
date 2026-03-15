@@ -403,6 +403,11 @@ class SearchService:
         """
         entities = await self.entity_repository.find_all()
         entity_ids = [entity.id for entity in entities]
+
+        # Clean up stale rows in search_index and search_vector_chunks
+        # that reference entity_ids no longer in the entity table
+        await self._purge_stale_search_rows(set(entity_ids))
+
         batch_result = await self.repository.sync_entity_vectors_batch(
             entity_ids,
             progress_callback=progress_callback,
@@ -418,6 +423,52 @@ class SearchService:
             logger.warning(f"Failed to embed entity {failed_entity_id}")
 
         return stats
+
+    async def _purge_stale_search_rows(self, valid_entity_ids: set[int]) -> None:
+        """Remove rows from search_index and search_vector_chunks for deleted entities.
+
+        Trigger: entities are deleted but their derived search rows remain
+        Why: stale rows inflate embedding coverage stats in project info
+        Outcome: search tables only contain rows for entities that still exist
+        """
+        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+        from sqlalchemy import text
+
+        project_id = self.repository.project_id
+        stale_entity_filter = (
+            "entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)"
+        )
+        params = {"project_id": project_id}
+
+        # Delete stale search_index rows
+        await self.repository.execute_query(
+            text(
+                f"DELETE FROM search_index WHERE project_id = :project_id AND {stale_entity_filter}"
+            ),
+            params,
+        )
+
+        # SQLite vec has no CASCADE — must delete embeddings before chunks
+        if isinstance(self.repository, SQLiteSearchRepository):
+            await self.repository.execute_query(
+                text(
+                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                    "SELECT id FROM search_vector_chunks "
+                    f"WHERE project_id = :project_id AND {stale_entity_filter})"
+                ),
+                params,
+            )
+
+        # Postgres CASCADE handles embedding deletion automatically
+        await self.repository.execute_query(
+            text(
+                f"DELETE FROM search_vector_chunks "
+                f"WHERE project_id = :project_id AND {stale_entity_filter}"
+            ),
+            params,
+        )
+
+        logger.info("Purged stale search rows for deleted entities", project_id=project_id)
 
     async def index_entity_file(
         self,
