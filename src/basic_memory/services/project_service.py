@@ -1000,6 +1000,10 @@ class ProjectService:
         # Filter by entity existence to exclude stale rows from deleted entities
         # that remain in derived search tables (search_index, search_vector_chunks)
         entity_exists = "AND entity_id IN (SELECT id FROM entity WHERE project_id = :project_id)"
+        # Same filter for aliased chunks table (used in JOIN queries below)
+        chunk_entity_exists = (
+            "AND c.entity_id IN (SELECT id FROM entity WHERE project_id = :project_id)"
+        )
 
         si_result = await self.repository.execute_query(
             text(
@@ -1034,13 +1038,13 @@ class ProjectService:
                 embeddings_sql = text(
                     "SELECT COUNT(*) FROM search_vector_chunks c "
                     "JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                    "WHERE c.project_id = :project_id"
+                    f"WHERE c.project_id = :project_id {chunk_entity_exists}"
                 )
             else:
                 embeddings_sql = text(
                     "SELECT COUNT(*) FROM search_vector_chunks c "
                     "JOIN search_vector_embeddings e ON e.rowid = c.id "
-                    "WHERE c.project_id = :project_id"
+                    f"WHERE c.project_id = :project_id {chunk_entity_exists}"
                 )
 
             embeddings_result = await self.repository.execute_query(
@@ -1053,13 +1057,13 @@ class ProjectService:
                 orphan_sql = text(
                     "SELECT COUNT(*) FROM search_vector_chunks c "
                     "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                    "WHERE c.project_id = :project_id AND e.chunk_id IS NULL"
+                    f"WHERE c.project_id = :project_id AND e.chunk_id IS NULL {chunk_entity_exists}"
                 )
             else:
                 orphan_sql = text(
                     "SELECT COUNT(*) FROM search_vector_chunks c "
                     "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
-                    "WHERE c.project_id = :project_id AND e.rowid IS NULL"
+                    f"WHERE c.project_id = :project_id AND e.rowid IS NULL {chunk_entity_exists}"
                 )
 
             orphan_result = await self.repository.execute_query(

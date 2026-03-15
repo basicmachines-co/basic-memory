@@ -282,14 +282,20 @@ async def test_embedding_status_excludes_stale_entity_ids(
     ):
         status = await project_service.get_embedding_status(test_project.id)
 
-    # The stale entity_id should NOT be counted in total_indexed_entities
-    real_entity_result = await project_service.repository.execute_query(
-        text("SELECT COUNT(*) FROM entity WHERE project_id = :pid"),
+    # The stale entity_id should NOT be counted in total_indexed_entities.
+    # Count real entities that have search_index rows (the stale one should be excluded).
+    real_indexed_result = await project_service.repository.execute_query(
+        text(
+            "SELECT COUNT(DISTINCT si.entity_id) FROM search_index si "
+            "JOIN entity e ON e.id = si.entity_id "
+            "WHERE si.project_id = :pid"
+        ),
         {"pid": test_project.id},
     )
-    real_entity_count = real_entity_result.scalar() or 0
+    real_indexed_count = real_indexed_result.scalar() or 0
 
-    assert status.total_indexed_entities <= real_entity_count
+    # Exact match — stale entity_id must not inflate the count
+    assert status.total_indexed_entities == real_indexed_count
 
 
 @pytest.mark.asyncio

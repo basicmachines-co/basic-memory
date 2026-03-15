@@ -406,7 +406,7 @@ class SearchService:
 
         # Clean up stale rows in search_index and search_vector_chunks
         # that reference entity_ids no longer in the entity table
-        await self._purge_stale_search_rows(set(entity_ids))
+        await self._purge_stale_search_rows()
 
         batch_result = await self.repository.sync_entity_vectors_batch(
             entity_ids,
@@ -424,7 +424,7 @@ class SearchService:
 
         return stats
 
-    async def _purge_stale_search_rows(self, valid_entity_ids: set[int]) -> None:
+    async def _purge_stale_search_rows(self) -> None:
         """Remove rows from search_index and search_vector_chunks for deleted entities.
 
         Trigger: entities are deleted but their derived search rows remain
