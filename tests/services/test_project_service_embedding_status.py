@@ -260,17 +260,19 @@ async def test_embedding_status_excludes_stale_entity_ids(
     Regression test for #670: after reindex, project info reported missing embeddings
     because stale entity_ids in search_index/search_vector_chunks inflated total_indexed_entities.
     """
-    # Insert a stale search_index row for an entity_id that doesn't exist in the entity table
+    # Insert a stale search_index row for an entity_id that doesn't exist in the entity table.
+    # Include 'id' column — required NOT NULL on Postgres (regular table),
+    # ignored on SQLite (FTS5 virtual table where id is UNINDEXED).
     stale_entity_id = 999999
     await project_service.repository.execute_query(
         text(
             "INSERT INTO search_index "
-            "(entity_id, project_id, type, title, permalink, content_stems, "
+            "(id, entity_id, project_id, type, title, permalink, content_stems, "
             "content_snippet, file_path, metadata) "
-            "VALUES (:eid, :pid, 'entity', 'Stale Note', 'stale-note', "
+            "VALUES (:id, :eid, :pid, 'entity', 'Stale Note', 'stale-note', "
             "'stale content', 'stale snippet', 'stale.md', '{}')"
         ),
-        {"eid": stale_entity_id, "pid": test_project.id},
+        {"id": stale_entity_id, "eid": stale_entity_id, "pid": test_project.id},
     )
 
     with patch.object(
