@@ -191,6 +191,50 @@ class TestValidateProjectPathAttacks:
             assert not result, f"Absolute path '{path}' should be blocked"
 
 
+class TestValidateProjectPathDoubleDotInFilename:
+    """Test that filenames containing '..' as part of the name are allowed."""
+
+    def test_double_dot_in_filename_allowed(self, tmp_path):
+        """Filenames like 'hi-everyone..md' should NOT be blocked.
+
+        This was a production bug: a title ending with a period (e.g. "Hi everyone.")
+        produced a file path like "hi-everyone..md" which the old substring check
+        ('..' in path) incorrectly flagged as path traversal.
+        """
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+
+        safe_paths_with_dots = [
+            "hi-everyone..md",
+            "notes/hi-everyone..md",
+            "version-2..0.md",
+            "file...name.md",
+            "docs/report..final.txt",
+        ]
+
+        for path in safe_paths_with_dots:
+            assert validate_project_path(path, project_path), (
+                f"Path '{path}' with '..' in filename should be allowed"
+            )
+
+    def test_actual_traversal_still_blocked(self, tmp_path):
+        """Ensure '..' as a path segment is still blocked."""
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+
+        attack_paths = [
+            "../file.md",
+            "notes/../../etc/passwd",
+            "foo/../../../bar",
+            "..\\Windows\\System32",
+        ]
+
+        for path in attack_paths:
+            assert not validate_project_path(path, project_path), (
+                f"Traversal path '{path}' should still be blocked"
+            )
+
+
 class TestValidateProjectPathEdgeCases:
     """Test edge cases and error conditions."""
 

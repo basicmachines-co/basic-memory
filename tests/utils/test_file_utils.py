@@ -198,6 +198,19 @@ def test_sanitize_for_filename_removes_invalid_characters():
         assert char not in sanitized_text
 
 
+def test_sanitize_for_filename_strips_trailing_periods():
+    """Trailing periods cause double-dot filenames like 'hi-everyone..md'.
+
+    This was a production bug where title "Hi everyone." produced file path
+    "hi-everyone..md" which failed path traversal validation.
+    """
+    assert sanitize_for_filename("Hi everyone.") == "Hi everyone"
+    assert sanitize_for_filename("test...") == "test"
+    assert sanitize_for_filename(".hidden") == "hidden"
+    assert sanitize_for_filename("...dots...") == "dots"
+    assert sanitize_for_filename("normal title") == "normal title"
+
+
 @pytest.mark.parametrize(
     "input_directory,expected",
     [

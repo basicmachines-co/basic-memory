@@ -447,6 +447,11 @@ def sanitize_for_filename(text: str, replacement: str = "-") -> str:
     # compress multiple, repeated replacements
     text = re.sub(f"{re.escape(replacement)}+", replacement, text)
 
+    # Strip trailing periods — they cause "hi-everyone..md" double-dot filenames
+    # when ".md" is appended, which triggers path traversal false positives.
+    # Trailing periods are also invalid on Windows filesystems.
+    text = text.strip(".")
+
     return text.strip(replacement)
 
 
