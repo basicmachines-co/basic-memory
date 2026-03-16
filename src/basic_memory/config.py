@@ -203,6 +203,12 @@ class BasicMemoryConfig(BaseSettings):
         ge=0.0,
         le=1.0,
     )
+    default_search_type: Literal["text", "vector", "hybrid"] | None = Field(
+        default=None,
+        description="Default search type for search_notes when not specified per-query. "
+        "Valid values: text, vector, hybrid. "
+        "When unset, defaults to 'hybrid' if semantic search is enabled, otherwise 'text'.",
+    )
 
     # Database connection pool configuration (Postgres only)
     db_pool_size: int = Field(

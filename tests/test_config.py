@@ -903,6 +903,22 @@ class TestSemanticSearchConfig:
         with pytest.raises(Exception):
             BasicMemoryConfig(semantic_min_similarity=1.1)
 
+    def test_default_search_type_defaults_to_none(self):
+        """default_search_type should be None by default (auto-detect)."""
+        config = BasicMemoryConfig()
+        assert config.default_search_type is None
+
+    def test_default_search_type_accepts_valid_values(self):
+        """default_search_type accepts text, vector, hybrid."""
+        for search_type in ("text", "vector", "hybrid"):
+            config = BasicMemoryConfig(default_search_type=search_type)
+            assert config.default_search_type == search_type
+
+    def test_default_search_type_rejects_invalid_values(self):
+        """default_search_type rejects unknown values."""
+        with pytest.raises(Exception):
+            BasicMemoryConfig(default_search_type="invalid")
+
 
 class TestFormattingConfig:
     """Test file formatting configuration options."""

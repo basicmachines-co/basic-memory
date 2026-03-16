@@ -1567,3 +1567,54 @@ async def test_search_notes_metadata_filters_preserves_non_aliased_keys(monkeypa
 
     # "note_type" aliased to "type", "priority" passes through unchanged
     assert captured_payload["metadata_filters"] == {"type": "spec", "priority": "high"}
+
+
+def test_default_search_type_uses_config_value():
+    """_default_search_type should return config.default_search_type when set."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = "vector"
+    mock_config.semantic_search_enabled = True
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with patch.object(search_module, "get_container", return_value=mock_container):
+        assert search_module._default_search_type() == "vector"
+
+
+def test_default_search_type_falls_back_to_hybrid_when_semantic_enabled():
+    """When default_search_type is None and semantic is enabled, default to hybrid."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
+    mock_config.semantic_search_enabled = True
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with patch.object(search_module, "get_container", return_value=mock_container):
+        assert search_module._default_search_type() == "hybrid"
+
+
+def test_default_search_type_falls_back_to_text_when_semantic_disabled():
+    """When default_search_type is None and semantic is disabled, default to text."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
+    mock_config.semantic_search_enabled = False
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with patch.object(search_module, "get_container", return_value=mock_container):
+        assert search_module._default_search_type() == "text"

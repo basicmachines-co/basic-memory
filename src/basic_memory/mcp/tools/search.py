@@ -25,20 +25,20 @@ from basic_memory.schemas.search import (
 )
 
 
-def _semantic_search_enabled_for_text_search() -> bool:
-    """Resolve semantic-search enablement in both MCP and CLI invocation paths."""
-    try:
-        return get_container().config.semantic_search_enabled
-    except RuntimeError:
-        # Trigger: MCP container is not initialized (e.g., `bm tool search-notes` direct call).
-        # Why: CLI path still needs the same semantic-default behavior as MCP server path.
-        # Outcome: load config directly and keep text-mode retrieval behavior consistent.
-        return ConfigManager().config.semantic_search_enabled
-
-
 def _default_search_type() -> str:
-    """Pick default search mode from semantic-search config."""
-    return "hybrid" if _semantic_search_enabled_for_text_search() else "text"
+    """Pick default search mode from config, falling back to auto-detection.
+
+    Priority: config default_search_type > auto-detect (hybrid if semantic enabled, else text).
+    """
+    try:
+        config = get_container().config
+    except RuntimeError:
+        config = ConfigManager().config
+
+    if config.default_search_type:
+        return config.default_search_type
+
+    return "hybrid" if config.semantic_search_enabled else "text"
 
 
 def _format_search_error_response(
