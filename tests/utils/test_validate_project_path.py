@@ -227,6 +227,10 @@ class TestValidateProjectPathDoubleDotInFilename:
             "notes/../../etc/passwd",
             "foo/../../../bar",
             "..\\Windows\\System32",
+            # Windows normalizes trailing dots/spaces to ".."
+            ".. /file.md",
+            ".. ./file.md",
+            "notes/.. /etc/passwd",
         ]
 
         for path in attack_paths:

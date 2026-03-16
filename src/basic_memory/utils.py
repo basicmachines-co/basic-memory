@@ -509,8 +509,13 @@ def valid_project_path_value(path: str):
 
     # Check for ".." as a path segment (path traversal), not as a substring.
     # Filenames like "hi-everyone..md" are legitimate and must not be blocked.
+    # Also block segments like ".. " and ".. ." because Windows normalizes
+    # trailing dots and spaces away, making them equivalent to "..".
     segments = path.replace("\\", "/").split("/")
-    if any(seg == ".." for seg in segments):
+    if any(
+        seg == ".." or (len(seg) > 2 and seg[:2] == ".." and all(c in ". " for c in seg[2:]))
+        for seg in segments
+    ):
         return False
 
     # Check for Windows-style leading backslash
