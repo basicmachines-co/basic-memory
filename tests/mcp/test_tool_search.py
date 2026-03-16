@@ -788,6 +788,7 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
     @dataclass
     class StubConfig:
         semantic_search_enabled: bool = True
+        default_search_type: str | None = None
 
     @dataclass
     class StubContainer:
@@ -849,6 +850,7 @@ async def test_search_notes_defaults_to_fts_when_semantic_disabled(monkeypatch):
     @dataclass
     class StubConfig:
         semantic_search_enabled: bool = False
+        default_search_type: str | None = None
 
     @dataclass
     class StubContainer:
@@ -909,6 +911,7 @@ async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkey
     @dataclass
     class StubConfig:
         semantic_search_enabled: bool = True
+        default_search_type: str | None = None
 
     @dataclass
     class StubContainer:
@@ -976,7 +979,11 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
         lambda: type(
             "StubConfigManager",
             (),
-            {"config": type("Cfg", (), {"semantic_search_enabled": True})()},
+            {
+                "config": type(
+                    "Cfg", (), {"semantic_search_enabled": True, "default_search_type": None}
+                )()
+            },
         )(),
     )
 
@@ -1037,7 +1044,11 @@ async def test_search_notes_defaults_to_fts_when_container_not_initialized_and_s
         lambda: type(
             "StubConfigManager",
             (),
-            {"config": type("Cfg", (), {"semantic_search_enabled": False})()},
+            {
+                "config": type(
+                    "Cfg", (), {"semantic_search_enabled": False, "default_search_type": None}
+                )()
+            },
         )(),
     )
 
