@@ -6,14 +6,16 @@ import os
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, List, Tuple
-from enum import Enum
 
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from basic_memory import __version__
+from basic_memory.telemetry import configure_telemetry
 from basic_memory.utils import setup_logging, generate_permalink
 
 
@@ -139,6 +141,24 @@ class BasicMemoryConfig(BaseSettings):
 
     # overridden by ~/.basic-memory/config.json
     log_level: str = "INFO"
+
+    # Optional Logfire telemetry (disabled by default)
+    logfire_enabled: bool = Field(
+        default=False,
+        description="Enable Logfire instrumentation for local development or managed deployments.",
+    )
+    logfire_send_to_logfire: bool = Field(
+        default=False,
+        description="When true, allow Logfire to export telemetry to the configured backend.",
+    )
+    logfire_service_name: str = Field(
+        default="basic-memory",
+        description="Base service name used when constructing entrypoint-specific Logfire service names.",
+    )
+    logfire_environment: str | None = Field(
+        default=None,
+        description="Optional override for Logfire environment. Defaults to env when unset.",
+    )
 
     # Database configuration
     database_backend: DatabaseBackend = Field(
@@ -955,6 +975,20 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
 # Logging initialization functions for different entry points
 
 
+def _configure_logfire_for_entrypoint(entrypoint: str) -> None:
+    """Configure optional Logfire telemetry for a specific entrypoint."""
+    config = ConfigManager().config
+    service_name = f"{config.logfire_service_name}-{entrypoint}"
+    environment = config.logfire_environment or config.env
+    configure_telemetry(
+        service_name=service_name,
+        environment=environment,
+        service_version=__version__,
+        enable_logfire=config.logfire_enabled,
+        send_to_logfire=config.logfire_send_to_logfire,
+    )
+
+
 def init_cli_logging() -> None:  # pragma: no cover
     """Initialize logging for CLI commands - file only.
 
@@ -962,6 +996,7 @@ def init_cli_logging() -> None:  # pragma: no cover
     command output and shell integration.
     """
     log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    _configure_logfire_for_entrypoint("cli")
     setup_logging(log_level=log_level, log_to_file=True)
 
 
@@ -972,6 +1007,7 @@ def init_mcp_logging() -> None:  # pragma: no cover
     JSON-RPC protocol communication.
     """
     log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    _configure_logfire_for_entrypoint("mcp")
     setup_logging(log_level=log_level, log_to_file=True)
 
 
@@ -982,6 +1018,7 @@ def init_api_logging() -> None:  # pragma: no cover
     Local mode: file only
     """
     log_level = os.getenv("BASIC_MEMORY_LOG_LEVEL", "INFO")
+    _configure_logfire_for_entrypoint("api")
     cloud_mode = os.getenv("BASIC_MEMORY_CLOUD_MODE", "").lower() in ("1", "true")
     if cloud_mode:
         setup_logging(log_level=log_level, log_to_stdout=True, structured_context=True)

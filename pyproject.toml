@@ -18,6 +18,7 @@ dependencies = [
     "mcp>=1.23.1",
     "pydantic-settings>=2.6.1",
     "loguru>=0.7.3",
+    "logfire>=4.19.0",
     "pyright>=1.1.390",
     "markdown-it-py>=3.0.0",
     "python-frontmatter>=1.1.0",

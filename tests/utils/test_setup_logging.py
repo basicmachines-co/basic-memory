@@ -19,6 +19,8 @@ def test_setup_logging_uses_shared_log_file_off_windows(monkeypatch, tmp_path) -
         "add",
         lambda sink, **kwargs: added_sinks.append(str(sink)),
     )
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
 
     utils.setup_logging(log_to_file=True)
 
@@ -39,6 +41,8 @@ def test_setup_logging_uses_per_process_log_file_on_windows(monkeypatch, tmp_pat
         "add",
         lambda sink, **kwargs: added_sinks.append(str(sink)),
     )
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
 
     utils.setup_logging(log_to_file=True)
 
@@ -64,6 +68,8 @@ def test_setup_logging_trims_stale_windows_pid_logs(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(utils.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
     monkeypatch.setattr(utils.logger, "add", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
 
     utils.setup_logging(log_to_file=True)
 
@@ -103,6 +109,8 @@ def test_setup_logging_log_to_stdout(monkeypatch) -> None:
     monkeypatch.setenv("BASIC_MEMORY_ENV", "dev")
     monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
     monkeypatch.setattr(utils.logger, "add", lambda sink, **kwargs: added_sinks.append(sink))
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
 
     utils.setup_logging(log_to_stdout=True)
 
@@ -120,6 +128,8 @@ def test_setup_logging_structured_context(monkeypatch) -> None:
     monkeypatch.setenv("FLY_REGION", "ord")
     monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
     monkeypatch.setattr(utils.logger, "add", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
     monkeypatch.setattr(
         utils.logger,
         "configure",
@@ -143,6 +153,8 @@ def test_setup_logging_suppresses_noisy_loggers(monkeypatch) -> None:
     monkeypatch.setenv("BASIC_MEMORY_ENV", "dev")
     monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
     monkeypatch.setattr(utils.logger, "add", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
 
     httpx_logger = utils.logging.getLogger("httpx")
     watchfiles_logger = utils.logging.getLogger("watchfiles.main")
@@ -160,3 +172,42 @@ def test_setup_logging_suppresses_noisy_loggers(monkeypatch) -> None:
     finally:
         httpx_logger.setLevel(original_httpx_level)
         watchfiles_logger.setLevel(original_watchfiles_level)
+
+
+def test_setup_logging_adds_logfire_handler(monkeypatch) -> None:
+    """Configured Logfire handlers should be added as an extra Loguru sink."""
+    added_sinks: list[object] = []
+
+    monkeypatch.setenv("BASIC_MEMORY_ENV", "dev")
+    monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.logger, "add", lambda sink, **kwargs: added_sinks.append(sink))
+    monkeypatch.setattr(
+        utils.telemetry,
+        "get_logfire_handler",
+        lambda: {"sink": "logfire-sink", "level": "INFO"},
+    )
+    monkeypatch.setattr(utils.telemetry, "pop_telemetry_warnings", lambda: [])
+
+    utils.setup_logging()
+
+    assert added_sinks == ["logfire-sink"]
+
+
+def test_setup_logging_emits_telemetry_warnings(monkeypatch) -> None:
+    """Telemetry warnings should be logged after sinks are configured."""
+    warnings_logged: list[str] = []
+
+    monkeypatch.setenv("BASIC_MEMORY_ENV", "dev")
+    monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.logger, "add", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+    monkeypatch.setattr(
+        utils.telemetry,
+        "pop_telemetry_warnings",
+        lambda: ["telemetry warning 1", "telemetry warning 2"],
+    )
+    monkeypatch.setattr(utils.logger, "warning", lambda message: warnings_logged.append(message))
+
+    utils.setup_logging()
+
+    assert warnings_logged == ["telemetry warning 1", "telemetry warning 2"]

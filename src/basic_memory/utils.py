@@ -13,6 +13,8 @@ from typing import Any, Protocol, Union, runtime_checkable, List, Optional
 from loguru import logger
 from unidecode import unidecode
 
+from basic_memory import telemetry
+
 
 def normalize_project_path(path: str) -> str:
     """Normalize project path by stripping mount point prefix.
@@ -300,6 +302,11 @@ def setup_logging(
     if log_to_stdout:
         logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=True, colorize=True)
 
+    # Add Logfire sink when telemetry bootstrap enabled it for this process.
+    logfire_handler = telemetry.get_logfire_handler()
+    if logfire_handler is not None:
+        logger.add(**logfire_handler)
+
     # Bind structured context for cloud observability
     if structured_context:
         logger.configure(
@@ -314,6 +321,9 @@ def setup_logging(
     # Reduce noise from third-party libraries
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("watchfiles.main").setLevel(logging.WARNING)
+
+    for warning_message in telemetry.pop_telemetry_warnings():
+        logger.warning(warning_message)
 
 
 def _cleanup_windows_log_files(log_dir: Path, current_log_name: str) -> None:
