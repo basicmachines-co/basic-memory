@@ -5,12 +5,12 @@ import re
 from datetime import datetime
 from typing import List, Optional, Set, Dict, Any
 
-
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
 from sqlalchemy import text
 
+from basic_memory import telemetry
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import (
@@ -176,21 +176,31 @@ class SearchService:
         retrieval_mode = query.retrieval_mode or SearchRetrievalMode.FTS
         strict_search_text = query.text
 
-        # First pass: preserve existing strict search behavior.
-        results = await self.repository.search(
-            search_text=strict_search_text,
-            permalink=query.permalink,
-            permalink_match=query.permalink_match,
-            title=query.title,
-            note_types=query.note_types,
-            search_item_types=query.entity_types,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            retrieval_mode=retrieval_mode,
-            min_similarity=query.min_similarity,
+        with telemetry.span(
+            "search.execute",
+            retrieval_mode=retrieval_mode.value,
+            has_text_query=bool(strict_search_text),
+            has_title_query=bool(query.title),
+            has_permalink_query=bool(query.permalink or query.permalink_match),
+            has_metadata_filters=bool(metadata_filters),
             limit=limit,
             offset=offset,
-        )
+        ):
+            # First pass: preserve existing strict search behavior.
+            results = await self.repository.search(
+                search_text=strict_search_text,
+                permalink=query.permalink,
+                permalink_match=query.permalink_match,
+                title=query.title,
+                note_types=query.note_types,
+                search_item_types=query.entity_types,
+                after_date=after_date,
+                metadata_filters=metadata_filters,
+                retrieval_mode=retrieval_mode,
+                min_similarity=query.min_similarity,
+                limit=limit,
+                offset=offset,
+            )
 
         # Trigger: strict FTS with plain multi-term text returned no results.
         # Why: natural-language queries often include stopwords that over-constrain implicit AND.
@@ -209,20 +219,27 @@ class SearchService:
             "Strict FTS returned 0 results; retrying relaxed FTS query "
             f"strict='{strict_search_text}' relaxed='{relaxed_search_text}'"
         )
-        return await self.repository.search(
-            search_text=relaxed_search_text,
-            permalink=query.permalink,
-            permalink_match=query.permalink_match,
-            title=query.title,
-            note_types=query.note_types,
-            search_item_types=query.entity_types,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            retrieval_mode=retrieval_mode,
-            min_similarity=query.min_similarity,
+        with telemetry.span(
+            "search.relaxed_fts_retry",
+            retrieval_mode=retrieval_mode.value,
+            token_count=len(self._tokenize_fts_text(strict_search_text)),
             limit=limit,
             offset=offset,
-        )
+        ):
+            return await self.repository.search(
+                search_text=relaxed_search_text,
+                permalink=query.permalink,
+                permalink_match=query.permalink_match,
+                title=query.title,
+                note_types=query.note_types,
+                search_item_types=query.entity_types,
+                after_date=after_date,
+                metadata_filters=metadata_filters,
+                retrieval_mode=retrieval_mode,
+                min_similarity=query.min_similarity,
+                limit=limit,
+                offset=offset,
+            )
 
     @staticmethod
     def _tokenize_fts_text(search_text: str) -> list[str]:

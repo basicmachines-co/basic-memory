@@ -19,6 +19,7 @@ from loguru import logger
 from fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 
+from basic_memory import telemetry
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
 from basic_memory.project_resolver import ProjectResolver
 from basic_memory.schemas.cloud import WorkspaceInfo, WorkspaceListResponse
@@ -89,22 +90,27 @@ async def resolve_project_parameter(
     Returns:
         Resolved project name or None if no resolution possible
     """
-    # Load config for any values not explicitly provided.
-    # ConfigManager reads from the local config file, which doesn't exist in cloud mode.
-    # When it returns None, fall back to querying the projects API for the is_default flag.
-    if default_project is None:
-        config = ConfigManager().config
-        default_project = config.default_project
+    with telemetry.span(
+        "routing.resolve_project",
+        requested_project=project,
+        allow_discovery=allow_discovery,
+    ):
+        # Load config for any values not explicitly provided.
+        # ConfigManager reads from the local config file, which doesn't exist in cloud mode.
+        # When it returns None, fall back to querying the projects API for the is_default flag.
+        if default_project is None:
+            config = ConfigManager().config
+            default_project = config.default_project
 
-    if default_project is None:
-        default_project = await _resolve_default_project_from_api()
+        if default_project is None:
+            default_project = await _resolve_default_project_from_api()
 
-    # Create resolver with configuration and resolve
-    resolver = ProjectResolver.from_env(
-        default_project=default_project,
-    )
-    result = resolver.resolve(project=project, allow_discovery=allow_discovery)
-    return result.project
+        # Create resolver with configuration and resolve
+        resolver = ProjectResolver.from_env(
+            default_project=default_project,
+        )
+        result = resolver.resolve(project=project, allow_discovery=allow_discovery)
+        return result.project
 
 
 async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = None) -> List[str]:
@@ -177,51 +183,60 @@ async def resolve_workspace_parameter(
     context: Optional[Context] = None,
 ) -> WorkspaceInfo:
     """Resolve workspace using explicit input, session cache, and cloud discovery."""
-    if context:
-        cached_raw = await context.get_state("active_workspace")
-        if isinstance(cached_raw, dict):
-            cached_workspace = WorkspaceInfo.model_validate(cached_raw)
-            if workspace is None or _workspace_matches_identifier(cached_workspace, workspace):
-                logger.debug(f"Using cached workspace from context: {cached_workspace.tenant_id}")
-                return cached_workspace
+    with telemetry.span(
+        "routing.resolve_workspace",
+        workspace_requested=workspace is not None,
+        has_context=context is not None,
+    ):
+        if context:
+            cached_raw = await context.get_state("active_workspace")
+            if isinstance(cached_raw, dict):
+                cached_workspace = WorkspaceInfo.model_validate(cached_raw)
+                if workspace is None or _workspace_matches_identifier(cached_workspace, workspace):
+                    logger.debug(
+                        f"Using cached workspace from context: {cached_workspace.tenant_id}"
+                    )
+                    return cached_workspace
 
-    workspaces = await get_available_workspaces(context=context)
-    if not workspaces:
-        raise ValueError(
-            "No accessible workspaces found for this account. "
-            "Ensure you have an active subscription and tenant access."
-        )
-
-    selected_workspace: WorkspaceInfo | None = None
-
-    if workspace:
-        matches = [item for item in workspaces if _workspace_matches_identifier(item, workspace)]
-        if not matches:
+        workspaces = await get_available_workspaces(context=context)
+        if not workspaces:
             raise ValueError(
-                f"Workspace '{workspace}' was not found.\n"
+                "No accessible workspaces found for this account. "
+                "Ensure you have an active subscription and tenant access."
+            )
+
+        selected_workspace: WorkspaceInfo | None = None
+
+        if workspace:
+            matches = [
+                item for item in workspaces if _workspace_matches_identifier(item, workspace)
+            ]
+            if not matches:
+                raise ValueError(
+                    f"Workspace '{workspace}' was not found.\n"
+                    f"Available workspaces:\n{_workspace_choices(workspaces)}"
+                )
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Workspace name '{workspace}' matches multiple workspaces. "
+                    "Use tenant_id instead.\n"
+                    f"Available workspaces:\n{_workspace_choices(workspaces)}"
+                )
+            selected_workspace = matches[0]
+        elif len(workspaces) == 1:
+            selected_workspace = workspaces[0]
+        else:
+            raise ValueError(
+                "Multiple workspaces are available. Ask the user which workspace to use, then retry "
+                "with the 'workspace' argument set to the tenant_id or unique name.\n"
                 f"Available workspaces:\n{_workspace_choices(workspaces)}"
             )
-        if len(matches) > 1:
-            raise ValueError(
-                f"Workspace name '{workspace}' matches multiple workspaces. "
-                "Use tenant_id instead.\n"
-                f"Available workspaces:\n{_workspace_choices(workspaces)}"
-            )
-        selected_workspace = matches[0]
-    elif len(workspaces) == 1:
-        selected_workspace = workspaces[0]
-    else:
-        raise ValueError(
-            "Multiple workspaces are available. Ask the user which workspace to use, then retry "
-            "with the 'workspace' argument set to the tenant_id or unique name.\n"
-            f"Available workspaces:\n{_workspace_choices(workspaces)}"
-        )
 
-    if context:
-        await context.set_state("active_workspace", selected_workspace.model_dump())
-        logger.debug(f"Cached workspace in context: {selected_workspace.tenant_id}")
+        if context:
+            await context.set_state("active_workspace", selected_workspace.model_dump())
+            logger.debug(f"Cached workspace in context: {selected_workspace.tenant_id}")
 
-    return selected_workspace
+        return selected_workspace
 
 
 async def get_active_project(
@@ -244,53 +259,58 @@ async def get_active_project(
         ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
-    # Deferred import to avoid circular dependency with tools
-    from basic_memory.mcp.tools.utils import call_post
+    with telemetry.span(
+        "routing.validate_project",
+        requested_project=project,
+        has_context=context is not None,
+    ):
+        # Deferred import to avoid circular dependency with tools
+        from basic_memory.mcp.tools.utils import call_post
 
-    resolved_project = await resolve_project_parameter(project)
-    if not resolved_project:
-        project_names = await get_project_names(client, headers)
-        raise ValueError(
-            "No project specified. "
-            "Either set 'default_project' in config, or use 'project' argument.\n"
-            f"Available projects: {project_names}"
+        resolved_project = await resolve_project_parameter(project)
+        if not resolved_project:
+            project_names = await get_project_names(client, headers)
+            raise ValueError(
+                "No project specified. "
+                "Either set 'default_project' in config, or use 'project' argument.\n"
+                f"Available projects: {project_names}"
+            )
+
+        project = resolved_project
+
+        # Check if already cached in context
+        if context:
+            cached_raw = await context.get_state("active_project")
+            if isinstance(cached_raw, dict):
+                cached_project = ProjectItem.model_validate(cached_raw)
+                if cached_project.name == project:
+                    logger.debug(f"Using cached project from context: {project}")
+                    return cached_project
+
+        # Validate project exists by calling API
+        logger.debug(f"Validating project: {project}")
+        response = await call_post(
+            client,
+            "/v2/projects/resolve",
+            json={"identifier": project},
+            headers=headers,
+        )
+        resolved = ProjectResolveResponse.model_validate(response.json())
+        active_project = ProjectItem(
+            id=resolved.project_id,
+            external_id=resolved.external_id,
+            name=resolved.name,
+            path=resolved.path,
+            is_default=resolved.is_default,
         )
 
-    project = resolved_project
+        # Cache in context if available
+        if context:
+            await context.set_state("active_project", active_project.model_dump())
+            logger.debug(f"Cached project in context: {project}")
 
-    # Check if already cached in context
-    if context:
-        cached_raw = await context.get_state("active_project")
-        if isinstance(cached_raw, dict):
-            cached_project = ProjectItem.model_validate(cached_raw)
-            if cached_project.name == project:
-                logger.debug(f"Using cached project from context: {project}")
-                return cached_project
-
-    # Validate project exists by calling API
-    logger.debug(f"Validating project: {project}")
-    response = await call_post(
-        client,
-        "/v2/projects/resolve",
-        json={"identifier": project},
-        headers=headers,
-    )
-    resolved = ProjectResolveResponse.model_validate(response.json())
-    active_project = ProjectItem(
-        id=resolved.project_id,
-        external_id=resolved.external_id,
-        name=resolved.name,
-        path=resolved.path,
-        is_default=resolved.is_default,
-    )
-
-    # Cache in context if available
-    if context:
-        await context.set_state("active_project", active_project.model_dump())
-        logger.debug(f"Cached project in context: {project}")
-
-    logger.debug(f"Validated project: {active_project.name}")
-    return active_project
+        logger.debug(f"Validated project: {active_project.name}")
+        return active_project
 
 
 def _split_project_prefix(path: str) -> tuple[Optional[str], str]:
@@ -321,66 +341,77 @@ async def resolve_project_and_path(
         Tuple of (active_project, normalized_path, is_memory_url)
     """
     is_memory_url = identifier.strip().startswith("memory://")
-    if not is_memory_url:
-        active_project = await get_active_project(client, project, context, headers)
-        return active_project, identifier, False
+    include_project = ConfigManager().config.permalinks_include_project if is_memory_url else None
+    with telemetry.span(
+        "routing.resolve_memory_url",
+        is_memory_url=is_memory_url,
+        requested_project=project,
+        include_project_prefix=include_project,
+    ):
+        if not is_memory_url:
+            active_project = await get_active_project(client, project, context, headers)
+            return active_project, identifier, False
 
-    normalized_path = normalize_project_reference(memory_url_path(identifier))
-    project_prefix, remainder = _split_project_prefix(normalized_path)
-    include_project = ConfigManager().config.permalinks_include_project
+        normalized_path = normalize_project_reference(memory_url_path(identifier))
+        project_prefix, remainder = _split_project_prefix(normalized_path)
+        include_project = ConfigManager().config.permalinks_include_project
 
-    # Trigger: memory URL begins with a potential project segment
-    # Why: allow project-scoped memory URLs without requiring a separate project parameter
-    # Outcome: attempt to resolve the prefix as a project and route to it
-    if project_prefix:
-        try:
-            from basic_memory.mcp.tools.utils import call_post
+        # Trigger: memory URL begins with a potential project segment
+        # Why: allow project-scoped memory URLs without requiring a separate project parameter
+        # Outcome: attempt to resolve the prefix as a project and route to it
+        if project_prefix:
+            try:
+                from basic_memory.mcp.tools.utils import call_post
 
-            response = await call_post(
-                client,
-                "/v2/projects/resolve",
-                json={"identifier": project_prefix},
-                headers=headers,
-            )
-            resolved = ProjectResolveResponse.model_validate(response.json())
-        except ToolError as exc:
-            if "project not found" not in str(exc).lower():
-                raise
-        else:
-            resolved_project = await resolve_project_parameter(project_prefix)
-            if resolved_project and generate_permalink(resolved_project) != generate_permalink(
-                project_prefix
-            ):
-                raise ValueError(
-                    f"Project is constrained to '{resolved_project}', cannot use '{project_prefix}'."
+                response = await call_post(
+                    client,
+                    "/v2/projects/resolve",
+                    json={"identifier": project_prefix},
+                    headers=headers,
                 )
+                resolved = ProjectResolveResponse.model_validate(response.json())
+            except ToolError as exc:
+                if "project not found" not in str(exc).lower():
+                    raise
+            else:
+                resolved_project = await resolve_project_parameter(project_prefix)
+                if resolved_project and generate_permalink(resolved_project) != generate_permalink(
+                    project_prefix
+                ):
+                    raise ValueError(
+                        f"Project is constrained to '{resolved_project}', cannot use '{project_prefix}'."
+                    )
 
-            active_project = ProjectItem(
-                id=resolved.project_id,
-                external_id=resolved.external_id,
-                name=resolved.name,
-                path=resolved.path,
-                is_default=resolved.is_default,
-            )
-            if context:
-                await context.set_state("active_project", active_project.model_dump())
+                active_project = ProjectItem(
+                    id=resolved.project_id,
+                    external_id=resolved.external_id,
+                    name=resolved.name,
+                    path=resolved.path,
+                    is_default=resolved.is_default,
+                )
+                if context:
+                    await context.set_state("active_project", active_project.model_dump())
 
-            resolved_path = f"{resolved.permalink}/{remainder}" if include_project else remainder
-            return active_project, resolved_path, True
+                resolved_path = (
+                    f"{resolved.permalink}/{remainder}" if include_project else remainder
+                )
+                return active_project, resolved_path, True
 
-    # Trigger: no resolvable project prefix in the memory URL
-    # Why: preserve existing memory URL behavior within the active project
-    # Outcome: use the active project and normalize the path for lookup
-    active_project = await get_active_project(client, project, context, headers)
-    resolved_path = normalized_path
-    if include_project:
-        # Trigger: project-prefixed permalinks are enabled and the path lacks a prefix
-        # Why: ensure memory URL lookups align with canonical permalinks
-        # Outcome: prefix the path with the active project's permalink
-        project_prefix = active_project.permalink
-        if resolved_path != project_prefix and not resolved_path.startswith(f"{project_prefix}/"):
-            resolved_path = f"{project_prefix}/{resolved_path}"
-    return active_project, resolved_path, True
+        # Trigger: no resolvable project prefix in the memory URL
+        # Why: preserve existing memory URL behavior within the active project
+        # Outcome: use the active project and normalize the path for lookup
+        active_project = await get_active_project(client, project, context, headers)
+        resolved_path = normalized_path
+        if include_project:
+            # Trigger: project-prefixed permalinks are enabled and the path lacks a prefix
+            # Why: ensure memory URL lookups align with canonical permalinks
+            # Outcome: prefix the path with the active project's permalink
+            project_prefix = active_project.permalink
+            if resolved_path != project_prefix and not resolved_path.startswith(
+                f"{project_prefix}/"
+            ):
+                resolved_path = f"{project_prefix}/{resolved_path}"
+        return active_project, resolved_path, True
 
 
 def add_project_metadata(result: str, project_name: str) -> str:
@@ -494,9 +525,18 @@ async def get_project_client(
     #   control-plane API with no valid credentials and fail with 401
     # Outcome: use the factory client directly, skip workspace resolution
     if is_factory_mode():
-        async with get_client() as client:
-            active_project = await get_active_project(client, resolved_project, context)
-            yield client, active_project
+        route_mode = "factory"
+        with telemetry.contextualize(route_mode=route_mode, workspace_id=workspace):
+            with telemetry.span(
+                "routing.resolve_client",
+                project_name=resolved_project,
+                route_mode=route_mode,
+                workspace_id=workspace,
+            ):
+                logger.debug("Using injected client factory for project routing")
+            async with get_client() as client:
+                active_project = await get_active_project(client, resolved_project, context)
+                yield client, active_project
         return
 
     # Step 2: Check explicit routing BEFORE workspace resolution
@@ -504,9 +544,17 @@ async def get_project_client(
     # Why: explicit flags must be deterministic — skip workspace entirely for --local
     # Outcome: route strictly based on explicit flag, no workspace network calls
     if _explicit_routing() and _force_local_mode():
-        async with get_client(project_name=resolved_project) as client:
-            active_project = await get_active_project(client, resolved_project, context)
-            yield client, active_project
+        route_mode = "explicit_local"
+        with telemetry.contextualize(route_mode=route_mode, workspace_id=None):
+            with telemetry.span(
+                "routing.resolve_client",
+                project_name=resolved_project,
+                route_mode=route_mode,
+            ):
+                logger.debug("Explicit local routing selected for project client")
+            async with get_client(project_name=resolved_project) as client:
+                active_project = await get_active_project(client, resolved_project, context)
+                yield client, active_project
         return
 
     # Step 3: Determine if cloud routing is needed
@@ -535,28 +583,60 @@ async def get_project_client(
         if effective_workspace is None and config.default_workspace:
             effective_workspace = config.default_workspace
 
+        route_mode = "cloud_proxy"
+
         # Priorities 4-6: if still unresolved, fall back to resolve_workspace_parameter
         # which checks context cache, auto-selects single workspace, or errors
         if effective_workspace is not None:
             # Config-resolved workspace — pass directly to get_client, skip network lookup
-            async with get_client(
-                project_name=resolved_project,
-                workspace=effective_workspace,
-            ) as client:
-                active_project = await get_active_project(client, resolved_project, context)
-                yield client, active_project
+            with telemetry.contextualize(
+                route_mode=route_mode,
+                workspace_id=effective_workspace,
+            ):
+                with telemetry.span(
+                    "routing.resolve_client",
+                    project_name=resolved_project,
+                    route_mode=route_mode,
+                    workspace_id=effective_workspace,
+                ):
+                    logger.debug("Using configured workspace for cloud project routing")
+                async with get_client(
+                    project_name=resolved_project,
+                    workspace=effective_workspace,
+                ) as client:
+                    active_project = await get_active_project(client, resolved_project, context)
+                    yield client, active_project
         else:
             # No config-based workspace — use resolve_workspace_parameter for discovery
             active_ws = await resolve_workspace_parameter(workspace=None, context=context)
-            async with get_client(
-                project_name=resolved_project,
-                workspace=active_ws.tenant_id,
-            ) as client:
-                active_project = await get_active_project(client, resolved_project, context)
-                yield client, active_project
+            with telemetry.contextualize(
+                route_mode=route_mode,
+                workspace_id=active_ws.tenant_id,
+            ):
+                with telemetry.span(
+                    "routing.resolve_client",
+                    project_name=resolved_project,
+                    route_mode=route_mode,
+                    workspace_id=active_ws.tenant_id,
+                ):
+                    logger.debug("Resolved workspace dynamically for cloud project routing")
+                async with get_client(
+                    project_name=resolved_project,
+                    workspace=active_ws.tenant_id,
+                ) as client:
+                    active_project = await get_active_project(client, resolved_project, context)
+                    yield client, active_project
         return
 
     # Step 4: Local routing (default)
-    async with get_client(project_name=resolved_project) as client:
-        active_project = await get_active_project(client, resolved_project, context)
-        yield client, active_project
+    route_mode = "local_asgi"
+    with telemetry.contextualize(route_mode=route_mode, workspace_id=None):
+        with telemetry.span(
+            "routing.resolve_client",
+            project_name=resolved_project,
+            route_mode=route_mode,
+        ):
+            logger.debug("Using default local ASGI routing for project client")
+        async with get_client(project_name=resolved_project) as client:
+            active_project = await get_active_project(client, resolved_project, context)
+            yield client, active_project

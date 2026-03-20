@@ -347,7 +347,7 @@ Avoid full automatic SQL span firehose by default.
 
 - [x] Phase 1: Bootstrap and config gating
 - [x] Phase 2: Root spans for entrypoints and primary operations
-- [ ] Phase 3: Child spans for sync, search, and routing
+- [x] Phase 3: Child spans for sync, search, and routing
 - [ ] Phase 4: Failure-focused detail and final verification
 
 ## Recommended Rollout Phases
