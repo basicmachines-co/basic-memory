@@ -250,7 +250,9 @@ async def write_note(
                                 title, entity.permalink, active_project.name
                             )
 
-                        logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
+                        logger.debug(
+                            f"Entity exists, updating instead permalink={entity.permalink}"
+                        )
                         try:
                             if not entity.permalink:
                                 raise ValueError(

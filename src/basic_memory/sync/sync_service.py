@@ -37,6 +37,7 @@ from basic_memory.services.search_service import SearchService
 
 # Circuit breaker configuration
 MAX_CONSECUTIVE_FAILURES = 3
+SLOW_FILE_SYNC_WARNING_MS = 500
 
 
 @dataclass
@@ -650,12 +651,14 @@ class SyncService:
             logger.warning(f"Skipping file due to repeated failures: {path}")
             return None, None
 
-        try:
-            logger.debug(
-                f"Syncing file path={path} is_new={new} is_markdown={self.file_service.is_markdown(path)}"
-            )
+        start_time = time.time()
+        is_markdown = self.file_service.is_markdown(path)
+        file_kind = "markdown" if is_markdown else "regular"
 
-            if self.file_service.is_markdown(path):
+        try:
+            logger.debug(f"Syncing file path={path} is_new={new} is_markdown={is_markdown}")
+
+            if is_markdown:
                 entity, checksum = await self.sync_markdown_file(path, new)
             else:
                 entity, checksum = await self.sync_regular_file(path, new)
@@ -680,33 +683,63 @@ class SyncService:
                 logger.debug(
                     f"File sync completed, path={path}, entity_id={entity.id}, checksum={checksum[:8]}"
                 )
+            duration_ms = int((time.time() - start_time) * 1000)
+            if duration_ms >= SLOW_FILE_SYNC_WARNING_MS:
+                logger.warning(
+                    f"Slow file sync detected: path={path}, file_kind={file_kind}, duration_ms={duration_ms}"
+                )
             return entity, checksum
 
         except FileNotFoundError:
             # File exists in database but not on filesystem
             # This indicates a database/filesystem inconsistency - treat as deletion
-            logger.warning(
-                f"File not found during sync, treating as deletion: path={path}. "
-                "This may indicate a race condition or manual file deletion."
-            )
-            await self.handle_delete(path)
+            with telemetry.span(
+                "sync.file.failure",
+                failure_type="file_not_found",
+                path=path,
+                file_kind=file_kind,
+                is_new=new,
+                is_fatal=False,
+            ):
+                logger.warning(
+                    f"File not found during sync, treating as deletion: path={path}. "
+                    "This may indicate a race condition or manual file deletion."
+                )
+                await self.handle_delete(path)
             return None, None
 
         except Exception as e:
+            failure_type = type(e).__name__
             # Check if this is a fatal error (or caused by one)
             # Fatal errors like project deletion should terminate sync immediately
             if isinstance(e, SyncFatalError) or isinstance(
                 e.__cause__, SyncFatalError
             ):  # pragma: no cover
-                logger.error(f"Fatal sync error encountered, terminating sync: path={path}")
+                with telemetry.span(
+                    "sync.file.failure",
+                    failure_type=failure_type,
+                    path=path,
+                    file_kind=file_kind,
+                    is_new=new,
+                    is_fatal=True,
+                ):
+                    logger.error(f"Fatal sync error encountered, terminating sync: path={path}")
                 raise
 
             # Otherwise treat as recoverable file-level error
             error_msg = str(e)
-            logger.error(f"Failed to sync file: path={path}, error={error_msg}")
+            with telemetry.span(
+                "sync.file.failure",
+                failure_type=failure_type,
+                path=path,
+                file_kind=file_kind,
+                is_new=new,
+                is_fatal=False,
+            ):
+                logger.error(f"Failed to sync file: path={path}, error={error_msg}")
 
-            # Record failure for circuit breaker
-            await self._record_failure(path, error_msg)
+                # Record failure for circuit breaker
+                await self._record_failure(path, error_msg)
 
             return None, None
 
@@ -1100,24 +1133,36 @@ class SyncService:
                     # update search index only on successful resolution
                     await self.search_service.index_entity(resolved_entity)
                 except IntegrityError:
-                    # IntegrityError means a relation with this (from_id, to_id, relation_type)
-                    # already exists. The UPDATE was rolled back, so our unresolved relation
-                    # (to_id=NULL) still exists in the database. We delete it because:
-                    # 1. It's redundant - a resolved relation already captures this relationship
-                    # 2. If we don't delete it, future syncs will try to resolve it again
-                    #    and get the same IntegrityError
-                    logger.debug(
-                        "Deleting duplicate unresolved relation "
-                        f"relation_id={relation.id} "
-                        f"from_id={relation.from_id} "
-                        f"to_name={relation.to_name} "
-                        f"resolved_to_id={resolved_entity.id}"
-                    )
-                    try:
-                        await self.relation_repository.delete(relation.id)
-                    except Exception as e:
-                        # Log but don't fail - the relation may have been deleted already
-                        logger.debug(f"Could not delete duplicate relation {relation.id}: {e}")
+                    with telemetry.span(
+                        "sync.relation.resolve_conflict",
+                        relation_id=relation.id,
+                        relation_type=relation.relation_type,
+                    ):
+                        # IntegrityError means a relation with this (from_id, to_id, relation_type)
+                        # already exists. The UPDATE was rolled back, so our unresolved relation
+                        # (to_id=NULL) still exists in the database. We delete it because:
+                        # 1. It's redundant - a resolved version already captures this relationship
+                        # 2. If we don't delete it, future syncs will try to resolve it again
+                        #    and get the same IntegrityError
+                        logger.debug(
+                            "Deleting duplicate unresolved relation "
+                            f"relation_id={relation.id} "
+                            f"from_id={relation.from_id} "
+                            f"to_name={relation.to_name} "
+                            f"resolved_to_id={resolved_entity.id}"
+                        )
+                        try:
+                            await self.relation_repository.delete(relation.id)
+                        except Exception as e:
+                            with telemetry.span(
+                                "sync.relation.cleanup_failure",
+                                relation_id=relation.id,
+                                relation_type=relation.relation_type,
+                            ):
+                                # Log but don't fail - the relation may have been deleted already
+                                logger.debug(
+                                    f"Could not delete duplicate relation {relation.id}: {e}"
+                                )
 
     async def _quick_count_files(self, directory: Path) -> int:
         """Fast file count using find command.

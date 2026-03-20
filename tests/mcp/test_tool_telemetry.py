@@ -60,6 +60,10 @@ async def test_write_note_emits_root_operation_and_project_context(
         )
     ]
     assert contexts[0] == {
+        "route_mode": "local_asgi",
+        "workspace_id": None,
+    }
+    assert contexts[1] == {
         "project_name": test_project.name,
         "workspace_id": None,
         "tool_name": "write_note",
@@ -104,6 +108,10 @@ async def test_read_note_emits_root_operation_and_project_context(
         )
     ]
     assert contexts[0] == {
+        "route_mode": "local_asgi",
+        "workspace_id": None,
+    }
+    assert contexts[1] == {
         "project_name": test_project.name,
         "workspace_id": None,
         "tool_name": "read_note",
@@ -155,6 +163,10 @@ async def test_search_notes_emits_root_operation_and_project_context(
     )
     assert ("api.request.search",) == (operations[1][0],)
     assert contexts[0] == {
+        "route_mode": "local_asgi",
+        "workspace_id": None,
+    }
+    assert contexts[1] == {
         "project_name": test_project.name,
         "workspace_id": None,
         "tool_name": "search_notes",

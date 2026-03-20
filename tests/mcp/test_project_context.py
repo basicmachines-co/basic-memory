@@ -95,6 +95,26 @@ async def test_uses_explicit_project_when_no_env(config_manager, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_canonicalizes_case_insensitive_project_reference(
+    config_manager, config_home, monkeypatch
+):
+    from basic_memory.config import ProjectEntry
+    from basic_memory.mcp.project_context import resolve_project_parameter
+
+    cfg = config_manager.load_config()
+    project_name = "Personal-Project"
+    project_path = config_home / "personal-project"
+    project_path.mkdir(parents=True, exist_ok=True)
+    cfg.projects[project_name] = ProjectEntry(path=str(project_path))
+    config_manager.save_config(cfg)
+
+    monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+
+    assert await resolve_project_parameter(project="personal-project") == project_name
+    assert await resolve_project_parameter(project="PERSONAL-PROJECT") == project_name
+
+
+@pytest.mark.asyncio
 async def test_uses_default_project(config_manager, config_home, monkeypatch):
     from basic_memory.mcp.project_context import resolve_project_parameter
     from basic_memory.config import ProjectEntry

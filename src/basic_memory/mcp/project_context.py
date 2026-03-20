@@ -64,6 +64,27 @@ async def _resolve_default_project_from_api() -> Optional[str]:
     return None
 
 
+def _canonicalize_project_name(
+    project_name: Optional[str],
+    config: BasicMemoryConfig,
+) -> Optional[str]:
+    """Return the configured project name when the identifier matches by permalink.
+
+    Project routing happens before API validation, so we normalize explicit inputs
+    here to keep local/cloud routing aligned with the database's case-insensitive
+    project resolver.
+    """
+    if project_name is None:
+        return None
+
+    requested_permalink = generate_permalink(project_name)
+    for configured_name in config.projects:
+        if generate_permalink(configured_name) == requested_permalink:
+            return configured_name
+
+    return project_name
+
+
 async def resolve_project_parameter(
     project: Optional[str] = None,
     allow_discovery: bool = False,
@@ -95,11 +116,12 @@ async def resolve_project_parameter(
         requested_project=project,
         allow_discovery=allow_discovery,
     ):
+        config = ConfigManager().config
+
         # Load config for any values not explicitly provided.
         # ConfigManager reads from the local config file, which doesn't exist in cloud mode.
         # When it returns None, fall back to querying the projects API for the is_default flag.
         if default_project is None:
-            config = ConfigManager().config
             default_project = config.default_project
 
         if default_project is None:
@@ -110,7 +132,7 @@ async def resolve_project_parameter(
             default_project=default_project,
         )
         result = resolver.resolve(project=project, allow_discovery=allow_discovery)
-        return result.project
+        return _canonicalize_project_name(result.project, config)
 
 
 async def get_project_names(client: AsyncClient, headers: HeaderTypes | None = None) -> List[str]:

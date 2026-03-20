@@ -5,6 +5,7 @@ from typing import AsyncIterator, Callable, Optional
 from httpx import ASGITransport, AsyncClient, Timeout
 from loguru import logger
 
+from basic_memory import telemetry
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.config import ConfigManager, ProjectMode
 
@@ -43,21 +44,26 @@ def _asgi_client(timeout: Timeout) -> AsyncClient:
 
 async def _resolve_cloud_token(config) -> str:
     """Resolve cloud token with API key preferred, OAuth fallback."""
-    token = config.cloud_api_key
-    if token:
-        return token
+    with telemetry.span(
+        "routing.resolve_cloud_credentials",
+        has_api_key=bool(config.cloud_api_key),
+    ):
+        token = config.cloud_api_key
+        if token:
+            return token
 
-    from basic_memory.cli.auth import CLIAuth
+        from basic_memory.cli.auth import CLIAuth
 
-    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-    token = await auth.get_valid_token()
-    if token:
-        return token
+        auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+        token = await auth.get_valid_token()
+        if token:
+            return token
 
-    raise RuntimeError(
-        "Cloud routing requested but no credentials found. "
-        "Run 'bm cloud api-key save <key>' or 'bm cloud login' first."
-    )
+        logger.error("Cloud routing requested but no credentials were available")
+        raise RuntimeError(
+            "Cloud routing requested but no credentials found. "
+            "Run 'bm cloud api-key save <key>' or 'bm cloud login' first."
+        )
 
 
 @asynccontextmanager
