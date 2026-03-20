@@ -25,6 +25,7 @@ from basic_memory.api.v2.routers.project_router import (
     list_projects,
     synchronize_projects,
 )
+from basic_memory import telemetry
 from basic_memory.config import init_api_logging
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.initialization import initialize_app
@@ -43,30 +44,39 @@ async def lifespan(app: FastAPI):  # pragma: no cover
     set_container(container)
     app.state.container = container
 
-    logger.info(f"Starting Basic Memory API (mode={container.mode.name})")
+    with telemetry.operation(
+        "api.lifecycle.startup",
+        entrypoint="api",
+        mode=container.mode.name.lower(),
+    ):
+        logger.info(f"Starting Basic Memory API (mode={container.mode.name})")
 
-    await initialize_app(container.config)
+        await initialize_app(container.config)
 
-    # Cache database connections in app state for performance
-    logger.info("Initializing database and caching connections...")
-    engine, session_maker = await container.init_database()
-    app.state.engine = engine
-    app.state.session_maker = session_maker
-    logger.info("Database connections cached in app state")
+        # Cache database connections in app state for performance
+        logger.info("Initializing database and caching connections...")
+        engine, session_maker = await container.init_database()
+        app.state.engine = engine
+        app.state.session_maker = session_maker
+        logger.info("Database connections cached in app state")
 
-    # Create and start sync coordinator (lifecycle centralized in coordinator)
-    sync_coordinator = container.create_sync_coordinator()
-    await sync_coordinator.start()
-    app.state.sync_coordinator = sync_coordinator
+        # Create and start sync coordinator (lifecycle centralized in coordinator)
+        sync_coordinator = container.create_sync_coordinator()
+        await sync_coordinator.start()
+        app.state.sync_coordinator = sync_coordinator
 
     # Proceed with startup
     yield
 
     # Shutdown - coordinator handles clean task cancellation
-    logger.info("Shutting down Basic Memory API")
-    await sync_coordinator.stop()
-
-    await container.shutdown_database()
+    with telemetry.operation(
+        "api.lifecycle.shutdown",
+        entrypoint="api",
+        mode=container.mode.name.lower(),
+    ):
+        logger.info("Shutting down Basic Memory API")
+        await sync_coordinator.stop()
+        await container.shutdown_database()
 
 
 # Initialize FastAPI app

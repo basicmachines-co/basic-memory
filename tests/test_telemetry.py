@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import copy_context
 
+from loguru import logger
 from basic_memory import telemetry
 from basic_memory.config import init_api_logging, init_cli_logging, init_mcp_logging
 
@@ -95,6 +97,19 @@ def test_bind_telemetry_context_filters_nulls() -> None:
     assert extra == {"project_name": "main"}
 
 
+def test_contextualize_adds_filtered_loguru_context() -> None:
+    records: list[dict] = []
+    sink_id = logger.add(lambda message: records.append(message.record["extra"].copy()))
+
+    try:
+        with telemetry.contextualize(project_name="main", workspace_id=None):
+            logger.info("inside telemetry context")
+    finally:
+        logger.remove(sink_id)
+
+    assert records == [{"project_name": "main"}]
+
+
 def test_span_uses_logfire_when_enabled(monkeypatch) -> None:
     fake_logfire = FakeLogfire()
     telemetry.reset_telemetry_state()
@@ -108,9 +123,56 @@ def test_span_uses_logfire_when_enabled(monkeypatch) -> None:
     with telemetry.span("mcp.tool.write_note", project_name="main", workspace_id=None):
         pass
 
+    assert fake_logfire.span_calls == [("mcp.tool.write_note", {"project_name": "main"})]
+
+
+def test_operation_creates_span_and_log_context(monkeypatch) -> None:
+    fake_logfire = FakeLogfire()
+    records: list[dict] = []
+    sink_id = logger.add(lambda message: records.append(message.record["extra"].copy()))
+
+    telemetry.reset_telemetry_state()
+    monkeypatch.setattr(telemetry, "_load_logfire", lambda: fake_logfire)
+    telemetry.configure_telemetry(
+        "basic-memory-cli",
+        environment="dev",
+        enable_logfire=True,
+    )
+
+    try:
+        with telemetry.operation(
+            "cli.command.status",
+            entrypoint="cli",
+            command_name="status",
+            workspace_id=None,
+        ):
+            logger.info("inside operation")
+    finally:
+        logger.remove(sink_id)
+
     assert fake_logfire.span_calls == [
-        ("mcp.tool.write_note", {"project_name": "main"})
+        ("cli.command.status", {"entrypoint": "cli", "command_name": "status"})
     ]
+    assert records == [{"entrypoint": "cli", "command_name": "status"}]
+
+
+def test_contextualize_isolated_per_context() -> None:
+    def read_extra() -> dict:
+        holder: list[dict] = []
+        sink_id = logger.add(lambda message: holder.append(message.record["extra"].copy()))
+        try:
+            logger.info("outside context")
+        finally:
+            logger.remove(sink_id)
+        return holder[0]
+
+    with telemetry.contextualize(project_name="main"):
+        inside = read_extra()
+
+    outside = copy_context().run(read_extra)
+
+    assert inside == {"project_name": "main"}
+    assert outside == {}
 
 
 def test_init_logging_functions_configure_telemetry_and_logging(monkeypatch) -> None:
@@ -124,7 +186,9 @@ def test_init_logging_functions_configure_telemetry_and_logging(monkeypatch) -> 
         logfire_environment = "staging"
         env = "dev"
 
-    monkeypatch.setattr("basic_memory.config.ConfigManager", lambda: type("CM", (), {"config": StubConfig()})())
+    monkeypatch.setattr(
+        "basic_memory.config.ConfigManager", lambda: type("CM", (), {"config": StubConfig()})()
+    )
     monkeypatch.setattr(
         "basic_memory.config.configure_telemetry",
         lambda **kwargs: telemetry_calls.append(kwargs),

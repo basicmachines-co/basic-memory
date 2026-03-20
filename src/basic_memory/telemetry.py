@@ -142,6 +142,13 @@ def bind_telemetry_context(**attrs: Any):
 
 
 @contextmanager
+def contextualize(**attrs: Any) -> Iterator[None]:
+    """Apply stable telemetry attributes to all Loguru calls in this scope."""
+    with logger.contextualize(**_filter_attributes(attrs)):
+        yield
+
+
+@contextmanager
 def span(name: str, **attrs: Any) -> Iterator[None]:
     """Create a manual Logfire span when telemetry is enabled."""
     if not telemetry_enabled():
@@ -157,10 +164,20 @@ def span(name: str, **attrs: Any) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def operation(name: str, **attrs: Any) -> Iterator[None]:
+    """Create a root operation span and mirror its metadata into Loguru context."""
+    with contextualize(**attrs):
+        with span(name, **attrs):
+            yield
+
+
 __all__ = [
     "bind_telemetry_context",
+    "contextualize",
     "configure_telemetry",
     "get_logfire_handler",
+    "operation",
     "pop_telemetry_warnings",
     "reset_telemetry_state",
     "span",

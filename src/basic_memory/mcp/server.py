@@ -21,6 +21,7 @@ from basic_memory.db import (
 )
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app
+from basic_memory import telemetry
 
 
 async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -82,83 +83,96 @@ async def lifespan(app: FastMCP):
     set_container(container)
 
     config = container.config
-    logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
-    logger.info(
-        f"Config: database_backend={config.database_backend.value}, "
-        f"semantic_search_enabled={config.semantic_search_enabled}, "
-        f"default_project={config.default_project}"
-    )
-    if config.semantic_search_enabled:
+    with telemetry.operation(
+        "mcp.lifecycle.startup",
+        entrypoint="mcp",
+        mode=container.mode.name.lower(),
+        default_project=config.default_project,
+    ):
+        logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
         logger.info(
-            f"Semantic search: provider={config.semantic_embedding_provider}, "
-            f"model={config.semantic_embedding_model}, "
-            f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
-            f"batch_size={config.semantic_embedding_batch_size}"
+            f"Config: database_backend={config.database_backend.value}, "
+            f"semantic_search_enabled={config.semantic_search_enabled}, "
+            f"default_project={config.default_project}"
         )
+        if config.semantic_search_enabled:
+            logger.info(
+                f"Semantic search: provider={config.semantic_embedding_provider}, "
+                f"model={config.semantic_embedding_model}, "
+                f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
+                f"batch_size={config.semantic_embedding_batch_size}"
+            )
 
-    # Log configured projects with their routing mode
-    for name, entry in config.projects.items():
-        default = " (default)" if name == config.default_project else ""
-        logger.info(f"Project: {name} -> {entry.path} [mode={entry.mode.value}]{default}")
+        # Log configured projects with their routing mode
+        for name, entry in config.projects.items():
+            default = " (default)" if name == config.default_project else ""
+            logger.info(f"Project: {name} -> {entry.path} [mode={entry.mode.value}]{default}")
 
-    # Check cloud auth status (local file check, no network call)
-    auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-    tokens = auth.load_tokens()
-    if tokens is not None:
-        if not auth.is_token_valid(tokens):
-            expires_at = tokens.get("expires_at", 0)
-            expired_ago = int(time.time() - expires_at)
-            logger.warning(f"Cloud token expired {expired_ago}s ago - may need 'bm cloud login'")
-        else:
-            logger.info("Cloud: authenticated (OAuth token valid)")
+        # Check cloud auth status (local file check, no network call)
+        auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+        tokens = auth.load_tokens()
+        if tokens is not None:
+            if not auth.is_token_valid(tokens):
+                expires_at = tokens.get("expires_at", 0)
+                expired_ago = int(time.time() - expires_at)
+                logger.warning(
+                    f"Cloud token expired {expired_ago}s ago - may need 'bm cloud login'"
+                )
+            else:
+                logger.info("Cloud: authenticated (OAuth token valid)")
 
-    if config.cloud_api_key:
-        logger.info("Cloud: API key configured")
+        if config.cloud_api_key:
+            logger.info("Cloud: API key configured")
 
-    # Track if we created the engine (vs test fixtures providing it)
-    # This prevents disposing an engine provided by test fixtures when
-    # multiple Client connections are made in the same test
-    engine_was_none = db._engine is None
+        # Track if we created the engine (vs test fixtures providing it)
+        # This prevents disposing an engine provided by test fixtures when
+        # multiple Client connections are made in the same test
+        engine_was_none = db._engine is None
 
-    # Initialize app (runs migrations, reconciles projects)
-    await initialize_app(container.config)
+        # Initialize app (runs migrations, reconciles projects)
+        await initialize_app(container.config)
 
-    # Log embedding status so it's easy to spot in the logs
-    backfill_task: asyncio.Task | None = None  # type: ignore[type-arg]
-    if config.semantic_search_enabled and db._session_maker is not None:
-        await _log_embedding_status(db._session_maker)
-        # Launch backfill in background so MCP server is ready immediately
-        backfill_task = asyncio.create_task(
-            _background_embedding_backfill(config, db._session_maker),
-            name="embedding-backfill",
-        )
+        # Log embedding status so it's easy to spot in the logs
+        backfill_task: asyncio.Task | None = None  # type: ignore[type-arg]
+        if config.semantic_search_enabled and db._session_maker is not None:
+            await _log_embedding_status(db._session_maker)
+            # Launch backfill in background so MCP server is ready immediately
+            backfill_task = asyncio.create_task(
+                _background_embedding_backfill(config, db._session_maker),
+                name="embedding-backfill",
+            )
 
-    # Create and start sync coordinator (lifecycle centralized in coordinator)
-    sync_coordinator = container.create_sync_coordinator()
-    await sync_coordinator.start()
+        # Create and start sync coordinator (lifecycle centralized in coordinator)
+        sync_coordinator = container.create_sync_coordinator()
+        await sync_coordinator.start()
 
     try:
         yield
     finally:
         # Shutdown - coordinator handles clean task cancellation
-        logger.debug("Shutting down Basic Memory MCP server")
+        with telemetry.operation(
+            "mcp.lifecycle.shutdown",
+            entrypoint="mcp",
+            mode=container.mode.name.lower(),
+        ):
+            logger.debug("Shutting down Basic Memory MCP server")
 
-        # Cancel embedding backfill if still running
-        if backfill_task is not None and not backfill_task.done():
-            backfill_task.cancel()
-            try:
-                await backfill_task
-            except asyncio.CancelledError:
-                logger.info("Background embedding backfill cancelled during shutdown")
+            # Cancel embedding backfill if still running
+            if backfill_task is not None and not backfill_task.done():
+                backfill_task.cancel()
+                try:
+                    await backfill_task
+                except asyncio.CancelledError:
+                    logger.info("Background embedding backfill cancelled during shutdown")
 
-        await sync_coordinator.stop()
+            await sync_coordinator.stop()
 
-        # Only shutdown DB if we created it (not if test fixture provided it)
-        if engine_was_none:
-            await db.shutdown_db()
-            logger.debug("Database connections closed")
-        else:  # pragma: no cover
-            logger.debug("Skipping DB shutdown - engine provided externally")
+            # Only shutdown DB if we created it (not if test fixture provided it)
+            if engine_was_none:
+                await db.shutdown_db()
+                logger.debug("Database connections closed")
+            else:  # pragma: no cover
+                logger.debug("Skipping DB shutdown - engine provided externally")
 
 
 mcp = FastMCP(

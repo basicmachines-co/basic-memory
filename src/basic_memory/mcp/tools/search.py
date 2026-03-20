@@ -8,6 +8,7 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import BeforeValidator
 
+from basic_memory import telemetry
 from basic_memory.config import ConfigManager
 from basic_memory.utils import coerce_dict, coerce_list
 from basic_memory.mcp.container import get_container
@@ -523,124 +524,146 @@ async def search_notes(
         if detected:
             project = detected
 
-    async with get_project_client(project, workspace, context) as (client, active_project):
-        # Handle memory:// URLs by resolving to permalink search
-        is_memory_url = False
-        if query is not None:
-            _, resolved_query, is_memory_url = await resolve_project_and_path(
-                client, query, project, context
-            )
-            if is_memory_url:
-                query = resolved_query
-        effective_search_type = search_type or _default_search_type()
-        if is_memory_url:
-            effective_search_type = "permalink"
+    with telemetry.operation(
+        "mcp.tool.search_notes",
+        entrypoint="mcp",
+        tool_name="search_notes",
+        requested_project=project,
+        workspace_id=workspace,
+        search_type=search_type or "default",
+        output_format=output_format,
+        page=page,
+        page_size=page_size,
+        has_query=bool(query and query.strip()),
+        note_type_filter_count=len(note_types),
+        entity_type_filter_count=len(entity_types),
+        has_metadata_filters=bool(metadata_filters),
+        has_tags_filter=bool(tags),
+        has_status_filter=bool(status),
+    ):
+        async with get_project_client(project, workspace, context) as (client, active_project):
+            with telemetry.contextualize(
+                project_name=active_project.name,
+                workspace_id=workspace,
+                tool_name="search_notes",
+            ):
+                # Handle memory:// URLs by resolving to permalink search
+                is_memory_url = False
+                if query is not None:
+                    _, resolved_query, is_memory_url = await resolve_project_and_path(
+                        client, query, project, context
+                    )
+                    if is_memory_url:
+                        query = resolved_query
+                effective_search_type = search_type or _default_search_type()
+                if is_memory_url:
+                    effective_search_type = "permalink"
 
-        try:
-            # Create a SearchQuery object based on the parameters
-            search_query = SearchQuery()
+                try:
+                    # Create a SearchQuery object based on the parameters
+                    search_query = SearchQuery()
 
-            # Only map search_type to query fields when there is an actual query string.
-            # When query is None/empty, skip the search mode block — filters-only path.
-            effective_query = (query or "").strip()
-            if effective_query:
-                valid_search_types = {
-                    "text",
-                    "title",
-                    "permalink",
-                    "vector",
-                    "semantic",
-                    "hybrid",
-                }
-                if effective_search_type == "text":
-                    search_query.text = effective_query
-                    search_query.retrieval_mode = SearchRetrievalMode.FTS
-                elif effective_search_type in ("vector", "semantic"):
-                    search_query.text = effective_query
-                    search_query.retrieval_mode = SearchRetrievalMode.VECTOR
-                elif effective_search_type == "hybrid":
-                    search_query.text = effective_query
-                    search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-                elif effective_search_type == "title":
-                    search_query.title = effective_query
-                elif effective_search_type == "permalink" and "*" in effective_query:
-                    search_query.permalink_match = effective_query
-                elif effective_search_type == "permalink":
-                    search_query.permalink = effective_query
-                else:
-                    raise ValueError(
-                        f"Invalid search_type '{effective_search_type}'. "
-                        f"Valid options: {', '.join(sorted(valid_search_types))}"
+                    # Only map search_type to query fields when there is an actual query string.
+                    # When query is None/empty, skip the search mode block — filters-only path.
+                    effective_query = (query or "").strip()
+                    if effective_query:
+                        valid_search_types = {
+                            "text",
+                            "title",
+                            "permalink",
+                            "vector",
+                            "semantic",
+                            "hybrid",
+                        }
+                        if effective_search_type == "text":
+                            search_query.text = effective_query
+                            search_query.retrieval_mode = SearchRetrievalMode.FTS
+                        elif effective_search_type in ("vector", "semantic"):
+                            search_query.text = effective_query
+                            search_query.retrieval_mode = SearchRetrievalMode.VECTOR
+                        elif effective_search_type == "hybrid":
+                            search_query.text = effective_query
+                            search_query.retrieval_mode = SearchRetrievalMode.HYBRID
+                        elif effective_search_type == "title":
+                            search_query.title = effective_query
+                        elif effective_search_type == "permalink" and "*" in effective_query:
+                            search_query.permalink_match = effective_query
+                        elif effective_search_type == "permalink":
+                            search_query.permalink = effective_query
+                        else:
+                            raise ValueError(
+                                f"Invalid search_type '{effective_search_type}'. "
+                                f"Valid options: {', '.join(sorted(valid_search_types))}"
+                            )
+
+                    # Add optional filters if provided (empty lists are treated as no filter)
+                    if entity_types:
+                        search_query.entity_types = [SearchItemType(t) for t in entity_types]
+                    if note_types:
+                        search_query.note_types = note_types
+                    if after_date:
+                        search_query.after_date = after_date
+                    if metadata_filters:
+                        # Alias common column/model names to their frontmatter key equivalents.
+                        # Users often pass "note_type" (the entity model column) when the
+                        # frontmatter field is actually "type".
+                        _METADATA_KEY_ALIASES = {"note_type": "type"}
+                        metadata_filters = {
+                            _METADATA_KEY_ALIASES.get(k, k): v for k, v in metadata_filters.items()
+                        }
+                        search_query.metadata_filters = metadata_filters
+                    if tags:
+                        search_query.tags = tags
+                    if status:
+                        search_query.status = status
+                    if min_similarity is not None:
+                        search_query.min_similarity = min_similarity
+
+                    # Reject searches with no criteria at all
+                    if search_query.no_criteria():
+                        return (
+                            "# No Search Criteria\n\n"
+                            "Please provide at least one of: `query`, `metadata_filters`, "
+                            "`tags`, `status`, `note_types`, `entity_types`, or `after_date`."
+                        )
+
+                    # Default to entity-level results to avoid returning individual
+                    # observations/relations as separate search results (see issue #31).
+                    # Applied after no_criteria() so that the implicit default doesn't
+                    # mask a truly empty search request.
+                    if not search_query.entity_types:
+                        search_query.entity_types = [SearchItemType("entity")]
+
+                    logger.debug(f"Searching for {search_query} in project {active_project.name}")
+                    # Import here to avoid circular import (tools → clients → utils → tools)
+                    from basic_memory.mcp.clients import SearchClient
+
+                    # Use typed SearchClient for API calls
+                    search_client = SearchClient(client, active_project.external_id)
+                    result = await search_client.search(
+                        search_query.model_dump(),
+                        page=page,
+                        page_size=page_size,
                     )
 
-            # Add optional filters if provided (empty lists are treated as no filter)
-            if entity_types:
-                search_query.entity_types = [SearchItemType(t) for t in entity_types]
-            if note_types:
-                search_query.note_types = note_types
-            if after_date:
-                search_query.after_date = after_date
-            if metadata_filters:
-                # Alias common column/model names to their frontmatter key equivalents.
-                # Users often pass "note_type" (the entity model column) when the
-                # frontmatter field is actually "type".
-                _METADATA_KEY_ALIASES = {"note_type": "type"}
-                metadata_filters = {
-                    _METADATA_KEY_ALIASES.get(k, k): v for k, v in metadata_filters.items()
-                }
-                search_query.metadata_filters = metadata_filters
-            if tags:
-                search_query.tags = tags
-            if status:
-                search_query.status = status
-            if min_similarity is not None:
-                search_query.min_similarity = min_similarity
+                    # Check if we got no results and provide helpful guidance
+                    if not result.results:
+                        logger.debug(
+                            f"Search returned no results for query: {query} in project {active_project.name}"
+                        )
+                        # Don't treat this as an error, but the user might want guidance
+                        # We return the empty result as normal - the user can decide if they need help
 
-            # Reject searches with no criteria at all
-            if search_query.no_criteria():
-                return (
-                    "# No Search Criteria\n\n"
-                    "Please provide at least one of: `query`, `metadata_filters`, "
-                    "`tags`, `status`, `note_types`, `entity_types`, or `after_date`."
-                )
+                    if output_format == "json":
+                        return result.model_dump(mode="json", exclude_none=True)
 
-            # Default to entity-level results to avoid returning individual
-            # observations/relations as separate search results (see issue #31).
-            # Applied after no_criteria() so that the implicit default doesn't
-            # mask a truly empty search request.
-            if not search_query.entity_types:
-                search_query.entity_types = [SearchItemType("entity")]
+                    return _format_search_markdown(result, active_project.name, query)
 
-            logger.debug(f"Searching for {search_query} in project {active_project.name}")
-            # Import here to avoid circular import (tools → clients → utils → tools)
-            from basic_memory.mcp.clients import SearchClient
-
-            # Use typed SearchClient for API calls
-            search_client = SearchClient(client, active_project.external_id)
-            result = await search_client.search(
-                search_query.model_dump(),
-                page=page,
-                page_size=page_size,
-            )
-
-            # Check if we got no results and provide helpful guidance
-            if not result.results:
-                logger.debug(
-                    f"Search returned no results for query: {query} in project {active_project.name}"
-                )
-                # Don't treat this as an error, but the user might want guidance
-                # We return the empty result as normal - the user can decide if they need help
-
-            if output_format == "json":
-                return result.model_dump(mode="json", exclude_none=True)
-
-            return _format_search_markdown(result, active_project.name, query)
-
-        except Exception as e:
-            logger.error(
-                f"Search failed for query '{query or ''}': {e}, project: {active_project.name}"
-            )
-            # Return formatted error message as string for better user experience
-            return _format_search_error_response(
-                active_project.name, str(e), query or "", effective_search_type
-            )
+                except Exception as e:
+                    logger.error(
+                        f"Search failed for query '{query or ''}': {e}, project: {active_project.name}"
+                    )
+                    # Return formatted error message as string for better user experience
+                    return _format_search_error_response(
+                        active_project.name, str(e), query or "", effective_search_type
+                    )

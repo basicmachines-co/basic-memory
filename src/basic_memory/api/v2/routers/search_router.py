@@ -6,6 +6,7 @@ V1 uses string-based project names which are less efficient and less stable.
 
 from fastapi import APIRouter, HTTPException, Path
 
+from basic_memory import telemetry
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
@@ -47,29 +48,39 @@ async def search(
     Returns:
         SearchResponse with paginated search results
     """
-    offset = (page - 1) * page_size
-    # Fetch one extra item to detect whether more pages exist (N+1 trick)
-    fetch_limit = page_size + 1
-    try:
-        results = await search_service.search(query, limit=fetch_limit, offset=offset)
-    except SemanticSearchDisabledError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except SemanticDependenciesMissingError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    has_more = len(results) > page_size
-    if has_more:
-        results = results[:page_size]
-
-    search_results = await to_search_results(entity_service, results)
-    return SearchResponse(
-        results=search_results,
-        current_page=page,
+    with telemetry.operation(
+        "api.request.search",
+        entrypoint="api",
+        page=page,
         page_size=page_size,
-        has_more=has_more,
-    )
+        retrieval_mode=query.retrieval_mode.value,
+        has_text_query=bool(query.text and query.text.strip()),
+        has_title_query=bool(query.title),
+        has_permalink_query=bool(query.permalink or query.permalink_match),
+    ):
+        offset = (page - 1) * page_size
+        # Fetch one extra item to detect whether more pages exist (N+1 trick)
+        fetch_limit = page_size + 1
+        try:
+            results = await search_service.search(query, limit=fetch_limit, offset=offset)
+        except SemanticSearchDisabledError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SemanticDependenciesMissingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        has_more = len(results) > page_size
+        if has_more:
+            results = results[:page_size]
+
+        search_results = await to_search_results(entity_service, results)
+        return SearchResponse(
+            results=search_results,
+            current_page=page,
+            page_size=page_size,
+            has_more=has_more,
+        )
 
 
 @router.post("/search/reindex")
