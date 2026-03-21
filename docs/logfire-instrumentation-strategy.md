@@ -403,6 +403,66 @@ Add:
 
 This makes the trace view and the log stream tell the same story without forcing logger rewrites across the codebase.
 
+## Local Dev Playbook
+
+The fastest way to sanity-check the current trace shape is:
+
+```bash
+LOGFIRE_TOKEN=lf_... just telemetry-smoke
+```
+
+What this does:
+
+- creates an isolated temp home, config dir, and project path
+- enables Logfire for the run
+- automatically exports to Logfire when `LOGFIRE_TOKEN` is present
+- defaults `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false` so the smoke run stays fast and trace-friendly
+- disables promo telemetry so the trace is about Basic Memory work, not analytics noise
+- runs a small CLI workflow:
+  - `project add`
+  - `tool write-note`
+  - `tool search-notes`
+  - `doctor`
+
+If you want to exercise the instrumentation without exporting anything upstream:
+
+```bash
+BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE=false just telemetry-smoke
+```
+
+If you want the smoke run to include vector or hybrid retrieval spans too:
+
+```bash
+LOGFIRE_TOKEN=lf_... BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true just telemetry-smoke
+```
+
+The recipe sets `BASIC_MEMORY_LOGFIRE_ENVIRONMENT=telemetry-smoke` by default so these traces are easy to isolate in Logfire. Override it if you want the smoke traces grouped under a different environment name.
+
+### What to look for
+
+You should see a small set of comparable root spans rather than a framework-generated span forest:
+
+- `cli.command.project`
+- `cli.command.tool`
+- `mcp.tool.write_note`
+- `mcp.tool.search_notes`
+- `sync.project.run`
+
+You should also see correlated logs under those traces with stable fields like:
+
+- `project_name`
+- `route_mode`
+- `tool_name`
+- `entrypoint`
+
+### Expected nuance
+
+`doctor` creates its own temporary project on purpose. That means the sync trace will usually show a different project name than the `telemetry-smoke` write/search traces. That is fine for smoke testing because the goal is to confirm:
+
+- root span names are meaningful
+- scoped logs stay attached to the active trace
+- routing, tool, search, and sync phases are easy to distinguish
+
 ## Validation Checklist
 
 We should consider the integration successful when the following are true:

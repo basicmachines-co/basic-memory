@@ -205,6 +205,48 @@ doctor:
     BASIC_MEMORY_CONFIG_DIR="$TMP_CONFIG" \
     ./.venv/bin/python -m basic_memory.cli.main doctor --local
 
+# Run an isolated Logfire smoke workflow for local trace inspection
+telemetry-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    TMP_HOME=$(mktemp -d)
+    TMP_CONFIG=$(mktemp -d)
+    TMP_PROJECT=$(mktemp -d)
+    export HOME="$TMP_HOME"
+    export BASIC_MEMORY_ENV="${BASIC_MEMORY_ENV:-dev}"
+    export BASIC_MEMORY_HOME="$TMP_PROJECT/home-root"
+    export BASIC_MEMORY_CONFIG_DIR="$TMP_CONFIG"
+    export BASIC_MEMORY_NO_PROMOS=1
+    export BASIC_MEMORY_LOG_LEVEL="${BASIC_MEMORY_LOG_LEVEL:-INFO}"
+    export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED="${BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED:-false}"
+    export BASIC_MEMORY_LOGFIRE_ENABLED="${BASIC_MEMORY_LOGFIRE_ENABLED:-true}"
+    export BASIC_MEMORY_LOGFIRE_ENVIRONMENT="${BASIC_MEMORY_LOGFIRE_ENVIRONMENT:-telemetry-smoke}"
+    if [[ -z "${BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE:-}" ]]; then
+        if [[ -n "${LOGFIRE_TOKEN:-}" ]]; then
+            export BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE=true
+        else
+            export BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE=false
+        fi
+    fi
+    mkdir -p "$BASIC_MEMORY_HOME"
+    echo "Telemetry smoke setup:"
+    echo "  logfire_enabled=$BASIC_MEMORY_LOGFIRE_ENABLED"
+    echo "  send_to_logfire=$BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE"
+    echo "  log_level=$BASIC_MEMORY_LOG_LEVEL"
+    echo "  semantic_search_enabled=$BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"
+    echo "  logfire_environment=$BASIC_MEMORY_LOGFIRE_ENVIRONMENT"
+    echo "  project_path=$TMP_PROJECT"
+    ./.venv/bin/python -m basic_memory.cli.main project add telemetry-smoke "$TMP_PROJECT" --default --local
+    ./.venv/bin/python -m basic_memory.cli.main tool write-note --title "Telemetry Smoke" --folder notes --content "hello from smoke" --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool search-notes telemetry --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main doctor --local
+    echo ""
+    echo "Telemetry smoke complete."
+    echo "Search Logfire for:"
+    echo "  service_name: basic-memory-cli"
+    echo "  environment: $BASIC_MEMORY_LOGFIRE_ENVIRONMENT"
+    echo "  span names: mcp.tool.write_note, mcp.tool.search_notes, sync.project.run"
+
 
 # Update all dependencies to latest versions
 update-deps:
