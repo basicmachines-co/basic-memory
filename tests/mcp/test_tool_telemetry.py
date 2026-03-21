@@ -29,6 +29,10 @@ def _recording_contexts():
     return operations, contexts, fake_operation, fake_contextualize
 
 
+def _contains_context(contexts: list[dict], expected: dict) -> bool:
+    return any(expected.items() <= context.items() for context in contexts)
+
+
 @pytest.mark.asyncio
 async def test_write_note_emits_root_operation_and_project_context(
     app, test_project, monkeypatch
@@ -59,15 +63,20 @@ async def test_write_note_emits_root_operation_and_project_context(
             },
         )
     ]
-    assert contexts[0] == {
-        "route_mode": "local_asgi",
-        "workspace_id": None,
-    }
-    assert contexts[1] == {
-        "project_name": test_project.name,
-        "workspace_id": None,
-        "tool_name": "write_note",
-    }
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "route_mode": "local_asgi",
+        },
+    )
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "tool_name": "write_note",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -107,15 +116,20 @@ async def test_read_note_emits_root_operation_and_project_context(
             },
         )
     ]
-    assert contexts[0] == {
-        "route_mode": "local_asgi",
-        "workspace_id": None,
-    }
-    assert contexts[1] == {
-        "project_name": test_project.name,
-        "workspace_id": None,
-        "tool_name": "read_note",
-    }
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "route_mode": "local_asgi",
+        },
+    )
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "tool_name": "read_note",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -162,12 +176,17 @@ async def test_search_notes_emits_root_operation_and_project_context(
         },
     )
     assert ("api.request.search",) == (operations[1][0],)
-    assert contexts[0] == {
-        "route_mode": "local_asgi",
-        "workspace_id": None,
-    }
-    assert contexts[1] == {
-        "project_name": test_project.name,
-        "workspace_id": None,
-        "tool_name": "search_notes",
-    }
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "route_mode": "local_asgi",
+        },
+    )
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "tool_name": "search_notes",
+        },
+    )

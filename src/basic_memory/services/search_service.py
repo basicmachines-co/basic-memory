@@ -152,8 +152,6 @@ class SearchService:
             logger.debug("no criteria passed to query")
             return []
 
-        logger.trace(f"Searching with query: {query}")
-
         after_date = (
             (
                 query.after_date
@@ -176,7 +174,7 @@ class SearchService:
         retrieval_mode = query.retrieval_mode or SearchRetrievalMode.FTS
         strict_search_text = query.text
 
-        with telemetry.span(
+        with telemetry.scope(
             "search.execute",
             retrieval_mode=retrieval_mode.value,
             has_text_query=bool(strict_search_text),
@@ -186,6 +184,7 @@ class SearchService:
             limit=limit,
             offset=offset,
         ):
+            logger.trace(f"Searching with query: {query}")
             # First pass: preserve existing strict search behavior.
             results = await self.repository.search(
                 search_text=strict_search_text,
@@ -219,7 +218,7 @@ class SearchService:
             "Strict FTS returned 0 results; retrying relaxed FTS query "
             f"strict='{strict_search_text}' relaxed='{relaxed_search_text}'"
         )
-        with telemetry.span(
+        with telemetry.scope(
             "search.relaxed_fts_retry",
             retrieval_mode=retrieval_mode.value,
             token_count=len(self._tokenize_fts_text(strict_search_text)),

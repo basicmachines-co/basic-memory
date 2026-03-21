@@ -91,4 +91,4 @@ async def test_get_project_client_contextualizes_route_mode(config_manager, monk
     assert "routing.resolve_project" in span_names
     assert "routing.resolve_client" in span_names
     assert "routing.validate_project" in span_names
-    assert {"route_mode": "local_asgi", "workspace_id": None} in contexts
+    assert {"project_name": "main", "route_mode": "local_asgi"} in contexts

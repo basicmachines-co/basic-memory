@@ -205,7 +205,7 @@ async def resolve_workspace_parameter(
     context: Optional[Context] = None,
 ) -> WorkspaceInfo:
     """Resolve workspace using explicit input, session cache, and cloud discovery."""
-    with telemetry.span(
+    with telemetry.scope(
         "routing.resolve_workspace",
         workspace_requested=workspace is not None,
         has_context=context is not None,
@@ -281,7 +281,7 @@ async def get_active_project(
         ValueError: If no project can be resolved
         HTTPError: If project doesn't exist or is inaccessible
     """
-    with telemetry.span(
+    with telemetry.scope(
         "routing.validate_project",
         requested_project=project,
         has_context=context is not None,
@@ -364,7 +364,7 @@ async def resolve_project_and_path(
     """
     is_memory_url = identifier.strip().startswith("memory://")
     include_project = ConfigManager().config.permalinks_include_project if is_memory_url else None
-    with telemetry.span(
+    with telemetry.scope(
         "routing.resolve_memory_url",
         is_memory_url=is_memory_url,
         requested_project=project,
@@ -548,14 +548,13 @@ async def get_project_client(
     # Outcome: use the factory client directly, skip workspace resolution
     if is_factory_mode():
         route_mode = "factory"
-        with telemetry.contextualize(route_mode=route_mode, workspace_id=workspace):
-            with telemetry.span(
-                "routing.resolve_client",
-                project_name=resolved_project,
-                route_mode=route_mode,
-                workspace_id=workspace,
-            ):
-                logger.debug("Using injected client factory for project routing")
+        with telemetry.scope(
+            "routing.resolve_client",
+            project_name=resolved_project,
+            route_mode=route_mode,
+            workspace_id=workspace,
+        ):
+            logger.debug("Using injected client factory for project routing")
             async with get_client() as client:
                 active_project = await get_active_project(client, resolved_project, context)
                 yield client, active_project
@@ -567,13 +566,12 @@ async def get_project_client(
     # Outcome: route strictly based on explicit flag, no workspace network calls
     if _explicit_routing() and _force_local_mode():
         route_mode = "explicit_local"
-        with telemetry.contextualize(route_mode=route_mode, workspace_id=None):
-            with telemetry.span(
-                "routing.resolve_client",
-                project_name=resolved_project,
-                route_mode=route_mode,
-            ):
-                logger.debug("Explicit local routing selected for project client")
+        with telemetry.scope(
+            "routing.resolve_client",
+            project_name=resolved_project,
+            route_mode=route_mode,
+        ):
+            logger.debug("Explicit local routing selected for project client")
             async with get_client(project_name=resolved_project) as client:
                 active_project = await get_active_project(client, resolved_project, context)
                 yield client, active_project
@@ -611,17 +609,13 @@ async def get_project_client(
         # which checks context cache, auto-selects single workspace, or errors
         if effective_workspace is not None:
             # Config-resolved workspace — pass directly to get_client, skip network lookup
-            with telemetry.contextualize(
+            with telemetry.scope(
+                "routing.resolve_client",
+                project_name=resolved_project,
                 route_mode=route_mode,
                 workspace_id=effective_workspace,
             ):
-                with telemetry.span(
-                    "routing.resolve_client",
-                    project_name=resolved_project,
-                    route_mode=route_mode,
-                    workspace_id=effective_workspace,
-                ):
-                    logger.debug("Using configured workspace for cloud project routing")
+                logger.debug("Using configured workspace for cloud project routing")
                 async with get_client(
                     project_name=resolved_project,
                     workspace=effective_workspace,
@@ -631,17 +625,13 @@ async def get_project_client(
         else:
             # No config-based workspace — use resolve_workspace_parameter for discovery
             active_ws = await resolve_workspace_parameter(workspace=None, context=context)
-            with telemetry.contextualize(
+            with telemetry.scope(
+                "routing.resolve_client",
+                project_name=resolved_project,
                 route_mode=route_mode,
                 workspace_id=active_ws.tenant_id,
             ):
-                with telemetry.span(
-                    "routing.resolve_client",
-                    project_name=resolved_project,
-                    route_mode=route_mode,
-                    workspace_id=active_ws.tenant_id,
-                ):
-                    logger.debug("Resolved workspace dynamically for cloud project routing")
+                logger.debug("Resolved workspace dynamically for cloud project routing")
                 async with get_client(
                     project_name=resolved_project,
                     workspace=active_ws.tenant_id,
@@ -652,13 +642,12 @@ async def get_project_client(
 
     # Step 4: Local routing (default)
     route_mode = "local_asgi"
-    with telemetry.contextualize(route_mode=route_mode, workspace_id=None):
-        with telemetry.span(
-            "routing.resolve_client",
-            project_name=resolved_project,
-            route_mode=route_mode,
-        ):
-            logger.debug("Using default local ASGI routing for project client")
+    with telemetry.scope(
+        "routing.resolve_client",
+        project_name=resolved_project,
+        route_mode=route_mode,
+    ):
+        logger.debug("Using default local ASGI routing for project client")
         async with get_client(project_name=resolved_project) as client:
             active_project = await get_active_project(client, resolved_project, context)
             yield client, active_project

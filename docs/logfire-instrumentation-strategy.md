@@ -349,6 +349,7 @@ Avoid full automatic SQL span firehose by default.
 - [x] Phase 2: Root spans for entrypoints and primary operations
 - [x] Phase 3: Child spans for sync, search, and routing
 - [x] Phase 4: Failure-focused detail and final verification
+- [x] Phase 5: Loguru context binding and scoped context inheritance
 
 ## Recommended Rollout Phases
 
@@ -391,6 +392,16 @@ Add selective deeper spans/log enrichment for:
 - cloud routing/auth failures
 
 This keeps normal traces clean while improving debuggability.
+
+### Phase 5: Loguru context binding and scoped context inheritance
+
+Add:
+
+- context-local telemetry state in `basic_memory.telemetry`
+- a shared `scope(...)` helper that opens a span and binds stable logger context together
+- context inheritance for routing, sync, and search so downstream `loguru` logs carry the active operation fields
+
+This makes the trace view and the log stream tell the same story without forcing logger rewrites across the codebase.
 
 ## Validation Checklist
 

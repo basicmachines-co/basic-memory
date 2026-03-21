@@ -278,7 +278,7 @@ class SyncService:
 
             # initial paths from db to sync
             # path -> checksum
-            with telemetry.span("sync.project.scan", force_full=force_full):
+            with telemetry.scope("sync.project.scan", force_full=force_full):
                 report = await self.scan(directory, force_full=force_full)
 
             # order of sync matters to resolve relations effectively
@@ -287,7 +287,7 @@ class SyncService:
                 + f"deleted_files={len(report.deleted)}, moved_files={len(report.moves)}"
             )
 
-            with telemetry.span(
+            with telemetry.scope(
                 "sync.project.apply_changes",
                 new_count=len(report.new),
                 modified_count=len(report.modified),
@@ -350,7 +350,7 @@ class SyncService:
             # Only resolve relations if there were actual changes
             # If no files changed, no new unresolved relations could have been created
             if report.total > 0:
-                with telemetry.span("sync.project.resolve_relations", relation_scope="all_pending"):
+                with telemetry.scope("sync.project.resolve_relations", relation_scope="all_pending"):
                     await self.resolve_relations()
             else:
                 logger.info("Skipping relation resolution - no file changes detected")
@@ -358,7 +358,7 @@ class SyncService:
             # Batch-generate vector embeddings for all synced entities
             if synced_entity_ids and self.app_config.semantic_search_enabled:
                 try:
-                    with telemetry.span(
+                    with telemetry.scope(
                         "sync.project.sync_embeddings",
                         entity_count=len(synced_entity_ids),
                     ):
@@ -382,7 +382,7 @@ class SyncService:
             # Update scan watermark after successful sync
             # Use the timestamp from sync start (not end) to ensure we catch files
             # created during the sync on the next iteration
-            with telemetry.span("sync.project.update_watermark"):
+            with telemetry.scope("sync.project.update_watermark"):
                 current_file_count = await self._quick_count_files(directory)
                 if self.entity_repository.project_id is not None:
                     project = await self.project_repository.find_by_id(
@@ -458,7 +458,7 @@ class SyncService:
         if project is None:
             raise ValueError(f"Project not found: {self.entity_repository.project_id}")
 
-        with telemetry.span("sync.project.select_scan_strategy", force_full=force_full):
+        with telemetry.scope("sync.project.select_scan_strategy", force_full=force_full):
             # Step 1: Quick file count
             logger.debug("Counting files in directory")
             current_count = await self._quick_count_files(directory)
@@ -502,13 +502,12 @@ class SyncService:
                 logger.warning("No scan watermark available, falling back to full scan")
                 scan_coro = self._scan_directory_full(directory)
 
-        with telemetry.contextualize(scan_type=scan_type):
-            with telemetry.span("sync.project.filesystem_scan", scan_type=scan_type):
-                file_paths_to_scan = await scan_coro
-                if scan_type == "incremental":
-                    logger.debug(
-                        f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
-                    )
+        with telemetry.scope("sync.project.filesystem_scan", scan_type=scan_type):
+            file_paths_to_scan = await scan_coro
+            if scan_type == "incremental":
+                logger.debug(
+                    f"Incremental scan found {len(file_paths_to_scan)} potentially changed files"
+                )
 
             # Step 3: Process each file with mtime-based comparison
             scanned_paths: Set[str] = set()
@@ -569,7 +568,7 @@ class SyncService:
 
             # Step 4: Detect moves (for both full and incremental scans)
             # Check if any "new" files are actually moves by matching checksums
-            with telemetry.span("sync.project.detect_moves", new_count=len(report.new)):
+            with telemetry.scope("sync.project.detect_moves", new_count=len(report.new)):
                 for new_path in list(
                     report.new
                 ):  # Use list() to allow modification during iteration
@@ -604,7 +603,7 @@ class SyncService:
             # Step 5: Detect deletions (only for full scans)
             # Incremental scans can't reliably detect deletions since they only see modified files
             if scan_type in ("full_initial", "full_deletions", "full_fallback", "full_forced"):
-                with telemetry.span("sync.project.detect_deletions", scan_type=scan_type):
+                with telemetry.scope("sync.project.detect_deletions", scan_type=scan_type):
                     # Use optimized query for just file paths (not full entities)
                     db_file_paths = await self.entity_repository.get_all_file_paths()
                     logger.debug(f"Found {len(db_file_paths)} db paths for deletion detection")
@@ -693,7 +692,7 @@ class SyncService:
         except FileNotFoundError:
             # File exists in database but not on filesystem
             # This indicates a database/filesystem inconsistency - treat as deletion
-            with telemetry.span(
+            with telemetry.scope(
                 "sync.file.failure",
                 failure_type="file_not_found",
                 path=path,
@@ -715,7 +714,7 @@ class SyncService:
             if isinstance(e, SyncFatalError) or isinstance(
                 e.__cause__, SyncFatalError
             ):  # pragma: no cover
-                with telemetry.span(
+                with telemetry.scope(
                     "sync.file.failure",
                     failure_type=failure_type,
                     path=path,
@@ -728,7 +727,7 @@ class SyncService:
 
             # Otherwise treat as recoverable file-level error
             error_msg = str(e)
-            with telemetry.span(
+            with telemetry.scope(
                 "sync.file.failure",
                 failure_type=failure_type,
                 path=path,
@@ -1133,7 +1132,7 @@ class SyncService:
                     # update search index only on successful resolution
                     await self.search_service.index_entity(resolved_entity)
                 except IntegrityError:
-                    with telemetry.span(
+                    with telemetry.scope(
                         "sync.relation.resolve_conflict",
                         relation_id=relation.id,
                         relation_type=relation.relation_type,
@@ -1154,7 +1153,7 @@ class SyncService:
                         try:
                             await self.relation_repository.delete(relation.id)
                         except Exception as e:
-                            with telemetry.span(
+                            with telemetry.scope(
                                 "sync.relation.cleanup_failure",
                                 relation_id=relation.id,
                                 relation_type=relation.relation_type,

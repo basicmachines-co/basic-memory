@@ -97,6 +97,18 @@ def test_bind_telemetry_context_filters_nulls() -> None:
     assert extra == {"project_name": "main"}
 
 
+def test_bind_telemetry_context_merges_active_context() -> None:
+    with telemetry.contextualize(project_name="main", route_mode="local_asgi"):
+        bound = telemetry.bind_telemetry_context(tool_name="write_note", workspace_id=None)
+
+    extra = bound._options[-1]  # type: ignore[attr-defined]
+    assert extra == {
+        "project_name": "main",
+        "route_mode": "local_asgi",
+        "tool_name": "write_note",
+    }
+
+
 def test_contextualize_adds_filtered_loguru_context() -> None:
     records: list[dict] = []
     sink_id = logger.add(lambda message: records.append(message.record["extra"].copy()))
@@ -108,6 +120,26 @@ def test_contextualize_adds_filtered_loguru_context() -> None:
         logger.remove(sink_id)
 
     assert records == [{"project_name": "main"}]
+
+
+def test_contextualize_nested_contexts_merge_and_unwind() -> None:
+    records: list[dict] = []
+    sink_id = logger.add(lambda message: records.append(message.record["extra"].copy()))
+
+    try:
+        with telemetry.contextualize(project_name="main"):
+            logger.info("outer context")
+            with telemetry.contextualize(tool_name="write_note"):
+                logger.info("inner context")
+            logger.info("outer context restored")
+    finally:
+        logger.remove(sink_id)
+
+    assert records == [
+        {"project_name": "main"},
+        {"project_name": "main", "tool_name": "write_note"},
+        {"project_name": "main"},
+    ]
 
 
 def test_span_uses_logfire_when_enabled(monkeypatch) -> None:
@@ -154,6 +186,36 @@ def test_operation_creates_span_and_log_context(monkeypatch) -> None:
         ("cli.command.status", {"entrypoint": "cli", "command_name": "status"})
     ]
     assert records == [{"entrypoint": "cli", "command_name": "status"}]
+
+
+def test_scope_creates_span_and_nested_log_context(monkeypatch) -> None:
+    fake_logfire = FakeLogfire()
+    records: list[dict] = []
+    sink_id = logger.add(lambda message: records.append(message.record["extra"].copy()))
+
+    telemetry.reset_telemetry_state()
+    monkeypatch.setattr(telemetry, "_load_logfire", lambda: fake_logfire)
+    telemetry.configure_telemetry(
+        "basic-memory-mcp",
+        environment="dev",
+        enable_logfire=True,
+    )
+
+    try:
+        with telemetry.contextualize(project_name="main"):
+            with telemetry.scope(
+                "routing.resolve_client",
+                route_mode="local_asgi",
+                workspace_id=None,
+            ):
+                logger.info("inside scope")
+    finally:
+        logger.remove(sink_id)
+
+    assert fake_logfire.span_calls == [
+        ("routing.resolve_client", {"route_mode": "local_asgi"})
+    ]
+    assert records == [{"project_name": "main", "route_mode": "local_asgi"}]
 
 
 def test_contextualize_isolated_per_context() -> None:
