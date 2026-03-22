@@ -238,6 +238,9 @@ telemetry-smoke:
     echo "  project_path=$TMP_PROJECT"
     ./.venv/bin/python -m basic_memory.cli.main project add telemetry-smoke "$TMP_PROJECT" --default --local
     ./.venv/bin/python -m basic_memory.cli.main tool write-note --title "Telemetry Smoke" --folder notes --content "hello from smoke" --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool read-note notes/telemetry-smoke --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool edit-note notes/telemetry-smoke --operation append --content $'\n\nsmoke edit line' --project telemetry-smoke --local
+    ./.venv/bin/python -m basic_memory.cli.main tool build-context notes/telemetry-smoke --project telemetry-smoke --local --page-size 5 --max-related 5
     ./.venv/bin/python -m basic_memory.cli.main tool search-notes telemetry --project telemetry-smoke --local
     ./.venv/bin/python -m basic_memory.cli.main doctor --local
     echo ""
@@ -245,7 +248,7 @@ telemetry-smoke:
     echo "Search Logfire for:"
     echo "  service_name: basic-memory-cli"
     echo "  environment: $BASIC_MEMORY_LOGFIRE_ENVIRONMENT"
-    echo "  span names: mcp.tool.write_note, mcp.tool.search_notes, sync.project.run"
+    echo "  span names: mcp.tool.write_note, mcp.tool.read_note, mcp.tool.edit_note, mcp.tool.build_context, mcp.tool.search_notes, sync.project.run"
 
 
 # Update all dependencies to latest versions

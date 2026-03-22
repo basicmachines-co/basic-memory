@@ -421,6 +421,9 @@ What this does:
 - runs a small CLI workflow:
   - `project add`
   - `tool write-note`
+  - `tool read-note`
+  - `tool edit-note`
+  - `tool build-context`
   - `tool search-notes`
   - `doctor`
 
@@ -445,6 +448,9 @@ You should see a small set of comparable root spans rather than a framework-gene
 - `cli.command.project`
 - `cli.command.tool`
 - `mcp.tool.write_note`
+- `mcp.tool.read_note`
+- `mcp.tool.edit_note`
+- `mcp.tool.build_context`
 - `mcp.tool.search_notes`
 - `sync.project.run`
 

@@ -6,6 +6,7 @@ from loguru import logger
 from fastmcp import Context
 
 from basic_memory.config import ConfigManager
+from basic_memory import telemetry
 from basic_memory.mcp.project_context import (
     detect_project_from_url_prefix,
     get_project_client,
@@ -190,8 +191,6 @@ async def build_context(
         if detected:
             project = detected
 
-    logger.info(f"Building context from {url} in project {project}")
-
     # Convert string depth to integer if needed
     if isinstance(depth, str):
         try:
@@ -203,25 +202,52 @@ async def build_context(
 
     # URL is already validated and normalized by MemoryUrl type annotation
 
-    async with get_project_client(project, workspace, context) as (client, active_project):
-        # Resolve memory:// identifier with project-prefix awareness
-        _, resolved_path, _ = await resolve_project_and_path(client, url, project, context)
+    with telemetry.operation(
+        "mcp.tool.build_context",
+        entrypoint="mcp",
+        tool_name="build_context",
+        requested_project=project,
+        workspace_id=workspace,
+        depth=depth or 1,
+        timeframe=timeframe,
+        page=page,
+        page_size=page_size,
+        max_related=max_related,
+        output_format=output_format,
+        is_memory_url=str(url).startswith("memory://"),
+    ):
+        async with get_project_client(project, workspace, context) as (client, active_project):
+            with telemetry.contextualize(
+                project_name=active_project.name,
+                workspace_id=workspace,
+                tool_name="build_context",
+            ):
+                logger.info(
+                    "Building context",
+                    url=str(url),
+                    project=active_project.name,
+                    depth=depth,
+                    timeframe=timeframe,
+                )
 
-        # Import here to avoid circular import
-        from basic_memory.mcp.clients import MemoryClient
+                # Resolve memory:// identifier with project-prefix awareness
+                _, resolved_path, _ = await resolve_project_and_path(client, url, project, context)
 
-        # Use typed MemoryClient for API calls
-        memory_client = MemoryClient(client, active_project.external_id)
-        graph = await memory_client.build_context(
-            resolved_path,
-            depth=depth or 1,
-            timeframe=timeframe,
-            page=page,
-            page_size=page_size,
-            max_related=max_related,
-        )
+                # Import here to avoid circular import
+                from basic_memory.mcp.clients import MemoryClient
 
-        if output_format == "text":
-            return _format_context_markdown(graph, active_project.name)
+                # Use typed MemoryClient for API calls
+                memory_client = MemoryClient(client, active_project.external_id)
+                graph = await memory_client.build_context(
+                    resolved_path,
+                    depth=depth or 1,
+                    timeframe=timeframe,
+                    page=page,
+                    page_size=page_size,
+                    max_related=max_related,
+                )
 
-        return graph.model_dump()
+                if output_format == "text":
+                    return _format_context_markdown(graph, active_project.name)
+
+                return graph.model_dump()

@@ -88,6 +88,12 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def suppress_logfire_no_config_warning(monkeypatch) -> None:
+    """Keep tests focused on behavior instead of Logfire bootstrap warnings."""
+    monkeypatch.setenv("LOGFIRE_IGNORE_NO_CONFIG", "1")
+
+
 @pytest.fixture
 def project_root() -> Path:
     return Path(__file__).parent.parent

@@ -7,6 +7,8 @@ from contextlib import contextmanager
 
 import pytest
 
+build_context_module = importlib.import_module("basic_memory.mcp.tools.build_context")
+edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
 read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
 search_module = importlib.import_module("basic_memory.mcp.tools.search")
 write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
@@ -188,5 +190,120 @@ async def test_search_notes_emits_root_operation_and_project_context(
         {
             "project_name": test_project.name,
             "tool_name": "search_notes",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_note_emits_root_operation_and_project_context(
+    app, test_project, monkeypatch
+) -> None:
+    await write_note_module.write_note(
+        project=test_project.name,
+        title="Editable Telemetry Note",
+        directory="notes",
+        content="Original telemetry content",
+    )
+
+    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
+    monkeypatch.setattr(edit_note_module.telemetry, "operation", fake_operation)
+    monkeypatch.setattr(edit_note_module.telemetry, "contextualize", fake_contextualize)
+
+    await edit_note_module.edit_note(
+        "notes/editable-telemetry-note",
+        operation="append",
+        content="\n\nAppended telemetry content",
+        project=test_project.name,
+        output_format="json",
+    )
+
+    assert operations == [
+        (
+            "mcp.tool.edit_note",
+            {
+                "entrypoint": "mcp",
+                "tool_name": "edit_note",
+                "requested_project": test_project.name,
+                "workspace_id": None,
+                "edit_operation": "append",
+                "output_format": "json",
+                "has_section": False,
+                "has_find_text": False,
+                "expected_replacements": 1,
+            },
+        )
+    ]
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "route_mode": "local_asgi",
+        },
+    )
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "tool_name": "edit_note",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_context_emits_root_operation_and_project_context(
+    app, test_project, monkeypatch
+) -> None:
+    await write_note_module.write_note(
+        project=test_project.name,
+        title="Context Telemetry Note",
+        directory="notes",
+        content="Context telemetry content",
+    )
+
+    operations, contexts, fake_operation, fake_contextualize = _recording_contexts()
+    monkeypatch.setattr(build_context_module.telemetry, "operation", fake_operation)
+    monkeypatch.setattr(build_context_module.telemetry, "contextualize", fake_contextualize)
+
+    await build_context_module.build_context(
+        url="memory://notes/context-telemetry-note",
+        project=test_project.name,
+        depth=2,
+        timeframe="7d",
+        page=1,
+        page_size=5,
+        max_related=3,
+        output_format="json",
+    )
+
+    assert operations == [
+        (
+            "mcp.tool.build_context",
+            {
+                "entrypoint": "mcp",
+                "tool_name": "build_context",
+                "requested_project": test_project.name,
+                "workspace_id": None,
+                "depth": 2,
+                "timeframe": "7d",
+                "page": 1,
+                "page_size": 5,
+                "max_related": 3,
+                "output_format": "json",
+                "is_memory_url": True,
+            },
+        )
+    ]
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "route_mode": "local_asgi",
+        },
+    )
+    assert _contains_context(
+        contexts,
+        {
+            "project_name": test_project.name,
+            "tool_name": "build_context",
         },
     )
