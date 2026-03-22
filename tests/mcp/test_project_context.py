@@ -383,6 +383,49 @@ class TestDetectProjectFromUrlPrefix:
         assert result == "My Research"
 
 
+@pytest.mark.asyncio
+async def test_resolve_project_and_path_skips_unknown_prefix_when_project_already_fixed(
+    config_manager, monkeypatch
+):
+    from basic_memory.mcp.project_context import ProjectItem, resolve_project_and_path
+
+    config = config_manager.load_config()
+    config.permalinks_include_project = True
+    config_manager.save_config(config)
+
+    async def fake_get_active_project(client, project=None, context=None, headers=None):
+        return ProjectItem(
+            id=1,
+            external_id="project-123",
+            name="test-project",
+            path="/tmp/test-project",
+            is_default=True,
+        )
+
+    async def fail_if_called(*args, **kwargs):  # pragma: no cover
+        raise AssertionError("Project resolution should not run for a plain directory prefix")
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_active_project",
+        fake_get_active_project,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.tools.utils.call_post",
+        fail_if_called,
+    )
+
+    active_project, resolved_path, is_memory_url = await resolve_project_and_path(
+        client=object(),
+        identifier="memory://testing/note",
+        project="test-project",
+        context=None,
+    )
+
+    assert active_project.name == "test-project"
+    assert resolved_path == "test-project/testing/note"
+    assert is_memory_url is True
+
+
 class TestGetProjectClientRoutingOrder:
     """Test that get_project_client respects explicit routing before workspace resolution."""
 

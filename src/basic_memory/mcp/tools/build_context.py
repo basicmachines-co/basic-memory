@@ -223,15 +223,17 @@ async def build_context(
                 tool_name="build_context",
             ):
                 logger.info(
-                    "Building context",
-                    url=str(url),
-                    project=active_project.name,
-                    depth=depth,
-                    timeframe=timeframe,
+                    f"MCP tool call tool=build_context project={active_project.name} "
+                    f"url={url} depth={depth} timeframe={timeframe} output_format={output_format}"
                 )
 
                 # Resolve memory:// identifier with project-prefix awareness
-                _, resolved_path, _ = await resolve_project_and_path(client, url, project, context)
+                _, resolved_path, _ = await resolve_project_and_path(
+                    client,
+                    url,
+                    active_project.name,
+                    context,
+                )
 
                 # Import here to avoid circular import
                 from basic_memory.mcp.clients import MemoryClient
@@ -245,6 +247,14 @@ async def build_context(
                     page=page,
                     page_size=page_size,
                     max_related=max_related,
+                )
+
+                logger.info(
+                    f"MCP tool response: tool=build_context project={active_project.name} "
+                    f"uri={graph.metadata.uri or resolved_path} "
+                    f"primary_count={graph.metadata.primary_count or 0} "
+                    f"related_count={graph.metadata.related_count or 0} "
+                    f"output_format={output_format}"
                 )
 
                 if output_format == "text":

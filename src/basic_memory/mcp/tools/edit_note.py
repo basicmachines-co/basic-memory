@@ -290,11 +290,8 @@ async def edit_note(
                 tool_name="edit_note",
             ):
                 logger.info(
-                    "MCP tool call",
-                    tool="edit_note",
-                    project=active_project.name,
-                    identifier=identifier,
-                    operation=operation,
+                    f"MCP tool call tool=edit_note project={active_project.name} "
+                    f"identifier={identifier} operation={operation} output_format={output_format}"
                 )
 
                 # Validate operation
@@ -474,14 +471,11 @@ async def edit_note(
                             summary.append(f"- Unresolved: {unresolved}")
 
                     logger.info(
-                        "MCP tool response",
-                        tool="edit_note",
-                        operation=operation,
-                        project=active_project.name,
-                        permalink=result.permalink,
-                        observations_count=len(result.observations),
-                        relations_count=len(result.relations),
-                        file_created=file_created,
+                        f"MCP tool response: tool=edit_note project={active_project.name} "
+                        f"operation={operation} permalink={result.permalink} "
+                        f"observations_count={len(result.observations)} "
+                        f"relations_count={len(result.relations)} "
+                        f"file_created={str(file_created).lower()}"
                     )
 
                     if output_format == "json":

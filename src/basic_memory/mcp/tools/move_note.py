@@ -477,8 +477,11 @@ async def move_note(
             }
         return f"# Move Failed - Invalid Parameters\n\n{error_msg}"
     async with get_project_client(project, workspace, context) as (client, active_project):
-        logger.debug(
-            f"Moving {'directory' if is_directory else 'note'}: {identifier} to {destination_path} in project: {active_project.name}"
+        destination_target = destination_folder or destination_path
+        logger.info(
+            f"MCP tool call tool=move_note project={active_project.name} "
+            f"identifier={identifier} destination={destination_target} "
+            f"is_directory={str(is_directory).lower()}"
         )
 
         # Validate destination path to prevent path traversal attacks
@@ -834,10 +837,8 @@ move_note("{identifier}", destination_folder="notes")
 
             # Log the operation
             logger.info(
-                "Move note completed",
-                identifier=identifier,
-                destination_path=destination_path,
-                project=active_project.name,
+                f"MCP tool response: tool=move_note project={active_project.name} "
+                f"source={identifier} destination={result.file_path} permalink={result.permalink}"
             )
 
             return "\n".join(result_lines)

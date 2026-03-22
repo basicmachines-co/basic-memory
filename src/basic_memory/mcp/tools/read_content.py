@@ -216,7 +216,7 @@ async def read_content(
         if detected:
             project = detected
 
-    logger.info("Reading file", path=path, project=project)
+    logger.info(f"MCP tool call tool=read_content project={project} path={path}")
 
     async with get_project_client(project, workspace, context) as (client, active_project):
         # Resolve path with project-prefix awareness for memory:// URLs
@@ -260,6 +260,10 @@ async def read_content(
         # Handle text or json
         if content_type.startswith("text/") or content_type == "application/json":
             logger.debug("Processing text resource")
+            logger.info(
+                f"MCP tool response: tool=read_content project={active_project.name} "
+                f"path={url} type=text content_type={content_type}"
+            )
             return {
                 "type": "text",
                 "text": response.text,
@@ -272,6 +276,10 @@ async def read_content(
             logger.debug("Processing image")
             img = PILImage.open(io.BytesIO(response.content))
             img_bytes = optimize_image(img, content_length)
+            logger.info(
+                f"MCP tool response: tool=read_content project={active_project.name} "
+                f"path={url} type=image content_type=image/jpeg"
+            )
 
             return {
                 "type": "image",
@@ -291,6 +299,10 @@ async def read_content(
                     "type": "error",
                     "error": f"Document size {content_length} bytes exceeds maximum allowed size",
                 }
+            logger.info(
+                f"MCP tool response: tool=read_content project={active_project.name} "
+                f"path={url} type=document content_type={content_type}"
+            )
             return {
                 "type": "document",
                 "source": {

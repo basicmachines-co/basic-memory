@@ -634,7 +634,13 @@ async def search_notes(
                     if not search_query.entity_types:
                         search_query.entity_types = [SearchItemType("entity")]
 
-                    logger.debug(f"Searching for {search_query} in project {active_project.name}")
+                    logger.debug(
+                        f"Search request: project={active_project.name} "
+                        f"search_type={effective_search_type} "
+                        f"query={effective_query or '<filters-only>'} "
+                        f"note_types={len(note_types)} entity_types={len(search_query.entity_types or [])} "
+                        f"page={page} page_size={page_size}"
+                    )
                     # Import here to avoid circular import (tools → clients → utils → tools)
                     from basic_memory.mcp.clients import SearchClient
 
@@ -644,6 +650,11 @@ async def search_notes(
                         search_query.model_dump(),
                         page=page,
                         page_size=page_size,
+                    )
+                    logger.debug(
+                        f"Search response: project={active_project.name} "
+                        f"results={len(result.results)} has_more={str(result.has_more).lower()} "
+                        f"page={result.current_page} page_size={result.page_size}"
                     )
 
                     # Check if we got no results and provide helpful guidance
