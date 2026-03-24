@@ -85,21 +85,6 @@ def _canonicalize_project_name(
     return project_name
 
 
-def _configured_project_name(
-    project_name: Optional[str],
-    config: BasicMemoryConfig,
-) -> Optional[str]:
-    """Return the configured project name when the identifier matches a known project."""
-    if project_name is None:
-        return None
-
-    requested_permalink = generate_permalink(project_name)
-    for configured_name in config.projects:
-        if generate_permalink(configured_name) == requested_permalink:
-            return configured_name
-
-    return None
-
 
 async def resolve_project_parameter(
     project: Optional[str] = None,
@@ -394,19 +379,10 @@ async def resolve_project_and_path(
         normalized_path = normalize_project_reference(memory_url_path(identifier))
         project_prefix, remainder = _split_project_prefix(normalized_path)
         include_project = config.permalinks_include_project
-        configured_prefix = _configured_project_name(project_prefix, config)
-
         # Trigger: memory URL begins with a potential project segment
         # Why: allow project-scoped memory URLs without requiring a separate project parameter
         # Outcome: attempt to resolve the prefix as a project and route to it
-        #
-        # Trigger: the active project is already fixed and the first path segment is not
-        # a configured project name
-        # Why: in memory URLs like memory://notes/topic, "notes" is a directory, not a
-        # project. Resolving it through /v2/projects/resolve creates noisy false-negative
-        # logs before the tool recovers with the active project anyway.
-        # Outcome: skip project resolution and keep the path within the active project.
-        if project_prefix and (configured_prefix is not None or project is None):
+        if project_prefix:
             try:
                 from basic_memory.mcp.tools.utils import call_post
 
