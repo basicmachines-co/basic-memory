@@ -167,7 +167,6 @@ dependencies = [
     { name = "fastmcp" },
     { name = "greenlet" },
     { name = "httpx" },
-    { name = "logfire" },
     { name = "loguru" },
     { name = "markdown-it-py" },
     { name = "mcp" },
@@ -197,6 +196,11 @@ dependencies = [
     { name = "watchfiles" },
 ]
 
+[package.optional-dependencies]
+telemetry = [
+    { name = "logfire" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "cst-lsp" },
@@ -204,6 +208,7 @@ dev = [
     { name = "gevent" },
     { name = "icecream" },
     { name = "libcst" },
+    { name = "logfire" },
     { name = "psycopg" },
     { name = "pyright" },
     { name = "pytest" },
@@ -230,7 +235,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=3.0.1,<4" },
     { name = "greenlet", specifier = ">=3.1.1" },
     { name = "httpx", specifier = ">=0.28.0" },
-    { name = "logfire", specifier = ">=4.19.0" },
+    { name = "logfire", marker = "extra == 'telemetry'", specifier = ">=4.19.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "markdown-it-py", specifier = ">=3.0.0" },
     { name = "mcp", specifier = ">=1.23.1" },
@@ -259,6 +264,7 @@ requires-dist = [
     { name = "unidecode", specifier = ">=1.3.8" },
     { name = "watchfiles", specifier = ">=1.0.4" },
 ]
+provides-extras = ["telemetry"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -267,6 +273,7 @@ dev = [
     { name = "gevent", specifier = ">=24.11.1" },
     { name = "icecream", specifier = ">=2.1.3" },
     { name = "libcst", specifier = ">=1.8.6" },
+    { name = "logfire", specifier = ">=4.19.0" },
     { name = "psycopg", specifier = ">=3.2.0" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=8.3.4" },

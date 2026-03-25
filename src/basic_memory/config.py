@@ -989,7 +989,7 @@ def _configure_logfire_for_entrypoint(entrypoint: str) -> None:
     )
 
 
-def init_cli_logging() -> None:  # pragma: no cover
+def init_cli_logging() -> None:
     """Initialize logging for CLI commands - file only.
 
     CLI commands should not log to stdout to avoid interfering with
@@ -1000,7 +1000,7 @@ def init_cli_logging() -> None:  # pragma: no cover
     setup_logging(log_level=log_level, log_to_file=True)
 
 
-def init_mcp_logging() -> None:  # pragma: no cover
+def init_mcp_logging() -> None:
     """Initialize logging for MCP server - file only.
 
     MCP server must not log to stdout as it would corrupt the
@@ -1011,7 +1011,7 @@ def init_mcp_logging() -> None:  # pragma: no cover
     setup_logging(log_level=log_level, log_to_file=True)
 
 
-def init_api_logging() -> None:  # pragma: no cover
+def init_api_logging() -> None:
     """Initialize logging for API server.
 
     Cloud mode (BASIC_MEMORY_CLOUD_MODE=1): stdout with structured context

@@ -204,7 +204,7 @@ def test_scope_creates_span_and_nested_log_context(monkeypatch) -> None:
     try:
         with telemetry.contextualize(project_name="main"):
             with telemetry.scope(
-                "routing.resolve_client",
+                "routing.client_session",
                 route_mode="local_asgi",
                 workspace_id=None,
             ):
@@ -213,7 +213,7 @@ def test_scope_creates_span_and_nested_log_context(monkeypatch) -> None:
         logger.remove(sink_id)
 
     assert fake_logfire.span_calls == [
-        ("routing.resolve_client", {"route_mode": "local_asgi"})
+        ("routing.client_session", {"route_mode": "local_asgi"})
     ]
     assert records == [{"project_name": "main", "route_mode": "local_asgi"}]
 

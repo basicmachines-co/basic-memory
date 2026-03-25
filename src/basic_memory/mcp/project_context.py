@@ -550,7 +550,7 @@ async def get_project_client(
     if is_factory_mode():
         route_mode = "factory"
         with telemetry.scope(
-            "routing.resolve_client",
+            "routing.client_session",
             project_name=resolved_project,
             route_mode=route_mode,
             workspace_id=workspace,
@@ -568,7 +568,7 @@ async def get_project_client(
     if _explicit_routing() and _force_local_mode():
         route_mode = "explicit_local"
         with telemetry.scope(
-            "routing.resolve_client",
+            "routing.client_session",
             project_name=resolved_project,
             route_mode=route_mode,
         ):
@@ -611,7 +611,7 @@ async def get_project_client(
         if effective_workspace is not None:
             # Config-resolved workspace — pass directly to get_client, skip network lookup
             with telemetry.scope(
-                "routing.resolve_client",
+                "routing.client_session",
                 project_name=resolved_project,
                 route_mode=route_mode,
                 workspace_id=effective_workspace,
@@ -627,7 +627,7 @@ async def get_project_client(
             # No config-based workspace — use resolve_workspace_parameter for discovery
             active_ws = await resolve_workspace_parameter(workspace=None, context=context)
             with telemetry.scope(
-                "routing.resolve_client",
+                "routing.client_session",
                 project_name=resolved_project,
                 route_mode=route_mode,
                 workspace_id=active_ws.tenant_id,
@@ -644,7 +644,7 @@ async def get_project_client(
     # Step 4: Local routing (default)
     route_mode = "local_asgi"
     with telemetry.scope(
-        "routing.resolve_client",
+        "routing.client_session",
         project_name=resolved_project,
         route_mode=route_mode,
     ):

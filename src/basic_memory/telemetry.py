@@ -174,11 +174,9 @@ def scope(name: str, **attrs: Any) -> Iterator[None]:
             yield
 
 
-@contextmanager
-def operation(name: str, **attrs: Any) -> Iterator[None]:
-    """Create a root operation span and mirror its metadata into Loguru context."""
-    with scope(name, **attrs):
-        yield
+# Alias: `operation` signals a root-level boundary (entrypoint, tool invocation),
+# while `scope` signals a nested phase. The distinction is convention only.
+operation = scope
 
 
 @contextmanager

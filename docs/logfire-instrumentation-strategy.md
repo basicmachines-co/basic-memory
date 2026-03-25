@@ -187,7 +187,7 @@ Child spans should represent real phases whose duration we care about.
 
 Examples:
 
-- `routing.resolve_client`
+- `routing.client_session`
 - `routing.resolve_project`
 - `routing.resolve_workspace`
 - `api.search.execute`
