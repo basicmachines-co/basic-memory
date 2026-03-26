@@ -45,14 +45,26 @@ def get_cloud_config() -> tuple[str, str, str]:
 
 async def get_authenticated_headers(auth: CLIAuth | None = None) -> dict[str, str]:
     """
-    Get authentication headers with JWT token.
-    handles jwt refresh if needed.
+    Get authentication headers for cloud API requests.
+
+    Credential priority mirrors async_client._resolve_cloud_token():
+      1. API key (config.cloud_api_key) — fast, no refresh needed
+      2. OAuth token via CLIAuth — handles JWT refresh automatically
     """
+    # --- API key (preferred) ---
+    config_manager = ConfigManager()
+    api_key = config_manager.config.cloud_api_key
+    if api_key:
+        return {"Authorization": f"Bearer {api_key}"}
+
+    # --- OAuth fallback ---
     client_id, domain, _ = get_cloud_config()
     auth_obj = auth or CLIAuth(client_id=client_id, authkit_domain=domain)
     token = await auth_obj.get_valid_token()
     if not token:
-        console.print("[red]Not authenticated. Please run 'bm cloud login' first.[/red]")
+        console.print(
+            "[red]Not authenticated. Run 'bm cloud set-key <key>' or 'bm cloud login' first.[/red]"
+        )
         raise typer.Exit(1)
 
     return {"Authorization": f"Bearer {token}"}
