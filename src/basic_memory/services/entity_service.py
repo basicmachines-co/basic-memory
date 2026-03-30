@@ -735,6 +735,10 @@ class EntityService(BaseService[EntityModel]):
                 entity = await self.get_by_permalink(permalink_or_id)
             else:
                 entities = await self.get_entities_by_id([permalink_or_id])
+                if len(entities) == 0:
+                    # Entity already deleted (concurrent delete or race condition)
+                    logger.info("Entity already deleted", entity_id=permalink_or_id)
+                    return True
                 if len(entities) != 1:  # pragma: no cover
                     logger.error(
                         "Entity lookup error", entity_id=permalink_or_id, found_count=len(entities)
@@ -746,13 +750,28 @@ class EntityService(BaseService[EntityModel]):
 
             # Delete from search index first (if search_service is available)
             if self.search_service:
-                await self.search_service.handle_delete(entity)
+                try:
+                    await self.search_service.handle_delete(entity)
+                except Exception:
+                    # Search cleanup is best-effort during concurrent deletes.
+                    # Relationships may have been cascade-deleted by a concurrent request.
+                    logger.warning(
+                        "Search cleanup failed for entity (likely concurrent delete)",
+                        permalink_or_id=permalink_or_id,
+                        exc_info=True,
+                    )
 
             # Delete file
             await self.file_service.delete_entity_file(entity)
 
             # Delete from DB (this will cascade to observations/relations)
-            return await self.repository.delete(entity.id)
+            # Trigger: repository.delete returns False when entity is already gone (NoResultFound)
+            # Why: concurrent delete_directory requests can race to delete the same entity
+            # Outcome: treat as success since the entity is deleted either way
+            deleted = await self.repository.delete(entity.id)
+            if not deleted:
+                logger.info("Entity already removed from DB", entity_id=permalink_or_id)
+            return True
 
         except EntityNotFoundError:
             logger.info(f"Entity not found: {permalink_or_id}")

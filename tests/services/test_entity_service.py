@@ -2426,3 +2426,116 @@ async def test_fast_write_entity_null_user_id(entity_service: EntityService):
     entity = await entity_service.fast_write_entity(schema, external_id=str(uuid.uuid4()))
     assert entity.created_by is None
     assert entity.last_updated_by is None
+
+
+# --- Concurrent Delete Resilience ---
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_by_id_already_deleted(entity_service: EntityService):
+    """delete_entity returns True when entity was already deleted (concurrent delete)."""
+    entity_data = EntitySchema(
+        title="ConcurrentDeleteTarget",
+        directory="test",
+        note_type="test",
+    )
+    created = await entity_service.create_entity(entity_data)
+    entity_id = created.id
+
+    # Delete once - should succeed
+    assert await entity_service.delete_entity(entity_id) is True
+
+    # Delete again by ID - should return True (already deleted), not raise ValueError
+    assert await entity_service.delete_entity(entity_id) is True
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_by_permalink_already_deleted(entity_service: EntityService):
+    """delete_entity returns True when entity was already deleted by permalink."""
+    entity_data = EntitySchema(
+        title="ConcurrentDeleteByPermalink",
+        directory="test",
+        note_type="test",
+    )
+    created = await entity_service.create_entity(entity_data)
+
+    # Delete once
+    assert await entity_service.delete_entity(created.id) is True
+
+    # Delete again by permalink - should return True (EntityNotFoundError caught)
+    assert await entity_service.delete_entity(entity_data.permalink) is True
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_concurrent_resilience(entity_service: EntityService):
+    """delete_directory succeeds even when entities are concurrently deleted."""
+    # Create entities in a directory
+    entities = []
+    for i in range(5):
+        entity_data = EntitySchema(
+            title=f"DirEntity{i}",
+            directory="concurrent-test",
+            note_type="test",
+        )
+        created = await entity_service.create_entity(entity_data)
+        entities.append(created)
+
+    # Delete some entities directly to simulate concurrent delete
+    await entity_service.delete_entity(entities[0].id)
+    await entity_service.delete_entity(entities[2].id)
+
+    # Now delete the directory - should handle already-deleted entities gracefully
+    result = await entity_service.delete_directory("concurrent-test")
+
+    # Only 3 remain in DB (2 were already deleted before the directory query)
+    assert result.total_files == 3
+    assert result.successful_deletes == 3
+    assert result.failed_deletes == 0
+    assert len(result.errors) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_all_already_deleted(entity_service: EntityService):
+    """delete_directory handles case where all entities were concurrently deleted."""
+    # Create entities
+    created_entities = []
+    for i in range(3):
+        entity_data = EntitySchema(
+            title=f"AllGone{i}",
+            directory="all-deleted",
+            note_type="test",
+        )
+        created = await entity_service.create_entity(entity_data)
+        created_entities.append(created)
+
+    # Delete all entities directly
+    for e in created_entities:
+        await entity_service.delete_entity(e.id)
+
+    # Directory delete should report empty (entities no longer found in prefix query)
+    result = await entity_service.delete_directory("all-deleted")
+    assert result.total_files == 0
+    assert result.successful_deletes == 0
+    assert result.failed_deletes == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_directory_entity_deleted_between_query_and_delete(
+    entity_service: EntityService,
+):
+    """Simulates the real race condition: entity exists in prefix query but is deleted
+    by a concurrent request before delete_entity is called."""
+    # Create entities
+    entity_data = EntitySchema(title="RaceTarget", directory="race-dir", note_type="test")
+    created = await entity_service.create_entity(entity_data)
+
+    # Get the entities via prefix query (as delete_directory does)
+    entities = await entity_service.repository.find_by_directory_prefix("race-dir")
+    assert len(entities) == 1
+
+    # Now delete the entity behind the scenes (simulating a concurrent request)
+    await entity_service.delete_entity(created.id)
+
+    # Call delete_entity with the stale entity ID - should return True, not raise
+    result = await entity_service.delete_entity(entities[0].id)
+    assert result is True
