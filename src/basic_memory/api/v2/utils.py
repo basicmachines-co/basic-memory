@@ -177,20 +177,30 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
         phase="hydrate_results",
         result_count=len(results),
     ):
-        entity_batches = []
-        with telemetry.scope(
-            "search.hydrate_results.fetch_entities",
-            domain="search",
-            action="search",
-            phase="fetch_entities",
-            result_count=len(results),
-        ):
-            for result in results:
-                entity_batches.append(
-                    await entity_service.get_entities_by_id(
-                        [result.entity_id, result.from_id, result.to_id]  # pyright: ignore
-                    )
-                )
+        # First pass: collect all unique entity IDs needed across all results.
+        # This covers entity_id (owning entity), from_id and to_id (relation endpoints).
+        entity_ids_needed: set[int] = set()
+        for result in results:
+            if result.entity_id is not None:
+                entity_ids_needed.add(result.entity_id)
+            if result.from_id is not None:
+                entity_ids_needed.add(result.from_id)
+            if result.to_id is not None:
+                entity_ids_needed.add(result.to_id)
+
+        # Batch fetch all entities in a single query instead of one per result.
+        entity_permalink_lookup: dict[int, str] = {}
+        if entity_ids_needed:
+            with telemetry.scope(
+                "search.hydrate_results.fetch_entities",
+                domain="search",
+                action="search",
+                phase="fetch_entities",
+                result_count=len(entity_ids_needed),
+            ):
+                entities = await entity_service.get_entities_by_id(list(entity_ids_needed))
+            for e in entities:
+                entity_permalink_lookup[e.id] = e.permalink
 
         search_results = []
         with telemetry.scope(
@@ -200,7 +210,7 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
             phase="shape_results",
             result_count=len(results),
         ):
-            for result, entities in zip(results, entity_batches):
+            for result in results:
                 entity_id = None
                 observation_id = None
                 relation_id = None
@@ -214,13 +224,29 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                     relation_id = result.id
                     entity_id = result.entity_id
 
+                entity_permalink = (
+                    entity_permalink_lookup.get(result.entity_id)  # pyright: ignore
+                    if result.entity_id is not None
+                    else None
+                )
+                from_permalink = (
+                    entity_permalink_lookup.get(result.from_id)  # pyright: ignore
+                    if result.from_id is not None
+                    else None
+                )
+                to_permalink = (
+                    entity_permalink_lookup.get(result.to_id)
+                    if result.to_id is not None
+                    else None
+                )
+
                 search_results.append(
                     SearchResult(
                         title=result.title,  # pyright: ignore
                         type=result.type,  # pyright: ignore
                         permalink=result.permalink,
                         score=result.score,  # pyright: ignore
-                        entity=entities[0].permalink if entities else None,
+                        entity=entity_permalink,
                         content=result.content,
                         matched_chunk=result.matched_chunk_text,
                         file_path=result.file_path,
@@ -229,8 +255,8 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                         observation_id=observation_id,
                         relation_id=relation_id,
                         category=result.category,
-                        from_entity=entities[0].permalink if entities else None,
-                        to_entity=entities[1].permalink if len(entities) > 1 else None,
+                        from_entity=from_permalink,
+                        to_entity=to_permalink,
                         relation_type=result.relation_type,
                     )
                 )

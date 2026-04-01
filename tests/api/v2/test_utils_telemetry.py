@@ -32,9 +32,10 @@ async def test_to_search_results_emits_hydration_spans(monkeypatch) -> None:
 
     class FakeEntityService:
         async def get_entities_by_id(self, ids):
+            # Return entities with .id so the batch lookup dict can be built
             return [
-                SimpleNamespace(permalink="notes/root"),
-                SimpleNamespace(permalink="notes/child"),
+                SimpleNamespace(id=1, permalink="notes/root"),
+                SimpleNamespace(id=2, permalink="notes/child"),
             ]
 
     now = datetime.now(timezone.utc)
@@ -59,6 +60,9 @@ async def test_to_search_results_emits_hydration_spans(monkeypatch) -> None:
     search_results = await utils_module.to_search_results(FakeEntityService(), results)
 
     assert search_results[0].relation_type == "relates_to"
+    # from_entity and to_entity are now correctly resolved via lookup dict
+    assert search_results[0].from_entity == "notes/root"
+    assert search_results[0].to_entity == "notes/child"
     assert [name for name, _ in spans] == [
         "search.hydrate_results",
         "search.hydrate_results.fetch_entities",
