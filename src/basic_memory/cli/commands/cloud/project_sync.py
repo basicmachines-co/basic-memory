@@ -131,7 +131,7 @@ def sync_project_command(
                 async def _trigger_db_sync():
                     async with get_client() as client:
                         return await ProjectClient(client).sync(
-                            project_data.external_id, force_full=True
+                            project_data.external_id, force_full=False
                         )
 
                 try:
@@ -206,7 +206,7 @@ def bisync_project_command(
                 async def _trigger_db_sync():
                     async with get_client() as client:
                         return await ProjectClient(client).sync(
-                            project_data.external_id, force_full=True
+                            project_data.external_id, force_full=False
                         )
 
                 try:
