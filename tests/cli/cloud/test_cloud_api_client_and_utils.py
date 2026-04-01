@@ -10,6 +10,7 @@ from basic_memory.cli.commands.cloud.api_client import (
     make_api_request,
 )
 from basic_memory.cli.commands.cloud.cloud_utils import (
+    _workspace_headers,
     create_cloud_project,
     fetch_cloud_projects,
     project_exists,
@@ -163,6 +164,81 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(
     assert created.new_project["name"] == "My Project"
     # Path should be permalink-like (kebab)
     assert seen["create_payload"]["path"] == "my-project"
+
+
+def test_workspace_headers_with_workspace():
+    """_workspace_headers returns X-Workspace-ID when workspace is provided."""
+    assert _workspace_headers("tenant-123") == {"X-Workspace-ID": "tenant-123"}
+
+
+def test_workspace_headers_without_workspace():
+    """_workspace_headers returns empty dict when no workspace."""
+    assert _workspace_headers(None) == {}
+    assert _workspace_headers() == {}
+
+
+@pytest.mark.asyncio
+async def test_cloud_utils_pass_workspace_header(config_home, config_manager):
+    """fetch_cloud_projects, project_exists, and create_cloud_project pass workspace header."""
+    config = config_manager.load_config()
+    config.cloud_host = "https://cloud.example.test"
+    config_manager.save_config(config)
+
+    auth = CLIAuth(client_id="cid", authkit_domain="https://auth.example.test")
+    auth.token_file.parent.mkdir(parents=True, exist_ok=True)
+    auth.token_file.write_text(
+        '{"access_token":"token-123","refresh_token":null,"expires_at":9999999999,"token_type":"Bearer"}',
+        encoding="utf-8",
+    )
+
+    seen_headers: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(dict(request.headers))
+        if request.method == "GET":
+            return httpx.Response(200, json={"projects": []})
+        if request.method == "POST":
+            payload = json.loads(request.content.decode("utf-8"))
+            return httpx.Response(
+                200,
+                json={
+                    "message": "created",
+                    "status": "success",
+                    "default": False,
+                    "old_project": None,
+                    "new_project": {"name": payload["name"], "path": payload["path"]},
+                },
+            )
+        raise AssertionError(f"Unexpected: {request.method}")
+
+    transport = httpx.MockTransport(handler)
+
+    @asynccontextmanager
+    async def http_client_factory():
+        async with httpx.AsyncClient(
+            transport=transport, base_url="https://cloud.example.test"
+        ) as client:
+            yield client
+
+    async def api_request(**kwargs):
+        return await make_api_request(auth=auth, http_client_factory=http_client_factory, **kwargs)
+
+    # fetch with workspace
+    await fetch_cloud_projects(workspace="tenant-abc", api_request=api_request)
+    assert seen_headers[-1].get("x-workspace-id") == "tenant-abc"
+
+    # project_exists with workspace
+    await project_exists("test", workspace="tenant-abc", api_request=api_request)
+    assert seen_headers[-1].get("x-workspace-id") == "tenant-abc"
+
+    # create with workspace
+    await create_cloud_project("new-proj", workspace="tenant-abc", api_request=api_request)
+    assert seen_headers[-1].get("x-workspace-id") == "tenant-abc"
+
+    # Without workspace — header should not be present
+    seen_headers.clear()
+    await fetch_cloud_projects(api_request=api_request)
+    assert "x-workspace-id" not in seen_headers[-1]
 
 
 @pytest.mark.asyncio

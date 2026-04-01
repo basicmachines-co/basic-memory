@@ -275,6 +275,64 @@ async def test_get_cloud_control_plane_client_uses_oauth_token(config_manager):
 
 
 @pytest.mark.asyncio
+async def test_get_cloud_control_plane_client_with_workspace(config_manager):
+    """Control plane client passes X-Workspace-ID header when workspace is provided."""
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    config_manager.save_config(cfg)
+
+    async with get_cloud_control_plane_client(workspace="tenant-abc") as client:
+        assert client.headers.get("X-Workspace-ID") == "tenant-abc"
+
+    # Without workspace, header should not be present
+    async with get_cloud_control_plane_client() as client:
+        assert "X-Workspace-ID" not in client.headers
+
+
+@pytest.mark.asyncio
+async def test_get_client_auto_resolves_workspace_from_project_config(config_manager):
+    """get_client resolves workspace from project entry when not explicitly passed."""
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    cfg.projects["research"].workspace_id = "tenant-from-config"
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research") as client:
+        assert client.headers.get("X-Workspace-ID") == "tenant-from-config"
+
+
+@pytest.mark.asyncio
+async def test_get_client_auto_resolves_workspace_from_default(config_manager):
+    """get_client falls back to default_workspace when project has no workspace_id."""
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    cfg.default_workspace = "default-tenant-456"
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research") as client:
+        assert client.headers.get("X-Workspace-ID") == "default-tenant-456"
+
+
+@pytest.mark.asyncio
+async def test_get_client_explicit_workspace_overrides_config(config_manager):
+    """Explicit workspace param takes priority over project config."""
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    cfg.projects["research"].workspace_id = "tenant-from-config"
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research", workspace="explicit-tenant") as client:
+        assert client.headers.get("X-Workspace-ID") == "explicit-tenant"
+
+
+@pytest.mark.asyncio
 async def test_get_cloud_control_plane_client_raises_without_credentials(config_manager):
     cfg = config_manager.load_config()
     cfg.cloud_host = "https://cloud.example.test"

@@ -10,7 +10,7 @@ from basic_memory.cli.app import app
 runner = CliRunner()
 
 
-def test_cloud_upload_uses_control_plane_client(monkeypatch, tmp_path):
+def test_cloud_upload_uses_control_plane_client(monkeypatch, tmp_path, config_manager):
     """Upload command should use control-plane cloud client for WebDAV PUT operations."""
     import basic_memory.cli.commands.cloud.upload_command as upload_command
 
@@ -20,11 +20,11 @@ def test_cloud_upload_uses_control_plane_client(monkeypatch, tmp_path):
 
     seen: dict[str, str] = {}
 
-    async def fake_project_exists(_project_name: str) -> bool:
+    async def fake_project_exists(_project_name: str, workspace: str | None = None) -> bool:
         return True
 
     @asynccontextmanager
-    async def fake_get_client():
+    async def fake_get_client(workspace=None):
         async with httpx.AsyncClient(base_url="https://cloud.example.test") as client:
             yield client
 
