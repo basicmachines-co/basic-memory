@@ -16,8 +16,16 @@ class CloudUtilsError(Exception):
     pass
 
 
+def _workspace_headers(workspace: str | None = None) -> dict[str, str]:
+    """Build workspace header if workspace is specified."""
+    if workspace:
+        return {"X-Workspace-ID": workspace}
+    return {}
+
+
 async def fetch_cloud_projects(
     *,
+    workspace: str | None = None,
     api_request=make_api_request,
 ) -> CloudProjectList:
     """Fetch list of projects from cloud API.
@@ -30,7 +38,11 @@ async def fetch_cloud_projects(
         config = config_manager.config
         host_url = config.cloud_host.rstrip("/")
 
-        response = await api_request(method="GET", url=f"{host_url}/proxy/v2/projects/")
+        response = await api_request(
+            method="GET",
+            url=f"{host_url}/proxy/v2/projects/",
+            headers=_workspace_headers(workspace),
+        )
 
         return CloudProjectList.model_validate(response.json())
     except Exception as e:
@@ -40,12 +52,14 @@ async def fetch_cloud_projects(
 async def create_cloud_project(
     project_name: str,
     *,
+    workspace: str | None = None,
     api_request=make_api_request,
 ) -> CloudProjectCreateResponse:
     """Create a new project on cloud.
 
     Args:
         project_name: Name of project to create
+        workspace: Cloud workspace tenant_id to create project in
 
     Returns:
         CloudProjectCreateResponse with project details from API
@@ -64,10 +78,13 @@ async def create_cloud_project(
             set_default=False,
         )
 
+        headers = {"Content-Type": "application/json"}
+        headers.update(_workspace_headers(workspace))
+
         response = await api_request(
             method="POST",
             url=f"{host_url}/proxy/v2/projects/",
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             json_data=project_data.model_dump(),
         )
 
@@ -91,17 +108,23 @@ async def sync_project(project_name: str, force_full: bool = False) -> None:
         raise CloudUtilsError(f"Failed to sync project '{project_name}': {e}") from e
 
 
-async def project_exists(project_name: str, *, api_request=make_api_request) -> bool:
+async def project_exists(
+    project_name: str,
+    *,
+    workspace: str | None = None,
+    api_request=make_api_request,
+) -> bool:
     """Check if a project exists on cloud.
 
     Args:
         project_name: Name of project to check
+        workspace: Cloud workspace tenant_id to check in
 
     Returns:
         True if project exists, False otherwise
     """
     try:
-        projects = await fetch_cloud_projects(api_request=api_request)
+        projects = await fetch_cloud_projects(workspace=workspace, api_request=api_request)
         project_names = {p.name for p in projects.projects}
         return project_name in project_names
     except Exception:

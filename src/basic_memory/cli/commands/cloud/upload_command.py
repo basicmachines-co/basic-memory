@@ -13,6 +13,7 @@ from basic_memory.cli.commands.cloud.cloud_utils import (
     sync_project,
 )
 from basic_memory.cli.commands.cloud.upload import upload_path
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_cloud_control_plane_client
 
 console = Console()
@@ -73,12 +74,21 @@ def upload(
     """
 
     async def _upload():
+        # Resolve workspace: per-project workspace_id, then default_workspace
+        config = ConfigManager().config
+        workspace = None
+        entry = config.projects.get(project)
+        if entry and entry.workspace_id:
+            workspace = entry.workspace_id
+        elif config.default_workspace:
+            workspace = config.default_workspace
+
         # Check if project exists
-        if not await project_exists(project):
+        if not await project_exists(project, workspace=workspace):
             if create_project:
                 console.print(f"[blue]Creating cloud project '{project}'...[/blue]")
                 try:
-                    await create_cloud_project(project)
+                    await create_cloud_project(project, workspace=workspace)
                     console.print(f"[green]Created project '{project}'[/green]")
                 except Exception as e:
                     console.print(f"[red]Failed to create project: {e}[/red]")
@@ -93,6 +103,8 @@ def upload(
                 raise typer.Exit(1)
 
         # Perform upload (or dry run)
+        if workspace:
+            console.print(f"[dim]Using workspace: {workspace}[/dim]")
         if dry_run:
             console.print(
                 f"[yellow]DRY RUN: Showing what would be uploaded to '{project}'[/yellow]"
@@ -100,13 +112,16 @@ def upload(
         else:
             console.print(f"[blue]Uploading {path} to project '{project}'...[/blue]")
 
+        def _client_factory():
+            return get_cloud_control_plane_client(workspace=workspace)
+
         success = await upload_path(
             path,
             project,
             verbose=verbose,
             use_gitignore=not no_gitignore,
             dry_run=dry_run,
-            client_cm_factory=get_cloud_control_plane_client,
+            client_cm_factory=_client_factory,
         )
         if not success:
             console.print("[red]Upload failed[/red]")

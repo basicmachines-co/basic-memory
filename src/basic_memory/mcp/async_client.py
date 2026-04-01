@@ -88,15 +88,20 @@ async def _cloud_client(
 
 
 @asynccontextmanager
-async def get_cloud_control_plane_client() -> AsyncIterator[AsyncClient]:
+async def get_cloud_control_plane_client(
+    workspace: Optional[str] = None,
+) -> AsyncIterator[AsyncClient]:
     """Create a control-plane cloud client for endpoints outside /proxy."""
     config = ConfigManager().config
     timeout = _build_timeout()
     token = await _resolve_cloud_token(config)
+    headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    if workspace:
+        headers["X-Workspace-ID"] = workspace
     logger.info(f"Creating HTTP client for cloud control plane at: {config.cloud_host}")
     async with AsyncClient(
         base_url=config.cloud_host,
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
         timeout=timeout,
     ) as client:
         yield client
@@ -179,8 +184,16 @@ async def get_client(
         project_mode = config.get_project_mode(project_name)
         if project_mode == ProjectMode.CLOUD:
             logger.debug(f"Project '{project_name}' is cloud mode - using cloud proxy client")
+            # Resolve workspace from project config if not explicitly provided
+            effective_workspace = workspace
+            if effective_workspace is None:
+                entry = config.projects.get(project_name)
+                if entry and entry.workspace_id:
+                    effective_workspace = entry.workspace_id
+                elif config.default_workspace:
+                    effective_workspace = config.default_workspace
             try:
-                async with _cloud_client(config, timeout, workspace=workspace) as client:
+                async with _cloud_client(config, timeout, workspace=effective_workspace) as client:
                     yield client
             except RuntimeError as exc:
                 raise RuntimeError(
