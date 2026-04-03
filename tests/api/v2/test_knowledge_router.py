@@ -355,6 +355,7 @@ async def test_update_entity_by_id(
     response = await client.put(
         f"{v2_project_url}/knowledge/entities/{original_external_id}",
         json=update_data,
+        params={"fast": False},
     )
 
     assert response.status_code == 200
@@ -363,6 +364,8 @@ async def test_update_entity_by_id(
     # V2 update must return external_id field
     assert updated_entity.external_id is not None
     assert updated_entity.api_version == "v2"
+    assert updated_entity.content is not None
+    assert "Updated content via V2" in updated_entity.content
 
     # Verify file was updated
     file_path = file_service.get_entity_path(updated_entity)
@@ -532,6 +535,7 @@ async def test_edit_entity_by_id_append(
     response = await client.patch(
         f"{v2_project_url}/knowledge/entities/{original_external_id}",
         json=edit_data,
+        params={"fast": False},
     )
 
     assert response.status_code == 200
@@ -540,6 +544,8 @@ async def test_edit_entity_by_id_append(
     # V2 patch must return external_id field
     assert edited_entity.external_id is not None
     assert edited_entity.api_version == "v2"
+    assert edited_entity.content is not None
+    assert "Appended content" in edited_entity.content
 
     # Verify file has both original and appended content
     file_path = file_service.get_entity_path(edited_entity)

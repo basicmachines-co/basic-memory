@@ -306,8 +306,11 @@ async def create_entity(
         ):
             if fast:
                 entity = await entity_service.fast_write_entity(data)
+                written_content = None
             else:
-                entity = await entity_service.create_entity(data)
+                write_result = await entity_service.create_entity_with_content(data)
+                entity = write_result.entity
+                written_content = write_result.content
 
         if fast:
             with telemetry.scope(
@@ -329,7 +332,7 @@ async def create_entity(
                 action="create_entity",
                 phase="search_index",
             ):
-                await search_service.index_entity(entity)
+                await search_service.index_entity(entity, content=written_content)
             with telemetry.scope(
                 "api.knowledge.create_entity.vector_sync",
                 domain="knowledge",
@@ -352,8 +355,12 @@ async def create_entity(
             domain="knowledge",
             action="create_entity",
             phase="read_content",
+            source="file" if fast else "memory",
         ):
-            content = await file_service.read_file_content(entity.file_path)
+            if fast:
+                content = await file_service.read_file_content(entity.file_path)
+            else:
+                content = written_content
         result = result.model_copy(update={"content": content})
 
         logger.info(
@@ -421,13 +428,18 @@ async def update_entity_by_id(
         ):
             if fast:
                 entity = await entity_service.fast_write_entity(data, external_id=entity_id)
+                written_content = None
                 response.status_code = 200 if existing else 201
             else:
                 if existing:
-                    entity = await entity_service.update_entity(existing, data)
+                    write_result = await entity_service.update_entity_with_content(existing, data)
+                    entity = write_result.entity
+                    written_content = write_result.content
                     response.status_code = 200
                 else:
-                    entity = await entity_service.create_entity(data)
+                    write_result = await entity_service.create_entity_with_content(data)
+                    entity = write_result.entity
+                    written_content = write_result.content
                     if entity.external_id != entity_id:
                         entity = await entity_repository.update(
                             entity.id,
@@ -461,7 +473,7 @@ async def update_entity_by_id(
                 action="update_entity",
                 phase="search_index",
             ):
-                await search_service.index_entity(entity)
+                await search_service.index_entity(entity, content=written_content)
             with telemetry.scope(
                 "api.knowledge.update_entity.vector_sync",
                 domain="knowledge",
@@ -484,8 +496,12 @@ async def update_entity_by_id(
             domain="knowledge",
             action="update_entity",
             phase="read_content",
+            source="file" if fast else "memory",
         ):
-            content = await file_service.read_file_content(entity.file_path)
+            if fast:
+                content = await file_service.read_file_content(entity.file_path)
+            else:
+                content = written_content
         result = result.model_copy(update={"content": content})
 
         logger.info(
@@ -563,9 +579,10 @@ async def edit_entity_by_id(
                         find_text=data.find_text,
                         expected_replacements=data.expected_replacements,
                     )
+                    written_content = None
                 else:
                     identifier = entity.permalink or entity.file_path
-                    updated_entity = await entity_service.edit_entity(
+                    write_result = await entity_service.edit_entity_with_content(
                         identifier=identifier,
                         operation=data.operation,
                         content=data.content,
@@ -573,6 +590,8 @@ async def edit_entity_by_id(
                         find_text=data.find_text,
                         expected_replacements=data.expected_replacements,
                     )
+                    updated_entity = write_result.entity
+                    written_content = write_result.content
 
             if fast:
                 with telemetry.scope(
@@ -594,7 +613,7 @@ async def edit_entity_by_id(
                     action="edit_entity",
                     phase="search_index",
                 ):
-                    await search_service.index_entity(updated_entity)
+                    await search_service.index_entity(updated_entity, content=written_content)
                 with telemetry.scope(
                     "api.knowledge.edit_entity.vector_sync",
                     domain="knowledge",
@@ -617,8 +636,12 @@ async def edit_entity_by_id(
                 domain="knowledge",
                 action="edit_entity",
                 phase="read_content",
+                source="file" if fast else "memory",
             ):
-                content = await file_service.read_file_content(updated_entity.file_path)
+                if fast:
+                    content = await file_service.read_file_content(updated_entity.file_path)
+                else:
+                    content = written_content
             result = result.model_copy(update={"content": content})
 
             logger.info(

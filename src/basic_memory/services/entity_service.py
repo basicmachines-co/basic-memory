@@ -1,6 +1,7 @@
 """Service for managing entities in the database."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple, Union
@@ -50,6 +51,14 @@ from basic_memory.services.search_service import SearchService
 from basic_memory.utils import build_canonical_permalink
 
 
+@dataclass(frozen=True)
+class EntityWriteResult:
+    """Persisted entity plus the markdown written during this call."""
+
+    entity: EntityModel
+    content: str
+
+
 class EntityService(BaseService[EntityModel]):
     """Service for managing entities in the database."""
 
@@ -79,7 +88,7 @@ class EntityService(BaseService[EntityModel]):
 
     async def detect_file_path_conflicts(
         self, file_path: str, skip_check: bool = False
-    ) -> List[Entity]:
+    ) -> List[str]:
         """Detect potential file path conflicts for a given file path.
 
         This checks for entities with similar file paths that might cause conflicts:
@@ -93,28 +102,19 @@ class EntityService(BaseService[EntityModel]):
             skip_check: If True, skip the check and return empty list (optimization for bulk operations)
 
         Returns:
-            List of entities that might conflict with the given file path
+            List of file paths that might conflict with the given file path
         """
         if skip_check:
             return []
 
         from basic_memory.utils import detect_potential_file_conflicts
 
-        conflicts = []
-
-        # Get all existing file paths
-        all_entities = await self.repository.find_all()
-        existing_paths = [entity.file_path for entity in all_entities]
+        # Load only file paths. Conflict detection is on the hot write path and
+        # does not need observations or relations.
+        existing_paths = await self.repository.get_all_file_paths()
 
         # Use the enhanced conflict detection utility
-        conflicting_paths = detect_potential_file_conflicts(file_path, existing_paths)
-
-        # Find the entities corresponding to conflicting paths
-        for entity in all_entities:
-            if entity.file_path in conflicting_paths:
-                conflicts.append(entity)
-
-        return conflicts
+        return detect_potential_file_conflicts(file_path, existing_paths)
 
     async def resolve_permalink(
         self,
@@ -143,8 +143,7 @@ class EntityService(BaseService[EntityModel]):
         )
         if conflicts:
             logger.warning(
-                f"Detected potential file path conflicts for '{file_path_str}': "
-                f"{[entity.file_path for entity in conflicts]}"
+                f"Detected potential file path conflicts for '{file_path_str}': {conflicts}"
             )
 
         # If markdown has explicit permalink, try to validate it
@@ -255,6 +254,10 @@ class EntityService(BaseService[EntityModel]):
 
     async def create_entity(self, schema: EntitySchema) -> EntityModel:
         """Create a new entity and write to filesystem."""
+        return (await self.create_entity_with_content(schema)).entity
+
+    async def create_entity_with_content(self, schema: EntitySchema) -> EntityWriteResult:
+        """Create a new entity and return both the entity row and written markdown."""
         logger.debug(f"Creating entity: {schema.title}")
 
         # Get file path and ensure it's a Path object
@@ -328,10 +331,19 @@ class EntityService(BaseService[EntityModel]):
             action="create",
             phase="update_checksum",
         ):
-            return await self.repository.update(entity.id, {"checksum": checksum})
+            updated = await self.repository.update(entity.id, {"checksum": checksum})
+        if not updated:  # pragma: no cover
+            raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
+        return EntityWriteResult(entity=updated, content=final_content)
 
     async def update_entity(self, entity: EntityModel, schema: EntitySchema) -> EntityModel:
         """Update an entity's content and metadata."""
+        return (await self.update_entity_with_content(entity, schema)).entity
+
+    async def update_entity_with_content(
+        self, entity: EntityModel, schema: EntitySchema
+    ) -> EntityWriteResult:
+        """Update an entity and return both the entity row and written markdown."""
         logger.debug(
             f"Updating entity with permalink: {entity.permalink} content-type: {schema.content_type}"
         )
@@ -444,8 +456,10 @@ class EntityService(BaseService[EntityModel]):
             phase="update_checksum",
         ):
             entity = await self.repository.update(entity.id, {"checksum": checksum})
+        if not entity:  # pragma: no cover
+            raise ValueError(f"Failed to update entity checksum after update: {file_path}")
 
-        return entity
+        return EntityWriteResult(entity=entity, content=final_content)
 
     async def fast_write_entity(
         self,
@@ -988,6 +1002,27 @@ class EntityService(BaseService[EntityModel]):
             EntityNotFoundError: If the entity cannot be found
             ValueError: If required parameters are missing for the operation or replacement count doesn't match expected
         """
+        return (
+            await self.edit_entity_with_content(
+                identifier=identifier,
+                operation=operation,
+                content=content,
+                section=section,
+                find_text=find_text,
+                expected_replacements=expected_replacements,
+            )
+        ).entity
+
+    async def edit_entity_with_content(
+        self,
+        identifier: str,
+        operation: str,
+        content: str,
+        section: Optional[str] = None,
+        find_text: Optional[str] = None,
+        expected_replacements: int = 1,
+    ) -> EntityWriteResult:
+        """Edit an entity and return both the entity row and written markdown."""
         logger.debug(f"Editing entity: {identifier}, operation: {operation}")
 
         with telemetry.scope(
@@ -1055,8 +1090,10 @@ class EntityService(BaseService[EntityModel]):
             phase="update_checksum",
         ):
             entity = await self.repository.update(entity.id, {"checksum": checksum})
+        if not entity:  # pragma: no cover
+            raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
 
-        return entity
+        return EntityWriteResult(entity=entity, content=new_content)
 
     def apply_edit_operation(
         self,
