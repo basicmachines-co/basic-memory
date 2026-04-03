@@ -53,10 +53,11 @@ from basic_memory.utils import build_canonical_permalink
 
 @dataclass(frozen=True)
 class EntityWriteResult:
-    """Persisted entity plus the markdown written during this call."""
+    """Persisted entity plus the response/search content produced during this call."""
 
     entity: EntityModel
     content: str
+    search_content: str
 
 
 class EntityService(BaseService[EntityModel]):
@@ -334,7 +335,11 @@ class EntityService(BaseService[EntityModel]):
             updated = await self.repository.update(entity.id, {"checksum": checksum})
         if not updated:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
-        return EntityWriteResult(entity=updated, content=final_content)
+        return EntityWriteResult(
+            entity=updated,
+            content=final_content,
+            search_content=remove_frontmatter(final_content),
+        )
 
     async def update_entity(self, entity: EntityModel, schema: EntitySchema) -> EntityModel:
         """Update an entity's content and metadata."""
@@ -459,7 +464,11 @@ class EntityService(BaseService[EntityModel]):
         if not entity:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after update: {file_path}")
 
-        return EntityWriteResult(entity=entity, content=final_content)
+        return EntityWriteResult(
+            entity=entity,
+            content=final_content,
+            search_content=remove_frontmatter(final_content),
+        )
 
     async def fast_write_entity(
         self,
@@ -1093,7 +1102,11 @@ class EntityService(BaseService[EntityModel]):
         if not entity:  # pragma: no cover
             raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
 
-        return EntityWriteResult(entity=entity, content=new_content)
+        return EntityWriteResult(
+            entity=entity,
+            content=new_content,
+            search_content=remove_frontmatter(new_content),
+        )
 
     def apply_edit_operation(
         self,

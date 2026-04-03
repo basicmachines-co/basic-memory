@@ -59,10 +59,15 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
+    response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\ntelemetry content"
 
     class FakeEntityService:
         async def create_entity_with_content(self, data):
-            return SimpleNamespace(entity=entity, content="telemetry content")
+            return SimpleNamespace(
+                entity=entity,
+                content=response_content,
+                search_content="telemetry content",
+            )
 
     class FakeSearchService:
         async def index_entity(self, entity, content=None):
@@ -95,7 +100,7 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         fast=False,
     )
 
-    assert result.content == "telemetry content"
+    assert result.content == response_content
     _assert_names_in_order(
         [name for name, _ in spans],
         [
@@ -114,10 +119,17 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
+    response_content = (
+        "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
+    )
 
     class FakeEntityService:
         async def update_entity_with_content(self, existing, data):
-            return SimpleNamespace(entity=entity, content="updated telemetry content")
+            return SimpleNamespace(
+                entity=entity,
+                content=response_content,
+                search_content="updated telemetry content",
+            )
 
     class FakeSearchService:
         async def index_entity(self, entity, content=None):
@@ -158,7 +170,7 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         fast=False,
     )
 
-    assert result.content == "updated telemetry content"
+    assert result.content == response_content
     _assert_names_in_order(
         [name for name, _ in spans],
         [
@@ -178,10 +190,17 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
+    response_content = (
+        "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
+    )
 
     class FakeEntityService:
         async def edit_entity_with_content(self, **kwargs):
-            return SimpleNamespace(entity=entity, content="edited telemetry content")
+            return SimpleNamespace(
+                entity=entity,
+                content=response_content,
+                search_content="edited telemetry content",
+            )
 
     class FakeSearchService:
         async def index_entity(self, entity, content=None):
@@ -214,7 +233,7 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         fast=False,
     )
 
-    assert result.content == "edited telemetry content"
+    assert result.content == response_content
     _assert_names_in_order(
         [name for name, _ in spans],
         [

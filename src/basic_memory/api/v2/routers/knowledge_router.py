@@ -307,10 +307,12 @@ async def create_entity(
             if fast:
                 entity = await entity_service.fast_write_entity(data)
                 written_content = None
+                search_content = None
             else:
                 write_result = await entity_service.create_entity_with_content(data)
                 entity = write_result.entity
                 written_content = write_result.content
+                search_content = write_result.search_content
 
         if fast:
             with telemetry.scope(
@@ -332,7 +334,7 @@ async def create_entity(
                 action="create_entity",
                 phase="search_index",
             ):
-                await search_service.index_entity(entity, content=written_content)
+                await search_service.index_entity(entity, content=search_content)
             with telemetry.scope(
                 "api.knowledge.create_entity.vector_sync",
                 domain="knowledge",
@@ -360,6 +362,9 @@ async def create_entity(
             if fast:
                 content = await file_service.read_file_content(entity.file_path)
             else:
+                # Non-fast writes already captured the markdown in memory. Reuse it here
+                # instead of re-reading the file; format_on_save is the one config that can
+                # still make the persisted file diverge because write_file only returns a checksum.
                 content = written_content
         result = result.model_copy(update={"content": content})
 
@@ -429,17 +434,20 @@ async def update_entity_by_id(
             if fast:
                 entity = await entity_service.fast_write_entity(data, external_id=entity_id)
                 written_content = None
+                search_content = None
                 response.status_code = 200 if existing else 201
             else:
                 if existing:
                     write_result = await entity_service.update_entity_with_content(existing, data)
                     entity = write_result.entity
                     written_content = write_result.content
+                    search_content = write_result.search_content
                     response.status_code = 200
                 else:
                     write_result = await entity_service.create_entity_with_content(data)
                     entity = write_result.entity
                     written_content = write_result.content
+                    search_content = write_result.search_content
                     if entity.external_id != entity_id:
                         entity = await entity_repository.update(
                             entity.id,
@@ -475,7 +483,7 @@ async def update_entity_by_id(
                 action="update_entity",
                 phase="search_index",
             ):
-                await search_service.index_entity(entity, content=written_content)
+                await search_service.index_entity(entity, content=search_content)
             with telemetry.scope(
                 "api.knowledge.update_entity.vector_sync",
                 domain="knowledge",
@@ -503,6 +511,9 @@ async def update_entity_by_id(
             if fast:
                 content = await file_service.read_file_content(entity.file_path)
             else:
+                # Non-fast writes already captured the markdown in memory. Reuse it here
+                # instead of re-reading the file; format_on_save is the one config that can
+                # still make the persisted file diverge because write_file only returns a checksum.
                 content = written_content
         result = result.model_copy(update={"content": content})
 
@@ -582,6 +593,7 @@ async def edit_entity_by_id(
                         expected_replacements=data.expected_replacements,
                     )
                     written_content = None
+                    search_content = None
                 else:
                     identifier = entity.permalink or entity.file_path
                     write_result = await entity_service.edit_entity_with_content(
@@ -594,6 +606,7 @@ async def edit_entity_by_id(
                     )
                     updated_entity = write_result.entity
                     written_content = write_result.content
+                    search_content = write_result.search_content
 
             if fast:
                 with telemetry.scope(
@@ -615,7 +628,7 @@ async def edit_entity_by_id(
                     action="edit_entity",
                     phase="search_index",
                 ):
-                    await search_service.index_entity(updated_entity, content=written_content)
+                    await search_service.index_entity(updated_entity, content=search_content)
                 with telemetry.scope(
                     "api.knowledge.edit_entity.vector_sync",
                     domain="knowledge",
@@ -643,6 +656,9 @@ async def edit_entity_by_id(
                 if fast:
                     content = await file_service.read_file_content(updated_entity.file_path)
                 else:
+                    # Non-fast writes already captured the markdown in memory. Reuse it here
+                    # instead of re-reading the file; format_on_save is the one config that can
+                    # still make the persisted file diverge because write_file only returns a checksum.
                     content = written_content
             result = result.model_copy(update={"content": content})
 
