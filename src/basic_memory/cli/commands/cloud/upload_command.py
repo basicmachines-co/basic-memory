@@ -1,5 +1,6 @@
 """Upload CLI commands for basic-memory projects."""
 
+from functools import partial
 from pathlib import Path
 
 import typer
@@ -13,7 +14,10 @@ from basic_memory.cli.commands.cloud.cloud_utils import (
     sync_project,
 )
 from basic_memory.cli.commands.cloud.upload import upload_path
-from basic_memory.mcp.async_client import get_cloud_control_plane_client
+from basic_memory.mcp.async_client import (
+    get_cloud_control_plane_client,
+    resolve_configured_workspace,
+)
 
 console = Console()
 
@@ -73,12 +77,14 @@ def upload(
     """
 
     async def _upload():
+        resolved_workspace = resolve_configured_workspace(project_name=project)
+
         # Check if project exists
-        if not await project_exists(project):
+        if not await project_exists(project, workspace=resolved_workspace):
             if create_project:
                 console.print(f"[blue]Creating cloud project '{project}'...[/blue]")
                 try:
-                    await create_cloud_project(project)
+                    await create_cloud_project(project, workspace=resolved_workspace)
                     console.print(f"[green]Created project '{project}'[/green]")
                 except Exception as e:
                     console.print(f"[red]Failed to create project: {e}[/red]")
@@ -106,7 +112,10 @@ def upload(
             verbose=verbose,
             use_gitignore=not no_gitignore,
             dry_run=dry_run,
-            client_cm_factory=get_cloud_control_plane_client,
+            client_cm_factory=partial(
+                get_cloud_control_plane_client,
+                workspace=resolved_workspace,
+            ),
         )
         if not success:
             console.print("[red]Upload failed[/red]")
