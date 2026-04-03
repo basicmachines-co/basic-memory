@@ -6,6 +6,7 @@ import httpx
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.cloud.cloud_utils import CloudUtilsError
 from basic_memory.config import ProjectMode
 
 runner = CliRunner()
@@ -111,3 +112,32 @@ def test_cloud_upload_uses_project_workspace_for_api_and_webdav(
     assert seen["project_exists_workspace"] == "project-workspace"
     assert seen["control_plane_workspace"] == "project-workspace"
     assert seen["base_url"] == "https://cloud.example.test"
+
+
+def test_cloud_upload_exits_when_project_lookup_fails(monkeypatch, tmp_path):
+    """Upload command should fail fast when cloud project lookup cannot reach the API."""
+    import basic_memory.cli.commands.cloud.upload_command as upload_command
+
+    upload_dir = tmp_path / "upload"
+    upload_dir.mkdir()
+    (upload_dir / "note.md").write_text("hello", encoding="utf-8")
+
+    async def fake_project_exists(_project_name: str, workspace: str | None = None) -> bool:
+        raise CloudUtilsError("lookup failed")
+
+    monkeypatch.setattr(upload_command, "project_exists", fake_project_exists)
+
+    result = runner.invoke(
+        app,
+        [
+            "cloud",
+            "upload",
+            str(upload_dir),
+            "--project",
+            "routing-test",
+            "--no-sync",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "Failed to check cloud project 'routing-test'" in result.output

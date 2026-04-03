@@ -69,6 +69,7 @@ async def create_cloud_project(
 
     Args:
         project_name: Name of project to create
+        workspace: Optional workspace override for tenant-scoped project creation
 
     Returns:
         CloudProjectCreateResponse with project details from API
@@ -127,17 +128,18 @@ async def project_exists(
 
     Args:
         project_name: Name of project to check
+        workspace: Optional workspace override for tenant-scoped project lookup
 
     Returns:
         True if project exists, False otherwise
+
+    Raises:
+        CloudUtilsError: If the project list cannot be fetched from cloud
     """
-    try:
-        projects = await fetch_cloud_projects(
-            project_name=project_name,
-            workspace=workspace,
-            api_request=api_request,
-        )
-        project_names = {p.name for p in projects.projects}
-        return project_name in project_names
-    except Exception:
-        return False
+    projects = await fetch_cloud_projects(
+        project_name=project_name,
+        workspace=workspace,
+        api_request=api_request,
+    )
+    project_names = {p.name for p in projects.projects}
+    return project_name in project_names

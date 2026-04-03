@@ -10,6 +10,7 @@ from basic_memory.cli.commands.cloud.api_client import (
     make_api_request,
 )
 from basic_memory.cli.commands.cloud.cloud_utils import (
+    CloudUtilsError,
     create_cloud_project,
     fetch_cloud_projects,
     project_exists,
@@ -214,6 +215,20 @@ async def test_cloud_utils_use_configured_workspace_headers(config_home, config_
         ("POST", "project-workspace"),
         ("GET", "default-workspace"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_project_exists_surfaces_cloud_lookup_failures(config_home, config_manager):
+    """project_exists should surface lookup failures instead of pretending the project is missing."""
+    config = config_manager.load_config()
+    config.cloud_host = "https://cloud.example.test"
+    config_manager.save_config(config)
+
+    async def api_request(**_kwargs):
+        raise httpx.ConnectError("boom")
+
+    with pytest.raises(CloudUtilsError, match="Failed to fetch cloud projects"):
+        await project_exists("alpha", api_request=api_request)
 
 
 @pytest.mark.asyncio

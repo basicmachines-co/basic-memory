@@ -195,7 +195,10 @@ def bisync_project_command(
             # Update config — sync_entry is guaranteed non-None because
             # _get_sync_project validated local_sync_path (which comes from sync_entry)
             sync_entry = config.projects.get(name)
-            assert sync_entry is not None
+            if sync_entry is None:
+                raise RuntimeError(
+                    f"Sync entry for project '{name}' unexpectedly missing after validation"
+                )
             sync_entry.last_sync = datetime.now()
             sync_entry.bisync_initialized = True
             ConfigManager().save_config(config)
