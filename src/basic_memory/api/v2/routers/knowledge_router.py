@@ -445,6 +445,8 @@ async def update_entity_by_id(
                             entity.id,
                             {"external_id": entity_id},
                         )
+                        # external_id fixup only changes the DB row. The file content is unchanged,
+                        # so the markdown captured during the write remains valid downstream.
                         if not entity:
                             raise HTTPException(
                                 status_code=404,
