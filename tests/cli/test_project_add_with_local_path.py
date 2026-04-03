@@ -115,6 +115,7 @@ def test_project_add_with_local_path_saves_to_config(
     assert "test-project" in config_data["projects"]
     entry = config_data["projects"]["test-project"]
     # Use as_posix() for cross-platform compatibility (Windows uses backslashes)
+    assert entry["mode"] == "cloud"
     assert entry["local_sync_path"] == local_sync_dir.as_posix()
     assert entry.get("last_sync") is None
     assert entry.get("bisync_initialized", False) is False
@@ -248,7 +249,61 @@ def test_project_add_cloud_workspace_resolves_and_persists(
 
     config_data = json.loads(mock_config.read_text())
     entry = config_data["projects"]["team-notes"]
+    assert entry["mode"] == "cloud"
     assert entry["workspace_id"] == "11111111-1111-1111-1111-111111111111"
+
+
+def test_project_add_cloud_workspace_persists_without_local_path(
+    runner, mock_config, mock_api_client, monkeypatch
+):
+    """Cloud project add should persist workspace routing even without local sync."""
+    from basic_memory.schemas.cloud import WorkspaceInfo
+
+    async def fake_get_available_workspaces():
+        return [
+            WorkspaceInfo(
+                tenant_id="11111111-1111-1111-1111-111111111111",
+                workspace_type="organization",
+                name="Basic Memory",
+                role="owner",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "project",
+            "add",
+            "team-notes",
+            "--cloud",
+            "--workspace",
+            "Basic Memory",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_api_client["workspaces"] == ["11111111-1111-1111-1111-111111111111"]
+    assert mock_api_client["calls"] == [
+        {
+            "name": "team-notes",
+            "path": "team-notes",
+            "local_sync_path": None,
+            "set_default": False,
+            "visibility": "workspace",
+        }
+    ]
+
+    config_data = json.loads(mock_config.read_text())
+    entry = config_data["projects"]["team-notes"]
+    assert entry["path"] == ""
+    assert entry["mode"] == "cloud"
+    assert entry["workspace_id"] == "11111111-1111-1111-1111-111111111111"
+    assert entry["local_sync_path"] is None
 
 
 def test_project_add_visibility_requires_cloud_mode(runner, mock_config, tmp_path):

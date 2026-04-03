@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console, Group
@@ -27,6 +28,7 @@ from basic_memory.cli.commands.routing import force_routing, validate_routing_fl
 from basic_memory.config import ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
+from basic_memory.schemas.cloud import ProjectVisibility
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink, normalize_project_path
 
@@ -56,27 +58,27 @@ def make_bar(value: int, max_value: int, width: int = 40) -> Text:
     return bar
 
 
-def _normalize_project_visibility(visibility: str | None) -> str:
+def _normalize_project_visibility(visibility: str | None) -> ProjectVisibility:
     """Normalize CLI visibility input to the cloud API contract."""
     if visibility is None:
         return "workspace"
 
     normalized = visibility.strip().lower()
     if normalized in {"workspace", "shared", "private"}:
-        return normalized
+        return cast(ProjectVisibility, normalized)
 
     raise ValueError("Invalid visibility. Expected one of: workspace, shared, private.")
 
 
 def _resolve_workspace_id(config, workspace: str | None) -> str | None:
     """Resolve a workspace name or tenant_id to a tenant_id."""
-    if workspace is not None:
-        from basic_memory.mcp.project_context import (
-            _workspace_choices,
-            _workspace_matches_identifier,
-            get_available_workspaces,
-        )
+    from basic_memory.mcp.project_context import (
+        _workspace_choices,
+        _workspace_matches_identifier,
+        get_available_workspaces,
+    )
 
+    if workspace is not None:
         workspaces = run_with_cleanup(get_available_workspaces())
         matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, workspace)]
         if not matches:
@@ -97,8 +99,6 @@ def _resolve_workspace_id(config, workspace: str | None) -> str | None:
         return config.default_workspace
 
     try:
-        from basic_memory.mcp.project_context import get_available_workspaces
-
         workspaces = run_with_cleanup(get_available_workspaces())
         if len(workspaces) == 1:
             return workspaces[0].tenant_id
@@ -402,27 +402,33 @@ def add_project(
             result = run_with_cleanup(_add_project())
         console.print(f"[green]{result.message}[/green]")
 
-        # Save local sync path to config if in cloud mode
-        if effective_cloud_mode and local_sync_path:
-            # Create local directory if it doesn't exist
-            local_dir = Path(local_sync_path)
-            local_dir.mkdir(parents=True, exist_ok=True)
-
-            # Update project entry — path is always the local directory
+        # Trigger: local config needs enough metadata to route future commands back to cloud.
+        # Why: explicit workspace selection and local sync state should persist across CLI sessions.
+        # Outcome: cloud-backed projects keep cloud mode, workspace_id, and optional local sync path.
+        if effective_cloud_mode and (local_sync_path or resolved_workspace_id):
             entry = config.projects.get(name)
             if entry:
-                entry.path = local_sync_path
-                entry.local_sync_path = local_sync_path
+                entry.mode = ProjectMode.CLOUD
+                if local_sync_path:
+                    entry.path = local_sync_path
+                    entry.local_sync_path = local_sync_path
                 if resolved_workspace_id:
                     entry.workspace_id = resolved_workspace_id
             else:
                 # Project may not be in local config yet (cloud-only add)
                 config.projects[name] = ProjectEntry(
-                    path=local_sync_path,
+                    path=local_sync_path or "",
+                    mode=ProjectMode.CLOUD,
                     local_sync_path=local_sync_path,
                     workspace_id=resolved_workspace_id,
                 )
             ConfigManager().save_config(config)
+
+        # Save local sync path to config if in cloud mode
+        if effective_cloud_mode and local_sync_path:
+            # Create local directory if it doesn't exist
+            local_dir = Path(local_sync_path)
+            local_dir.mkdir(parents=True, exist_ok=True)
 
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
             console.print("\nNext steps:")
