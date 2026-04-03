@@ -22,7 +22,13 @@ from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
 from basic_memory import db
-from basic_memory.config import ProjectConfig, BasicMemoryConfig, ConfigManager, DatabaseBackend
+from basic_memory.config import (
+    ProjectConfig,
+    ProjectEntry,
+    BasicMemoryConfig,
+    ConfigManager,
+    DatabaseBackend,
+)
 from basic_memory.db import DatabaseType
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
@@ -83,6 +89,79 @@ def postgres_container(db_backend):
         yield postgres
 
 
+POSTGRES_EPHEMERAL_TABLES = [
+    "search_vector_embeddings",
+    "search_vector_index",
+]
+
+
+def _postgres_alembic_config(async_url: str) -> Config:
+    """Build Alembic config for stamping the shared Postgres test schema."""
+    alembic_dir = Path(db.__file__).parent / "alembic"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(alembic_dir))
+    cfg.set_main_option(
+        "file_template",
+        "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s",
+    )
+    cfg.set_main_option("timezone", "UTC")
+    cfg.set_main_option("revision_environment", "false")
+    cfg.set_main_option("sqlalchemy.url", async_url)
+    return cfg
+
+
+def _postgres_reset_tables() -> list[str]:
+    """Resolve the current ORM table set at reset time.
+
+    Some tests declare models after conftest import, so the list must stay dynamic.
+    """
+    return [table.name for table in Base.metadata.sorted_tables] + [
+        "search_index",
+        "search_vector_chunks",
+    ]
+
+
+async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> None:
+    """Restore the shared Postgres schema to a clean baseline before each test."""
+    from basic_memory.models.search import (
+        CREATE_POSTGRES_SEARCH_INDEX_FTS,
+        CREATE_POSTGRES_SEARCH_INDEX_METADATA,
+        CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
+        CREATE_POSTGRES_SEARCH_INDEX_TABLE,
+        CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_INDEX,
+        CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE,
+    )
+
+    async with engine.begin() as conn:
+        # Trigger: several tests intentionally drop or stub search tables to exercise recovery code.
+        # Why: TRUNCATE is much cheaper than drop_all/create_all, but it only works when the schema exists.
+        # Outcome: we recreate any missing core tables once, then clear rows for deterministic test setup.
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
+        await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE)
+        await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_INDEX)
+
+        for table_name in POSTGRES_EPHEMERAL_TABLES:
+            await conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+
+        await conn.execute(
+            text(
+                f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
+
+        alembic_version_exists = (
+            await conn.execute(text("SELECT to_regclass('public.alembic_version')"))
+        ).scalar() is not None
+
+    if not alembic_version_exists:
+        command.stamp(_postgres_alembic_config(async_url), "head")
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
@@ -114,7 +193,7 @@ def config_home(tmp_path, monkeypatch) -> Path:
 @pytest.fixture(scope="function")
 def app_config(config_home, db_backend, postgres_container, monkeypatch) -> BasicMemoryConfig:
     """Create test app configuration for the appropriate backend."""
-    projects = {"test-project": str(config_home)}
+    projects = {"test-project": ProjectEntry(path=str(config_home))}
 
     # Set backend based on parameterized db_backend fixture
     if db_backend == "postgres":
@@ -229,46 +308,7 @@ async def engine_factory(
         db._engine = engine
         db._session_maker = session_maker
 
-        from basic_memory.models.search import (
-            CREATE_POSTGRES_SEARCH_INDEX_TABLE,
-            CREATE_POSTGRES_SEARCH_INDEX_FTS,
-            CREATE_POSTGRES_SEARCH_INDEX_METADATA,
-            CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
-            CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE,
-            CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_INDEX,
-        )
-
-        # Drop and recreate all tables for test isolation
-        async with engine.begin() as conn:
-            # Must drop search_index first (has FK to project, blocks drop_all)
-            await conn.execute(text("DROP TABLE IF EXISTS search_index CASCADE"))
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
-            # Create search_index via DDL (not ORM - uses composite PK + tsvector)
-            # asyncpg requires separate execute calls for each statement
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
-            await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE)
-            await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_INDEX)
-
-            # Mark migrations as already applied for this test-created schema.
-            #
-            # Some codepaths (e.g. ensure_initialization()) invoke Alembic migrations.
-            # If we create tables via ORM directly, alembic_version is missing and migrations
-            # will try to create tables again, causing DuplicateTableError.
-            alembic_dir = Path(db.__file__).parent / "alembic"
-            cfg = Config()
-            cfg.set_main_option("script_location", str(alembic_dir))
-            cfg.set_main_option(
-                "file_template",
-                "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s",
-            )
-            cfg.set_main_option("timezone", "UTC")
-            cfg.set_main_option("revision_environment", "false")
-            cfg.set_main_option("sqlalchemy.url", async_url)
-            command.stamp(cfg, "head")
+        await _reset_postgres_test_schema(engine, async_url)
 
         yield engine, session_maker
 

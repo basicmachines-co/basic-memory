@@ -51,7 +51,7 @@ The `app` fixture ensures FastAPI dependency overrides are active, and
 """
 
 import os
-from typing import AsyncGenerator, Literal
+from typing import AsyncGenerator, Generator, Literal
 
 import pytest
 import pytest_asyncio
@@ -63,7 +63,13 @@ from testcontainers.postgres import PostgresContainer
 
 from httpx import AsyncClient, ASGITransport
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager, DatabaseBackend
+from basic_memory.config import (
+    BasicMemoryConfig,
+    ProjectConfig,
+    ProjectEntry,
+    ConfigManager,
+    DatabaseBackend,
+)
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.models.base import Base
@@ -112,6 +118,49 @@ def postgres_container(db_backend):
         yield postgres
 
 
+POSTGRES_EPHEMERAL_TABLES = [
+    "search_vector_embeddings",
+    "search_vector_chunks",
+    "search_vector_index",
+]
+
+
+def _postgres_reset_tables() -> list[str]:
+    """Resolve the current ORM table set at reset time."""
+    return [table.name for table in Base.metadata.sorted_tables] + ["search_index"]
+
+
+async def _reset_postgres_integration_schema(engine) -> None:
+    """Restore the shared Postgres integration schema to a clean baseline."""
+    from basic_memory.models.search import (
+        CREATE_POSTGRES_SEARCH_INDEX_FTS,
+        CREATE_POSTGRES_SEARCH_INDEX_METADATA,
+        CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
+        CREATE_POSTGRES_SEARCH_INDEX_TABLE,
+    )
+
+    async with engine.begin() as conn:
+        # Trigger: integration tests may leave behind temporary search/vector tables while
+        # exercising full-stack recovery paths.
+        # Why: recreating only the missing schema is much cheaper than dropping every table.
+        # Outcome: each integration test gets the same baseline without paying repeated full DDL cost.
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
+
+        for table_name in POSTGRES_EPHEMERAL_TABLES:
+            await conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+
+        await conn.execute(
+            text(
+                f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
+
+
 @pytest_asyncio.fixture
 async def engine_factory(
     app_config,
@@ -121,13 +170,7 @@ async def engine_factory(
     tmp_path,
 ) -> AsyncGenerator[tuple, None]:
     """Create engine and session factory for the configured database backend."""
-    from basic_memory.models.search import (
-        CREATE_SEARCH_INDEX,
-        CREATE_POSTGRES_SEARCH_INDEX_TABLE,
-        CREATE_POSTGRES_SEARCH_INDEX_FTS,
-        CREATE_POSTGRES_SEARCH_INDEX_METADATA,
-        CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
-    )
+    from basic_memory.models.search import CREATE_SEARCH_INDEX
     from basic_memory import db
 
     if db_backend == "postgres":
@@ -153,16 +196,7 @@ async def engine_factory(
         db._engine = engine
         db._session_maker = session_maker
 
-        # Drop and recreate all tables for test isolation
-        async with engine.begin() as conn:
-            await conn.execute(text("DROP TABLE IF EXISTS search_index CASCADE"))
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
-            # asyncpg requires separate execute calls for each statement
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
+        await _reset_postgres_integration_schema(engine)
 
         yield engine, session_maker
 
@@ -228,7 +262,7 @@ def app_config(
     monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
 
     # Create a basic config with test-project like unit tests do
-    projects = {"test-project": str(config_home)}
+    projects = {"test-project": ProjectEntry(path=str(config_home))}
 
     # Configure database backend based on env var
     if db_backend == "postgres":
@@ -285,7 +319,9 @@ def project_config(test_project):
 
 
 @pytest.fixture
-def app(app_config, project_config, engine_factory, test_project, config_manager) -> FastAPI:
+def app(
+    app_config, project_config, engine_factory, test_project, config_manager
+) -> Generator[FastAPI, None, None]:
     """Create test FastAPI application with single project."""
 
     # Import the FastAPI app AFTER the config_manager has written the test config to disk

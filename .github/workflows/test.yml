@@ -52,7 +52,6 @@ jobs:
   test-sqlite-unit:
     name: Test SQLite Unit (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 30
-    needs: [static-checks]
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +98,6 @@ jobs:
   test-sqlite-integration:
     name: Test SQLite Integration (${{ matrix.os }}, Python ${{ matrix.python-version }})
     timeout-minutes: 45
-    needs: [static-checks]
     strategy:
       fail-fast: false
       matrix:
@@ -146,7 +144,7 @@ jobs:
   test-postgres-unit:
     name: Test Postgres Unit (Python ${{ matrix.python-version }})
     timeout-minutes: 30
-    needs: [static-checks]
+    if: github.event_name != 'pull_request' || matrix.python-version == '3.12'
     strategy:
       fail-fast: false
       matrix:
@@ -190,7 +188,7 @@ jobs:
   test-postgres-integration:
     name: Test Postgres Integration (Python ${{ matrix.python-version }})
     timeout-minutes: 45
-    needs: [static-checks]
+    if: github.event_name != 'pull_request' || matrix.python-version == '3.12'
     strategy:
       fail-fast: false
       matrix:
@@ -234,7 +232,6 @@ jobs:
   test-semantic:
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
-    needs: [static-checks]
     runs-on: ubuntu-latest
 
     steps:
