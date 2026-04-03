@@ -442,5 +442,9 @@ With GitHub integration, the development workflow includes:
 3. **Branch management** - Claude can create feature branches for implementations
 4. **Documentation maintenance** - Claude can keep documentation updated as the code evolves
 5. **Code Commits**: ALWAYS sign off commits with `git commit -s`
+6. **Pull Request Titles**: PR titles must follow the semantic format enforced by `.github/workflows/pr-title.yml`: `type(scope): summary`
+   - Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`
+   - Allowed scopes: `core`, `cli`, `api`, `mcp`, `sync`, `ui`, `deps`, `installer`
+   - Example: `fix(cli): propagate cloud workspace routing`
 
 This level of integration represents a new paradigm in AI-human collaboration, where the AI assistant becomes a full-fledged team member rather than just a tool for generating code snippets.
