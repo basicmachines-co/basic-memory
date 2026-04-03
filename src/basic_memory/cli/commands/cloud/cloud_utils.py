@@ -7,6 +7,7 @@ from basic_memory.schemas.cloud import (
     CloudProjectList,
     CloudProjectCreateRequest,
     CloudProjectCreateResponse,
+    ProjectVisibility,
 )
 from basic_memory.utils import generate_permalink
 
@@ -63,6 +64,7 @@ async def create_cloud_project(
     project_name: str,
     *,
     workspace: str | None = None,
+    visibility: ProjectVisibility = "workspace",
     api_request=make_api_request,
 ) -> CloudProjectCreateResponse:
     """Create a new project on cloud.
@@ -70,6 +72,7 @@ async def create_cloud_project(
     Args:
         project_name: Name of project to create
         workspace: Optional workspace override for tenant-scoped project creation
+        visibility: Visibility for the created cloud project
 
     Returns:
         CloudProjectCreateResponse with project details from API
@@ -86,6 +89,7 @@ async def create_cloud_project(
             name=project_name,
             path=project_path,
             set_default=False,
+            visibility=visibility,
         )
 
         response = await api_request(

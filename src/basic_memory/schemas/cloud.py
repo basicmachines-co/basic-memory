@@ -1,6 +1,10 @@
 """Schemas for cloud-related API responses."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+type ProjectVisibility = Literal["workspace", "shared", "private"]
 
 
 class TenantMountInfo(BaseModel):
@@ -36,6 +40,10 @@ class CloudProjectCreateRequest(BaseModel):
     name: str = Field(..., description="Project name")
     path: str = Field(..., description="Project path (permalink)")
     set_default: bool = Field(default=False, description="Set as default project")
+    visibility: ProjectVisibility = Field(
+        default="workspace",
+        description="Project visibility for team workspaces",
+    )
 
 
 class CloudProjectCreateResponse(BaseModel):

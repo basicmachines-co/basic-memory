@@ -56,6 +56,59 @@ def make_bar(value: int, max_value: int, width: int = 40) -> Text:
     return bar
 
 
+def _normalize_project_visibility(visibility: str | None) -> str:
+    """Normalize CLI visibility input to the cloud API contract."""
+    if visibility is None:
+        return "workspace"
+
+    normalized = visibility.strip().lower()
+    if normalized in {"workspace", "shared", "private"}:
+        return normalized
+
+    raise ValueError("Invalid visibility. Expected one of: workspace, shared, private.")
+
+
+def _resolve_workspace_id(config, workspace: str | None) -> str | None:
+    """Resolve a workspace name or tenant_id to a tenant_id."""
+    if workspace is not None:
+        from basic_memory.mcp.project_context import (
+            _workspace_choices,
+            _workspace_matches_identifier,
+            get_available_workspaces,
+        )
+
+        workspaces = run_with_cleanup(get_available_workspaces())
+        matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, workspace)]
+        if not matches:
+            console.print(f"[red]Error: Workspace '{workspace}' not found[/red]")
+            if workspaces:
+                console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+            raise typer.Exit(1)
+        if len(matches) > 1:
+            console.print(
+                f"[red]Error: Workspace name '{workspace}' matches multiple workspaces. "
+                f"Use tenant_id instead.[/red]"
+            )
+            console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
+            raise typer.Exit(1)
+        return matches[0].tenant_id
+
+    if config.default_workspace:
+        return config.default_workspace
+
+    try:
+        from basic_memory.mcp.project_context import get_available_workspaces
+
+        workspaces = run_with_cleanup(get_available_workspaces())
+        if len(workspaces) == 1:
+            return workspaces[0].tenant_id
+    except Exception:
+        # Workspace resolution is optional until a command needs a specific tenant.
+        pass
+
+    return None
+
+
 @project_app.command("list")
 def list_projects(
     local: bool = typer.Option(False, "--local", help="Force local routing for this command"),
@@ -257,6 +310,16 @@ def add_project(
     local_path: str = typer.Option(
         None, "--local-path", help="Local sync path for cloud mode (optional)"
     ),
+    workspace: str = typer.Option(
+        None,
+        "--workspace",
+        help="Cloud workspace name or tenant_id (cloud mode only)",
+    ),
+    visibility: str = typer.Option(
+        None,
+        "--visibility",
+        help="Cloud project visibility: workspace, shared, or private",
+    ),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -271,6 +334,8 @@ def add_project(
     Cloud mode examples:\n
         bm project add research                           # No local sync\n
         bm project add research --local-path ~/docs       # With local sync\n
+        bm project add research --cloud --visibility shared\n
+        bm project add research --cloud --workspace Personal --visibility shared\n
 
     Local mode example:\n
         bm project add research ~/Documents/research
@@ -285,6 +350,7 @@ def add_project(
 
     # Determine effective mode: default local, cloud only when explicitly requested.
     effective_cloud_mode = cloud and not local
+    resolved_workspace_id: str | None = None
 
     # Resolve local sync path early (needed for both cloud and local mode)
     local_sync_path: str | None = None
@@ -293,18 +359,31 @@ def add_project(
 
     if effective_cloud_mode:
         _require_cloud_credentials(config)
+        try:
+            resolved_visibility = _normalize_project_visibility(visibility)
+        except ValueError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(1)
+        resolved_workspace_id = _resolve_workspace_id(config, workspace)
         # Cloud mode: path auto-generated from name, local sync is optional
 
         async def _add_project():
-            async with get_client() as client:
+            async with get_client(workspace=resolved_workspace_id) as client:
                 data = {
                     "name": name,
                     "path": generate_permalink(name),
                     "local_sync_path": local_sync_path,
                     "set_default": set_default,
+                    "visibility": resolved_visibility,
                 }
                 return await ProjectClient(client).create_project(data)
     else:
+        if workspace is not None:
+            console.print("[red]Error: --workspace is only supported in cloud mode[/red]")
+            raise typer.Exit(1)
+        if visibility is not None:
+            console.print("[red]Error: --visibility is only supported in cloud mode[/red]")
+            raise typer.Exit(1)
         # Local mode: path is required
         if path is None:
             console.print("[red]Error: path argument is required in local mode[/red]")
@@ -334,11 +413,14 @@ def add_project(
             if entry:
                 entry.path = local_sync_path
                 entry.local_sync_path = local_sync_path
+                if resolved_workspace_id:
+                    entry.workspace_id = resolved_workspace_id
             else:
                 # Project may not be in local config yet (cloud-only add)
                 config.projects[name] = ProjectEntry(
                     path=local_sync_path,
                     local_sync_path=local_sync_path,
+                    workspace_id=resolved_workspace_id,
                 )
             ConfigManager().save_config(config)
 
@@ -575,45 +657,7 @@ def set_cloud(
         console.print("[dim]Run 'bm cloud api-key save <key>' or 'bm cloud login' first[/dim]")
         raise typer.Exit(1)
 
-    # --- Resolve workspace to tenant_id ---
-    resolved_workspace_id: str | None = None
-
-    if workspace is not None:
-        # Explicit --workspace: resolve to tenant_id via cloud lookup
-        from basic_memory.mcp.project_context import (
-            get_available_workspaces,
-            _workspace_matches_identifier,
-            _workspace_choices,
-        )
-
-        workspaces = run_with_cleanup(get_available_workspaces())
-        matches = [ws for ws in workspaces if _workspace_matches_identifier(ws, workspace)]
-        if not matches:
-            console.print(f"[red]Error: Workspace '{workspace}' not found[/red]")
-            if workspaces:
-                console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
-            raise typer.Exit(1)
-        if len(matches) > 1:
-            console.print(
-                f"[red]Error: Workspace name '{workspace}' matches multiple workspaces. "
-                f"Use tenant_id instead.[/red]"
-            )
-            console.print(f"[dim]Available:\n{_workspace_choices(workspaces)}[/dim]")
-            raise typer.Exit(1)
-        resolved_workspace_id = matches[0].tenant_id
-    elif config.default_workspace:
-        # Fall back to global default
-        resolved_workspace_id = config.default_workspace
-    else:
-        # Try auto-select if single workspace
-        try:
-            from basic_memory.mcp.project_context import get_available_workspaces
-
-            workspaces = run_with_cleanup(get_available_workspaces())
-            if len(workspaces) == 1:
-                resolved_workspace_id = workspaces[0].tenant_id
-        except Exception:
-            pass  # Workspace resolution is optional at set-cloud time
+    resolved_workspace_id = _resolve_workspace_id(config, workspace)
 
     config.set_project_mode(name, ProjectMode.CLOUD)
     if resolved_workspace_id:

@@ -165,6 +165,45 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(
     assert created.new_project["name"] == "My Project"
     # Path should be permalink-like (kebab)
     assert seen["create_payload"]["path"] == "my-project"
+    assert seen["create_payload"]["visibility"] == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_create_cloud_project_accepts_visibility_override(config_home, config_manager):
+    """Shared cloud helper should pass explicit visibility through to the API payload."""
+    config = config_manager.load_config()
+    config.cloud_host = "https://cloud.example.test"
+    config_manager.save_config(config)
+
+    seen_payload: dict | None = None
+
+    async def api_request(**kwargs):
+        nonlocal seen_payload
+        seen_payload = kwargs["json_data"]
+        return httpx.Response(
+            200,
+            json={
+                "message": "created",
+                "status": "success",
+                "default": False,
+                "old_project": None,
+                "new_project": {"name": "shared-project", "path": "shared-project"},
+            },
+        )
+
+    created = await create_cloud_project(
+        "Shared Project",
+        visibility="shared",
+        api_request=api_request,
+    )
+
+    assert created.new_project is not None
+    assert seen_payload == {
+        "name": "Shared Project",
+        "path": "shared-project",
+        "set_default": False,
+        "visibility": "shared",
+    }
 
 
 @pytest.mark.asyncio
