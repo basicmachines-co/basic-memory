@@ -1,6 +1,7 @@
 from typing import Optional, List
 
 from basic_memory import telemetry
+from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import (
@@ -177,20 +178,26 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
         phase="hydrate_results",
         result_count=len(results),
     ):
-        entity_batches = []
+        # Collect all unique entity IDs across all results in a single pass
+        # This avoids N+1 queries — one batch fetch instead of one per result
+        all_entity_ids: set[int] = set()
+        for result in results:
+            for eid in (result.entity_id, result.from_id, result.to_id):
+                if eid is not None:
+                    all_entity_ids.add(eid)
+
+        # Single batch fetch for all entities
+        entities_by_id: dict[int, EntityModel] = {}
         with telemetry.scope(
             "search.hydrate_results.fetch_entities",
             domain="search",
             action="search",
             phase="fetch_entities",
-            result_count=len(results),
+            result_count=len(all_entity_ids),
         ):
-            for result in results:
-                entity_batches.append(
-                    await entity_service.get_entities_by_id(
-                        [result.entity_id, result.from_id, result.to_id]  # pyright: ignore
-                    )
-                )
+            if all_entity_ids:
+                entities = await entity_service.get_entities_by_id(list(all_entity_ids))
+                entities_by_id = {e.id: e for e in entities}
 
         search_results = []
         with telemetry.scope(
@@ -200,7 +207,7 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
             phase="shape_results",
             result_count=len(results),
         ):
-            for result, entities in zip(results, entity_batches):
+            for result in results:
                 entity_id = None
                 observation_id = None
                 relation_id = None
@@ -214,13 +221,18 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                     relation_id = result.id
                     entity_id = result.entity_id
 
+                # Look up entities by their specific IDs
+                parent_entity = entities_by_id.get(result.entity_id) if result.entity_id else None  # pyright: ignore
+                from_entity = entities_by_id.get(result.from_id) if result.from_id else None  # pyright: ignore
+                to_entity = entities_by_id.get(result.to_id) if result.to_id else None
+
                 search_results.append(
                     SearchResult(
                         title=result.title,  # pyright: ignore
                         type=result.type,  # pyright: ignore
                         permalink=result.permalink,
                         score=result.score,  # pyright: ignore
-                        entity=entities[0].permalink if entities else None,
+                        entity=parent_entity.permalink if parent_entity else None,
                         content=result.content,
                         matched_chunk=result.matched_chunk_text,
                         file_path=result.file_path,
@@ -229,8 +241,8 @@ async def to_search_results(entity_service: EntityService, results: List[SearchI
                         observation_id=observation_id,
                         relation_id=relation_id,
                         category=result.category,
-                        from_entity=entities[0].permalink if entities else None,
-                        to_entity=entities[1].permalink if len(entities) > 1 else None,
+                        from_entity=from_entity.permalink if from_entity else None,
+                        to_entity=to_entity.permalink if to_entity else None,
                         relation_type=result.relation_type,
                     )
                 )
