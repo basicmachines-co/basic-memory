@@ -153,8 +153,22 @@ jobs:
           - python-version: "3.13"
           - python-version: "3.14"
     runs-on: ubuntu-latest
-
-    # Note: No services section needed - testcontainers handles Postgres in Docker
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: basic_memory_user
+          POSTGRES_PASSWORD: dev_password
+          POSTGRES_DB: basic_memory_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U basic_memory_user -d basic_memory_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
 
     steps:
       - uses: actions/checkout@v4
@@ -197,8 +211,22 @@ jobs:
           - python-version: "3.13"
           - python-version: "3.14"
     runs-on: ubuntu-latest
-
-    # Note: No services section needed - testcontainers handles Postgres in Docker
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: basic_memory_user
+          POSTGRES_PASSWORD: dev_password
+          POSTGRES_DB: basic_memory_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U basic_memory_user -d basic_memory_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
 
     steps:
       - uses: actions/checkout@v4

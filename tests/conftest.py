@@ -80,7 +80,7 @@ def postgres_container(db_backend):
     The container is started once per test session and shared across all tests.
     Only starts if db_backend is "postgres".
     """
-    if db_backend != "postgres":
+    if db_backend != "postgres" or _configured_postgres_sync_url():
         yield None
         return
 
@@ -93,6 +93,21 @@ POSTGRES_EPHEMERAL_TABLES = [
     "search_vector_embeddings",
     "search_vector_index",
 ]
+
+
+def _configured_postgres_sync_url() -> str | None:
+    """Prefer an externally managed Postgres server when CI provides one."""
+    configured_url = os.environ.get("BASIC_MEMORY_TEST_POSTGRES_URL") or os.environ.get(
+        "POSTGRES_TEST_URL"
+    )
+    if not configured_url:
+        return None
+
+    return (
+        configured_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        .replace("postgresql://", "postgresql+psycopg2://", 1)
+        .replace("postgres://", "postgresql+psycopg2://", 1)
+    )
 
 
 def _postgres_alembic_config(async_url: str) -> Config:
@@ -119,6 +134,15 @@ def _postgres_reset_tables() -> list[str]:
         "search_index",
         "search_vector_chunks",
     ]
+
+
+def _resolve_postgres_sync_url(postgres_container) -> str:
+    """Use CI's shared service when configured, otherwise fall back to testcontainers."""
+    configured_url = _configured_postgres_sync_url()
+    if configured_url:
+        return configured_url
+    assert postgres_container is not None
+    return postgres_container.get_connection_url()
 
 
 async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> None:
@@ -198,8 +222,10 @@ def app_config(config_home, db_backend, postgres_container, monkeypatch) -> Basi
     # Set backend based on parameterized db_backend fixture
     if db_backend == "postgres":
         backend = DatabaseBackend.POSTGRES
-        # Get URL from testcontainer and convert to asyncpg driver
-        sync_url = postgres_container.get_connection_url()
+        # Trigger: CI jobs can provide a shared Postgres service instead of per-session containers.
+        # Why: reusing one pgvector-enabled server avoids Docker startup churn on every job.
+        # Outcome: local runs keep using testcontainers, while CI injects a stable service URL.
+        sync_url = _resolve_postgres_sync_url(postgres_container)
         database_url = sync_url.replace("postgresql+psycopg2", "postgresql+asyncpg")
     else:
         backend = DatabaseBackend.SQLITE
@@ -285,7 +311,7 @@ async def engine_factory(
     if db_backend == "postgres":
         # Postgres mode using testcontainers
         # Get async connection URL (asyncpg driver - same as production)
-        sync_url = postgres_container.get_connection_url()
+        sync_url = _resolve_postgres_sync_url(postgres_container)
         async_url = sync_url.replace("postgresql+psycopg2", "postgresql+asyncpg")
 
         engine = create_async_engine(
