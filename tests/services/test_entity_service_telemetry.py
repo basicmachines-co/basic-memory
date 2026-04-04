@@ -54,7 +54,9 @@ async def test_create_entity_emits_expected_phase_spans(entity_service, monkeypa
             "file_service.write",
             "entity_service.create.parse_markdown",
             "entity_service.create.upsert_entity",
-            "entity_service.create.update_checksum",
+            "entity_service.upsert.base_entity",
+            "entity_service.upsert.relations",
+            "entity_service.upsert.persist_checksum",
         ],
     )
 
@@ -93,7 +95,9 @@ async def test_edit_entity_emits_expected_phase_spans(entity_service, monkeypatc
             "file_service.write",
             "entity_service.edit.parse_markdown",
             "entity_service.edit.upsert_entity",
-            "entity_service.edit.update_checksum",
+            "entity_service.upsert.base_entity",
+            "entity_service.upsert.relations",
+            "entity_service.upsert.persist_checksum",
         ],
     )
 
@@ -124,6 +128,9 @@ async def test_reindex_entity_emits_expected_phase_spans(entity_service, monkeyp
             "file_service.read_content",
             "entity_service.reindex.parse_markdown",
             "entity_service.reindex.upsert_entity",
+            "entity_service.upsert.base_entity",
+            "entity_service.upsert.relations",
+            "entity_service.upsert.hydrate_entity",
             "entity_service.reindex.update_checksum",
         ],
     )

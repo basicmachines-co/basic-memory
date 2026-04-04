@@ -242,9 +242,17 @@ class EntityService(BaseService[EntityModel]):
 
         # Try to find existing entity using strict resolution (no fuzzy search)
         # This prevents incorrectly matching similar file paths like "Node A.md" and "Node C.md"
-        existing = await self.link_resolver.resolve_link(schema.file_path, strict=True)
+        existing = await self.link_resolver.resolve_link(
+            schema.file_path,
+            strict=True,
+            load_relations=False,
+        )
         if not existing and schema.permalink:
-            existing = await self.link_resolver.resolve_link(schema.permalink, strict=True)
+            existing = await self.link_resolver.resolve_link(
+                schema.permalink,
+                strict=True,
+                load_relations=False,
+            )
 
         if existing:
             logger.debug(f"Found existing entity: {existing.file_path}")
@@ -324,17 +332,14 @@ class EntityService(BaseService[EntityModel]):
             action="create",
             phase="upsert_entity",
         ):
-            entity = await self.upsert_entity_from_markdown(file_path, entity_markdown, is_new=True)
-
-        with telemetry.scope(
-            "entity_service.create.update_checksum",
-            domain="entity_service",
-            action="create",
-            phase="update_checksum",
-        ):
-            updated = await self.repository.update(entity.id, {"checksum": checksum})
+            updated = await self.upsert_entity_from_markdown(
+                file_path,
+                entity_markdown,
+                is_new=True,
+                checksum=checksum,
+            )
         if not updated:  # pragma: no cover
-            raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
+            raise ValueError(f"Failed to persist entity after create: {file_path}")
         return EntityWriteResult(
             entity=updated,
             content=final_content,
@@ -451,18 +456,13 @@ class EntityService(BaseService[EntityModel]):
             phase="upsert_entity",
         ):
             entity = await self.upsert_entity_from_markdown(
-                file_path, entity_markdown, is_new=False
+                file_path,
+                entity_markdown,
+                is_new=False,
+                checksum=checksum,
             )
-
-        with telemetry.scope(
-            "entity_service.update.update_checksum",
-            domain="entity_service",
-            action="update",
-            phase="update_checksum",
-        ):
-            entity = await self.repository.update(entity.id, {"checksum": checksum})
         if not entity:  # pragma: no cover
-            raise ValueError(f"Failed to update entity checksum after update: {file_path}")
+            raise ValueError(f"Failed to persist entity after update: {file_path}")
 
         return EntityWriteResult(
             entity=entity,
@@ -848,7 +848,7 @@ class EntityService(BaseService[EntityModel]):
 
         # Use UPSERT to handle conflicts cleanly
         try:
-            return await self.repository.upsert_entity(model)
+            return await self.repository.upsert_entity(model, reload=False)
         except Exception as e:
             logger.error(f"Failed to upsert entity for {file_path}: {e}")
             raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
@@ -863,7 +863,12 @@ class EntityService(BaseService[EntityModel]):
         """
         logger.debug(f"Updating entity and observations: {file_path}")
 
-        db_entity = await self.repository.get_by_file_path(file_path.as_posix())
+        db_entity = await self.repository.get_by_file_path(
+            file_path.as_posix(),
+            load_relations=False,
+        )
+        if not db_entity:  # pragma: no cover
+            raise EntityNotFoundError(f"Entity not found: {file_path}")
 
         # Clear observations for entity
         await self.observation_repository.delete_by_fields(entity_id=db_entity.id)
@@ -880,23 +885,37 @@ class EntityService(BaseService[EntityModel]):
             )
             for obs in markdown.observations
         ]
-        await self.observation_repository.add_all(observations)
+        if observations:
+            await self.observation_repository.add_all(observations)
 
-        # update values from markdown
-        db_entity = entity_model_from_markdown(file_path, markdown, db_entity)
+        # Trigger: the lightweight lookup above returns a detached row without loaded collections
+        # Why: assigning a new observation list onto that detached ORM object would trigger lazy loads
+        # Outcome: rebuild a fresh model from markdown, then copy over stable identity fields
+        db_entity_data = entity_model_from_markdown(
+            file_path,
+            markdown,
+            project_id=self.repository.project_id,
+        )
+        db_entity_data.id = db_entity.id
+        db_entity_data.project_id = db_entity.project_id
+        db_entity_data.external_id = db_entity.external_id
+        db_entity_data.created_by = db_entity.created_by
 
         # checksum value is None == not finished with sync
-        db_entity.checksum = None
+        db_entity_data.checksum = None
 
         # Set last_updated_by for cloud usage (preserve existing created_by)
         user_id = self.get_user_id()
         if user_id is not None:
-            db_entity.last_updated_by = user_id
+            db_entity_data.last_updated_by = user_id
+        else:
+            db_entity_data.last_updated_by = db_entity.last_updated_by
 
         # update entity
         return await self.repository.update(
             db_entity.id,
-            db_entity,
+            db_entity_data,
+            reload=False,
         )
 
     async def upsert_entity_from_markdown(
@@ -905,26 +924,76 @@ class EntityService(BaseService[EntityModel]):
         markdown: EntityMarkdown,
         *,
         is_new: bool,
+        checksum: Optional[str] = None,
     ) -> EntityModel:
         """Create/update entity and relations from parsed markdown."""
-        if is_new:
-            created = await self.create_entity_from_markdown(file_path, markdown)
-        else:
-            created = await self.update_entity_and_observations(file_path, markdown)
-        return await self.update_entity_relations(created.file_path, markdown)
+        # --- Base Entity Row ---
+        # Trigger: writes rebuild the entity row before touching relation edges
+        # Why: relations need a stable source entity ID, but not a fully hydrated graph
+        # Outcome: create/update the row with a lightweight return value
+        with telemetry.scope(
+            "entity_service.upsert.base_entity",
+            domain="entity_service",
+            action="upsert",
+            phase="base_entity",
+        ):
+            if is_new:
+                created = await self.create_entity_from_markdown(file_path, markdown)
+            else:
+                created = await self.update_entity_and_observations(file_path, markdown)
+
+        # --- Relation Edges ---
+        with telemetry.scope(
+            "entity_service.upsert.relations",
+            domain="entity_service",
+            action="upsert",
+            phase="relations",
+        ):
+            await self.update_entity_relations(created, markdown)
+
+        # --- Final Entity State ---
+        # Trigger: create/update/edit already computed the final file checksum
+        # Why: fold the checksum write into the upsert flow so callers do one hydrated read
+        # Outcome: the write path returns the final entity state without an extra checksum step
+        if checksum is not None:
+            with telemetry.scope(
+                "entity_service.upsert.persist_checksum",
+                domain="entity_service",
+                action="upsert",
+                phase="persist_checksum",
+            ):
+                updated = await self.repository.update(created.id, {"checksum": checksum})
+            if not updated:  # pragma: no cover
+                raise ValueError(f"Failed to update entity checksum after upsert: {file_path}")
+            return updated
+
+        with telemetry.scope(
+            "entity_service.upsert.hydrate_entity",
+            domain="entity_service",
+            action="upsert",
+            phase="hydrate_entity",
+        ):
+            hydrated = await self.repository.get_by_file_path(created.file_path)
+        if not hydrated:  # pragma: no cover
+            raise EntityNotFoundError(f"Entity not found after upsert: {created.file_path}")
+        return hydrated
 
     async def update_entity_relations(
         self,
-        path: str,
+        db_entity: EntityModel,
         markdown: EntityMarkdown,
-    ) -> EntityModel:
+    ) -> None:
         """Update relations for entity"""
-        logger.debug(f"Updating relations for entity: {path}")
-
-        db_entity = await self.repository.get_by_file_path(path)
+        logger.debug(f"Updating relations for entity: {db_entity.file_path}")
 
         # Clear existing relations first
-        await self.relation_repository.delete_outgoing_relations_from_entity(db_entity.id)
+        with telemetry.scope(
+            "entity_service.upsert.delete_relations",
+            domain="entity_service",
+            action="upsert",
+            phase="delete_relations",
+        ):
+            await self.relation_repository.delete_outgoing_relations_from_entity(db_entity.id)
 
         # Batch resolve all relation targets in parallel
         if markdown.relations:
@@ -933,13 +1002,23 @@ class EntityService(BaseService[EntityModel]):
             # Create tasks for all relation lookups
             # Use strict=True to disable fuzzy search - only exact matches should create resolved relations
             # This ensures forward references (links to non-existent entities) remain unresolved (to_id=NULL)
-            lookup_tasks = [
-                self.link_resolver.resolve_link(rel.target, strict=True)
-                for rel in markdown.relations
-            ]
+            with telemetry.scope(
+                "entity_service.upsert.resolve_relation_targets",
+                domain="entity_service",
+                action="upsert",
+                phase="resolve_relation_targets",
+            ):
+                lookup_tasks = [
+                    self.link_resolver.resolve_link(
+                        rel.target,
+                        strict=True,
+                        load_relations=False,
+                    )
+                    for rel in markdown.relations
+                ]
 
-            # Execute all lookups in parallel
-            resolved_entities = await asyncio.gather(*lookup_tasks, return_exceptions=True)
+                # Execute all lookups in parallel
+                resolved_entities = await asyncio.gather(*lookup_tasks, return_exceptions=True)
 
             # Process results and create relation records
             relations_to_add = []
@@ -968,22 +1047,26 @@ class EntityService(BaseService[EntityModel]):
 
             # Batch insert all relations
             if relations_to_add:
-                try:
-                    await self.relation_repository.add_all(relations_to_add)
-                except IntegrityError:
-                    # Some relations might be duplicates - fall back to individual inserts
-                    logger.debug("Batch relation insert failed, trying individual inserts")
-                    for relation in relations_to_add:
-                        try:
-                            await self.relation_repository.add(relation)
-                        except IntegrityError:
-                            # Unique constraint violation - relation already exists
-                            logger.debug(
-                                f"Skipping duplicate relation {relation.relation_type} from {db_entity.permalink}"
-                            )
-                            continue
-
-        return await self.repository.get_by_file_path(path)
+                with telemetry.scope(
+                    "entity_service.upsert.insert_relations",
+                    domain="entity_service",
+                    action="upsert",
+                    phase="insert_relations",
+                ):
+                    try:
+                        await self.relation_repository.add_all(relations_to_add)
+                    except IntegrityError:
+                        # Some relations might be duplicates - fall back to individual inserts
+                        logger.debug("Batch relation insert failed, trying individual inserts")
+                        for relation in relations_to_add:
+                            try:
+                                await self.relation_repository.add(relation)
+                            except IntegrityError:
+                                # Unique constraint violation - relation already exists
+                                logger.debug(
+                                    f"Skipping duplicate relation {relation.relation_type} from {db_entity.permalink}"
+                                )
+                                continue
 
     async def edit_entity(
         self,
@@ -1040,7 +1123,11 @@ class EntityService(BaseService[EntityModel]):
             action="edit",
             phase="resolve_entity",
         ):
-            entity = await self.link_resolver.resolve_link(identifier, strict=True)
+            entity = await self.link_resolver.resolve_link(
+                identifier,
+                strict=True,
+                load_relations=False,
+            )
         if not entity:
             raise EntityNotFoundError(f"Entity not found: {identifier}")
 
@@ -1089,18 +1176,13 @@ class EntityService(BaseService[EntityModel]):
             phase="upsert_entity",
         ):
             entity = await self.upsert_entity_from_markdown(
-                file_path, entity_markdown, is_new=False
+                file_path,
+                entity_markdown,
+                is_new=False,
+                checksum=checksum,
             )
-
-        with telemetry.scope(
-            "entity_service.edit.update_checksum",
-            domain="entity_service",
-            action="edit",
-            phase="update_checksum",
-        ):
-            entity = await self.repository.update(entity.id, {"checksum": checksum})
         if not entity:  # pragma: no cover
-            raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
+            raise ValueError(f"Failed to persist entity after edit: {file_path}")
 
         return EntityWriteResult(
             entity=entity,

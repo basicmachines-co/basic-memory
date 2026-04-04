@@ -268,8 +268,21 @@ class Repository[T: Base]:
 
             return await self.select_by_ids(session, [model.id for model in model_list])  # pyright: ignore [reportAttributeAccessIssue]
 
-    async def update(self, entity_id: int, entity_data: dict | T) -> Optional[T]:
-        """Update an entity with the given data."""
+    async def update(
+        self,
+        entity_id: int,
+        entity_data: dict | T,
+        *,
+        reload: bool = True,
+    ) -> Optional[T]:
+        """Update an entity with the given data.
+
+        Args:
+            entity_id: Primary key to update
+            entity_data: Column values or a model instance to copy from
+            reload: When True, re-select the entity with repository load options.
+                When False, return the attached row after flush/refresh.
+        """
         logger.debug(f"Updating {self.Model.__name__} {entity_id} with data: {entity_data}")
         async with db.scoped_session(self.session_maker) as session:
             try:
@@ -291,6 +304,8 @@ class Repository[T: Base]:
                 await session.refresh(entity)  # Refresh
 
                 logger.debug(f"Updated {self.Model.__name__}: {entity_id}")
+                if not reload:
+                    return entity
                 return await self.select_by_id(session, entity.id)  # pyright: ignore [reportAttributeAccessIssue]
 
             except NoResultFound:

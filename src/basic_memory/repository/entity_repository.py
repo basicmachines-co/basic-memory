@@ -59,16 +59,27 @@ class EntityRepository(Repository[Entity]):
         )
         return await self.find_one(query)
 
-    async def get_by_permalink(self, permalink: str) -> Optional[Entity]:
+    async def _find_one_by_query(self, query, *, load_relations: bool) -> Optional[Entity]:
+        """Return one entity row with optional eager loading."""
+        if load_relations:
+            query = query.options(*self.get_load_options())
+            return await self.find_one(query)
+
+        result = await self.execute_query(query, use_query_options=False)
+        return result.scalars().one_or_none()
+
+    async def get_by_permalink(
+        self, permalink: str, *, load_relations: bool = True
+    ) -> Optional[Entity]:
         """Get entity by permalink.
 
         Args:
             permalink: Unique identifier for the entity
         """
-        query = self.select().where(Entity.permalink == permalink).options(*self.get_load_options())
-        return await self.find_one(query)
+        query = self.select().where(Entity.permalink == permalink)
+        return await self._find_one_by_query(query, load_relations=load_relations)
 
-    async def get_by_title(self, title: str) -> Sequence[Entity]:
+    async def get_by_title(self, title: str, *, load_relations: bool = True) -> Sequence[Entity]:
         """Get entities by title, ordered by shortest path first.
 
         When multiple entities share the same title (in different folders),
@@ -82,23 +93,20 @@ class EntityRepository(Repository[Entity]):
             self.select()
             .where(Entity.title == title)
             .order_by(func.length(Entity.file_path), Entity.file_path)
-            .options(*self.get_load_options())
         )
-        result = await self.execute_query(query)
+        result = await self.execute_query(query, use_query_options=load_relations)
         return list(result.scalars().all())
 
-    async def get_by_file_path(self, file_path: Union[Path, str]) -> Optional[Entity]:
+    async def get_by_file_path(
+        self, file_path: Union[Path, str], *, load_relations: bool = True
+    ) -> Optional[Entity]:
         """Get entity by file_path.
 
         Args:
             file_path: Path to the entity file (will be converted to string internally)
         """
-        query = (
-            self.select()
-            .where(Entity.file_path == Path(file_path).as_posix())
-            .options(*self.get_load_options())
-        )
-        return await self.find_one(query)
+        query = self.select().where(Entity.file_path == Path(file_path).as_posix())
+        return await self._find_one_by_query(query, load_relations=load_relations)
 
     # -------------------------------------------------------------------------
     # Lightweight methods for permalink resolution (no eager loading)
@@ -306,7 +314,7 @@ class EntityRepository(Repository[Entity]):
         result = await self.execute_query(query)
         return list(result.scalars().all())
 
-    async def upsert_entity(self, entity: Entity) -> Entity:
+    async def upsert_entity(self, entity: Entity, *, reload: bool = True) -> Entity:
         """Insert or update entity using simple try/catch with database-level conflict resolution.
 
         Handles file_path race conditions by checking for existing entity on IntegrityError.
@@ -326,6 +334,9 @@ class EntityRepository(Repository[Entity]):
             try:
                 session.add(entity)
                 await session.flush()
+
+                if not reload:
+                    return entity
 
                 # Return with relationships loaded
                 query = (
@@ -363,13 +374,12 @@ class EntityRepository(Repository[Entity]):
                 await session.rollback()
 
                 # Re-query after rollback to get a fresh, attached entity
-                existing_result = await session.execute(
-                    select(Entity)
-                    .where(
-                        Entity.file_path == entity.file_path, Entity.project_id == entity.project_id
-                    )
-                    .options(*self.get_load_options())
+                existing_query = select(Entity).where(
+                    Entity.file_path == entity.file_path, Entity.project_id == entity.project_id
                 )
+                if reload:
+                    existing_query = existing_query.options(*self.get_load_options())
+                existing_result = await session.execute(existing_query)
                 existing_entity = existing_result.scalar_one_or_none()
 
                 if existing_entity:
@@ -392,6 +402,9 @@ class EntityRepository(Repository[Entity]):
                     merged_entity = await session.merge(entity)
 
                     await session.commit()
+
+                    if not reload:
+                        return merged_entity
 
                     # Re-query to get proper relationships loaded
                     final_result = await session.execute(
