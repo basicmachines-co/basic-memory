@@ -59,7 +59,9 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
-    response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\ntelemetry content"
+    response_content = (
+        "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\ntelemetry content"
+    )
 
     class FakeEntityService:
         async def create_entity_with_content(self, data):
@@ -119,9 +121,7 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
-    response_content = (
-        "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
-    )
+    response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
 
     class FakeEntityService:
         async def update_entity_with_content(self, existing, data):
@@ -190,9 +190,7 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
-    response_content = (
-        "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
-    )
+    response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
 
     class FakeEntityService:
         async def edit_entity_with_content(self, **kwargs):

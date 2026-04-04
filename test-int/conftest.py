@@ -178,10 +178,7 @@ async def _reset_postgres_integration_schema(engine) -> None:
             await conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
 
         await conn.execute(
-            text(
-                f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} "
-                "RESTART IDENTITY CASCADE"
-            )
+            text(f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} RESTART IDENTITY CASCADE")
         )
 
 

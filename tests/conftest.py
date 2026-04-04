@@ -172,10 +172,7 @@ async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> No
             await conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
 
         await conn.execute(
-            text(
-                f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} "
-                "RESTART IDENTITY CASCADE"
-            )
+            text(f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} RESTART IDENTITY CASCADE")
         )
 
         alembic_version_exists = (
