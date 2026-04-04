@@ -253,8 +253,12 @@ def list_projects(
             if cloud_project is not None and cloud_ws_name:
                 ws_label = f"{cloud_ws_name} ({cloud_ws_type})" if cloud_ws_type else cloud_ws_name
 
+            # Use display_name from cloud response (e.g., "My Project" for private UUID-named projects)
+            display_name = (
+                cloud_project.display_name if cloud_project and cloud_project.display_name else None
+            )
             row_data = {
-                "name": project_name,
+                "name": display_name or project_name,
                 "permalink": permalink,
                 "local_path": local_path,
                 "cloud_path": cloud_path,
