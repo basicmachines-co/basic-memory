@@ -13,6 +13,8 @@ import importlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -132,6 +134,39 @@ async def test_update_entity_relations_uses_pk_reload(entity_service: EntityServ
     assert find_by_ids_calls[0] == [entity.id]
 
 
+@pytest.mark.asyncio
+async def test_create_or_update_entity_uses_lightweight_exact_resolution(
+    entity_service: EntityService, monkeypatch
+):
+    """create_or_update_entity should use strict lookups without eager relation loading."""
+    schema = EntitySchema(
+        title="Create Or Update",
+        directory="notes",
+        note_type="note",
+        content="# Create Or Update",
+    )
+    sentinel_entity = SimpleNamespace(file_path="notes/existing.md")
+    resolve_calls: list[tuple[str, dict]] = []
+
+    async def fake_resolve_link(link_text: str, **kwargs):
+        resolve_calls.append((link_text, kwargs))
+        if link_text == schema.file_path:
+            return None
+        return sentinel_entity
+
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", fake_resolve_link)
+    monkeypatch.setattr(entity_service, "update_entity", AsyncMock(return_value=sentinel_entity))
+
+    entity, is_new = await entity_service.create_or_update_entity(schema)
+
+    assert entity is sentinel_entity
+    assert is_new is False
+    assert resolve_calls == [
+        (schema.file_path, {"strict": True, "load_relations": False}),
+        (schema.permalink, {"strict": True, "load_relations": False}),
+    ]
+
+
 # --- Telemetry sub-spans ---
 
 
@@ -204,6 +239,46 @@ async def test_upsert_with_relations_emits_resolve_and_insert_spans(
     span_names = [name for name, _ in spans]
     assert "upsert.relations.resolve_links" in span_names
     assert "upsert.relations.insert_relations" in span_names
+
+
+@pytest.mark.asyncio
+async def test_upsert_with_relations_uses_lightweight_exact_resolution(
+    entity_service: EntityService, monkeypatch
+):
+    """Relation target resolution should skip eager loading during upsert."""
+    target = await entity_service.create_entity(
+        EntitySchema(
+            title="Lightweight Target",
+            directory="notes",
+            note_type="note",
+            content="# Lightweight Target",
+        )
+    )
+    source = await entity_service.create_entity(
+        EntitySchema(
+            title="Lightweight Source",
+            directory="notes",
+            note_type="note",
+            content="# Lightweight Source",
+        )
+    )
+    resolve_calls: list[tuple[str, dict]] = []
+
+    async def fake_resolve_link(link_text: str, **kwargs):
+        resolve_calls.append((link_text, kwargs))
+        return target
+
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", fake_resolve_link)
+
+    markdown = _make_markdown(
+        title="Lightweight Source",
+        relations=[MarkdownRelation(type="links_to", target="Lightweight Target")],
+    )
+    await entity_service.upsert_entity_from_markdown(Path(source.file_path), markdown, is_new=False)
+
+    assert resolve_calls == [
+        ("Lightweight Target", {"strict": True, "load_relations": False}),
+    ]
 
 
 # --- Correctness: full round-trip ---
@@ -315,3 +390,37 @@ async def test_edit_entity_end_to_end(entity_service: EntityService):
     assert updated.observations[0].content == "appended fact"
     # Checksum should be set (not None) after edit completes
     assert updated.checksum is not None
+
+
+@pytest.mark.asyncio
+async def test_edit_entity_uses_lightweight_identifier_resolution(
+    entity_service: EntityService, monkeypatch
+):
+    """edit_entity should resolve the target note without eager relation loading."""
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Edit Lightweight",
+            directory="notes",
+            note_type="note",
+            content="# Edit Lightweight\n\nOriginal content.",
+        )
+    )
+    original_resolve_link = entity_service.link_resolver.resolve_link
+    resolve_calls: list[tuple[str, dict]] = []
+
+    async def spy_resolve_link(link_text: str, **kwargs):
+        resolve_calls.append((link_text, kwargs))
+        return await original_resolve_link(link_text, **kwargs)
+
+    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", spy_resolve_link)
+
+    await entity_service.edit_entity(
+        entity.file_path,
+        operation="append",
+        content="\n\nNo relation changes here.",
+    )
+
+    assert resolve_calls[0] == (
+        entity.file_path,
+        {"strict": True, "load_relations": False},
+    )

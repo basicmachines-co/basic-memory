@@ -242,9 +242,17 @@ class EntityService(BaseService[EntityModel]):
 
         # Try to find existing entity using strict resolution (no fuzzy search)
         # This prevents incorrectly matching similar file paths like "Node A.md" and "Node C.md"
-        existing = await self.link_resolver.resolve_link(schema.file_path, strict=True)
+        existing = await self.link_resolver.resolve_link(
+            schema.file_path,
+            strict=True,
+            load_relations=False,
+        )
         if not existing and schema.permalink:
-            existing = await self.link_resolver.resolve_link(schema.permalink, strict=True)
+            existing = await self.link_resolver.resolve_link(
+                schema.permalink,
+                strict=True,
+                load_relations=False,
+            )
 
         if existing:
             logger.debug(f"Found existing entity: {existing.file_path}")
@@ -946,7 +954,11 @@ class EntityService(BaseService[EntityModel]):
             # Use strict=True to disable fuzzy search - only exact matches should create resolved relations
             # This ensures forward references (links to non-existent entities) remain unresolved (to_id=NULL)
             lookup_tasks = [
-                self.link_resolver.resolve_link(rel.target, strict=True)
+                self.link_resolver.resolve_link(
+                    rel.target,
+                    strict=True,
+                    load_relations=False,
+                )
                 for rel in markdown.relations
             ]
 
@@ -1053,7 +1065,11 @@ class EntityService(BaseService[EntityModel]):
             action="edit",
             phase="resolve_entity",
         ):
-            entity = await self.link_resolver.resolve_link(identifier, strict=True)
+            entity = await self.link_resolver.resolve_link(
+                identifier,
+                strict=True,
+                load_relations=False,
+            )
         if not entity:
             raise EntityNotFoundError(f"Entity not found: {identifier}")
 
