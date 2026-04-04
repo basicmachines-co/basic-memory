@@ -139,6 +139,77 @@ def test_project_list_shows_local_cloud_presence_and_routes(
     assert "/beta" in result.stdout
 
 
+def test_project_list_shows_display_name_for_private_projects(
+    runner: CliRunner, write_config, mock_client, tmp_path, monkeypatch
+):
+    """Private projects should show display_name ('My Project') instead of raw UUID name."""
+    private_uuid = "f1df8f39-d5aa-4095-ae05-8c5a2883029a"
+
+    write_config(
+        {
+            "env": "dev",
+            "projects": {},
+            "default_project": "main",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    local_payload = {
+        "projects": [
+            {
+                "id": 1,
+                "external_id": "11111111-1111-1111-1111-111111111111",
+                "name": "main",
+                "path": "/main",
+                "is_default": True,
+            }
+        ],
+        "default_project": "main",
+    }
+
+    cloud_payload = {
+        "projects": [
+            {
+                "id": 1,
+                "external_id": "11111111-1111-1111-1111-111111111111",
+                "name": "main",
+                "path": "/main",
+                "is_default": True,
+            },
+            {
+                "id": 2,
+                "external_id": "22222222-2222-2222-2222-222222222222",
+                "name": private_uuid,
+                "path": f"/{private_uuid}",
+                "is_default": False,
+                "display_name": "My Project",
+                "is_private": True,
+            },
+        ],
+        "default_project": "main",
+    }
+
+    async def fake_list_projects(self):
+        if os.getenv("BASIC_MEMORY_FORCE_CLOUD", "").lower() in ("true", "1", "yes"):
+            return ProjectList.model_validate(cloud_payload)
+        return ProjectList.model_validate(local_payload)
+
+    monkeypatch.setattr(ProjectClient, "list_projects", fake_list_projects)
+
+    result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
+
+    assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
+    # display_name should appear in the Name column instead of the raw UUID
+    assert "My Project" in result.stdout
+    # The Name column should show "My Project", not the UUID.
+    # The UUID may still appear in the Cloud Path column — that's expected.
+    lines = result.stdout.splitlines()
+    project_line = next(line for line in lines if "My Project" in line)
+    # The name cell is the first column — verify UUID is not the displayed name
+    name_cell = project_line.split("│")[1].strip()
+    assert name_cell == "My Project"
+
+
 def test_project_ls_local_mode_defaults_to_local_route(
     runner: CliRunner, write_config, mock_client, tmp_path, monkeypatch
 ):
