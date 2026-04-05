@@ -34,17 +34,22 @@ class NoteContentRepository(Repository[NoteContent]):
         """Initialize with session maker and project-scoped filtering."""
         super().__init__(session_maker, NoteContent, project_id=project_id)
 
-    def _coerce_note_content(self, data: Mapping[str, Any] | NoteContent) -> NoteContent:
-        """Convert input data to a NoteContent model while preserving nullable fields."""
+    def _coerce_note_content(
+        self, data: Mapping[str, Any] | NoteContent
+    ) -> tuple[NoteContent, set[str]]:
+        """Convert input data to a NoteContent model and track explicit fields."""
         if isinstance(data, NoteContent):
-            return data
+            model_data = {
+                key: value for key, value in data.__dict__.items() if key in self.valid_columns
+            }
+        else:
+            model_data = {key: value for key, value in data.items() if key in self.valid_columns}
 
-        model_data = {key: value for key, value in data.items() if key in self.valid_columns}
         entity_id = model_data.get("entity_id")
         if entity_id is None:
             raise ValueError("entity_id is required for note_content writes")
 
-        return NoteContent(**model_data)
+        return NoteContent(**model_data), set(model_data)
 
     async def _load_entity_identity(self, session: AsyncSession, entity_id: int) -> Entity:
         """Load the owning entity so duplicated identity fields stay aligned."""
@@ -80,13 +85,32 @@ class NoteContentRepository(Repository[NoteContent]):
         return await self.find_one(query)
 
     async def get_by_file_path(self, file_path: Path | str) -> Optional[NoteContent]:
-        """Get note content by the mirrored entity file path."""
-        query = self.select().where(NoteContent.file_path == Path(file_path).as_posix())
-        return await self.find_one(query)
+        """Get note content by file path, preferring rows whose entity still owns that path."""
+        normalized_path = Path(file_path).as_posix()
+
+        # Trigger: note_content mirrors entity.file_path but does not enforce project-level uniqueness.
+        # Why: entity renames can leave stale mirrored paths behind until note_content realigns.
+        # Outcome: prefer the row whose current entity path still matches, then the newest mirror.
+        query = (
+            self.select()
+            .join(Entity, Entity.id == NoteContent.entity_id)
+            .where(NoteContent.file_path == normalized_path)
+            .order_by(
+                (Entity.file_path == normalized_path).desc(),
+                NoteContent.updated_at.desc(),
+                NoteContent.entity_id.desc(),
+            )
+            .limit(1)
+            .options(*self.get_load_options())
+        )
+
+        async with db.scoped_session(self.session_maker) as session:
+            result = await session.execute(query)
+            return result.scalars().first()
 
     async def create(self, data: Mapping[str, Any] | NoteContent) -> NoteContent:
         """Create a note_content row aligned to its owning entity."""
-        note_content = self._coerce_note_content(data)
+        note_content, _ = self._coerce_note_content(data)
 
         async with db.scoped_session(self.session_maker) as session:
             await self._align_identity_fields(session, note_content)
@@ -102,7 +126,7 @@ class NoteContentRepository(Repository[NoteContent]):
 
     async def upsert(self, data: Mapping[str, Any] | NoteContent) -> NoteContent:
         """Insert or update note_content while keeping mirrored identity fields in sync."""
-        note_content = self._coerce_note_content(data)
+        note_content, provided_fields = self._coerce_note_content(data)
 
         async with db.scoped_session(self.session_maker) as session:
             await self._align_identity_fields(session, note_content)
@@ -118,9 +142,12 @@ class NoteContentRepository(Repository[NoteContent]):
                     )
                 return created
 
-            for column_name in NoteContent.__table__.columns.keys():
-                if column_name == "entity_id":
-                    continue
+            fields_to_update = (provided_fields - {"entity_id"}) | {
+                "project_id",
+                "external_id",
+                "file_path",
+            }
+            for column_name in fields_to_update:
                 setattr(existing, column_name, getattr(note_content, column_name))
 
             await session.flush()
@@ -132,7 +159,7 @@ class NoteContentRepository(Repository[NoteContent]):
             return updated
 
     async def update_state_fields(self, entity_id: int, **updates: Any) -> Optional[NoteContent]:
-        """Update mutable sync and materialization fields for a note_content row."""
+        """Update sync fields and re-align project_id, external_id, and file_path from entity."""
         invalid_fields = set(updates) - NOTE_CONTENT_MUTABLE_FIELDS
         if invalid_fields:
             invalid_list = ", ".join(sorted(invalid_fields))

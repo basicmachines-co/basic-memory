@@ -66,7 +66,7 @@ target_metadata = Base.metadata
 
 
 # Add this function to tell Alembic what to include/exclude
-def include_object(object, name, type_, reflected, compare_to):
+def include_object(obj, name, type_, reflected, compare_to):
     # Ignore SQLite FTS tables
     if type_ == "table" and name.startswith("search_index"):
         return False
