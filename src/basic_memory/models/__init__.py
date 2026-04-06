@@ -2,12 +2,13 @@
 
 import basic_memory
 from basic_memory.models.base import Base
-from basic_memory.models.knowledge import Entity, Observation, Relation
+from basic_memory.models.knowledge import Entity, NoteContent, Observation, Relation
 from basic_memory.models.project import Project
 
 __all__ = [
     "Base",
     "Entity",
+    "NoteContent",
     "Observation",
     "Relation",
     "Project",

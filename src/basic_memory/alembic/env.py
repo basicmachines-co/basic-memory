@@ -66,7 +66,7 @@ target_metadata = Base.metadata
 
 
 # Add this function to tell Alembic what to include/exclude
-def include_object(object, name, type_, reflected, compare_to):
+def include_object(obj, name, type_, reflected, compare_to):
     # Ignore SQLite FTS tables
     if type_ == "table" and name.startswith("search_index"):
         return False
@@ -118,6 +118,54 @@ async def run_async_migrations(connectable):
     await connectable.dispose()
 
 
+def _run_async_migrations_with_asyncio_run(connectable) -> None:
+    """Run async migrations with asyncio.run while closing failed coroutines.
+
+    Trigger: asyncio.run() may reject execution when another event loop is already active.
+    Why: Python raises before awaiting the coroutine, which otherwise leaks a
+    RuntimeWarning about an un-awaited coroutine.
+    Outcome: close the pending coroutine before bubbling the RuntimeError to the
+    fallback path.
+    """
+    migration_coro = run_async_migrations(connectable)
+    try:
+        asyncio.run(migration_coro)
+    except RuntimeError:
+        migration_coro.close()
+        raise
+
+
+def _run_async_migrations_in_thread(connectable) -> None:
+    """Run async migrations in a dedicated thread with its own event loop."""
+    import concurrent.futures
+
+    def run_in_thread():
+        """Run async migrations in a new event loop in a separate thread."""
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            new_loop.run_until_complete(run_async_migrations(connectable))
+        finally:
+            new_loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        future = executor.submit(run_in_thread)
+        future.result()  # Wait for completion and re-raise any exceptions
+
+
+def _run_async_engine_migrations(connectable) -> None:
+    """Run async-engine migrations with a running-loop fallback."""
+    try:
+        _run_async_migrations_with_asyncio_run(connectable)
+    except RuntimeError as e:
+        if "cannot be called from a running event loop" in str(e):
+            # We're in a running event loop (likely uvloop or Python 3.14+ tests).
+            # Switch to a dedicated thread so Alembic can finish without nesting loops.
+            _run_async_migrations_in_thread(connectable)
+        else:
+            raise
+
+
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
@@ -148,30 +196,10 @@ def run_migrations_online() -> None:
 
     # Handle async engines (PostgreSQL with asyncpg)
     if isinstance(connectable, AsyncEngine):
-        # Try to run async migrations
-        # nest_asyncio allows asyncio.run() from within event loops, but doesn't work with uvloop
-        try:
-            asyncio.run(run_async_migrations(connectable))
-        except RuntimeError as e:
-            if "cannot be called from a running event loop" in str(e):
-                # We're in a running event loop (likely uvloop) - need to use a different approach
-                # Create a new thread to run the async migrations
-                import concurrent.futures
-
-                def run_in_thread():
-                    """Run async migrations in a new event loop in a separate thread."""
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        new_loop.run_until_complete(run_async_migrations(connectable))
-                    finally:
-                        new_loop.close()
-
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(run_in_thread)
-                    future.result()  # Wait for completion and re-raise any exceptions
-            else:
-                raise
+        # Trigger: async engines need Alembic work to cross the sync/async boundary.
+        # Why: most callers can use asyncio.run(), but running-loop contexts need a thread fallback.
+        # Outcome: migrations complete without leaking un-awaited coroutines.
+        _run_async_engine_migrations(connectable)
     else:
         # Handle sync engines (SQLite) or sync connections
         if hasattr(connectable, "connect"):

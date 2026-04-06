@@ -6,6 +6,8 @@ from basic_memory.utils import ensure_timezone_aware
 from typing import Optional
 
 from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
     Integer,
     String,
     Text,
@@ -116,6 +118,12 @@ class Entity(Base):
         foreign_keys="[Relation.to_id]",
         cascade="all, delete-orphan",
     )
+    note_content = relationship(
+        "NoteContent",
+        back_populates="entity",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     @property
     def relations(self):
@@ -139,6 +147,74 @@ class Entity(Base):
 
     def __repr__(self) -> str:
         return f"Entity(id={self.id}, external_id='{self.external_id}', name='{self.title}', type='{self.note_type}', checksum='{self.checksum}')"
+
+
+class NoteContent(Base):
+    """Materialized markdown content and sync state for a note entity."""
+
+    __tablename__ = "note_content"
+    __table_args__ = (
+        CheckConstraint(
+            "file_write_status IN ("
+            "'pending', "
+            "'writing', "
+            "'synced', "
+            "'failed', "
+            "'external_change_detected'"
+            ")",
+            name="ck_note_content_file_write_status",
+        ),
+        Index("ix_note_content_project_id", "project_id"),
+        Index("ix_note_content_file_path", "file_path"),
+        Index("ix_note_content_external_id", "external_id", unique=True),
+    )
+
+    # Core identity mirrored from entity for hot note reads
+    entity_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("entity.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    project_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Materialized content version tracked in the tenant database
+    markdown_content: Mapped[str] = mapped_column(Text, nullable=False)
+    db_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    db_checksum: Mapped[str] = mapped_column(String, nullable=False)
+
+    # File materialization state tracked against the latest write attempts
+    file_version: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    file_checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    file_write_status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    last_source: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now().astimezone(),
+        onupdate=lambda: datetime.now().astimezone(),
+    )
+    file_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    last_materialization_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_materialization_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    entity = relationship("Entity", back_populates="note_content")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"NoteContent(entity_id={self.entity_id}, external_id='{self.external_id}', "
+            f"file_path='{self.file_path}', file_write_status='{self.file_write_status}')"
+        )
 
 
 class Observation(Base):

@@ -54,7 +54,7 @@ def _require_cloud_credentials(config) -> None:
 
 async def _get_cloud_project(name: str) -> ProjectItem | None:
     """Fetch a project by name from the cloud API."""
-    async with get_client() as client:
+    async with get_client(project_name=name) as client:
         projects_list = await ProjectClient(client).list_projects()
         for proj in projects_list.projects:
             if generate_permalink(proj.name) == generate_permalink(name):
@@ -129,9 +129,9 @@ def sync_project_command(
             if not dry_run:
 
                 async def _trigger_db_sync():
-                    async with get_client() as client:
+                    async with get_client(project_name=name) as client:
                         return await ProjectClient(client).sync(
-                            project_data.external_id, force_full=True
+                            project_data.external_id, force_full=False
                         )
 
                 try:
@@ -195,7 +195,10 @@ def bisync_project_command(
             # Update config — sync_entry is guaranteed non-None because
             # _get_sync_project validated local_sync_path (which comes from sync_entry)
             sync_entry = config.projects.get(name)
-            assert sync_entry is not None
+            if sync_entry is None:
+                raise RuntimeError(
+                    f"Sync entry for project '{name}' unexpectedly missing after validation"
+                )
             sync_entry.last_sync = datetime.now()
             sync_entry.bisync_initialized = True
             ConfigManager().save_config(config)
@@ -204,9 +207,9 @@ def bisync_project_command(
             if not dry_run:
 
                 async def _trigger_db_sync():
-                    async with get_client() as client:
+                    async with get_client(project_name=name) as client:
                         return await ProjectClient(client).sync(
-                            project_data.external_id, force_full=True
+                            project_data.external_id, force_full=False
                         )
 
                 try:
@@ -320,7 +323,7 @@ def setup_project_sync(
 
     async def _verify_project_exists():
         """Verify the project exists on cloud by listing all projects."""
-        async with get_client() as client:
+        async with get_client(project_name=name) as client:
             projects_list = await ProjectClient(client).list_projects()
             project_names = [p.name for p in projects_list.projects]
             if name not in project_names:

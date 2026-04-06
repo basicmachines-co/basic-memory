@@ -47,6 +47,7 @@ class LinkResolver:
         use_search: bool = True,
         strict: bool = False,
         source_path: Optional[str] = None,
+        load_relations: bool = True,
     ) -> Optional[Entity]:
         """Resolve a markdown link to a permalink.
 
@@ -56,6 +57,7 @@ class LinkResolver:
             strict: If True, only exact matches are allowed (no fuzzy search fallback)
             source_path: Optional path of the source file containing the link.
                         Used to prefer notes closer to the source (context-aware resolution).
+            load_relations: When False, skip eager loading and return a lightweight entity row.
         """
         logger.trace(f"Resolving link: {link_text} (source: {source_path})")
 
@@ -70,7 +72,10 @@ class LinkResolver:
         # UUIDs also match the stored external_id values.
         try:
             canonical_id = str(uuid_mod.UUID(clean_text))
-            entity = await self.entity_repository.get_by_external_id(canonical_id)
+            entity = await self.entity_repository.get_by_external_id(
+                canonical_id,
+                load_relations=load_relations,
+            )
             if entity:
                 logger.debug(f"Found entity by external_id: {entity.permalink}")
                 return entity
@@ -98,6 +103,7 @@ class LinkResolver:
                 strict=strict,
                 source_path=None,
                 project_permalink=project.permalink,
+                load_relations=load_relations,
             )
 
         current_project_permalink = await self._get_current_project_permalink()
@@ -109,6 +115,7 @@ class LinkResolver:
             strict=strict,
             source_path=source_path,
             project_permalink=current_project_permalink,
+            load_relations=load_relations,
         )
         if resolved:
             return resolved
@@ -136,6 +143,7 @@ class LinkResolver:
             strict=strict,
             source_path=None,
             project_permalink=project.permalink,
+            load_relations=load_relations,
         )
 
     def _normalize_link_text(self, link_text: str) -> Tuple[str, Optional[str]]:
@@ -176,6 +184,7 @@ class LinkResolver:
         strict: bool,
         source_path: Optional[str],
         project_permalink: Optional[str],
+        load_relations: bool,
     ) -> Optional[Entity]:
         """Resolve a link within a specific project scope."""
         clean_text = link_text
@@ -223,12 +232,18 @@ class LinkResolver:
                     # Try with .md extension
                     if not relative_path.endswith(".md"):
                         relative_path_md = f"{relative_path}.md"
-                        entity = await entity_repository.get_by_file_path(relative_path_md)
+                        entity = await entity_repository.get_by_file_path(
+                            relative_path_md,
+                            load_relations=load_relations,
+                        )
                         if entity:
                             return entity
 
                     # Try as-is (already has extension or is a permalink)
-                    entity = await entity_repository.get_by_file_path(relative_path)
+                    entity = await entity_repository.get_by_file_path(
+                        relative_path,
+                        load_relations=load_relations,
+                    )
                     if entity:
                         return entity
 
@@ -242,12 +257,18 @@ class LinkResolver:
 
             # Check permalink match
             for candidate_permalink in permalink_candidates:
-                permalink_entity = await entity_repository.get_by_permalink(candidate_permalink)
+                permalink_entity = await entity_repository.get_by_permalink(
+                    candidate_permalink,
+                    load_relations=load_relations,
+                )
                 if permalink_entity and permalink_entity.id not in [c.id for c in candidates]:
                     candidates.append(permalink_entity)
 
             # Check title matches
-            title_entities = await entity_repository.get_by_title(clean_text)
+            title_entities = await entity_repository.get_by_title(
+                clean_text,
+                load_relations=load_relations,
+            )
             for entity in title_entities:
                 # Avoid duplicates (permalink match might also be in title matches)
                 if entity.id not in [c.id for c in candidates]:
@@ -263,13 +284,19 @@ class LinkResolver:
         # Standard resolution (no source context): permalink first, then title
         # 1. Try exact permalink match first (most efficient)
         for candidate_permalink in permalink_candidates:
-            entity = await entity_repository.get_by_permalink(candidate_permalink)
+            entity = await entity_repository.get_by_permalink(
+                candidate_permalink,
+                load_relations=load_relations,
+            )
             if entity:
                 logger.debug(f"Found exact permalink match: {entity.permalink}")
                 return entity
 
         # 2. Try exact title match
-        found = await entity_repository.get_by_title(clean_text)
+        found = await entity_repository.get_by_title(
+            clean_text,
+            load_relations=load_relations,
+        )
         if found:
             # Return first match (shortest path) if no source context
             entity = found[0]
@@ -277,7 +304,10 @@ class LinkResolver:
             return entity
 
         # 3. Try file path
-        found_path = await entity_repository.get_by_file_path(clean_text)
+        found_path = await entity_repository.get_by_file_path(
+            clean_text,
+            load_relations=load_relations,
+        )
         if found_path:
             logger.debug(f"Found entity with path: {found_path.file_path}")
             return found_path
@@ -285,7 +315,10 @@ class LinkResolver:
         # 4. Try file path with .md extension if not already present
         if not clean_text.endswith(".md") and "/" in clean_text:
             file_path_with_md = f"{clean_text}.md"
-            found_path_md = await entity_repository.get_by_file_path(file_path_with_md)
+            found_path_md = await entity_repository.get_by_file_path(
+                file_path_with_md,
+                load_relations=load_relations,
+            )
             if found_path_md:
                 logger.debug(f"Found entity with path (with .md): {found_path_md.file_path}")
                 return found_path_md
@@ -309,7 +342,10 @@ class LinkResolver:
                     f"Selected best match from {len(results)} results: {best_match.permalink}"
                 )
                 if best_match.permalink:
-                    return await entity_repository.get_by_permalink(best_match.permalink)
+                    return await entity_repository.get_by_permalink(
+                        best_match.permalink,
+                        load_relations=load_relations,
+                    )
 
         # if we couldn't find anything then return None
         return None

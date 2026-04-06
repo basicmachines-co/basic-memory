@@ -66,6 +66,27 @@ async def _resolve_cloud_token(config) -> str:
         )
 
 
+def resolve_configured_workspace(
+    *,
+    config=None,
+    project_name: Optional[str] = None,
+    workspace: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve workspace from explicit input, per-project config, then global default."""
+    if workspace is not None:
+        return workspace
+
+    if config is None:
+        config = ConfigManager().config
+
+    if project_name is not None:
+        project_entry = config.projects.get(project_name)
+        if project_entry and project_entry.workspace_id:
+            return project_entry.workspace_id
+
+    return config.default_workspace
+
+
 @asynccontextmanager
 async def _cloud_client(
     config,
@@ -95,7 +116,7 @@ async def get_cloud_control_plane_client(
     config = ConfigManager().config
     timeout = _build_timeout()
     token = await _resolve_cloud_token(config)
-    headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}"}
     if workspace:
         headers["X-Workspace-ID"] = workspace
     logger.info(f"Creating HTTP client for cloud control plane at: {config.cloud_host}")
@@ -107,11 +128,14 @@ async def get_cloud_control_plane_client(
         yield client
 
 
-# Optional factory override for dependency injection
-_client_factory: Optional[Callable[[], AbstractAsyncContextManager[AsyncClient]]] = None
+# Optional factory override for dependency injection.
+# The factory accepts an optional workspace keyword argument so that MCP tools
+# can route individual requests to a different workspace than the one set at
+# connection time.  See basic-memory-cloud main.py tenant_asgi_client_factory.
+_client_factory: Optional[Callable[..., AbstractAsyncContextManager[AsyncClient]]] = None
 
 
-def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncClient]]) -> None:
+def set_client_factory(factory: Callable[..., AbstractAsyncContextManager[AsyncClient]]) -> None:
     """Override the default client factory (for cloud app, testing, etc)."""
     global _client_factory
     _client_factory = factory
@@ -152,7 +176,7 @@ async def get_client(
     4. Local ASGI transport by default.
     """
     if _client_factory:
-        async with _client_factory() as client:
+        async with _client_factory(workspace=workspace) as client:
             yield client
         return
 
@@ -172,7 +196,12 @@ async def get_client(
 
         if _force_cloud_mode():
             logger.debug("Explicit cloud routing enabled - using cloud proxy client")
-            async with _cloud_client(config, timeout, workspace=workspace) as client:
+            effective_workspace = resolve_configured_workspace(
+                config=config,
+                project_name=project_name,
+                workspace=workspace,
+            )
+            async with _cloud_client(config, timeout, workspace=effective_workspace) as client:
                 yield client
             return
 
@@ -184,14 +213,11 @@ async def get_client(
         project_mode = config.get_project_mode(project_name)
         if project_mode == ProjectMode.CLOUD:
             logger.debug(f"Project '{project_name}' is cloud mode - using cloud proxy client")
-            # Resolve workspace from project config if not explicitly provided
-            effective_workspace = workspace
-            if effective_workspace is None:
-                entry = config.projects.get(project_name)
-                if entry and entry.workspace_id:
-                    effective_workspace = entry.workspace_id
-                elif config.default_workspace:
-                    effective_workspace = config.default_workspace
+            effective_workspace = resolve_configured_workspace(
+                config=config,
+                project_name=project_name,
+                workspace=workspace,
+            )
             try:
                 async with _cloud_client(config, timeout, workspace=effective_workspace) as client:
                     yield client

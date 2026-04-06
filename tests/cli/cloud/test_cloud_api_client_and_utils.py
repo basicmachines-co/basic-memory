@@ -10,11 +10,12 @@ from basic_memory.cli.commands.cloud.api_client import (
     make_api_request,
 )
 from basic_memory.cli.commands.cloud.cloud_utils import (
-    _workspace_headers,
+    CloudUtilsError,
     create_cloud_project,
     fetch_cloud_projects,
     project_exists,
 )
+from basic_memory.config import ProjectMode
 
 
 @pytest.mark.asyncio
@@ -164,81 +165,111 @@ async def test_cloud_utils_fetch_and_exists_and_create_project(
     assert created.new_project["name"] == "My Project"
     # Path should be permalink-like (kebab)
     assert seen["create_payload"]["path"] == "my-project"
-
-
-def test_workspace_headers_with_workspace():
-    """_workspace_headers returns X-Workspace-ID when workspace is provided."""
-    assert _workspace_headers("tenant-123") == {"X-Workspace-ID": "tenant-123"}
-
-
-def test_workspace_headers_without_workspace():
-    """_workspace_headers returns empty dict when no workspace."""
-    assert _workspace_headers(None) == {}
-    assert _workspace_headers() == {}
+    assert seen["create_payload"]["visibility"] == "workspace"
 
 
 @pytest.mark.asyncio
-async def test_cloud_utils_pass_workspace_header(config_home, config_manager):
-    """fetch_cloud_projects, project_exists, and create_cloud_project pass workspace header."""
+async def test_create_cloud_project_accepts_visibility_override(config_home, config_manager):
+    """Shared cloud helper should pass explicit visibility through to the API payload."""
     config = config_manager.load_config()
     config.cloud_host = "https://cloud.example.test"
     config_manager.save_config(config)
 
-    auth = CLIAuth(client_id="cid", authkit_domain="https://auth.example.test")
-    auth.token_file.parent.mkdir(parents=True, exist_ok=True)
-    auth.token_file.write_text(
-        '{"access_token":"token-123","refresh_token":null,"expires_at":9999999999,"token_type":"Bearer"}',
-        encoding="utf-8",
+    seen_payload: dict | None = None
+
+    async def api_request(**kwargs):
+        nonlocal seen_payload
+        seen_payload = kwargs["json_data"]
+        return httpx.Response(
+            200,
+            json={
+                "message": "created",
+                "status": "success",
+                "default": False,
+                "old_project": None,
+                "new_project": {"name": "shared-project", "path": "shared-project"},
+            },
+        )
+
+    created = await create_cloud_project(
+        "Shared Project",
+        visibility="shared",
+        api_request=api_request,
     )
 
-    seen_headers: list[dict] = []
+    assert created.new_project is not None
+    assert seen_payload == {
+        "name": "Shared Project",
+        "path": "shared-project",
+        "set_default": False,
+        "visibility": "shared",
+    }
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        seen_headers.append(dict(request.headers))
-        if request.method == "GET":
-            return httpx.Response(200, json={"projects": []})
-        if request.method == "POST":
-            payload = json.loads(request.content.decode("utf-8"))
+
+@pytest.mark.asyncio
+async def test_cloud_utils_use_configured_workspace_headers(config_home, config_manager):
+    """Workspace-aware cloud helpers should prefer project workspace over global default."""
+    config = config_manager.load_config()
+    config.cloud_host = "https://cloud.example.test"
+    config.default_workspace = "default-workspace"
+    config.set_project_mode("alpha", ProjectMode.CLOUD)
+    config.projects["alpha"].workspace_id = "project-workspace"
+    config_manager.save_config(config)
+
+    seen: list[tuple[str, str | None]] = []
+
+    async def api_request(**kwargs):
+        seen.append(
+            (
+                kwargs["method"],
+                (kwargs.get("headers") or {}).get("X-Workspace-ID"),
+            )
+        )
+
+        if kwargs["method"] == "GET":
             return httpx.Response(
                 200,
                 json={
-                    "message": "created",
-                    "status": "success",
-                    "default": False,
-                    "old_project": None,
-                    "new_project": {"name": payload["name"], "path": payload["path"]},
+                    "projects": [{"id": 1, "name": "alpha", "path": "alpha", "is_default": True}]
                 },
             )
-        raise AssertionError(f"Unexpected: {request.method}")
 
-    transport = httpx.MockTransport(handler)
+        return httpx.Response(
+            200,
+            json={
+                "message": "created",
+                "status": "success",
+                "default": False,
+                "old_project": None,
+                "new_project": {"name": "alpha", "path": "alpha"},
+            },
+        )
 
-    @asynccontextmanager
-    async def http_client_factory():
-        async with httpx.AsyncClient(
-            transport=transport, base_url="https://cloud.example.test"
-        ) as client:
-            yield client
+    assert await project_exists("alpha", api_request=api_request) is True
+    await create_cloud_project("alpha", api_request=api_request)
+    await fetch_cloud_projects(project_name="missing", api_request=api_request)
 
-    async def api_request(**kwargs):
-        return await make_api_request(auth=auth, http_client_factory=http_client_factory, **kwargs)
+    assert seen == [
+        ("GET", "project-workspace"),
+        ("POST", "project-workspace"),
+        ("GET", "default-workspace"),
+    ]
 
-    # fetch with workspace
-    await fetch_cloud_projects(workspace="tenant-abc", api_request=api_request)
-    assert seen_headers[-1].get("x-workspace-id") == "tenant-abc"
 
-    # project_exists with workspace
-    await project_exists("test", workspace="tenant-abc", api_request=api_request)
-    assert seen_headers[-1].get("x-workspace-id") == "tenant-abc"
+@pytest.mark.asyncio
+async def test_project_exists_surfaces_cloud_lookup_failures(config_home, config_manager):
+    """project_exists should surface lookup failures instead of pretending the project is missing."""
+    config = config_manager.load_config()
+    config.cloud_host = "https://cloud.example.test"
+    config_manager.save_config(config)
 
-    # create with workspace
-    await create_cloud_project("new-proj", workspace="tenant-abc", api_request=api_request)
-    assert seen_headers[-1].get("x-workspace-id") == "tenant-abc"
+    async def api_request(**_kwargs):
+        raise httpx.ConnectError("boom")
 
-    # Without workspace — header should not be present
-    seen_headers.clear()
-    await fetch_cloud_projects(api_request=api_request)
-    assert "x-workspace-id" not in seen_headers[-1]
+    with pytest.raises(CloudUtilsError, match="Failed to fetch cloud projects"):
+        await project_exists("alpha", api_request=api_request)
+
+
 
 
 @pytest.mark.asyncio

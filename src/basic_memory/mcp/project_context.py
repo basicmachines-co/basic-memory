@@ -622,10 +622,10 @@ async def get_project_client(
 
     # Step 1b: Factory injection (in-process cloud server)
     # Trigger: set_client_factory() was called (e.g., by cloud MCP server)
-    # Why: the transport layer already resolved workspace and tenant context;
-    #   attempting cloud workspace resolution here would call the production
-    #   control-plane API with no valid credentials and fail with 401
-    # Outcome: use the factory client directly, skip workspace resolution
+    # Why: the factory's transport layer handles auth and tenant resolution;
+    #   we pass workspace through so the transport can route to the correct
+    #   workspace when the tool specifies one different from the connection default
+    # Outcome: factory client with optional workspace override via inner request headers
     if is_factory_mode():
         route_mode = "factory"
         with telemetry.scope(
@@ -635,7 +635,7 @@ async def get_project_client(
             workspace_id=workspace,
         ):
             logger.debug("Using injected client factory for project routing")
-            async with get_client() as client:
+            async with get_client(workspace=workspace) as client:
                 active_project = await get_active_project(client, resolved_project, context)
                 yield client, active_project
         return

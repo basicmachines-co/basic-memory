@@ -28,7 +28,7 @@ async def test_get_client_uses_injected_factory(monkeypatch):
     seen = {"used": False}
 
     @asynccontextmanager
-    async def factory():
+    async def factory(workspace=None):
         seen["used"] = True
         async with httpx.AsyncClient(base_url="https://example.test") as client:
             yield client
@@ -77,6 +77,35 @@ async def test_get_client_cloud_adds_workspace_header(config_manager):
     async with get_client(project_name="research", workspace="tenant-123") as client:
         assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
         assert client.headers.get("X-Workspace-ID") == "tenant-123"
+
+
+@pytest.mark.asyncio
+async def test_get_client_cloud_uses_project_workspace_when_not_explicit(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.default_workspace = "default-tenant"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    cfg.projects["research"].workspace_id = "project-tenant"
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("X-Workspace-ID") == "project-tenant"
+
+
+@pytest.mark.asyncio
+async def test_get_client_cloud_uses_default_workspace_when_project_has_none(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    cfg.default_workspace = "default-tenant"
+    cfg.set_project_mode("research", ProjectMode.CLOUD)
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="research") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test/proxy"
+        assert client.headers.get("X-Workspace-ID") == "default-tenant"
 
 
 @pytest.mark.asyncio
@@ -156,7 +185,7 @@ async def test_get_client_factory_overrides_per_project_routing(config_manager):
     config_manager.save_config(cfg)
 
     @asynccontextmanager
-    async def factory():
+    async def factory(workspace=None):
         async with httpx.AsyncClient(base_url="https://factory.test") as client:
             yield client
 
@@ -251,6 +280,19 @@ async def test_get_cloud_control_plane_client_uses_api_key_when_available(config
     async with get_cloud_control_plane_client() as client:
         assert str(client.base_url).rstrip("/") == "https://cloud.example.test"
         assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
+
+
+@pytest.mark.asyncio
+async def test_get_cloud_control_plane_client_adds_workspace_header(config_manager):
+    cfg = config_manager.load_config()
+    cfg.cloud_host = "https://cloud.example.test"
+    cfg.cloud_api_key = "bmc_test_key_123"
+    config_manager.save_config(cfg)
+
+    async with get_cloud_control_plane_client(workspace="tenant-123") as client:
+        assert str(client.base_url).rstrip("/") == "https://cloud.example.test"
+        assert client.headers.get("Authorization") == "Bearer bmc_test_key_123"
+        assert client.headers.get("X-Workspace-ID") == "tenant-123"
 
 
 @pytest.mark.asyncio

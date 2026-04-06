@@ -709,7 +709,7 @@ class TestGetProjectClientRoutingOrder:
 
         # Set up a factory (simulates what cloud MCP server does)
         @asynccontextmanager
-        async def fake_factory():
+        async def fake_factory(workspace=None):
             from httpx import ASGITransport, AsyncClient
             from basic_memory.api.app import app as fastapi_app
 

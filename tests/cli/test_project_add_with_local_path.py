@@ -52,9 +52,11 @@ def mock_config(tmp_path, monkeypatch):
 @pytest.fixture
 def mock_api_client(monkeypatch):
     """Stub the API client for project add without stdlib mocks."""
+    seen_workspaces: list[str | None] = []
 
     @asynccontextmanager
-    async def fake_get_client():
+    async def fake_get_client(*, workspace=None):
+        seen_workspaces.append(workspace)
         yield object()
 
     _response_data = {
@@ -80,7 +82,7 @@ def mock_api_client(monkeypatch):
     monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
     monkeypatch.setattr(ProjectClient, "create_project", fake_create_project)
 
-    return calls
+    return {"calls": calls, "workspaces": seen_workspaces}
 
 
 def test_project_add_with_local_path_saves_to_config(
@@ -113,6 +115,7 @@ def test_project_add_with_local_path_saves_to_config(
     assert "test-project" in config_data["projects"]
     entry = config_data["projects"]["test-project"]
     # Use as_posix() for cross-platform compatibility (Windows uses backslashes)
+    assert entry["mode"] == "cloud"
     assert entry["local_sync_path"] == local_sync_dir.as_posix()
     assert entry.get("last_sync") is None
     assert entry.get("bisync_initialized", False) is False
@@ -173,3 +176,162 @@ def test_project_add_local_path_creates_nested_directories(
     assert result.exit_code == 0
     assert nested_path.exists()
     assert nested_path.is_dir()
+
+
+def test_project_add_cloud_visibility_passes_payload(runner, mock_config, mock_api_client):
+    """Cloud project creation should forward visibility to the API payload."""
+    result = runner.invoke(
+        app,
+        ["project", "add", "test-project", "--cloud", "--visibility", "shared"],
+    )
+
+    assert result.exit_code == 0
+    assert mock_api_client["workspaces"] == [None]
+    assert mock_api_client["calls"] == [
+        {
+            "name": "test-project",
+            "path": "test-project",
+            "local_sync_path": None,
+            "set_default": False,
+            "visibility": "shared",
+        }
+    ]
+
+
+def test_project_add_cloud_workspace_resolves_and_persists(
+    runner, mock_config, mock_api_client, monkeypatch, tmp_path
+):
+    """Cloud project add should resolve workspace names to tenant IDs."""
+    from basic_memory.schemas.cloud import WorkspaceInfo
+
+    local_sync_dir = tmp_path / "sync" / "team-notes"
+
+    async def fake_get_available_workspaces():
+        return [
+            WorkspaceInfo(
+                tenant_id="11111111-1111-1111-1111-111111111111",
+                workspace_type="organization",
+                name="Basic Memory",
+                role="owner",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "project",
+            "add",
+            "team-notes",
+            "--cloud",
+            "--workspace",
+            "Basic Memory",
+            "--local-path",
+            str(local_sync_dir),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_api_client["workspaces"] == ["11111111-1111-1111-1111-111111111111"]
+    assert mock_api_client["calls"] == [
+        {
+            "name": "team-notes",
+            "path": "team-notes",
+            "local_sync_path": local_sync_dir.as_posix(),
+            "set_default": False,
+            "visibility": "workspace",
+        }
+    ]
+
+    config_data = json.loads(mock_config.read_text())
+    entry = config_data["projects"]["team-notes"]
+    assert entry["mode"] == "cloud"
+    assert entry["workspace_id"] == "11111111-1111-1111-1111-111111111111"
+
+
+def test_project_add_cloud_workspace_persists_without_local_path(
+    runner, mock_config, mock_api_client, monkeypatch
+):
+    """Cloud project add should persist workspace routing even without local sync."""
+    from basic_memory.schemas.cloud import WorkspaceInfo
+
+    async def fake_get_available_workspaces():
+        return [
+            WorkspaceInfo(
+                tenant_id="11111111-1111-1111-1111-111111111111",
+                workspace_type="organization",
+                name="Basic Memory",
+                role="owner",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "project",
+            "add",
+            "team-notes",
+            "--cloud",
+            "--workspace",
+            "Basic Memory",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert mock_api_client["workspaces"] == ["11111111-1111-1111-1111-111111111111"]
+    assert mock_api_client["calls"] == [
+        {
+            "name": "team-notes",
+            "path": "team-notes",
+            "local_sync_path": None,
+            "set_default": False,
+            "visibility": "workspace",
+        }
+    ]
+
+    config_data = json.loads(mock_config.read_text())
+    entry = config_data["projects"]["team-notes"]
+    assert entry["path"] == ""
+    assert entry["mode"] == "cloud"
+    assert entry["workspace_id"] == "11111111-1111-1111-1111-111111111111"
+    assert entry["local_sync_path"] is None
+
+
+def test_project_add_visibility_requires_cloud_mode(runner, mock_config, tmp_path):
+    """Visibility is a cloud-only option."""
+    project_path = tmp_path / "local-project"
+
+    result = runner.invoke(
+        app,
+        [
+            "project",
+            "add",
+            "local-project",
+            str(project_path),
+            "--visibility",
+            "shared",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--visibility is only supported in cloud mode" in result.stdout
+
+
+def test_project_add_rejects_invalid_visibility(runner, mock_config):
+    """Invalid visibility values should fail fast before the API call."""
+    result = runner.invoke(
+        app,
+        ["project", "add", "test-project", "--cloud", "--visibility", "team-only"],
+    )
+
+    assert result.exit_code == 1
+    assert "Invalid visibility" in result.stdout

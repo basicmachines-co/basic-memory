@@ -59,13 +59,21 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
+    response_content = (
+        "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\ntelemetry content"
+    )
 
     class FakeEntityService:
-        async def create_entity(self, data):
-            return entity
+        async def create_entity_with_content(self, data):
+            return SimpleNamespace(
+                entity=entity,
+                content=response_content,
+                search_content="telemetry content",
+            )
 
     class FakeSearchService:
-        async def index_entity(self, entity):
+        async def index_entity(self, entity, content=None):
+            assert content == "telemetry content"
             return None
 
     class FakeTaskScheduler:
@@ -74,7 +82,7 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
 
     class FakeFileService:
         async def read_file_content(self, path):
-            return "telemetry content"
+            raise AssertionError("non-fast create should not re-read file content")
 
     result = await knowledge_router_module.create_entity(
         project_id="project-123",
@@ -94,7 +102,7 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         fast=False,
     )
 
-    assert result.content == "telemetry content"
+    assert result.content == response_content
     _assert_names_in_order(
         [name for name, _ in spans],
         [
@@ -113,13 +121,19 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
+    response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nupdated telemetry content"
 
     class FakeEntityService:
-        async def update_entity(self, existing, data):
-            return entity
+        async def update_entity_with_content(self, existing, data):
+            return SimpleNamespace(
+                entity=entity,
+                content=response_content,
+                search_content="updated telemetry content",
+            )
 
     class FakeSearchService:
-        async def index_entity(self, entity):
+        async def index_entity(self, entity, content=None):
+            assert content == "updated telemetry content"
             return None
 
     class FakeEntityRepository:
@@ -132,7 +146,7 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
 
     class FakeFileService:
         async def read_file_content(self, path):
-            return "updated telemetry content"
+            raise AssertionError("non-fast update should not re-read file content")
 
     response = Response()
     result = await knowledge_router_module.update_entity_by_id(
@@ -156,7 +170,7 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         fast=False,
     )
 
-    assert result.content == "updated telemetry content"
+    assert result.content == response_content
     _assert_names_in_order(
         [name for name, _ in spans],
         [
@@ -176,13 +190,19 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
     entity = _fake_entity()
+    response_content = "---\ntitle: Telemetry Entity\ntype: note\npermalink: notes/test\n---\n\nedited telemetry content"
 
     class FakeEntityService:
-        async def edit_entity(self, **kwargs):
-            return entity
+        async def edit_entity_with_content(self, **kwargs):
+            return SimpleNamespace(
+                entity=entity,
+                content=response_content,
+                search_content="edited telemetry content",
+            )
 
     class FakeSearchService:
-        async def index_entity(self, entity):
+        async def index_entity(self, entity, content=None):
+            assert content == "edited telemetry content"
             return None
 
     class FakeEntityRepository:
@@ -195,7 +215,7 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
 
     class FakeFileService:
         async def read_file_content(self, path):
-            return "edited telemetry content"
+            raise AssertionError("non-fast edit should not re-read file content")
 
     result = await knowledge_router_module.edit_entity_by_id(
         data=EditEntityRequest(operation="append", content="edited telemetry content"),
@@ -211,7 +231,7 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
         fast=False,
     )
 
-    assert result.content == "edited telemetry content"
+    assert result.content == response_content
     _assert_names_in_order(
         [name for name, _ in spans],
         [

@@ -51,7 +51,7 @@ The `app` fixture ensures FastAPI dependency overrides are active, and
 """
 
 import os
-from typing import AsyncGenerator, Literal
+from typing import AsyncGenerator, Generator, Literal
 
 import pytest
 import pytest_asyncio
@@ -63,7 +63,13 @@ from testcontainers.postgres import PostgresContainer
 
 from httpx import AsyncClient, ASGITransport
 
-from basic_memory.config import BasicMemoryConfig, ProjectConfig, ConfigManager, DatabaseBackend
+from basic_memory.config import (
+    BasicMemoryConfig,
+    ProjectConfig,
+    ProjectEntry,
+    ConfigManager,
+    DatabaseBackend,
+)
 from basic_memory.db import engine_session_factory, DatabaseType
 from basic_memory.models import Project
 from basic_memory.models.base import Base
@@ -103,13 +109,77 @@ def postgres_container(db_backend):
     Uses testcontainers to spin up a real Postgres instance.
     Only starts if db_backend is "postgres".
     """
-    if db_backend != "postgres":
+    if db_backend != "postgres" or _configured_postgres_sync_url():
         yield None
         return
 
     # Use pgvector image so CREATE EXTENSION vector succeeds in search repository
     with PostgresContainer("pgvector/pgvector:pg16") as postgres:
         yield postgres
+
+
+POSTGRES_EPHEMERAL_TABLES = [
+    "search_vector_embeddings",
+    "search_vector_chunks",
+    "search_vector_index",
+]
+
+
+def _configured_postgres_sync_url() -> str | None:
+    """Prefer an externally managed Postgres server when CI provides one."""
+    configured_url = os.environ.get("BASIC_MEMORY_TEST_POSTGRES_URL") or os.environ.get(
+        "POSTGRES_TEST_URL"
+    )
+    if not configured_url:
+        return None
+
+    return (
+        configured_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+        .replace("postgresql://", "postgresql+psycopg2://", 1)
+        .replace("postgres://", "postgresql+psycopg2://", 1)
+    )
+
+
+def _postgres_reset_tables() -> list[str]:
+    """Resolve the current ORM table set at reset time."""
+    return [table.name for table in Base.metadata.sorted_tables] + ["search_index"]
+
+
+def _resolve_postgres_sync_url(postgres_container) -> str:
+    """Use CI's shared service when configured, otherwise fall back to testcontainers."""
+    configured_url = _configured_postgres_sync_url()
+    if configured_url:
+        return configured_url
+    assert postgres_container is not None
+    return postgres_container.get_connection_url()
+
+
+async def _reset_postgres_integration_schema(engine) -> None:
+    """Restore the shared Postgres integration schema to a clean baseline."""
+    from basic_memory.models.search import (
+        CREATE_POSTGRES_SEARCH_INDEX_FTS,
+        CREATE_POSTGRES_SEARCH_INDEX_METADATA,
+        CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
+        CREATE_POSTGRES_SEARCH_INDEX_TABLE,
+    )
+
+    async with engine.begin() as conn:
+        # Trigger: integration tests may leave behind temporary search/vector tables while
+        # exercising full-stack recovery paths.
+        # Why: recreating only the missing schema is much cheaper than dropping every table.
+        # Outcome: each integration test gets the same baseline without paying repeated full DDL cost.
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
+
+        for table_name in POSTGRES_EPHEMERAL_TABLES:
+            await conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
+
+        await conn.execute(
+            text(f"TRUNCATE TABLE {', '.join(_postgres_reset_tables())} RESTART IDENTITY CASCADE")
+        )
 
 
 @pytest_asyncio.fixture
@@ -121,18 +191,12 @@ async def engine_factory(
     tmp_path,
 ) -> AsyncGenerator[tuple, None]:
     """Create engine and session factory for the configured database backend."""
-    from basic_memory.models.search import (
-        CREATE_SEARCH_INDEX,
-        CREATE_POSTGRES_SEARCH_INDEX_TABLE,
-        CREATE_POSTGRES_SEARCH_INDEX_FTS,
-        CREATE_POSTGRES_SEARCH_INDEX_METADATA,
-        CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
-    )
+    from basic_memory.models.search import CREATE_SEARCH_INDEX
     from basic_memory import db
 
     if db_backend == "postgres":
         # Postgres mode using testcontainers
-        sync_url = postgres_container.get_connection_url()
+        sync_url = _resolve_postgres_sync_url(postgres_container)
         async_url = sync_url.replace("postgresql+psycopg2", "postgresql+asyncpg")
 
         engine = create_async_engine(
@@ -153,16 +217,7 @@ async def engine_factory(
         db._engine = engine
         db._session_maker = session_maker
 
-        # Drop and recreate all tables for test isolation
-        async with engine.begin() as conn:
-            await conn.execute(text("DROP TABLE IF EXISTS search_index CASCADE"))
-            await conn.run_sync(Base.metadata.drop_all)
-            await conn.run_sync(Base.metadata.create_all)
-            # asyncpg requires separate execute calls for each statement
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
-            await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
+        await _reset_postgres_integration_schema(engine)
 
         yield engine, session_maker
 
@@ -228,13 +283,15 @@ def app_config(
     monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "false")
 
     # Create a basic config with test-project like unit tests do
-    projects = {"test-project": str(config_home)}
+    projects = {"test-project": ProjectEntry(path=str(config_home))}
 
     # Configure database backend based on env var
     if db_backend == "postgres":
         database_backend = DatabaseBackend.POSTGRES
-        # Get URL from testcontainer and convert to asyncpg driver
-        sync_url = postgres_container.get_connection_url()
+        # Trigger: CI jobs can provide a shared Postgres service instead of per-session containers.
+        # Why: reusing one pgvector-enabled server avoids Docker startup churn on every job.
+        # Outcome: local runs keep using testcontainers, while CI injects a stable service URL.
+        sync_url = _resolve_postgres_sync_url(postgres_container)
         database_url = sync_url.replace("postgresql+psycopg2", "postgresql+asyncpg")
     else:
         database_backend = DatabaseBackend.SQLITE
@@ -285,7 +342,9 @@ def project_config(test_project):
 
 
 @pytest.fixture
-def app(app_config, project_config, engine_factory, test_project, config_manager) -> FastAPI:
+def app(
+    app_config, project_config, engine_factory, test_project, config_manager
+) -> Generator[FastAPI, None, None]:
     """Create test FastAPI application with single project."""
 
     # Import the FastAPI app AFTER the config_manager has written the test config to disk
