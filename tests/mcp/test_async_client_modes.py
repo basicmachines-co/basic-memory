@@ -28,7 +28,7 @@ async def test_get_client_uses_injected_factory(monkeypatch):
     seen = {"used": False}
 
     @asynccontextmanager
-    async def factory():
+    async def factory(workspace=None):
         seen["used"] = True
         async with httpx.AsyncClient(base_url="https://example.test") as client:
             yield client
@@ -185,7 +185,7 @@ async def test_get_client_factory_overrides_per_project_routing(config_manager):
     config_manager.save_config(cfg)
 
     @asynccontextmanager
-    async def factory():
+    async def factory(workspace=None):
         async with httpx.AsyncClient(base_url="https://factory.test") as client:
             yield client
 

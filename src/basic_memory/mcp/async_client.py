@@ -128,11 +128,14 @@ async def get_cloud_control_plane_client(
         yield client
 
 
-# Optional factory override for dependency injection
-_client_factory: Optional[Callable[[], AbstractAsyncContextManager[AsyncClient]]] = None
+# Optional factory override for dependency injection.
+# The factory accepts an optional workspace keyword argument so that MCP tools
+# can route individual requests to a different workspace than the one set at
+# connection time.  See basic-memory-cloud main.py tenant_asgi_client_factory.
+_client_factory: Optional[Callable[..., AbstractAsyncContextManager[AsyncClient]]] = None
 
 
-def set_client_factory(factory: Callable[[], AbstractAsyncContextManager[AsyncClient]]) -> None:
+def set_client_factory(factory: Callable[..., AbstractAsyncContextManager[AsyncClient]]) -> None:
     """Override the default client factory (for cloud app, testing, etc)."""
     global _client_factory
     _client_factory = factory
@@ -173,7 +176,7 @@ async def get_client(
     4. Local ASGI transport by default.
     """
     if _client_factory:
-        async with _client_factory() as client:
+        async with _client_factory(workspace=workspace) as client:
             yield client
         return
 
