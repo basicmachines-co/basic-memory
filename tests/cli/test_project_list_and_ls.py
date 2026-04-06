@@ -199,15 +199,20 @@ def test_project_list_shows_display_name_for_private_projects(
     result = runner.invoke(app, ["project", "list"], env={"COLUMNS": "240"})
 
     assert result.exit_code == 0, f"Exit code: {result.exit_code}, output: {result.stdout}"
-    # display_name should appear in the Name column instead of the raw UUID
+    # Rich table should show display_name in the Name column
     assert "My Project" in result.stdout
-    # The Name column should show "My Project", not the UUID.
-    # The UUID may still appear in the Cloud Path column — that's expected.
     lines = result.stdout.splitlines()
     project_line = next(line for line in lines if "My Project" in line)
-    # The name cell is the first column — verify UUID is not the displayed name
     name_cell = project_line.split("│")[1].strip()
     assert name_cell == "My Project"
+
+    # JSON output should preserve canonical name for scripting, with display_name as separate field
+    json_result = runner.invoke(app, ["project", "list", "--json"], env={"COLUMNS": "240"})
+    assert json_result.exit_code == 0
+    data = json.loads(json_result.stdout)
+    private_project = next(p for p in data["projects"] if p.get("display_name") == "My Project")
+    assert private_project["name"] == private_uuid
+    assert private_project["display_name"] == "My Project"
 
 
 def test_project_ls_local_mode_defaults_to_local_route(

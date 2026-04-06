@@ -253,12 +253,14 @@ def list_projects(
             if cloud_project is not None and cloud_ws_name:
                 ws_label = f"{cloud_ws_name} ({cloud_ws_type})" if cloud_ws_type else cloud_ws_name
 
-            # Use display_name from cloud response (e.g., "My Project" for private UUID-named projects)
+            # display_name is a human label for private UUID-named projects (e.g., "My Project").
+            # Keep "name" as the canonical identifier for scripting/JSON consumers;
+            # the Rich table uses display_name when available.
             display_name = (
                 cloud_project.display_name if cloud_project and cloud_project.display_name else None
             )
             row_data = {
-                "name": display_name or project_name,
+                "name": project_name,
                 "permalink": permalink,
                 "local_path": local_path,
                 "cloud_path": cloud_path,
@@ -267,6 +269,8 @@ def list_projects(
                 "sync": has_sync,
                 "is_default": is_default,
             }
+            if display_name:
+                row_data["display_name"] = display_name
             if ws_label:
                 row_data["workspace"] = cloud_ws_name or ""
                 if cloud_ws_type:
@@ -282,7 +286,7 @@ def list_projects(
         # --- Rich table output ---
         for row_data in project_rows:
             table.add_row(
-                row_data["name"],
+                row_data.get("display_name") or row_data["name"],
                 row_data["local_path"],
                 row_data["cloud_path"],
                 row_data.get("workspace", "")
