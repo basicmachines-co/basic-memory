@@ -1236,8 +1236,8 @@ class SearchRepositoryBase(ABC):
                                     "embedding_model": current_embedding_model,
                                 },
                             )
-                    skipped_chunks_count += 1
-                    continue
+                        skipped_chunks_count += 1
+                        continue
 
                 pending_records.append(record)
 

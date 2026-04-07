@@ -65,6 +65,11 @@ ALL_COMBOS = [
     SearchCombo("postgres-openai", DatabaseBackend.POSTGRES, "openai", 1536),
 ]
 
+# Benchmark queries compare ranking quality across providers rather than enforcing
+# the stricter production retrieval cutoff. OpenAI paraphrase matches cluster near
+# ~0.37 in this corpus, so the default 0.55 filter hides otherwise-correct results.
+BENCHMARK_MIN_SIMILARITY = 0.3
+
 
 # --- Skip guards ---
 
@@ -229,6 +234,7 @@ async def create_search_service(
         default_project="bench-project",
         database_backend=combo.backend,
         semantic_search_enabled=semantic_enabled,
+        semantic_min_similarity=BENCHMARK_MIN_SIMILARITY,
     )
 
     # Create search repository (backend-specific)
