@@ -198,6 +198,12 @@ class BasicMemoryConfig(BaseSettings):
         description="Batch size for vector sync orchestration flushes.",
         gt=0,
     )
+    semantic_postgres_prepare_concurrency: int = Field(
+        default=4,
+        description="Number of Postgres entity prepare tasks to run concurrently during vector sync. Postgres only; keep this low to avoid overdriving the database connection pool.",
+        gt=0,
+        le=16,
+    )
     semantic_embedding_cache_dir: str | None = Field(
         default=None,
         description="Optional cache directory for FastEmbed model artifacts.",

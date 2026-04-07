@@ -28,9 +28,6 @@ from basic_memory.repository.semantic_errors import SemanticDependenciesMissingE
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
-POSTGRES_VECTOR_PREPARE_CONCURRENCY = 4
-
-
 def _strip_nul_from_row(row_data: dict) -> dict:
     """Strip NUL bytes from all string values in a row dict.
 
@@ -70,6 +67,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._semantic_embedding_sync_batch_size = (
             self._app_config.semantic_embedding_sync_batch_size
+        )
+        self._semantic_postgres_prepare_concurrency = (
+            self._app_config.semantic_postgres_prepare_concurrency
         )
         self._embedding_provider = embedding_provider
         self._vector_dimensions = 384
@@ -503,8 +503,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         Trigger: cloud indexing uses Neon Postgres where network latency dominates
         thousands of per-entity prepare queries.
-        Why: preparing a small window of entities concurrently hides round-trip latency
-        without exhausting the tenant connection pool.
+        Why: preparing a small config-driven window of entities concurrently hides
+        round-trip latency without exhausting the tenant connection pool.
         Outcome: Postgres vector sync keeps the existing flush semantics while reducing
         wall-clock time on large cloud projects.
         """
@@ -527,7 +527,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             project_id=self.project_id,
             entities_total=total_entities,
             sync_batch_size=self._semantic_embedding_sync_batch_size,
-            prepare_concurrency=POSTGRES_VECTOR_PREPARE_CONCURRENCY,
+            prepare_concurrency=self._semantic_postgres_prepare_concurrency,
         )
 
         pending_jobs: list[_PendingEmbeddingJob] = []
@@ -536,9 +536,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         deferred_entity_ids: set[int] = set()
         synced_entity_ids: set[int] = set()
 
-        for window_start in range(0, total_entities, POSTGRES_VECTOR_PREPARE_CONCURRENCY):
+        for window_start in range(0, total_entities, self._semantic_postgres_prepare_concurrency):
             window_entity_ids = entity_ids[
-                window_start : window_start + POSTGRES_VECTOR_PREPARE_CONCURRENCY
+                window_start : window_start + self._semantic_postgres_prepare_concurrency
             ]
 
             if progress_callback is not None:

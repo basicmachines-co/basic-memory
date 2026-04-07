@@ -40,6 +40,7 @@ def _make_repo(
     *,
     semantic_enabled: bool = False,
     embedding_provider=None,
+    semantic_postgres_prepare_concurrency: int = 4,
 ) -> PostgresSearchRepository:
     """Build a PostgresSearchRepository with a no-op session maker."""
     session_maker = MagicMock()
@@ -49,6 +50,7 @@ def _make_repo(
         default_project="test-project",
         database_backend=DatabaseBackend.POSTGRES,
         semantic_search_enabled=semantic_enabled,
+        semantic_postgres_prepare_concurrency=semantic_postgres_prepare_concurrency,
     )
     return PostgresSearchRepository(
         session_maker,
@@ -255,6 +257,7 @@ class TestBatchPrepareConcurrency:
         repo = _make_repo(
             semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
+            semantic_postgres_prepare_concurrency=2,
         )
         repo._semantic_embedding_sync_batch_size = 8
         repo._vector_tables_initialized = True
@@ -283,7 +286,7 @@ class TestBatchPrepareConcurrency:
         assert result.entities_total == 4
         assert result.entities_synced == 4
         assert result.entities_failed == 0
-        assert max_active_prepares > 1
+        assert max_active_prepares == 2
 
 
 @pytest.mark.asyncio

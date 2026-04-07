@@ -882,6 +882,22 @@ class TestSemanticSearchConfig:
         config = BasicMemoryConfig(semantic_embedding_dimensions=1536)
         assert config.semantic_embedding_dimensions == 1536
 
+    def test_semantic_postgres_prepare_concurrency_defaults_to_4(self):
+        """Postgres prepare concurrency should default to a conservative window of 4."""
+        config = BasicMemoryConfig()
+        assert config.semantic_postgres_prepare_concurrency == 4
+
+    def test_semantic_postgres_prepare_concurrency_validation(self):
+        """Postgres prepare concurrency must stay within the bounded safe range."""
+        config = BasicMemoryConfig(semantic_postgres_prepare_concurrency=8)
+        assert config.semantic_postgres_prepare_concurrency == 8
+
+        with pytest.raises(Exception):
+            BasicMemoryConfig(semantic_postgres_prepare_concurrency=0)
+
+        with pytest.raises(Exception):
+            BasicMemoryConfig(semantic_postgres_prepare_concurrency=17)
+
     def test_semantic_search_enabled_description_mentions_both_backends(self):
         """Description should not say 'SQLite only' anymore."""
         field_info = BasicMemoryConfig.model_fields["semantic_search_enabled"]
