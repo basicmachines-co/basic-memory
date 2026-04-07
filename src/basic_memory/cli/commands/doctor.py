@@ -101,7 +101,7 @@ async def run_doctor() -> None:
                 console.print("[green]OK[/green] Manual file written")
 
                 sync_data = await project_client.sync(
-                    project_id, force_full=True, run_in_background=False
+                    project_id, force_full=False, run_in_background=False
                 )
                 sync_report = SyncReportResponse.model_validate(sync_data)
                 if sync_report.total == 0:

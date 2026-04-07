@@ -142,7 +142,7 @@ def upload(
         if sync and not dry_run:
             console.print(f"[blue]Syncing project '{project}'...[/blue]")
             try:
-                await sync_project(project, force_full=True)
+                await sync_project(project)
             except Exception as e:
                 console.print(f"[yellow]Warning: Sync failed: {e}[/yellow]")
                 console.print("[dim]Files uploaded but may not be indexed yet[/dim]")

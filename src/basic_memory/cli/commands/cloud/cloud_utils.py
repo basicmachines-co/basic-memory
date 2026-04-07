@@ -116,12 +116,12 @@ async def sync_project(project_name: str, force_full: bool = False) -> None:
 
     Args:
         project_name: Name of project to sync
-        force_full: If True, force a full scan bypassing watermark optimization
+        force_full: ignored, kept for backwards compatibility
     """
     try:
         from basic_memory.cli.commands.command_utils import run_sync
 
-        await run_sync(project=project_name, force_full=force_full)
+        await run_sync(project=project_name)
     except Exception as e:
         raise CloudUtilsError(f"Failed to sync project '{project_name}': {e}") from e
 
