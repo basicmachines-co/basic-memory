@@ -5,12 +5,14 @@ covering utility functions, formatting helpers, and constructor paths that
 are difficult to reach in integration tests.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.search_repository_base import _PreparedEntityVectorSync
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
@@ -229,14 +231,55 @@ class TestWriteEmbeddings:
     """Cover _write_embeddings upsert logic."""
 
     @pytest.mark.asyncio
-    async def test_write_embeddings_executes_per_job(self):
+    async def test_write_embeddings_executes_single_bulk_upsert(self):
         repo = _make_repo()
         session = AsyncMock()
         jobs = [(100, "chunk text A"), (200, "chunk text B")]
         embeddings = [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]]
         await repo._write_embeddings(session, jobs, embeddings)
-        assert session.execute.call_count == 2
-        first_params = session.execute.call_args_list[0][0][1]
-        assert first_params["chunk_id"] == 100
-        assert first_params["project_id"] == repo.project_id
-        assert first_params["embedding_dims"] == 4
+        assert session.execute.call_count == 1
+        params = session.execute.call_args[0][1]
+        assert params["chunk_id_0"] == 100
+        assert params["chunk_id_1"] == 200
+        assert params["project_id"] == repo.project_id
+        assert params["embedding_dims_0"] == 4
+        assert params["embedding_dims_1"] == 4
+
+
+class TestBatchPrepareConcurrency:
+    """Cover the Postgres-specific concurrent prepare window."""
+
+    @pytest.mark.asyncio
+    async def test_sync_entity_vectors_batch_prepares_entities_concurrently(self, monkeypatch):
+        repo = _make_repo(
+            semantic_enabled=True,
+            embedding_provider=StubEmbeddingProvider(),
+        )
+        repo._semantic_embedding_sync_batch_size = 8
+        repo._vector_tables_initialized = True
+
+        active_prepares = 0
+        max_active_prepares = 0
+
+        async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+            nonlocal active_prepares, max_active_prepares
+            active_prepares += 1
+            max_active_prepares = max(max_active_prepares, active_prepares)
+            await asyncio.sleep(0)
+            active_prepares -= 1
+            return _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=float(entity_id),
+                source_rows_count=1,
+                embedding_jobs=[],
+            )
+
+        monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
+        monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+
+        result = await repo.sync_entity_vectors_batch([1, 2, 3, 4])
+
+        assert result.entities_total == 4
+        assert result.entities_synced == 4
+        assert result.entities_failed == 0
+        assert max_active_prepares > 1

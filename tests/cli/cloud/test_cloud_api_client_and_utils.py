@@ -270,8 +270,6 @@ async def test_project_exists_surfaces_cloud_lookup_failures(config_home, config
         await project_exists("alpha", api_request=api_request)
 
 
-
-
 @pytest.mark.asyncio
 async def test_make_api_request_prefers_api_key_over_oauth(config_home, config_manager):
     """API key in config should be used without needing an OAuth token on disk."""
