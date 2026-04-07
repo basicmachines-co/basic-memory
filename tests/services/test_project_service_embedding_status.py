@@ -105,8 +105,14 @@ async def test_embedding_status_orphaned_chunks(
     await project_service.repository.execute_query(
         text(
             "INSERT INTO search_vector_chunks "
-            "(entity_id, project_id, chunk_key, chunk_text, source_hash) "
-            "VALUES (:entity_id, :project_id, 'chunk-1', 'test text', 'abc123')"
+            "("
+            "entity_id, project_id, chunk_key, chunk_text, source_hash, "
+            "entity_fingerprint, embedding_model"
+            ") "
+            "VALUES ("
+            ":entity_id, :project_id, 'chunk-1', 'test text', 'abc123', "
+            "'fp-abc123', 'bge-small-en-v1.5'"
+            ")"
         ),
         {"entity_id": entity_id, "project_id": test_project.id},
     )
@@ -213,8 +219,14 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
         await project_service.repository.execute_query(
             text(
                 "INSERT INTO search_vector_chunks "
-                "(id, entity_id, project_id, chunk_key, chunk_text, source_hash) "
-                "VALUES (:id, :entity_id, :project_id, :key, 'text', 'hash')"
+                "("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model"
+                ") "
+                "VALUES ("
+                ":id, :entity_id, :project_id, :key, 'text', 'hash', "
+                "'fp-hash', 'bge-small-en-v1.5'"
+                ")"
             ),
             {
                 "id": chunk_id,

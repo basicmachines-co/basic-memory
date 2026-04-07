@@ -289,11 +289,6 @@ class SearchRepositoryBase(ABC):
         pass
 
     @abstractmethod
-    async def _update_timestamp_sql(self) -> str:
-        """Return the SQL expression for current timestamp in the backend."""
-        pass  # pragma: no cover
-
-    @abstractmethod
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert a backend-specific vector distance to cosine similarity in [0, 1].
 
@@ -825,6 +820,9 @@ class SearchRepositoryBase(ABC):
             window_entity_ids = entity_ids[window_start : window_start + prepare_window_size]
 
             if progress_callback is not None:
+                # Trigger: Postgres prepares one bounded entity window concurrently.
+                # Why: callbacks still need per-entity progress positions before the gather starts.
+                # Outcome: progress advances in prepare_window_size bursts instead of strict one-by-one.
                 for offset, entity_id in enumerate(window_entity_ids, start=window_start):
                     progress_callback(entity_id, offset, total_entities)
 

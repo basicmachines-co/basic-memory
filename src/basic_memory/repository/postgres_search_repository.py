@@ -870,9 +870,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
             stale_params,
         )
 
-    async def _update_timestamp_sql(self) -> str:
-        return "NOW()"  # pragma: no cover
-
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert pgvector cosine distance to cosine similarity.
 

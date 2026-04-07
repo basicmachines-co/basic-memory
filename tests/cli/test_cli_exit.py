@@ -28,7 +28,10 @@ def test_bm_help_exits_cleanly():
         ["uv", "run", "bm", "--help"],
         capture_output=True,
         text=True,
-        timeout=10,
+        # Help builds the full command tree, so use a looser timeout than the
+        # version fast path. This test is guarding against hangs, not enforcing
+        # a tight performance budget under full-suite load.
+        timeout=20,
         cwd=Path(__file__).parent.parent.parent,
     )
     assert result.returncode == 0

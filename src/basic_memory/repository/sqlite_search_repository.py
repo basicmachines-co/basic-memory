@@ -404,6 +404,10 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             }
             schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns
             if schema_mismatch:
+                # Trigger: older SQLite installs are missing newly required chunk metadata columns.
+                # Why: vector tables store derived data only, so rebuilding them is safer than
+                # attempting piecemeal ALTER TABLE compatibility across sqlite-vec upgrades.
+                # Outcome: first startup after the schema change forces a clean re-embed.
                 logger.warning("search_vector_chunks schema mismatch, recreating vector tables")
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
                 await session.execute(text("DROP TABLE IF EXISTS search_vector_chunks"))
@@ -553,9 +557,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             ),
             stale_params,
         )
-
-    async def _update_timestamp_sql(self) -> str:
-        return "CURRENT_TIMESTAMP"  # pragma: no cover
 
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert L2 distance to cosine similarity for normalized embeddings.
