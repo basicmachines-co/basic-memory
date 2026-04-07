@@ -71,6 +71,50 @@ async def test_upsert_entity_same_file_update(entity_repository: EntityRepositor
 
 
 @pytest.mark.asyncio
+async def test_upsert_entity_preserves_external_id(entity_repository: EntityRepository):
+    """Test that upserting an entity with the same file_path preserves the original external_id.
+
+    Trigger: force full re-index creates a new Entity model (with a fresh UUID)
+             for a file that already has a database record
+    Why: external_id is used by public share links — if it changes, shares break
+    Outcome: the original external_id survives the upsert
+    """
+    # Create initial entity
+    entity1 = Entity(
+        project_id=entity_repository.project_id,
+        title="Shared Note",
+        note_type="note",
+        permalink="test/shared-note",
+        file_path="test/shared-note.md",
+        content_type="text/markdown",
+        external_id="original-stable-id",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    result1 = await entity_repository.upsert_entity(entity1)
+    assert result1.external_id == "original-stable-id"
+
+    # Simulate re-index: new Entity model with a DIFFERENT external_id
+    entity2 = Entity(
+        project_id=entity_repository.project_id,
+        title="Shared Note (updated)",
+        note_type="note",
+        permalink="test/shared-note",
+        file_path="test/shared-note.md",
+        content_type="text/markdown",
+        external_id="newly-generated-uuid",  # would break share links
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    result2 = await entity_repository.upsert_entity(entity2)
+
+    # ID preserved, title updated, external_id stable
+    assert result2.id == result1.id
+    assert result2.title == "Shared Note (updated)"
+    assert result2.external_id == "original-stable-id"
+
+
+@pytest.mark.asyncio
 async def test_upsert_entity_permalink_conflict_different_file(entity_repository: EntityRepository):
     """Test upserting an entity with permalink conflict but different file_path."""
     # Create initial entity

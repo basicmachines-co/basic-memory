@@ -388,6 +388,9 @@ class EntityRepository(Repository[Entity]):
                     # Use merge to avoid session state conflicts
                     # Set the ID to update existing entity
                     entity.id = existing_entity.id
+                    # Preserve the stable external_id so that external references
+                    # (e.g. public share links) survive re-indexing
+                    entity.external_id = existing_entity.external_id
 
                     # Ensure observations reference the correct entity_id
                     for obs in entity.observations:
