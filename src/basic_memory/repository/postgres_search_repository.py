@@ -305,6 +305,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                             chunk_key TEXT NOT NULL,
                             chunk_text TEXT NOT NULL,
                             source_hash TEXT NOT NULL,
+                            entity_fingerprint TEXT NOT NULL,
+                            embedding_model TEXT NOT NULL,
                             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                             UNIQUE (project_id, entity_id, chunk_key)
                         )
@@ -316,6 +318,47 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         """
                         CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_project_entity
                         ON search_vector_chunks (project_id, entity_id)
+                        """
+                    )
+                )
+                await session.execute(
+                    text(
+                        """
+                        ALTER TABLE search_vector_chunks
+                        ADD COLUMN IF NOT EXISTS entity_fingerprint TEXT
+                        """
+                    )
+                )
+                await session.execute(
+                    text(
+                        """
+                        ALTER TABLE search_vector_chunks
+                        ADD COLUMN IF NOT EXISTS embedding_model TEXT
+                        """
+                    )
+                )
+                await session.execute(
+                    text(
+                        """
+                        UPDATE search_vector_chunks
+                        SET entity_fingerprint = COALESCE(entity_fingerprint, ''),
+                            embedding_model = COALESCE(embedding_model, '')
+                        """
+                    )
+                )
+                await session.execute(
+                    text(
+                        """
+                        ALTER TABLE search_vector_chunks
+                        ALTER COLUMN entity_fingerprint SET NOT NULL
+                        """
+                    )
+                )
+                await session.execute(
+                    text(
+                        """
+                        ALTER TABLE search_vector_chunks
+                        ALTER COLUMN embedding_model SET NOT NULL
                         """
                     )
                 )
@@ -521,6 +564,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 prepared_sync = cast(_PreparedEntityVectorSync, prepared)
 
                 embedding_jobs_count = len(prepared_sync.embedding_jobs)
+                result.chunks_total += prepared_sync.chunks_total
+                result.chunks_skipped += prepared_sync.chunks_skipped
+                if prepared_sync.entity_skipped:
+                    result.entities_skipped += 1
                 result.embedding_jobs_total += embedding_jobs_count
                 result.prepare_seconds_total += prepared_sync.prepare_seconds
 
@@ -537,7 +584,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         embed_seconds=0.0,
                         write_seconds=0.0,
                         source_rows_count=prepared_sync.source_rows_count,
+                        chunks_total=prepared_sync.chunks_total,
+                        chunks_skipped=prepared_sync.chunks_skipped,
                         embedding_jobs_count=0,
+                        entity_skipped=prepared_sync.entity_skipped,
                     )
                     continue
 
@@ -546,6 +596,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     source_rows_count=prepared_sync.source_rows_count,
                     embedding_jobs_count=embedding_jobs_count,
                     remaining_jobs=embedding_jobs_count,
+                    chunks_total=prepared_sync.chunks_total,
+                    chunks_skipped=prepared_sync.chunks_skipped,
+                    entity_skipped=prepared_sync.entity_skipped,
                     prepare_seconds=prepared_sync.prepare_seconds,
                 )
                 pending_jobs.extend(
@@ -634,13 +687,18 @@ class PostgresSearchRepository(SearchRepositoryBase):
         logger.info(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
-            "embedding_jobs_total={embedding_jobs_total} prepare_seconds_total={prepare_seconds_total:.3f} "
+            "entities_skipped={entities_skipped} chunks_total={chunks_total} "
+            "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
+            "prepare_seconds_total={prepare_seconds_total:.3f} "
             "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
             "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
             project_id=self.project_id,
             entities_total=result.entities_total,
             entities_synced=result.entities_synced,
             entities_failed=result.entities_failed,
+            entities_skipped=result.entities_skipped,
+            chunks_total=result.chunks_total,
+            chunks_skipped=result.chunks_skipped,
             embedding_jobs_total=result.embedding_jobs_total,
             prepare_seconds_total=result.prepare_seconds_total,
             queue_wait_seconds_total=result.queue_wait_seconds_total,
@@ -707,6 +765,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
             chunk_records = self._build_chunk_records(rows)
             built_chunk_records_count = len(chunk_records)
+            current_entity_fingerprint = self._build_entity_fingerprint(chunk_records)
+            current_embedding_model = self._embedding_model_key()
             logger.info(
                 "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
                 "source_rows_count={source_rows_count} "
@@ -729,7 +789,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
             existing_rows_result = await session.execute(
                 text(
-                    "SELECT c.id, c.chunk_key, c.source_hash, "
+                    "SELECT c.id, c.chunk_key, c.source_hash, c.entity_fingerprint, "
+                    "c.embedding_model, "
                     "(e.chunk_id IS NOT NULL) AS has_embedding "
                     "FROM search_vector_chunks c "
                     "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
@@ -754,8 +815,43 @@ class PostgresSearchRepository(SearchRepositoryBase):
             orphan_ids = {int(row["id"]) for row in existing_rows if not bool(row["has_embedding"])}
             orphan_chunks_count = len(orphan_ids)
 
+            skip_unchanged_entity = (
+                existing_chunks_count == built_chunk_records_count
+                and stale_chunks_count == 0
+                and orphan_chunks_count == 0
+                and existing_chunks_count > 0
+                and all(
+                    row["entity_fingerprint"] == current_entity_fingerprint
+                    and row["embedding_model"] == current_embedding_model
+                    for row in existing_rows
+                )
+            )
+            if skip_unchanged_entity:
+                logger.info(
+                    "Vector sync skipped unchanged entity: project_id={project_id} "
+                    "entity_id={entity_id} chunks_skipped={chunks_skipped} "
+                    "entity_fingerprint={entity_fingerprint} embedding_model={embedding_model}",
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    chunks_skipped=built_chunk_records_count,
+                    entity_fingerprint=current_entity_fingerprint,
+                    embedding_model=current_embedding_model,
+                )
+                prepare_seconds = time.perf_counter() - sync_start
+                return _PreparedEntityVectorSync(
+                    entity_id=entity_id,
+                    sync_start=sync_start,
+                    source_rows_count=source_rows_count,
+                    embedding_jobs=[],
+                    chunks_total=built_chunk_records_count,
+                    chunks_skipped=built_chunk_records_count,
+                    entity_skipped=True,
+                    prepare_seconds=prepare_seconds,
+                )
+
             upsert_records: list[dict[str, str]] = []
             embedding_jobs: list[tuple[int, str]] = []
+            skipped_chunks_count = 0
 
             for record in chunk_records:
                 current = existing_by_key.get(record["chunk_key"])
@@ -765,9 +861,29 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
                 row_id = int(current["id"])
                 is_orphan = row_id in orphan_ids
-                if current["source_hash"] == record["source_hash"]:
-                    if is_orphan:
-                        embedding_jobs.append((row_id, record["chunk_text"]))
+                same_source_hash = current["source_hash"] == record["source_hash"]
+                same_entity_fingerprint = (
+                    current["entity_fingerprint"] == current_entity_fingerprint
+                )
+                same_embedding_model = current["embedding_model"] == current_embedding_model
+
+                if same_source_hash and not is_orphan and same_embedding_model:
+                    if not same_entity_fingerprint:
+                        await session.execute(
+                            text(
+                                "UPDATE search_vector_chunks "
+                                "SET entity_fingerprint = :entity_fingerprint, "
+                                "embedding_model = :embedding_model, "
+                                "updated_at = NOW() "
+                                "WHERE id = :id"
+                            ),
+                            {
+                                "id": row_id,
+                                "entity_fingerprint": current_entity_fingerprint,
+                                "embedding_model": current_embedding_model,
+                            },
+                        )
+                    skipped_chunks_count += 1
                     continue
 
                 upsert_records.append(record)
@@ -782,10 +898,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     upsert_params[f"chunk_key_{index}"] = record["chunk_key"]
                     upsert_params[f"chunk_text_{index}"] = record["chunk_text"]
                     upsert_params[f"source_hash_{index}"] = record["source_hash"]
+                    upsert_params[f"entity_fingerprint_{index}"] = current_entity_fingerprint
+                    upsert_params[f"embedding_model_{index}"] = current_embedding_model
                     upsert_values.append(
                         "("
                         ":entity_id, :project_id, "
-                        f":chunk_key_{index}, :chunk_text_{index}, :source_hash_{index}, NOW()"
+                        f":chunk_key_{index}, :chunk_text_{index}, :source_hash_{index}, "
+                        f":entity_fingerprint_{index}, :embedding_model_{index}, NOW()"
                         ")"
                     )
 
@@ -797,11 +916,15 @@ class PostgresSearchRepository(SearchRepositoryBase):
                             chunk_key,
                             chunk_text,
                             source_hash,
+                            entity_fingerprint,
+                            embedding_model,
                             updated_at
                         ) VALUES {", ".join(upsert_values)}
                         ON CONFLICT (project_id, entity_id, chunk_key) DO UPDATE SET
                             chunk_text = EXCLUDED.chunk_text,
                             source_hash = EXCLUDED.source_hash,
+                            entity_fingerprint = EXCLUDED.entity_fingerprint,
+                            embedding_model = EXCLUDED.embedding_model,
                             updated_at = NOW()
                         RETURNING id, chunk_key
                     """),
@@ -819,12 +942,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 "existing_chunks_count={existing_chunks_count} "
                 "stale_chunks_count={stale_chunks_count} "
                 "orphan_chunks_count={orphan_chunks_count} "
+                "chunks_skipped={chunks_skipped} "
                 "embedding_jobs_count={embedding_jobs_count}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 existing_chunks_count=existing_chunks_count,
                 stale_chunks_count=stale_chunks_count,
                 orphan_chunks_count=orphan_chunks_count,
+                chunks_skipped=skipped_chunks_count,
                 embedding_jobs_count=len(embedding_jobs),
             )
 
@@ -834,6 +959,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
             sync_start=sync_start,
             source_rows_count=source_rows_count,
             embedding_jobs=embedding_jobs,
+            chunks_total=built_chunk_records_count,
+            chunks_skipped=skipped_chunks_count,
             prepare_seconds=prepare_seconds,
         )
 

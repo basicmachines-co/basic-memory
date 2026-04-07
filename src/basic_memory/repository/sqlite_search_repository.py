@@ -398,6 +398,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 "chunk_key",
                 "chunk_text",
                 "source_hash",
+                "entity_fingerprint",
+                "embedding_model",
                 "updated_at",
             }
             schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns

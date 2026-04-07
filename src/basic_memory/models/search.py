@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS search_vector_chunks (
     chunk_key TEXT NOT NULL,
     chunk_text TEXT NOT NULL,
     source_hash TEXT NOT NULL,
+    entity_fingerprint TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (project_id, entity_id, chunk_key)
 )
@@ -124,6 +126,8 @@ CREATE TABLE IF NOT EXISTS search_vector_chunks (
     chunk_key TEXT NOT NULL,
     chunk_text TEXT NOT NULL,
     source_hash TEXT NOT NULL,
+    entity_fingerprint TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """)

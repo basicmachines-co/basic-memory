@@ -42,7 +42,10 @@ class VectorSyncBatchResult:
     entities_total: int
     entities_synced: int
     entities_failed: int
+    entities_skipped: int = 0
     failed_entity_ids: list[int] = field(default_factory=list)
+    chunks_total: int = 0
+    chunks_skipped: int = 0
     embedding_jobs_total: int = 0
     prepare_seconds_total: float = 0.0
     queue_wait_seconds_total: float = 0.0
@@ -58,6 +61,9 @@ class _PreparedEntityVectorSync:
     sync_start: float
     source_rows_count: int
     embedding_jobs: list[tuple[int, str]]
+    chunks_total: int = 0
+    chunks_skipped: int = 0
+    entity_skipped: bool = False
     prepare_seconds: float = 0.0
 
 
@@ -78,6 +84,9 @@ class _EntitySyncRuntime:
     source_rows_count: int
     embedding_jobs_count: int
     remaining_jobs: int
+    chunks_total: int = 0
+    chunks_skipped: int = 0
+    entity_skipped: bool = False
     prepare_seconds: float = 0.0
     embed_seconds: float = 0.0
     write_seconds: float = 0.0
@@ -486,6 +495,35 @@ class SearchRepositoryBase(ABC):
 
         return list(records_by_key.values())
 
+    def _build_entity_fingerprint(self, chunk_records: list[dict[str, str]]) -> str:
+        """Hash the semantic chunk inputs for one entity.
+
+        Trigger: vector sync eligibility depends on the chunk records derived
+        from search_index rows, not raw file bytes.
+        Why: title/permalink/observation metadata can change vector inputs even
+        when unrelated file bytes do not, and vice versa.
+        Outcome: one deterministic fingerprint invalidates the entity-level skip
+        whenever the embeddable chunk set changes.
+        """
+        canonical_records = [
+            {
+                "chunk_key": record["chunk_key"],
+                "source_hash": record["source_hash"],
+            }
+            for record in sorted(chunk_records, key=lambda record: record["chunk_key"])
+        ]
+        payload = json.dumps(canonical_records, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _embedding_model_key(self) -> str:
+        """Build a stable model identity for vector invalidation checks."""
+        assert self._embedding_provider is not None
+        return (
+            f"{type(self._embedding_provider).__name__}:"
+            f"{self._embedding_provider.model_name}:"
+            f"{self._embedding_provider.dimensions}"
+        )
+
     # --- Text splitting ---
 
     def _split_text_into_chunks(self, text_value: str) -> list[str]:
@@ -699,6 +737,10 @@ class SearchRepositoryBase(ABC):
                 continue
 
             embedding_jobs_count = len(prepared.embedding_jobs)
+            result.chunks_total += prepared.chunks_total
+            result.chunks_skipped += prepared.chunks_skipped
+            if prepared.entity_skipped:
+                result.entities_skipped += 1
             result.embedding_jobs_total += embedding_jobs_count
             result.prepare_seconds_total += prepared.prepare_seconds
 
@@ -715,7 +757,10 @@ class SearchRepositoryBase(ABC):
                     embed_seconds=0.0,
                     write_seconds=0.0,
                     source_rows_count=prepared.source_rows_count,
+                    chunks_total=prepared.chunks_total,
+                    chunks_skipped=prepared.chunks_skipped,
                     embedding_jobs_count=0,
+                    entity_skipped=prepared.entity_skipped,
                 )
                 continue
 
@@ -724,6 +769,9 @@ class SearchRepositoryBase(ABC):
                 source_rows_count=prepared.source_rows_count,
                 embedding_jobs_count=embedding_jobs_count,
                 remaining_jobs=embedding_jobs_count,
+                chunks_total=prepared.chunks_total,
+                chunks_skipped=prepared.chunks_skipped,
+                entity_skipped=prepared.entity_skipped,
                 prepare_seconds=prepared.prepare_seconds,
             )
             pending_jobs.extend(
@@ -817,13 +865,18 @@ class SearchRepositoryBase(ABC):
         logger.info(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
-            "embedding_jobs_total={embedding_jobs_total} prepare_seconds_total={prepare_seconds_total:.3f} "
+            "entities_skipped={entities_skipped} chunks_total={chunks_total} "
+            "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
+            "prepare_seconds_total={prepare_seconds_total:.3f} "
             "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
             "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
             project_id=self.project_id,
             entities_total=result.entities_total,
             entities_synced=result.entities_synced,
             entities_failed=result.entities_failed,
+            entities_skipped=result.entities_skipped,
+            chunks_total=result.chunks_total,
+            chunks_skipped=result.chunks_skipped,
             embedding_jobs_total=result.embedding_jobs_total,
             prepare_seconds_total=result.prepare_seconds_total,
             queue_wait_seconds_total=result.queue_wait_seconds_total,
@@ -895,6 +948,8 @@ class SearchRepositoryBase(ABC):
 
             chunk_records = self._build_chunk_records(rows)
             built_chunk_records_count = len(chunk_records)
+            current_entity_fingerprint = self._build_entity_fingerprint(chunk_records)
+            current_embedding_model = self._embedding_model_key()
             logger.info(
                 "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
                 "source_rows_count={source_rows_count} "
@@ -919,7 +974,7 @@ class SearchRepositoryBase(ABC):
             # --- Diff existing chunks against incoming ---
             existing_rows_result = await session.execute(
                 text(
-                    "SELECT id, chunk_key, source_hash "
+                    "SELECT id, chunk_key, source_hash, entity_fingerprint, embedding_model "
                     "FROM search_vector_chunks "
                     "WHERE project_id = :project_id AND entity_id = :entity_id"
                 ),
@@ -952,9 +1007,49 @@ class SearchRepositoryBase(ABC):
             orphan_ids = {int(row.id) for row in orphan_rows}
             orphan_chunks_count = len(orphan_ids)
 
+            # Trigger: the persisted chunk metadata exactly matches the current
+            # semantic fingerprint/model and every chunk still has an embedding.
+            # Why: full reindex and embeddings-only runs should avoid reopening
+            # the expensive chunk diff + embed path for unchanged entities.
+            # Outcome: return immediately with skip counters and no writes.
+            skip_unchanged_entity = (
+                existing_chunks_count == built_chunk_records_count
+                and stale_chunks_count == 0
+                and orphan_chunks_count == 0
+                and existing_chunks_count > 0
+                and all(
+                    row.entity_fingerprint == current_entity_fingerprint
+                    and row.embedding_model == current_embedding_model
+                    for row in existing_by_key.values()
+                )
+            )
+            if skip_unchanged_entity:
+                logger.info(
+                    "Vector sync skipped unchanged entity: project_id={project_id} "
+                    "entity_id={entity_id} chunks_skipped={chunks_skipped} "
+                    "entity_fingerprint={entity_fingerprint} embedding_model={embedding_model}",
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    chunks_skipped=built_chunk_records_count,
+                    entity_fingerprint=current_entity_fingerprint,
+                    embedding_model=current_embedding_model,
+                )
+                prepare_seconds = time.perf_counter() - sync_start
+                return _PreparedEntityVectorSync(
+                    entity_id=entity_id,
+                    sync_start=sync_start,
+                    source_rows_count=source_rows_count,
+                    embedding_jobs=[],
+                    chunks_total=built_chunk_records_count,
+                    chunks_skipped=built_chunk_records_count,
+                    entity_skipped=True,
+                    prepare_seconds=prepare_seconds,
+                )
+
             # --- Upsert changed / new chunks, collect embedding jobs ---
             timestamp_expr = self._timestamp_now_expr()
             embedding_jobs: list[tuple[int, str]] = []
+            skipped_chunks_count = 0
             for record in chunk_records:
                 current = existing_by_key.get(record["chunk_key"])
 
@@ -962,16 +1057,44 @@ class SearchRepositoryBase(ABC):
                 # but chunk has no embedding (orphan from crash).
                 # Outcome: schedule re-embedding without touching chunk metadata.
                 is_orphan = current and int(current.id) in orphan_ids
-                if current and current.source_hash == record["source_hash"] and not is_orphan:
-                    continue
-
                 if current:
                     row_id = int(current.id)
-                    if current.source_hash != record["source_hash"]:
+                    same_source_hash = current.source_hash == record["source_hash"]
+                    same_entity_fingerprint = (
+                        current.entity_fingerprint == current_entity_fingerprint
+                    )
+                    same_embedding_model = current.embedding_model == current_embedding_model
+
+                    if same_source_hash and not is_orphan and same_embedding_model:
+                        if not same_entity_fingerprint:
+                            await session.execute(
+                                text(
+                                    "UPDATE search_vector_chunks "
+                                    "SET entity_fingerprint = :entity_fingerprint, "
+                                    "embedding_model = :embedding_model, "
+                                    f"updated_at = {timestamp_expr} "
+                                    "WHERE id = :id"
+                                ),
+                                {
+                                    "id": row_id,
+                                    "entity_fingerprint": current_entity_fingerprint,
+                                    "embedding_model": current_embedding_model,
+                                },
+                            )
+                        skipped_chunks_count += 1
+                        continue
+
+                    if (
+                        current.source_hash != record["source_hash"]
+                        or current.entity_fingerprint != current_entity_fingerprint
+                        or current.embedding_model != current_embedding_model
+                    ):
                         await session.execute(
                             text(
                                 "UPDATE search_vector_chunks "
                                 "SET chunk_text = :chunk_text, source_hash = :source_hash, "
+                                "entity_fingerprint = :entity_fingerprint, "
+                                "embedding_model = :embedding_model, "
                                 f"updated_at = {timestamp_expr} "
                                 "WHERE id = :id"
                             ),
@@ -979,6 +1102,8 @@ class SearchRepositoryBase(ABC):
                                 "id": row_id,
                                 "chunk_text": record["chunk_text"],
                                 "source_hash": record["source_hash"],
+                                "entity_fingerprint": current_entity_fingerprint,
+                                "embedding_model": current_embedding_model,
                             },
                         )
                     embedding_jobs.append((row_id, record["chunk_text"]))
@@ -987,9 +1112,11 @@ class SearchRepositoryBase(ABC):
                 inserted = await session.execute(
                     text(
                         "INSERT INTO search_vector_chunks ("
-                        "entity_id, project_id, chunk_key, chunk_text, source_hash, updated_at"
+                        "entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                        "entity_fingerprint, embedding_model, updated_at"
                         ") VALUES ("
                         f":entity_id, :project_id, :chunk_key, :chunk_text, :source_hash, "
+                        ":entity_fingerprint, :embedding_model, "
                         f"{timestamp_expr}"
                         ") RETURNING id"
                     ),
@@ -999,6 +1126,8 @@ class SearchRepositoryBase(ABC):
                         "chunk_key": record["chunk_key"],
                         "chunk_text": record["chunk_text"],
                         "source_hash": record["source_hash"],
+                        "entity_fingerprint": current_entity_fingerprint,
+                        "embedding_model": current_embedding_model,
                     },
                 )
                 row_id = int(inserted.scalar_one())
@@ -1009,12 +1138,14 @@ class SearchRepositoryBase(ABC):
                 "existing_chunks_count={existing_chunks_count} "
                 "stale_chunks_count={stale_chunks_count} "
                 "orphan_chunks_count={orphan_chunks_count} "
+                "chunks_skipped={chunks_skipped} "
                 "embedding_jobs_count={embedding_jobs_count}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 existing_chunks_count=existing_chunks_count,
                 stale_chunks_count=stale_chunks_count,
                 orphan_chunks_count=orphan_chunks_count,
+                chunks_skipped=skipped_chunks_count,
                 embedding_jobs_count=len(embedding_jobs),
             )
             await session.commit()
@@ -1025,6 +1156,8 @@ class SearchRepositoryBase(ABC):
             sync_start=sync_start,
             source_rows_count=source_rows_count,
             embedding_jobs=embedding_jobs,
+            chunks_total=built_chunk_records_count,
+            chunks_skipped=skipped_chunks_count,
             prepare_seconds=prepare_seconds,
         )
 
@@ -1123,7 +1256,10 @@ class SearchRepositoryBase(ABC):
                 embed_seconds=runtime.embed_seconds,
                 write_seconds=runtime.write_seconds,
                 source_rows_count=runtime.source_rows_count,
+                chunks_total=runtime.chunks_total,
+                chunks_skipped=runtime.chunks_skipped,
                 embedding_jobs_count=runtime.embedding_jobs_count,
+                entity_skipped=runtime.entity_skipped,
             )
             entity_runtime.pop(entity_id, None)
 
@@ -1139,7 +1275,10 @@ class SearchRepositoryBase(ABC):
         embed_seconds: float,
         write_seconds: float,
         source_rows_count: int,
+        chunks_total: int,
+        chunks_skipped: int,
         embedding_jobs_count: int,
+        entity_skipped: bool,
     ) -> None:
         """Log completion and slow-entity warnings with a consistent format."""
         logger.info(
@@ -1147,7 +1286,8 @@ class SearchRepositoryBase(ABC):
             "total_seconds={total_seconds:.3f} prepare_seconds={prepare_seconds:.3f} "
             "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
             "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
-            "embedding_jobs_count={embedding_jobs_count}",
+            "chunks_total={chunks_total} chunks_skipped={chunks_skipped} "
+            "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped}",
             project_id=self.project_id,
             entity_id=entity_id,
             total_seconds=total_seconds,
@@ -1156,7 +1296,10 @@ class SearchRepositoryBase(ABC):
             embed_seconds=embed_seconds,
             write_seconds=write_seconds,
             source_rows_count=source_rows_count,
+            chunks_total=chunks_total,
+            chunks_skipped=chunks_skipped,
             embedding_jobs_count=embedding_jobs_count,
+            entity_skipped=entity_skipped,
         )
         if total_seconds > 10:
             logger.warning(
@@ -1164,7 +1307,8 @@ class SearchRepositoryBase(ABC):
                 "total_seconds={total_seconds:.3f} prepare_seconds={prepare_seconds:.3f} "
                 "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
                 "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
-                "embedding_jobs_count={embedding_jobs_count}",
+                "chunks_total={chunks_total} chunks_skipped={chunks_skipped} "
+                "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 total_seconds=total_seconds,
@@ -1173,7 +1317,10 @@ class SearchRepositoryBase(ABC):
                 embed_seconds=embed_seconds,
                 write_seconds=write_seconds,
                 source_rows_count=source_rows_count,
+                chunks_total=chunks_total,
+                chunks_skipped=chunks_skipped,
                 embedding_jobs_count=embedding_jobs_count,
+                entity_skipped=entity_skipped,
             )
 
     async def _prepare_vector_session(self, session: AsyncSession) -> None:

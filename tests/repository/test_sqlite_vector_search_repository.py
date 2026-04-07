@@ -36,6 +36,12 @@ class StubEmbeddingProvider:
         return [0.0, 0.0, 0.0, 1.0]
 
 
+class StubEmbeddingProviderV2(StubEmbeddingProvider):
+    """Same vectors, different model identity to force resync."""
+
+    model_name = "stub-v2"
+
+
 def _entity_row(
     *,
     project_id: int,
@@ -62,14 +68,17 @@ def _entity_row(
     )
 
 
-def _enable_semantic(search_repository: SQLiteSearchRepository) -> None:
+def _enable_semantic(
+    search_repository: SQLiteSearchRepository,
+    embedding_provider: StubEmbeddingProvider | None = None,
+) -> None:
     try:
         import sqlite_vec  # noqa: F401
     except ImportError:
         pytest.skip("sqlite-vec dependency is required for sqlite vector repository tests.")
 
     search_repository._semantic_enabled = True
-    search_repository._embedding_provider = StubEmbeddingProvider()
+    search_repository._embedding_provider = embedding_provider or StubEmbeddingProvider()
     search_repository._vector_dimensions = search_repository._embedding_provider.dimensions
     search_repository._vector_tables_initialized = False
 
@@ -102,6 +111,8 @@ async def test_sqlite_vec_tables_are_created_and_rebuilt(search_repository):
             "chunk_key",
             "chunk_text",
             "source_hash",
+            "entity_fingerprint",
+            "embedding_model",
             "updated_at",
         }
 
@@ -180,6 +191,79 @@ async def test_sqlite_chunk_upsert_and_delete_lifecycle(search_repository):
             {"project_id": search_repository.project_id, "entity_id": 101},
         )
         assert int(embedding_count.scalar_one()) == 0
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(search_repository):
+    """SQLite vector sync tracks new, changed, unchanged, and model-changed entities."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=111,
+            entity_id=111,
+            title="Auth and Schema Notes",
+            permalink="specs/auth-and-schema",
+            content_stems="# Overview\n- auth token rotation\n- schema migration planning",
+        )
+    )
+
+    new_result = await search_repository.sync_entity_vectors_batch([111])
+    assert new_result.entities_synced == 1
+    assert new_result.entities_skipped == 0
+    assert new_result.chunks_total >= 2
+    assert new_result.chunks_skipped == 0
+    assert new_result.embedding_jobs_total == new_result.chunks_total
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        stored_rows = await session.execute(
+            text(
+                "SELECT entity_fingerprint, embedding_model "
+                "FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 111},
+        )
+        metadata_rows = stored_rows.fetchall()
+        assert metadata_rows
+        assert len({row.entity_fingerprint for row in metadata_rows}) == 1
+        assert len({row.embedding_model for row in metadata_rows}) == 1
+        assert metadata_rows[0].embedding_model == "StubEmbeddingProvider:stub:4"
+
+    unchanged_result = await search_repository.sync_entity_vectors_batch([111])
+    assert unchanged_result.entities_synced == 1
+    assert unchanged_result.entities_skipped == 1
+    assert unchanged_result.embedding_jobs_total == 0
+    assert unchanged_result.chunks_skipped == unchanged_result.chunks_total
+
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=111,
+            entity_id=111,
+            title="Auth and Schema Notes",
+            permalink="specs/auth-and-schema",
+            content_stems="# Overview\n- auth token rotation\n- database schema migration planning",
+        )
+    )
+    changed_result = await search_repository.sync_entity_vectors_batch([111])
+    assert changed_result.entities_synced == 1
+    assert changed_result.entities_skipped == 0
+    assert changed_result.embedding_jobs_total >= 1
+    assert changed_result.chunks_skipped >= 1
+    assert changed_result.embedding_jobs_total < changed_result.chunks_total
+
+    _enable_semantic(search_repository, StubEmbeddingProviderV2())
+    model_changed_result = await search_repository.sync_entity_vectors_batch([111])
+    assert model_changed_result.entities_synced == 1
+    assert model_changed_result.entities_skipped == 0
+    assert model_changed_result.chunks_skipped == 0
+    assert model_changed_result.embedding_jobs_total == model_changed_result.chunks_total
 
 
 @pytest.mark.asyncio

@@ -47,6 +47,12 @@ class StubEmbeddingProvider:
         return [0.0, 0.0, 0.0, 1.0]
 
 
+class StubEmbeddingProviderV2(StubEmbeddingProvider):
+    """Same vectors, different model identity to force Postgres resync."""
+
+    model_name = "stub-v2"
+
+
 async def _skip_if_pgvector_unavailable(session_maker) -> None:
     """Skip semantic pgvector tests when extension is not available in test Postgres image."""
     async with db.scoped_session(session_maker) as session:
@@ -440,6 +446,110 @@ async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_m
 
     assert results
     assert any(result.permalink == "specs/search-index" for result in results)
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content(
+    session_maker, test_project
+):
+    """Postgres vector sync tracks new, changed, unchanged, and model-changed entities."""
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    await repo.init_search_index()
+
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=421,
+            title="Auth and Schema Notes",
+            content_stems="# Overview\n- auth token rotation\n- schema migration planning",
+            content_snippet="# Overview\n- auth token rotation\n- schema migration planning",
+            permalink="specs/auth-and-schema",
+            file_path="specs/auth-and-schema.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=421,
+            metadata={"note_type": "spec"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    new_result = await repo.sync_entity_vectors_batch([421])
+    assert new_result.entities_synced == 1
+    assert new_result.entities_skipped == 0
+    assert new_result.chunks_total >= 2
+    assert new_result.chunks_skipped == 0
+    assert new_result.embedding_jobs_total == new_result.chunks_total
+
+    async with db.scoped_session(session_maker) as session:
+        stored_rows = await session.execute(
+            text(
+                "SELECT entity_fingerprint, embedding_model "
+                "FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": test_project.id, "entity_id": 421},
+        )
+        metadata_rows = stored_rows.fetchall()
+        assert metadata_rows
+        assert len({row.entity_fingerprint for row in metadata_rows}) == 1
+        assert len({row.embedding_model for row in metadata_rows}) == 1
+        assert metadata_rows[0].embedding_model == "StubEmbeddingProvider:stub:4"
+
+    unchanged_result = await repo.sync_entity_vectors_batch([421])
+    assert unchanged_result.entities_synced == 1
+    assert unchanged_result.entities_skipped == 1
+    assert unchanged_result.embedding_jobs_total == 0
+    assert unchanged_result.chunks_skipped == unchanged_result.chunks_total
+
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=421,
+            title="Auth and Schema Notes",
+            content_stems="# Overview\n- auth token rotation\n- database schema migration planning",
+            content_snippet="# Overview\n- auth token rotation\n- database schema migration planning",
+            permalink="specs/auth-and-schema",
+            file_path="specs/auth-and-schema.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=421,
+            metadata={"note_type": "spec"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    changed_result = await repo.sync_entity_vectors_batch([421])
+    assert changed_result.entities_synced == 1
+    assert changed_result.entities_skipped == 0
+    assert changed_result.embedding_jobs_total >= 1
+    assert changed_result.chunks_skipped >= 1
+    assert changed_result.embedding_jobs_total < changed_result.chunks_total
+
+    repo_v2 = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProviderV2(),
+    )
+    await repo_v2.init_search_index()
+    model_changed_result = await repo_v2.sync_entity_vectors_batch([421])
+    assert model_changed_result.entities_synced == 1
+    assert model_changed_result.entities_skipped == 0
+    assert model_changed_result.chunks_skipped == 0
+    assert model_changed_result.embedding_jobs_total == model_changed_result.chunks_total
 
 
 @pytest.mark.asyncio
