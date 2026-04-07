@@ -1,3 +1,22 @@
 {
-  "enabledPlugins": {}
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_NO_FLICKER": "1",
+    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(just fast-check)",
+      "Bash(just check)",
+      "Bash(just fix)",
+      "Bash(just typecheck)",
+      "Bash(just lint)",
+      "Bash(just test)"
+    ],
+    "deny": []
+  },
+  "enableAllProjectMcpServers": true
 }
