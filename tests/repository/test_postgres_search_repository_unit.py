@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_repository_base import _PreparedEntityVectorSync
@@ -283,3 +284,67 @@ class TestBatchPrepareConcurrency:
         assert result.entities_synced == 4
         assert result.entities_failed == 0
         assert max_active_prepares > 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
+    """Postgres batch sync should separate queue wait from prepare/embed/write."""
+    repo = _make_repo(
+        semantic_enabled=True,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    repo._semantic_embedding_sync_batch_size = 2
+    repo._vector_tables_initialized = True
+
+    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+        return _PreparedEntityVectorSync(
+            entity_id=entity_id,
+            sync_start=0.0,
+            source_rows_count=1,
+            embedding_jobs=[(200 + entity_id, f"chunk-{entity_id}")],
+            prepare_seconds=1.0,
+        )
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        for job in flush_jobs:
+            runtime = entity_runtime[job.entity_id]
+            if job.entity_id == 1:
+                runtime.embed_seconds = 1.0
+                runtime.write_seconds = 0.5
+            else:
+                runtime.embed_seconds = 2.0
+                runtime.write_seconds = 0.5
+            runtime.remaining_jobs = 0
+            synced_entity_ids.add(job.entity_id)
+        return (3.0, 1.0)
+
+    completion_records: list[dict] = []
+
+    def _capture_log(**kwargs):
+        completion_records.append(kwargs)
+
+    perf_counter_values = iter([4.0, 5.0])
+
+    monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+    monkeypatch.setattr(repo, "_log_vector_sync_complete", _capture_log)
+    monkeypatch.setattr(
+        search_repository_base_module.time,
+        "perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    result = await repo.sync_entity_vectors_batch([1, 2])
+
+    assert result.entities_total == 2
+    assert result.entities_synced == 2
+    assert result.entities_failed == 0
+    assert result.prepare_seconds_total == pytest.approx(2.0)
+    assert result.queue_wait_seconds_total == pytest.approx(3.0)
+    assert result.embed_seconds_total == pytest.approx(3.0)
+    assert result.write_seconds_total == pytest.approx(1.0)
+    assert len(completion_records) == 2
+    for record in completion_records:
+        assert record["prepare_seconds"] == pytest.approx(1.0)
+        assert record["queue_wait_seconds"] == pytest.approx(1.5)

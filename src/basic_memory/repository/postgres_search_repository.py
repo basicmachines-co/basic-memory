@@ -522,13 +522,18 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
                 embedding_jobs_count = len(prepared_sync.embedding_jobs)
                 result.embedding_jobs_total += embedding_jobs_count
+                result.prepare_seconds_total += prepared_sync.prepare_seconds
 
                 if embedding_jobs_count == 0:
                     synced_entity_ids.add(entity_id)
                     total_seconds = time.perf_counter() - prepared_sync.sync_start
+                    queue_wait_seconds = max(0.0, total_seconds - prepared_sync.prepare_seconds)
+                    result.queue_wait_seconds_total += queue_wait_seconds
                     self._log_vector_sync_complete(
                         entity_id=entity_id,
                         total_seconds=total_seconds,
+                        prepare_seconds=prepared_sync.prepare_seconds,
+                        queue_wait_seconds=queue_wait_seconds,
                         embed_seconds=0.0,
                         write_seconds=0.0,
                         source_rows_count=prepared_sync.source_rows_count,
@@ -541,6 +546,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     source_rows_count=prepared_sync.source_rows_count,
                     embedding_jobs_count=embedding_jobs_count,
                     remaining_jobs=embedding_jobs_count,
+                    prepare_seconds=prepared_sync.prepare_seconds,
                 )
                 pending_jobs.extend(
                     _PendingEmbeddingJob(
@@ -562,6 +568,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         )
                         result.embed_seconds_total += embed_seconds
                         result.write_seconds_total += write_seconds
+                        (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
+                            entity_runtime=entity_runtime,
+                            synced_entity_ids=synced_entity_ids,
+                        )
                     except Exception as exc:
                         affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                         failed_entity_ids.update(affected_entity_ids)
@@ -588,6 +598,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 result.embed_seconds_total += embed_seconds
                 result.write_seconds_total += write_seconds
+                (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
+                    entity_runtime=entity_runtime,
+                    synced_entity_ids=synced_entity_ids,
+                )
             except Exception as exc:
                 affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                 failed_entity_ids.update(affected_entity_ids)
@@ -620,13 +634,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
         logger.info(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
-            "embedding_jobs_total={embedding_jobs_total} embed_seconds_total={embed_seconds_total:.3f} "
-            "write_seconds_total={write_seconds_total:.3f}",
+            "embedding_jobs_total={embedding_jobs_total} prepare_seconds_total={prepare_seconds_total:.3f} "
+            "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
+            "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
             project_id=self.project_id,
             entities_total=result.entities_total,
             entities_synced=result.entities_synced,
             entities_failed=result.entities_failed,
             embedding_jobs_total=result.embedding_jobs_total,
+            prepare_seconds_total=result.prepare_seconds_total,
+            queue_wait_seconds_total=result.queue_wait_seconds_total,
             embed_seconds_total=result.embed_seconds_total,
             write_seconds_total=result.write_seconds_total,
         )
@@ -679,11 +696,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     source_rows_count=source_rows_count,
                 )
                 await self._delete_entity_chunks(session, entity_id)
+                prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
                     sync_start=sync_start,
                     source_rows_count=source_rows_count,
                     embedding_jobs=[],
+                    prepare_seconds=prepare_seconds,
                 )
 
             chunk_records = self._build_chunk_records(rows)
@@ -699,11 +718,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             if not chunk_records:
                 await self._delete_entity_chunks(session, entity_id)
+                prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
                     sync_start=sync_start,
                     source_rows_count=source_rows_count,
                     embedding_jobs=[],
+                    prepare_seconds=prepare_seconds,
                 )
 
             existing_rows_result = await session.execute(
@@ -807,11 +828,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 embedding_jobs_count=len(embedding_jobs),
             )
 
+        prepare_seconds = time.perf_counter() - sync_start
         return _PreparedEntityVectorSync(
             entity_id=entity_id,
             sync_start=sync_start,
             source_rows_count=source_rows_count,
             embedding_jobs=embedding_jobs,
+            prepare_seconds=prepare_seconds,
         )
 
     async def _write_embeddings(

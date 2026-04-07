@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.repository.search_repository_base import (
     MAX_VECTOR_CHUNK_CHARS,
     SearchRepositoryBase,
@@ -335,6 +336,8 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
     assert result.entities_failed == 0
     assert result.failed_entity_ids == []
     assert result.embedding_jobs_total == 3
+    assert result.prepare_seconds_total == pytest.approx(0.0)
+    assert result.queue_wait_seconds_total == pytest.approx(0.0)
     assert result.embed_seconds_total == pytest.approx(0.2)
     assert result.write_seconds_total == pytest.approx(0.4)
 
@@ -373,3 +376,65 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
     assert result.entities_synced == 1
     assert result.entities_failed == 2
     assert result.failed_entity_ids == [2, 3]
+
+
+@pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(monkeypatch):
+    """Queue wait should be reported separately from prepare/embed/write timings."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+    repo._semantic_embedding_sync_batch_size = 2
+
+    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+        return _PreparedEntityVectorSync(
+            entity_id=entity_id,
+            sync_start=0.0,
+            source_rows_count=1,
+            embedding_jobs=[(100 + entity_id, f"chunk-{entity_id}")],
+            prepare_seconds=1.0,
+        )
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        assert len(flush_jobs) == 2
+        for job in flush_jobs:
+            runtime = entity_runtime[job.entity_id]
+            if job.entity_id == 1:
+                runtime.embed_seconds = 1.0
+                runtime.write_seconds = 0.5
+            else:
+                runtime.embed_seconds = 2.0
+                runtime.write_seconds = 0.5
+            runtime.remaining_jobs = 0
+            synced_entity_ids.add(job.entity_id)
+        return (3.0, 1.0)
+
+    logged_completion: list[dict] = []
+
+    def _capture_log(**kwargs):
+        logged_completion.append(kwargs)
+
+    perf_counter_values = iter([4.0, 5.0])
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+    monkeypatch.setattr(repo, "_log_vector_sync_complete", _capture_log)
+    monkeypatch.setattr(
+        search_repository_base_module.time,
+        "perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    result = await repo.sync_entity_vectors_batch([1, 2])
+
+    assert result.entities_total == 2
+    assert result.entities_synced == 2
+    assert result.entities_failed == 0
+    assert result.prepare_seconds_total == pytest.approx(2.0)
+    assert result.queue_wait_seconds_total == pytest.approx(3.0)
+    assert result.embed_seconds_total == pytest.approx(3.0)
+    assert result.write_seconds_total == pytest.approx(1.0)
+    assert len(logged_completion) == 2
+    for record in logged_completion:
+        assert record["prepare_seconds"] == pytest.approx(1.0)
+        assert record["queue_wait_seconds"] == pytest.approx(1.5)

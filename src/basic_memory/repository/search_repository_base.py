@@ -44,6 +44,8 @@ class VectorSyncBatchResult:
     entities_failed: int
     failed_entity_ids: list[int] = field(default_factory=list)
     embedding_jobs_total: int = 0
+    prepare_seconds_total: float = 0.0
+    queue_wait_seconds_total: float = 0.0
     embed_seconds_total: float = 0.0
     write_seconds_total: float = 0.0
 
@@ -56,6 +58,7 @@ class _PreparedEntityVectorSync:
     sync_start: float
     source_rows_count: int
     embedding_jobs: list[tuple[int, str]]
+    prepare_seconds: float = 0.0
 
 
 @dataclass
@@ -75,6 +78,7 @@ class _EntitySyncRuntime:
     source_rows_count: int
     embedding_jobs_count: int
     remaining_jobs: int
+    prepare_seconds: float = 0.0
     embed_seconds: float = 0.0
     write_seconds: float = 0.0
 
@@ -696,13 +700,18 @@ class SearchRepositoryBase(ABC):
 
             embedding_jobs_count = len(prepared.embedding_jobs)
             result.embedding_jobs_total += embedding_jobs_count
+            result.prepare_seconds_total += prepared.prepare_seconds
 
             if embedding_jobs_count == 0:
                 synced_entity_ids.add(entity_id)
                 total_seconds = time.perf_counter() - prepared.sync_start
+                queue_wait_seconds = max(0.0, total_seconds - prepared.prepare_seconds)
+                result.queue_wait_seconds_total += queue_wait_seconds
                 self._log_vector_sync_complete(
                     entity_id=entity_id,
                     total_seconds=total_seconds,
+                    prepare_seconds=prepared.prepare_seconds,
+                    queue_wait_seconds=queue_wait_seconds,
                     embed_seconds=0.0,
                     write_seconds=0.0,
                     source_rows_count=prepared.source_rows_count,
@@ -715,6 +724,7 @@ class SearchRepositoryBase(ABC):
                 source_rows_count=prepared.source_rows_count,
                 embedding_jobs_count=embedding_jobs_count,
                 remaining_jobs=embedding_jobs_count,
+                prepare_seconds=prepared.prepare_seconds,
             )
             pending_jobs.extend(
                 _PendingEmbeddingJob(
@@ -734,6 +744,10 @@ class SearchRepositoryBase(ABC):
                     )
                     result.embed_seconds_total += embed_seconds
                     result.write_seconds_total += write_seconds
+                    (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
+                        entity_runtime=entity_runtime,
+                        synced_entity_ids=synced_entity_ids,
+                    )
                 except Exception as exc:
                     if not continue_on_error:
                         raise
@@ -761,6 +775,10 @@ class SearchRepositoryBase(ABC):
                 )
                 result.embed_seconds_total += embed_seconds
                 result.write_seconds_total += write_seconds
+                (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
+                    entity_runtime=entity_runtime,
+                    synced_entity_ids=synced_entity_ids,
+                )
             except Exception as exc:
                 if not continue_on_error:
                     raise
@@ -799,13 +817,16 @@ class SearchRepositoryBase(ABC):
         logger.info(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
-            "embedding_jobs_total={embedding_jobs_total} embed_seconds_total={embed_seconds_total:.3f} "
-            "write_seconds_total={write_seconds_total:.3f}",
+            "embedding_jobs_total={embedding_jobs_total} prepare_seconds_total={prepare_seconds_total:.3f} "
+            "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
+            "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
             project_id=self.project_id,
             entities_total=result.entities_total,
             entities_synced=result.entities_synced,
             entities_failed=result.entities_failed,
             embedding_jobs_total=result.embedding_jobs_total,
+            prepare_seconds_total=result.prepare_seconds_total,
+            queue_wait_seconds_total=result.queue_wait_seconds_total,
             embed_seconds_total=result.embed_seconds_total,
             write_seconds_total=result.write_seconds_total,
         )
@@ -863,11 +884,13 @@ class SearchRepositoryBase(ABC):
                 )
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
+                prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
                     sync_start=sync_start,
                     source_rows_count=source_rows_count,
                     embedding_jobs=[],
+                    prepare_seconds=prepare_seconds,
                 )
 
             chunk_records = self._build_chunk_records(rows)
@@ -884,11 +907,13 @@ class SearchRepositoryBase(ABC):
             if not chunk_records:
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
+                prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
                     sync_start=sync_start,
                     source_rows_count=source_rows_count,
                     embedding_jobs=[],
+                    prepare_seconds=prepare_seconds,
                 )
 
             # --- Diff existing chunks against incoming ---
@@ -994,11 +1019,13 @@ class SearchRepositoryBase(ABC):
             )
             await session.commit()
 
+        prepare_seconds = time.perf_counter() - sync_start
         return _PreparedEntityVectorSync(
             entity_id=entity_id,
             sync_start=sync_start,
             source_rows_count=source_rows_count,
             embedding_jobs=embedding_jobs,
+            prepare_seconds=prepare_seconds,
         )
 
     async def _flush_embedding_jobs(
@@ -1063,24 +1090,52 @@ class SearchRepositoryBase(ABC):
 
             if runtime.remaining_jobs <= 0:
                 synced_entity_ids.add(entity_id)
-                total_seconds = time.perf_counter() - runtime.sync_start
-                self._log_vector_sync_complete(
-                    entity_id=entity_id,
-                    total_seconds=total_seconds,
-                    embed_seconds=runtime.embed_seconds,
-                    write_seconds=runtime.write_seconds,
-                    source_rows_count=runtime.source_rows_count,
-                    embedding_jobs_count=runtime.embedding_jobs_count,
-                )
-                entity_runtime.pop(entity_id, None)
 
         return embed_seconds, write_seconds
+
+    def _finalize_completed_entity_syncs(
+        self,
+        *,
+        entity_runtime: dict[int, _EntitySyncRuntime],
+        synced_entity_ids: set[int],
+    ) -> float:
+        """Finalize completed entities and return cumulative queue wait seconds."""
+        queue_wait_seconds_total = 0.0
+        for entity_id, runtime in list(entity_runtime.items()):
+            if runtime.remaining_jobs > 0:
+                continue
+
+            synced_entity_ids.add(entity_id)
+            total_seconds = time.perf_counter() - runtime.sync_start
+            queue_wait_seconds = max(
+                0.0,
+                total_seconds
+                - runtime.prepare_seconds
+                - runtime.embed_seconds
+                - runtime.write_seconds,
+            )
+            queue_wait_seconds_total += queue_wait_seconds
+            self._log_vector_sync_complete(
+                entity_id=entity_id,
+                total_seconds=total_seconds,
+                prepare_seconds=runtime.prepare_seconds,
+                queue_wait_seconds=queue_wait_seconds,
+                embed_seconds=runtime.embed_seconds,
+                write_seconds=runtime.write_seconds,
+                source_rows_count=runtime.source_rows_count,
+                embedding_jobs_count=runtime.embedding_jobs_count,
+            )
+            entity_runtime.pop(entity_id, None)
+
+        return queue_wait_seconds_total
 
     def _log_vector_sync_complete(
         self,
         *,
         entity_id: int,
         total_seconds: float,
+        prepare_seconds: float,
+        queue_wait_seconds: float,
         embed_seconds: float,
         write_seconds: float,
         source_rows_count: int,
@@ -1089,12 +1144,15 @@ class SearchRepositoryBase(ABC):
         """Log completion and slow-entity warnings with a consistent format."""
         logger.info(
             "Vector sync complete: project_id={project_id} entity_id={entity_id} "
-            "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+            "total_seconds={total_seconds:.3f} prepare_seconds={prepare_seconds:.3f} "
+            "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
             "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
             "embedding_jobs_count={embedding_jobs_count}",
             project_id=self.project_id,
             entity_id=entity_id,
             total_seconds=total_seconds,
+            prepare_seconds=prepare_seconds,
+            queue_wait_seconds=queue_wait_seconds,
             embed_seconds=embed_seconds,
             write_seconds=write_seconds,
             source_rows_count=source_rows_count,
@@ -1103,12 +1161,15 @@ class SearchRepositoryBase(ABC):
         if total_seconds > 10:
             logger.warning(
                 "Vector sync slow entity: project_id={project_id} entity_id={entity_id} "
-                "total_seconds={total_seconds:.3f} embed_seconds={embed_seconds:.3f} "
+                "total_seconds={total_seconds:.3f} prepare_seconds={prepare_seconds:.3f} "
+                "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
                 "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
                 "embedding_jobs_count={embedding_jobs_count}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 total_seconds=total_seconds,
+                prepare_seconds=prepare_seconds,
+                queue_wait_seconds=queue_wait_seconds,
                 embed_seconds=embed_seconds,
                 write_seconds=write_seconds,
                 source_rows_count=source_rows_count,
