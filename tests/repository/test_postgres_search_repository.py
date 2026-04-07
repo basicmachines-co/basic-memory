@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.repository.postgres_search_repository import (
     PostgresSearchRepository,
     _strip_nul_from_row,
@@ -51,6 +52,13 @@ class StubEmbeddingProviderV2(StubEmbeddingProvider):
     """Same vectors, different model identity to force Postgres resync."""
 
     model_name = "stub-v2"
+
+
+def _oversized_entity_content(bullet_count: int) -> str:
+    """Build deterministic content that produces many vector chunks."""
+    lines = ["# Oversized Entity"]
+    lines.extend(f"- embedding job {index}" for index in range(1, bullet_count + 1))
+    return "\n".join(lines)
 
 
 async def _skip_if_pgvector_unavailable(session_maker) -> None:
@@ -550,6 +558,99 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
     assert model_changed_result.entities_skipped == 0
     assert model_changed_result.chunks_skipped == 0
     assert model_changed_result.embedding_jobs_total == model_changed_result.chunks_total
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_sync_shards_oversized_entity_and_resumes(
+    session_maker, test_project, monkeypatch
+):
+    """Oversized entities should sync one deterministic shard per run and resume cleanly."""
+    await _skip_if_pgvector_unavailable(session_maker)
+    monkeypatch.setattr(search_repository_base_module, "OVERSIZED_ENTITY_VECTOR_SHARD_SIZE", 2)
+
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    repo = PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    await repo.init_search_index()
+
+    now = datetime.now(timezone.utc)
+    content = _oversized_entity_content(5)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=430,
+            title="Oversized Vector Entity",
+            content_stems=content,
+            content_snippet=content,
+            permalink="specs/oversized-vector-entity",
+            file_path="specs/oversized-vector-entity.md",
+            type=SearchItemType.ENTITY.value,
+            entity_id=430,
+            metadata={"note_type": "spec"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    first_result = await repo.sync_entity_vectors_batch([430])
+    assert first_result.entities_synced == 0
+    assert first_result.entities_deferred == 1
+    assert first_result.entities_failed == 0
+    assert first_result.embedding_jobs_total == 2
+    assert first_result.chunks_total == 6
+    assert first_result.chunks_skipped == 0
+
+    second_result = await repo.sync_entity_vectors_batch([430])
+    assert second_result.entities_synced == 0
+    assert second_result.entities_deferred == 1
+    assert second_result.entities_failed == 0
+    assert second_result.embedding_jobs_total == 2
+    assert second_result.chunks_total == 6
+    assert second_result.chunks_skipped == 2
+
+    third_result = await repo.sync_entity_vectors_batch([430])
+    assert third_result.entities_synced == 1
+    assert third_result.entities_deferred == 0
+    assert third_result.entities_failed == 0
+    assert third_result.embedding_jobs_total == 2
+    assert third_result.chunks_total == 6
+    assert third_result.chunks_skipped == 4
+
+    unchanged_result = await repo.sync_entity_vectors_batch([430])
+    assert unchanged_result.entities_synced == 1
+    assert unchanged_result.entities_deferred == 0
+    assert unchanged_result.entities_skipped == 1
+    assert unchanged_result.embedding_jobs_total == 0
+    assert unchanged_result.chunks_skipped == unchanged_result.chunks_total == 6
+
+    async with db.scoped_session(session_maker) as session:
+        chunk_count = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": test_project.id, "entity_id": 430},
+        )
+        embedding_count = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_vector_embeddings e "
+                "JOIN search_vector_chunks c ON c.id = e.chunk_id "
+                "WHERE c.project_id = :project_id AND c.entity_id = :entity_id"
+            ),
+            {"project_id": test_project.id, "entity_id": 430},
+        )
+        assert int(chunk_count.scalar_one()) == 6
+        assert int(embedding_count.scalar_one()) == 6
 
 
 @pytest.mark.asyncio

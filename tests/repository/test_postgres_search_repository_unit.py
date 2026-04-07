@@ -348,3 +348,79 @@ async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
     for record in completion_records:
         assert record["prepare_seconds"] == pytest.approx(1.0)
         assert record["queue_wait_seconds"] == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
+async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatch):
+    """Oversized shard runs should be deferred until the last shard completes."""
+    repo = _make_repo(
+        semantic_enabled=True,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    repo._semantic_embedding_sync_batch_size = 8
+    repo._vector_tables_initialized = True
+
+    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+        if entity_id == 1:
+            return _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=0.0,
+                source_rows_count=1,
+                embedding_jobs=[(201, "chunk-1a"), (202, "chunk-1b")],
+                chunks_total=5,
+                pending_jobs_total=5,
+                entity_complete=False,
+                oversized_entity=True,
+                shard_index=1,
+                shard_count=3,
+                remaining_jobs_after_shard=3,
+            )
+        return _PreparedEntityVectorSync(
+            entity_id=entity_id,
+            sync_start=0.0,
+            source_rows_count=1,
+            embedding_jobs=[(301, "chunk-2a")],
+            chunks_total=1,
+            pending_jobs_total=1,
+            entity_complete=True,
+            shard_index=1,
+            shard_count=1,
+            remaining_jobs_after_shard=0,
+        )
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        for job in flush_jobs:
+            runtime = entity_runtime[job.entity_id]
+            runtime.remaining_jobs -= 1
+            runtime.embed_seconds += 0.5
+            runtime.write_seconds += 0.25
+        return (1.5, 0.75)
+
+    completion_records: list[dict] = []
+
+    def _capture_log(**kwargs):
+        completion_records.append(kwargs)
+
+    monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+    monkeypatch.setattr(repo, "_log_vector_sync_complete", _capture_log)
+
+    result = await repo.sync_entity_vectors_batch([1, 2])
+
+    assert result.entities_total == 2
+    assert result.entities_synced == 1
+    assert result.entities_deferred == 1
+    assert result.entities_failed == 0
+    assert result.embedding_jobs_total == 3
+
+    deferred_record = next(record for record in completion_records if record["entity_id"] == 1)
+    assert deferred_record["entity_complete"] is False
+    assert deferred_record["oversized_entity"] is True
+    assert deferred_record["pending_jobs_total"] == 5
+    assert deferred_record["shard_count"] == 3
+    assert deferred_record["remaining_jobs_after_shard"] == 3
+
+    complete_record = next(record for record in completion_records if record["entity_id"] == 2)
+    assert complete_record["entity_complete"] is True
+    assert complete_record["oversized_entity"] is False

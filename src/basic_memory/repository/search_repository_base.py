@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import re
 import time
 from abc import ABC, abstractmethod
@@ -33,6 +34,7 @@ TOP_CHUNKS_PER_RESULT = 5
 SMALL_NOTE_CONTENT_LIMIT = 2000
 HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
 BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
+OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
 
 
 @dataclass
@@ -42,6 +44,7 @@ class VectorSyncBatchResult:
     entities_total: int
     entities_synced: int
     entities_failed: int
+    entities_deferred: int = 0
     entities_skipped: int = 0
     failed_entity_ids: list[int] = field(default_factory=list)
     chunks_total: int = 0
@@ -64,6 +67,12 @@ class _PreparedEntityVectorSync:
     chunks_total: int = 0
     chunks_skipped: int = 0
     entity_skipped: bool = False
+    entity_complete: bool = True
+    oversized_entity: bool = False
+    pending_jobs_total: int = 0
+    shard_index: int = 1
+    shard_count: int = 1
+    remaining_jobs_after_shard: int = 0
     prepare_seconds: float = 0.0
 
 
@@ -87,9 +96,28 @@ class _EntitySyncRuntime:
     chunks_total: int = 0
     chunks_skipped: int = 0
     entity_skipped: bool = False
+    entity_complete: bool = True
+    oversized_entity: bool = False
+    pending_jobs_total: int = 0
+    shard_index: int = 1
+    shard_count: int = 1
+    remaining_jobs_after_shard: int = 0
     prepare_seconds: float = 0.0
     embed_seconds: float = 0.0
     write_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class _EntityVectorShardPlan:
+    """Shard selection for one entity's pending embedding work."""
+
+    scheduled_chunk_keys: set[str]
+    pending_jobs_total: int
+    shard_index: int
+    shard_count: int
+    remaining_jobs_after_shard: int
+    oversized_entity: bool
+    entity_complete: bool
 
 
 class SearchRepositoryBase(ABC):
@@ -524,6 +552,79 @@ class SearchRepositoryBase(ABC):
             f"{self._embedding_provider.dimensions}"
         )
 
+    def _plan_entity_vector_shard(
+        self,
+        pending_records: list[dict[str, str]],
+    ) -> _EntityVectorShardPlan:
+        """Select the bounded shard to process for one entity sync invocation."""
+        pending_jobs_total = len(pending_records)
+        if pending_jobs_total == 0:
+            return _EntityVectorShardPlan(
+                scheduled_chunk_keys=set(),
+                pending_jobs_total=0,
+                shard_index=1,
+                shard_count=1,
+                remaining_jobs_after_shard=0,
+                oversized_entity=False,
+                entity_complete=True,
+            )
+
+        ordered_pending_records = sorted(pending_records, key=lambda record: record["chunk_key"])
+        scheduled_records = ordered_pending_records[:OVERSIZED_ENTITY_VECTOR_SHARD_SIZE]
+        remaining_jobs_after_shard = pending_jobs_total - len(scheduled_records)
+        return _EntityVectorShardPlan(
+            scheduled_chunk_keys={record["chunk_key"] for record in scheduled_records},
+            pending_jobs_total=pending_jobs_total,
+            shard_index=1,
+            shard_count=max(
+                1,
+                math.ceil(pending_jobs_total / OVERSIZED_ENTITY_VECTOR_SHARD_SIZE),
+            ),
+            remaining_jobs_after_shard=remaining_jobs_after_shard,
+            oversized_entity=pending_jobs_total > OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
+            entity_complete=remaining_jobs_after_shard == 0,
+        )
+
+    def _log_vector_shard_plan(
+        self,
+        *,
+        entity_id: int,
+        shard_plan: _EntityVectorShardPlan,
+    ) -> None:
+        """Emit shard planning logs once the pending work is known."""
+        if shard_plan.pending_jobs_total == 0:
+            return
+
+        scheduled_jobs_count = shard_plan.pending_jobs_total - shard_plan.remaining_jobs_after_shard
+        if shard_plan.oversized_entity:
+            logger.warning(
+                "Vector sync oversized entity detected: project_id={project_id} "
+                "entity_id={entity_id} pending_jobs_total={pending_jobs_total} "
+                "shard_size={shard_size} shard_count={shard_count}",
+                project_id=self.project_id,
+                entity_id=entity_id,
+                pending_jobs_total=shard_plan.pending_jobs_total,
+                shard_size=OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
+                shard_count=shard_plan.shard_count,
+            )
+
+        logger.info(
+            "Vector sync shard planned: project_id={project_id} entity_id={entity_id} "
+            "pending_jobs_total={pending_jobs_total} scheduled_jobs_count={scheduled_jobs_count} "
+            "shard_index={shard_index} shard_count={shard_count} "
+            "remaining_jobs_after_shard={remaining_jobs_after_shard} "
+            "oversized_entity={oversized_entity} entity_complete={entity_complete}",
+            project_id=self.project_id,
+            entity_id=entity_id,
+            pending_jobs_total=shard_plan.pending_jobs_total,
+            scheduled_jobs_count=scheduled_jobs_count,
+            shard_index=shard_plan.shard_index,
+            shard_count=shard_plan.shard_count,
+            remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
+            oversized_entity=shard_plan.oversized_entity,
+            entity_complete=shard_plan.entity_complete,
+        )
+
     # --- Text splitting ---
 
     def _split_text_into_chunks(self, text_value: str) -> list[str]:
@@ -715,6 +816,7 @@ class SearchRepositoryBase(ABC):
         pending_jobs: list[_PendingEmbeddingJob] = []
         entity_runtime: dict[int, _EntitySyncRuntime] = {}
         failed_entity_ids: set[int] = set()
+        deferred_entity_ids: set[int] = set()
         synced_entity_ids: set[int] = set()
 
         for index, entity_id in enumerate(entity_ids):
@@ -745,7 +847,10 @@ class SearchRepositoryBase(ABC):
             result.prepare_seconds_total += prepared.prepare_seconds
 
             if embedding_jobs_count == 0:
-                synced_entity_ids.add(entity_id)
+                if prepared.entity_complete:
+                    synced_entity_ids.add(entity_id)
+                else:
+                    deferred_entity_ids.add(entity_id)
                 total_seconds = time.perf_counter() - prepared.sync_start
                 queue_wait_seconds = max(0.0, total_seconds - prepared.prepare_seconds)
                 result.queue_wait_seconds_total += queue_wait_seconds
@@ -761,6 +866,12 @@ class SearchRepositoryBase(ABC):
                     chunks_skipped=prepared.chunks_skipped,
                     embedding_jobs_count=0,
                     entity_skipped=prepared.entity_skipped,
+                    entity_complete=prepared.entity_complete,
+                    oversized_entity=prepared.oversized_entity,
+                    pending_jobs_total=prepared.pending_jobs_total,
+                    shard_index=prepared.shard_index,
+                    shard_count=prepared.shard_count,
+                    remaining_jobs_after_shard=prepared.remaining_jobs_after_shard,
                 )
                 continue
 
@@ -772,6 +883,12 @@ class SearchRepositoryBase(ABC):
                 chunks_total=prepared.chunks_total,
                 chunks_skipped=prepared.chunks_skipped,
                 entity_skipped=prepared.entity_skipped,
+                entity_complete=prepared.entity_complete,
+                oversized_entity=prepared.oversized_entity,
+                pending_jobs_total=prepared.pending_jobs_total,
+                shard_index=prepared.shard_index,
+                shard_count=prepared.shard_count,
+                remaining_jobs_after_shard=prepared.remaining_jobs_after_shard,
                 prepare_seconds=prepared.prepare_seconds,
             )
             pending_jobs.extend(
@@ -795,12 +912,15 @@ class SearchRepositoryBase(ABC):
                     (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
                         entity_runtime=entity_runtime,
                         synced_entity_ids=synced_entity_ids,
+                        deferred_entity_ids=deferred_entity_ids,
                     )
                 except Exception as exc:
                     if not continue_on_error:
                         raise
                     affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                     failed_entity_ids.update(affected_entity_ids)
+                    synced_entity_ids.difference_update(affected_entity_ids)
+                    deferred_entity_ids.difference_update(affected_entity_ids)
                     for failed_entity_id in affected_entity_ids:
                         entity_runtime.pop(failed_entity_id, None)
                     logger.warning(
@@ -826,12 +946,15 @@ class SearchRepositoryBase(ABC):
                 (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
                     entity_runtime=entity_runtime,
                     synced_entity_ids=synced_entity_ids,
+                    deferred_entity_ids=deferred_entity_ids,
                 )
             except Exception as exc:
                 if not continue_on_error:
                     raise
                 affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                 failed_entity_ids.update(affected_entity_ids)
+                synced_entity_ids.difference_update(affected_entity_ids)
+                deferred_entity_ids.difference_update(affected_entity_ids)
                 for failed_entity_id in affected_entity_ids:
                     entity_runtime.pop(failed_entity_id, None)
                 logger.warning(
@@ -849,6 +972,8 @@ class SearchRepositoryBase(ABC):
         if entity_runtime:
             orphan_runtime_entities = sorted(entity_runtime.keys())
             failed_entity_ids.update(orphan_runtime_entities)
+            synced_entity_ids.difference_update(orphan_runtime_entities)
+            deferred_entity_ids.difference_update(orphan_runtime_entities)
             logger.warning(
                 "Vector batch sync left unfinished entities after flushes: "
                 "project_id={project_id} unfinished_entities={unfinished_entities}",
@@ -858,13 +983,17 @@ class SearchRepositoryBase(ABC):
 
         # Keep result counters aligned with successful/failed terminal states.
         synced_entity_ids.difference_update(failed_entity_ids)
+        deferred_entity_ids.difference_update(failed_entity_ids)
+        deferred_entity_ids.difference_update(synced_entity_ids)
         result.failed_entity_ids = sorted(failed_entity_ids)
         result.entities_failed = len(result.failed_entity_ids)
+        result.entities_deferred = len(deferred_entity_ids)
         result.entities_synced = len(synced_entity_ids)
 
         logger.info(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
+            "entities_deferred={entities_deferred} "
             "entities_skipped={entities_skipped} chunks_total={chunks_total} "
             "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
             "prepare_seconds_total={prepare_seconds_total:.3f} "
@@ -874,6 +1003,7 @@ class SearchRepositoryBase(ABC):
             entities_total=result.entities_total,
             entities_synced=result.entities_synced,
             entities_failed=result.entities_failed,
+            entities_deferred=result.entities_deferred,
             entities_skipped=result.entities_skipped,
             chunks_total=result.chunks_total,
             chunks_skipped=result.chunks_skipped,
@@ -1046,9 +1176,8 @@ class SearchRepositoryBase(ABC):
                     prepare_seconds=prepare_seconds,
                 )
 
-            # --- Upsert changed / new chunks, collect embedding jobs ---
             timestamp_expr = self._timestamp_now_expr()
-            embedding_jobs: list[tuple[int, str]] = []
+            pending_records: list[dict[str, str]] = []
             skipped_chunks_count = 0
             for record in chunk_records:
                 current = existing_by_key.get(record["chunk_key"])
@@ -1081,9 +1210,29 @@ class SearchRepositoryBase(ABC):
                                     "embedding_model": current_embedding_model,
                                 },
                             )
-                        skipped_chunks_count += 1
-                        continue
+                    skipped_chunks_count += 1
+                    continue
 
+                pending_records.append(record)
+
+            shard_plan = self._plan_entity_vector_shard(pending_records)
+            self._log_vector_shard_plan(entity_id=entity_id, shard_plan=shard_plan)
+
+            # Trigger: oversized entities can accumulate thousands of pending chunks.
+            # Why: scheduling only one deterministic shard bounds memory and wall clock.
+            # Outcome: future runs resume from the remaining chunk rows without redoing completed work.
+            scheduled_records = [
+                record
+                for record in sorted(pending_records, key=lambda record: record["chunk_key"])
+                if record["chunk_key"] in shard_plan.scheduled_chunk_keys
+            ]
+
+            # --- Upsert scheduled changed / new chunks, collect embedding jobs ---
+            embedding_jobs: list[tuple[int, str]] = []
+            for record in scheduled_records:
+                current = existing_by_key.get(record["chunk_key"])
+                if current:
+                    row_id = int(current.id)
                     if (
                         current.source_hash != record["source_hash"]
                         or current.entity_fingerprint != current_entity_fingerprint
@@ -1139,7 +1288,10 @@ class SearchRepositoryBase(ABC):
                 "stale_chunks_count={stale_chunks_count} "
                 "orphan_chunks_count={orphan_chunks_count} "
                 "chunks_skipped={chunks_skipped} "
-                "embedding_jobs_count={embedding_jobs_count}",
+                "embedding_jobs_count={embedding_jobs_count} "
+                "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
+                "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard} "
+                "oversized_entity={oversized_entity} entity_complete={entity_complete}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 existing_chunks_count=existing_chunks_count,
@@ -1147,6 +1299,12 @@ class SearchRepositoryBase(ABC):
                 orphan_chunks_count=orphan_chunks_count,
                 chunks_skipped=skipped_chunks_count,
                 embedding_jobs_count=len(embedding_jobs),
+                pending_jobs_total=shard_plan.pending_jobs_total,
+                shard_index=shard_plan.shard_index,
+                shard_count=shard_plan.shard_count,
+                remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
+                oversized_entity=shard_plan.oversized_entity,
+                entity_complete=shard_plan.entity_complete,
             )
             await session.commit()
 
@@ -1158,6 +1316,12 @@ class SearchRepositoryBase(ABC):
             embedding_jobs=embedding_jobs,
             chunks_total=built_chunk_records_count,
             chunks_skipped=skipped_chunks_count,
+            entity_complete=shard_plan.entity_complete,
+            oversized_entity=shard_plan.oversized_entity,
+            pending_jobs_total=shard_plan.pending_jobs_total,
+            shard_index=shard_plan.shard_index,
+            shard_count=shard_plan.shard_count,
+            remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
             prepare_seconds=prepare_seconds,
         )
 
@@ -1221,7 +1385,7 @@ class SearchRepositoryBase(ABC):
             runtime.embed_seconds += embed_seconds * flush_share
             runtime.write_seconds += write_seconds * flush_share
 
-            if runtime.remaining_jobs <= 0:
+            if runtime.remaining_jobs <= 0 and runtime.entity_complete:
                 synced_entity_ids.add(entity_id)
 
         return embed_seconds, write_seconds
@@ -1231,6 +1395,7 @@ class SearchRepositoryBase(ABC):
         *,
         entity_runtime: dict[int, _EntitySyncRuntime],
         synced_entity_ids: set[int],
+        deferred_entity_ids: set[int],
     ) -> float:
         """Finalize completed entities and return cumulative queue wait seconds."""
         queue_wait_seconds_total = 0.0
@@ -1238,7 +1403,10 @@ class SearchRepositoryBase(ABC):
             if runtime.remaining_jobs > 0:
                 continue
 
-            synced_entity_ids.add(entity_id)
+            if runtime.entity_complete:
+                synced_entity_ids.add(entity_id)
+            else:
+                deferred_entity_ids.add(entity_id)
             total_seconds = time.perf_counter() - runtime.sync_start
             queue_wait_seconds = max(
                 0.0,
@@ -1260,6 +1428,12 @@ class SearchRepositoryBase(ABC):
                 chunks_skipped=runtime.chunks_skipped,
                 embedding_jobs_count=runtime.embedding_jobs_count,
                 entity_skipped=runtime.entity_skipped,
+                entity_complete=runtime.entity_complete,
+                oversized_entity=runtime.oversized_entity,
+                pending_jobs_total=runtime.pending_jobs_total,
+                shard_index=runtime.shard_index,
+                shard_count=runtime.shard_count,
+                remaining_jobs_after_shard=runtime.remaining_jobs_after_shard,
             )
             entity_runtime.pop(entity_id, None)
 
@@ -1279,6 +1453,12 @@ class SearchRepositoryBase(ABC):
         chunks_skipped: int,
         embedding_jobs_count: int,
         entity_skipped: bool,
+        entity_complete: bool,
+        oversized_entity: bool,
+        pending_jobs_total: int,
+        shard_index: int,
+        shard_count: int,
+        remaining_jobs_after_shard: int,
     ) -> None:
         """Log completion and slow-entity warnings with a consistent format."""
         logger.info(
@@ -1287,7 +1467,10 @@ class SearchRepositoryBase(ABC):
             "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
             "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
             "chunks_total={chunks_total} chunks_skipped={chunks_skipped} "
-            "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped}",
+            "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped} "
+            "entity_complete={entity_complete} oversized_entity={oversized_entity} "
+            "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
+            "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard}",
             project_id=self.project_id,
             entity_id=entity_id,
             total_seconds=total_seconds,
@@ -1300,6 +1483,12 @@ class SearchRepositoryBase(ABC):
             chunks_skipped=chunks_skipped,
             embedding_jobs_count=embedding_jobs_count,
             entity_skipped=entity_skipped,
+            entity_complete=entity_complete,
+            oversized_entity=oversized_entity,
+            pending_jobs_total=pending_jobs_total,
+            shard_index=shard_index,
+            shard_count=shard_count,
+            remaining_jobs_after_shard=remaining_jobs_after_shard,
         )
         if total_seconds > 10:
             logger.warning(
@@ -1308,7 +1497,10 @@ class SearchRepositoryBase(ABC):
                 "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
                 "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
                 "chunks_total={chunks_total} chunks_skipped={chunks_skipped} "
-                "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped}",
+                "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped} "
+                "entity_complete={entity_complete} oversized_entity={oversized_entity} "
+                "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
+                "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 total_seconds=total_seconds,
@@ -1321,6 +1513,12 @@ class SearchRepositoryBase(ABC):
                 chunks_skipped=chunks_skipped,
                 embedding_jobs_count=embedding_jobs_count,
                 entity_skipped=entity_skipped,
+                entity_complete=entity_complete,
+                oversized_entity=oversized_entity,
+                pending_jobs_total=pending_jobs_total,
+                shard_index=shard_index,
+                shard_count=shard_count,
+                remaining_jobs_after_shard=remaining_jobs_after_shard,
             )
 
     async def _prepare_vector_session(self, session: AsyncSession) -> None:

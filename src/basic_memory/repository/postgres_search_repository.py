@@ -533,6 +533,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         pending_jobs: list[_PendingEmbeddingJob] = []
         entity_runtime: dict[int, _EntitySyncRuntime] = {}
         failed_entity_ids: set[int] = set()
+        deferred_entity_ids: set[int] = set()
         synced_entity_ids: set[int] = set()
 
         for window_start in range(0, total_entities, POSTGRES_VECTOR_PREPARE_CONCURRENCY):
@@ -572,7 +573,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 result.prepare_seconds_total += prepared_sync.prepare_seconds
 
                 if embedding_jobs_count == 0:
-                    synced_entity_ids.add(entity_id)
+                    if prepared_sync.entity_complete:
+                        synced_entity_ids.add(entity_id)
+                    else:
+                        deferred_entity_ids.add(entity_id)
                     total_seconds = time.perf_counter() - prepared_sync.sync_start
                     queue_wait_seconds = max(0.0, total_seconds - prepared_sync.prepare_seconds)
                     result.queue_wait_seconds_total += queue_wait_seconds
@@ -588,6 +592,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         chunks_skipped=prepared_sync.chunks_skipped,
                         embedding_jobs_count=0,
                         entity_skipped=prepared_sync.entity_skipped,
+                        entity_complete=prepared_sync.entity_complete,
+                        oversized_entity=prepared_sync.oversized_entity,
+                        pending_jobs_total=prepared_sync.pending_jobs_total,
+                        shard_index=prepared_sync.shard_index,
+                        shard_count=prepared_sync.shard_count,
+                        remaining_jobs_after_shard=prepared_sync.remaining_jobs_after_shard,
                     )
                     continue
 
@@ -599,6 +609,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     chunks_total=prepared_sync.chunks_total,
                     chunks_skipped=prepared_sync.chunks_skipped,
                     entity_skipped=prepared_sync.entity_skipped,
+                    entity_complete=prepared_sync.entity_complete,
+                    oversized_entity=prepared_sync.oversized_entity,
+                    pending_jobs_total=prepared_sync.pending_jobs_total,
+                    shard_index=prepared_sync.shard_index,
+                    shard_count=prepared_sync.shard_count,
+                    remaining_jobs_after_shard=prepared_sync.remaining_jobs_after_shard,
                     prepare_seconds=prepared_sync.prepare_seconds,
                 )
                 pending_jobs.extend(
@@ -624,10 +640,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
                             entity_runtime=entity_runtime,
                             synced_entity_ids=synced_entity_ids,
+                            deferred_entity_ids=deferred_entity_ids,
                         )
                     except Exception as exc:
                         affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                         failed_entity_ids.update(affected_entity_ids)
+                        synced_entity_ids.difference_update(affected_entity_ids)
+                        deferred_entity_ids.difference_update(affected_entity_ids)
                         for failed_entity_id in affected_entity_ids:
                             entity_runtime.pop(failed_entity_id, None)
                         logger.warning(
@@ -654,10 +673,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
                     entity_runtime=entity_runtime,
                     synced_entity_ids=synced_entity_ids,
+                    deferred_entity_ids=deferred_entity_ids,
                 )
             except Exception as exc:
                 affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                 failed_entity_ids.update(affected_entity_ids)
+                synced_entity_ids.difference_update(affected_entity_ids)
+                deferred_entity_ids.difference_update(affected_entity_ids)
                 for failed_entity_id in affected_entity_ids:
                     entity_runtime.pop(failed_entity_id, None)
                 logger.warning(
@@ -672,6 +694,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         if entity_runtime:
             orphan_runtime_entities = sorted(entity_runtime.keys())
             failed_entity_ids.update(orphan_runtime_entities)
+            synced_entity_ids.difference_update(orphan_runtime_entities)
+            deferred_entity_ids.difference_update(orphan_runtime_entities)
             logger.warning(
                 "Vector batch sync left unfinished entities after flushes: "
                 "project_id={project_id} unfinished_entities={unfinished_entities}",
@@ -680,13 +704,17 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
 
         synced_entity_ids.difference_update(failed_entity_ids)
+        deferred_entity_ids.difference_update(failed_entity_ids)
+        deferred_entity_ids.difference_update(synced_entity_ids)
         result.failed_entity_ids = sorted(failed_entity_ids)
         result.entities_failed = len(result.failed_entity_ids)
+        result.entities_deferred = len(deferred_entity_ids)
         result.entities_synced = len(synced_entity_ids)
 
         logger.info(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
+            "entities_deferred={entities_deferred} "
             "entities_skipped={entities_skipped} chunks_total={chunks_total} "
             "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
             "prepare_seconds_total={prepare_seconds_total:.3f} "
@@ -696,6 +724,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             entities_total=result.entities_total,
             entities_synced=result.entities_synced,
             entities_failed=result.entities_failed,
+            entities_deferred=result.entities_deferred,
             entities_skipped=result.entities_skipped,
             chunks_total=result.chunks_total,
             chunks_skipped=result.chunks_skipped,
@@ -849,14 +878,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     prepare_seconds=prepare_seconds,
                 )
 
-            upsert_records: list[dict[str, str]] = []
-            embedding_jobs: list[tuple[int, str]] = []
+            pending_records: list[dict[str, str]] = []
             skipped_chunks_count = 0
 
             for record in chunk_records:
                 current = existing_by_key.get(record["chunk_key"])
                 if current is None:
-                    upsert_records.append(record)
+                    pending_records.append(record)
                     continue
 
                 row_id = int(current["id"])
@@ -886,7 +914,19 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     skipped_chunks_count += 1
                     continue
 
-                upsert_records.append(record)
+                pending_records.append(record)
+
+            shard_plan = self._plan_entity_vector_shard(pending_records)
+            self._log_vector_shard_plan(entity_id=entity_id, shard_plan=shard_plan)
+
+            scheduled_records = [
+                record
+                for record in sorted(pending_records, key=lambda record: record["chunk_key"])
+                if record["chunk_key"] in shard_plan.scheduled_chunk_keys
+            ]
+
+            embedding_jobs: list[tuple[int, str]] = []
+            upsert_records = list(scheduled_records)
 
             if upsert_records:
                 upsert_params: dict[str, object] = {
@@ -943,7 +983,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 "stale_chunks_count={stale_chunks_count} "
                 "orphan_chunks_count={orphan_chunks_count} "
                 "chunks_skipped={chunks_skipped} "
-                "embedding_jobs_count={embedding_jobs_count}",
+                "embedding_jobs_count={embedding_jobs_count} "
+                "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
+                "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard} "
+                "oversized_entity={oversized_entity} entity_complete={entity_complete}",
                 project_id=self.project_id,
                 entity_id=entity_id,
                 existing_chunks_count=existing_chunks_count,
@@ -951,6 +994,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 orphan_chunks_count=orphan_chunks_count,
                 chunks_skipped=skipped_chunks_count,
                 embedding_jobs_count=len(embedding_jobs),
+                pending_jobs_total=shard_plan.pending_jobs_total,
+                shard_index=shard_plan.shard_index,
+                shard_count=shard_plan.shard_count,
+                remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
+                oversized_entity=shard_plan.oversized_entity,
+                entity_complete=shard_plan.entity_complete,
             )
 
         prepare_seconds = time.perf_counter() - sync_start
@@ -961,6 +1010,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
             embedding_jobs=embedding_jobs,
             chunks_total=built_chunk_records_count,
             chunks_skipped=skipped_chunks_count,
+            entity_complete=shard_plan.entity_complete,
+            oversized_entity=shard_plan.oversized_entity,
+            pending_jobs_total=shard_plan.pending_jobs_total,
+            shard_index=shard_plan.shard_index,
+            shard_count=shard_plan.shard_count,
+            remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
             prepare_seconds=prepare_seconds,
         )
 
