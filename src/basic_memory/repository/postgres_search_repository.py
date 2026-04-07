@@ -18,9 +18,6 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
-    VectorSyncBatchResult,
-    _EntitySyncRuntime,
-    _PendingEmbeddingJob,
     _PreparedEntityVectorSync,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
@@ -494,248 +491,22 @@ class PostgresSearchRepository(SearchRepositoryBase):
         )
         return [dict(row) for row in vector_result.mappings().all()]
 
-    async def sync_entity_vectors_batch(
-        self,
-        entity_ids: list[int],
-        progress_callback=None,
-    ) -> VectorSyncBatchResult:
-        """Sync semantic vectors with concurrent Postgres preparation windows.
+    def _vector_prepare_window_size(self) -> int:
+        """Use a bounded config-driven prepare window for Postgres vector sync."""
+        return self._semantic_postgres_prepare_concurrency
 
-        Trigger: cloud indexing uses Neon Postgres where network latency dominates
-        thousands of per-entity prepare queries.
-        Why: preparing a small config-driven window of entities concurrently hides
-        round-trip latency without exhausting the tenant connection pool.
-        Outcome: Postgres vector sync keeps the existing flush semantics while reducing
-        wall-clock time on large cloud projects.
-        """
-        self._assert_semantic_available()
-        await self._ensure_vector_tables()
-        assert self._embedding_provider is not None
-
-        total_entities = len(entity_ids)
-        result = VectorSyncBatchResult(
-            entities_total=total_entities,
-            entities_synced=0,
-            entities_failed=0,
+    async def _prepare_entity_vector_jobs_window(
+        self, entity_ids: list[int]
+    ) -> list[_PreparedEntityVectorSync | BaseException]:
+        """Prepare one Postgres window concurrently to hide DB round-trip latency."""
+        prepared_window = await asyncio.gather(
+            *(self._prepare_entity_vector_jobs(entity_id) for entity_id in entity_ids),
+            return_exceptions=True,
         )
-        if total_entities == 0:
-            return result
-
-        logger.info(
-            "Vector batch sync start: project_id={project_id} entities_total={entities_total} "
-            "sync_batch_size={sync_batch_size} prepare_concurrency={prepare_concurrency}",
-            project_id=self.project_id,
-            entities_total=total_entities,
-            sync_batch_size=self._semantic_embedding_sync_batch_size,
-            prepare_concurrency=self._semantic_postgres_prepare_concurrency,
-        )
-
-        pending_jobs: list[_PendingEmbeddingJob] = []
-        entity_runtime: dict[int, _EntitySyncRuntime] = {}
-        failed_entity_ids: set[int] = set()
-        deferred_entity_ids: set[int] = set()
-        synced_entity_ids: set[int] = set()
-
-        for window_start in range(0, total_entities, self._semantic_postgres_prepare_concurrency):
-            window_entity_ids = entity_ids[
-                window_start : window_start + self._semantic_postgres_prepare_concurrency
-            ]
-
-            if progress_callback is not None:
-                for offset, entity_id in enumerate(window_entity_ids, start=window_start):
-                    progress_callback(entity_id, offset, total_entities)
-
-            prepared_window = await asyncio.gather(
-                *(self._prepare_entity_vector_jobs(entity_id) for entity_id in window_entity_ids),
-                return_exceptions=True,
-            )
-
-            for entity_id, prepared in zip(window_entity_ids, prepared_window, strict=True):
-                if isinstance(prepared, BaseException):
-                    failed_entity_ids.add(entity_id)
-                    logger.warning(
-                        "Vector batch sync entity prepare failed: project_id={project_id} "
-                        "entity_id={entity_id} error={error}",
-                        project_id=self.project_id,
-                        entity_id=entity_id,
-                        error=str(prepared),
-                    )
-                    continue
-
-                prepared_sync = cast(_PreparedEntityVectorSync, prepared)
-
-                embedding_jobs_count = len(prepared_sync.embedding_jobs)
-                result.chunks_total += prepared_sync.chunks_total
-                result.chunks_skipped += prepared_sync.chunks_skipped
-                if prepared_sync.entity_skipped:
-                    result.entities_skipped += 1
-                result.embedding_jobs_total += embedding_jobs_count
-                result.prepare_seconds_total += prepared_sync.prepare_seconds
-
-                if embedding_jobs_count == 0:
-                    if prepared_sync.entity_complete:
-                        synced_entity_ids.add(entity_id)
-                    else:
-                        deferred_entity_ids.add(entity_id)
-                    total_seconds = time.perf_counter() - prepared_sync.sync_start
-                    queue_wait_seconds = max(0.0, total_seconds - prepared_sync.prepare_seconds)
-                    result.queue_wait_seconds_total += queue_wait_seconds
-                    self._log_vector_sync_complete(
-                        entity_id=entity_id,
-                        total_seconds=total_seconds,
-                        prepare_seconds=prepared_sync.prepare_seconds,
-                        queue_wait_seconds=queue_wait_seconds,
-                        embed_seconds=0.0,
-                        write_seconds=0.0,
-                        source_rows_count=prepared_sync.source_rows_count,
-                        chunks_total=prepared_sync.chunks_total,
-                        chunks_skipped=prepared_sync.chunks_skipped,
-                        embedding_jobs_count=0,
-                        entity_skipped=prepared_sync.entity_skipped,
-                        entity_complete=prepared_sync.entity_complete,
-                        oversized_entity=prepared_sync.oversized_entity,
-                        pending_jobs_total=prepared_sync.pending_jobs_total,
-                        shard_index=prepared_sync.shard_index,
-                        shard_count=prepared_sync.shard_count,
-                        remaining_jobs_after_shard=prepared_sync.remaining_jobs_after_shard,
-                    )
-                    continue
-
-                entity_runtime[entity_id] = _EntitySyncRuntime(
-                    sync_start=prepared_sync.sync_start,
-                    source_rows_count=prepared_sync.source_rows_count,
-                    embedding_jobs_count=embedding_jobs_count,
-                    remaining_jobs=embedding_jobs_count,
-                    chunks_total=prepared_sync.chunks_total,
-                    chunks_skipped=prepared_sync.chunks_skipped,
-                    entity_skipped=prepared_sync.entity_skipped,
-                    entity_complete=prepared_sync.entity_complete,
-                    oversized_entity=prepared_sync.oversized_entity,
-                    pending_jobs_total=prepared_sync.pending_jobs_total,
-                    shard_index=prepared_sync.shard_index,
-                    shard_count=prepared_sync.shard_count,
-                    remaining_jobs_after_shard=prepared_sync.remaining_jobs_after_shard,
-                    prepare_seconds=prepared_sync.prepare_seconds,
-                )
-                pending_jobs.extend(
-                    _PendingEmbeddingJob(
-                        entity_id=entity_id,
-                        chunk_row_id=row_id,
-                        chunk_text=chunk_text,
-                    )
-                    for row_id, chunk_text in prepared_sync.embedding_jobs
-                )
-
-                while len(pending_jobs) >= self._semantic_embedding_sync_batch_size:
-                    flush_jobs = pending_jobs[: self._semantic_embedding_sync_batch_size]
-                    pending_jobs = pending_jobs[self._semantic_embedding_sync_batch_size :]
-                    try:
-                        embed_seconds, write_seconds = await self._flush_embedding_jobs(
-                            flush_jobs=flush_jobs,
-                            entity_runtime=entity_runtime,
-                            synced_entity_ids=synced_entity_ids,
-                        )
-                        result.embed_seconds_total += embed_seconds
-                        result.write_seconds_total += write_seconds
-                        (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
-                            entity_runtime=entity_runtime,
-                            synced_entity_ids=synced_entity_ids,
-                            deferred_entity_ids=deferred_entity_ids,
-                        )
-                    except Exception as exc:
-                        affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
-                        failed_entity_ids.update(affected_entity_ids)
-                        synced_entity_ids.difference_update(affected_entity_ids)
-                        deferred_entity_ids.difference_update(affected_entity_ids)
-                        for failed_entity_id in affected_entity_ids:
-                            entity_runtime.pop(failed_entity_id, None)
-                        logger.warning(
-                            "Vector batch sync flush failed: project_id={project_id} "
-                            "affected_entities={affected_entities} chunk_count={chunk_count} "
-                            "error={error}",
-                            project_id=self.project_id,
-                            affected_entities=affected_entity_ids,
-                            chunk_count=len(flush_jobs),
-                            error=str(exc),
-                        )
-
-        if pending_jobs:
-            flush_jobs = list(pending_jobs)
-            pending_jobs = []
-            try:
-                embed_seconds, write_seconds = await self._flush_embedding_jobs(
-                    flush_jobs=flush_jobs,
-                    entity_runtime=entity_runtime,
-                    synced_entity_ids=synced_entity_ids,
-                )
-                result.embed_seconds_total += embed_seconds
-                result.write_seconds_total += write_seconds
-                (result.queue_wait_seconds_total) += self._finalize_completed_entity_syncs(
-                    entity_runtime=entity_runtime,
-                    synced_entity_ids=synced_entity_ids,
-                    deferred_entity_ids=deferred_entity_ids,
-                )
-            except Exception as exc:
-                affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
-                failed_entity_ids.update(affected_entity_ids)
-                synced_entity_ids.difference_update(affected_entity_ids)
-                deferred_entity_ids.difference_update(affected_entity_ids)
-                for failed_entity_id in affected_entity_ids:
-                    entity_runtime.pop(failed_entity_id, None)
-                logger.warning(
-                    "Vector batch sync final flush failed: project_id={project_id} "
-                    "affected_entities={affected_entities} chunk_count={chunk_count} error={error}",
-                    project_id=self.project_id,
-                    affected_entities=affected_entity_ids,
-                    chunk_count=len(flush_jobs),
-                    error=str(exc),
-                )
-
-        if entity_runtime:
-            orphan_runtime_entities = sorted(entity_runtime.keys())
-            failed_entity_ids.update(orphan_runtime_entities)
-            synced_entity_ids.difference_update(orphan_runtime_entities)
-            deferred_entity_ids.difference_update(orphan_runtime_entities)
-            logger.warning(
-                "Vector batch sync left unfinished entities after flushes: "
-                "project_id={project_id} unfinished_entities={unfinished_entities}",
-                project_id=self.project_id,
-                unfinished_entities=orphan_runtime_entities,
-            )
-
-        synced_entity_ids.difference_update(failed_entity_ids)
-        deferred_entity_ids.difference_update(failed_entity_ids)
-        deferred_entity_ids.difference_update(synced_entity_ids)
-        result.failed_entity_ids = sorted(failed_entity_ids)
-        result.entities_failed = len(result.failed_entity_ids)
-        result.entities_deferred = len(deferred_entity_ids)
-        result.entities_synced = len(synced_entity_ids)
-
-        logger.info(
-            "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
-            "entities_synced={entities_synced} entities_failed={entities_failed} "
-            "entities_deferred={entities_deferred} "
-            "entities_skipped={entities_skipped} chunks_total={chunks_total} "
-            "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
-            "prepare_seconds_total={prepare_seconds_total:.3f} "
-            "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
-            "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
-            project_id=self.project_id,
-            entities_total=result.entities_total,
-            entities_synced=result.entities_synced,
-            entities_failed=result.entities_failed,
-            entities_deferred=result.entities_deferred,
-            entities_skipped=result.entities_skipped,
-            chunks_total=result.chunks_total,
-            chunks_skipped=result.chunks_skipped,
-            embedding_jobs_total=result.embedding_jobs_total,
-            prepare_seconds_total=result.prepare_seconds_total,
-            queue_wait_seconds_total=result.queue_wait_seconds_total,
-            embed_seconds_total=result.embed_seconds_total,
-            write_seconds_total=result.write_seconds_total,
-        )
-
-        return result
+        return [
+            cast(_PreparedEntityVectorSync | BaseException, prepared)
+            for prepared in prepared_window
+        ]
 
     async def _prepare_entity_vector_jobs(self, entity_id: int) -> _PreparedEntityVectorSync:
         """Prepare chunk mutations with Postgres-specific bulk upserts."""
@@ -783,6 +554,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     source_rows_count=source_rows_count,
                 )
                 await self._delete_entity_chunks(session, entity_id)
+                await session.commit()
                 prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
@@ -807,6 +579,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             if not chunk_records:
                 await self._delete_entity_chunks(session, entity_id)
+                await session.commit()
                 prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
@@ -830,12 +603,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
             existing_rows = existing_rows_result.mappings().all()
             existing_by_key = {str(row["chunk_key"]): row for row in existing_rows}
             existing_chunks_count = len(existing_by_key)
-            incoming_by_key = {record["chunk_key"]: record for record in chunk_records}
+            incoming_chunk_keys = {record["chunk_key"] for record in chunk_records}
 
             stale_ids = [
                 int(row["id"])
                 for chunk_key, row in existing_by_key.items()
-                if chunk_key not in incoming_by_key
+                if chunk_key not in incoming_chunk_keys
             ]
             stale_chunks_count = len(stale_ids)
             if stale_ids:
@@ -934,6 +707,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     "entity_id": entity_id,
                 }
                 upsert_values: list[str] = []
+                # The SQL template is built from integer enumerate() indices only.
+                # No user-controlled text is interpolated into the statement.
                 for index, record in enumerate(upsert_records):
                     upsert_params[f"chunk_key_{index}"] = record["chunk_key"]
                     upsert_params[f"chunk_text_{index}"] = record["chunk_text"]
@@ -1028,6 +803,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         params: dict[str, object] = {"project_id": self.project_id}
         value_rows: list[str] = []
 
+        # The SQL template is built from integer enumerate() indices only.
+        # No user-controlled text is interpolated into the statement.
         for index, ((row_id, _), vector) in enumerate(zip(jobs, embeddings, strict=True)):
             params[f"chunk_id_{index}"] = row_id
             params[f"embedding_{index}"] = self._format_pgvector_literal(vector)
