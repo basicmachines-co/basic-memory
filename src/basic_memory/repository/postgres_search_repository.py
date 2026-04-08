@@ -512,12 +512,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """Prepare chunk mutations with Postgres-specific bulk upserts."""
         sync_start = time.perf_counter()
 
-        logger.info(
-            "Vector sync start: project_id={project_id} entity_id={entity_id}",
-            project_id=self.project_id,
-            entity_id=entity_id,
-        )
-
         async with db.scoped_session(self.session_maker) as session:
             await self._prepare_vector_session(session)
 
@@ -546,13 +540,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
             source_rows_count = len(rows)
 
             if not rows:
-                logger.info(
-                    "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
-                    "source_rows_count={source_rows_count} built_chunk_records_count=0",
-                    project_id=self.project_id,
-                    entity_id=entity_id,
-                    source_rows_count=source_rows_count,
-                )
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
                 prepare_seconds = time.perf_counter() - sync_start
@@ -568,15 +555,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
             built_chunk_records_count = len(chunk_records)
             current_entity_fingerprint = self._build_entity_fingerprint(chunk_records)
             current_embedding_model = self._embedding_model_key()
-            logger.info(
-                "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
-                "source_rows_count={source_rows_count} "
-                "built_chunk_records_count={built_chunk_records_count}",
-                project_id=self.project_id,
-                entity_id=entity_id,
-                source_rows_count=source_rows_count,
-                built_chunk_records_count=built_chunk_records_count,
-            )
             if not chunk_records:
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
@@ -629,16 +607,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
             )
             if skip_unchanged_entity:
-                logger.info(
-                    "Vector sync skipped unchanged entity: project_id={project_id} "
-                    "entity_id={entity_id} chunks_skipped={chunks_skipped} "
-                    "entity_fingerprint={entity_fingerprint} embedding_model={embedding_model}",
-                    project_id=self.project_id,
-                    entity_id=entity_id,
-                    chunks_skipped=built_chunk_records_count,
-                    entity_fingerprint=current_entity_fingerprint,
-                    embedding_model=current_embedding_model,
-                )
                 prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
@@ -751,31 +719,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 for record in upsert_records:
                     row_id = upserted_ids_by_key[record["chunk_key"]]
                     embedding_jobs.append((row_id, record["chunk_text"]))
-
-            logger.info(
-                "Vector sync diff complete: project_id={project_id} entity_id={entity_id} "
-                "existing_chunks_count={existing_chunks_count} "
-                "stale_chunks_count={stale_chunks_count} "
-                "orphan_chunks_count={orphan_chunks_count} "
-                "chunks_skipped={chunks_skipped} "
-                "embedding_jobs_count={embedding_jobs_count} "
-                "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
-                "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard} "
-                "oversized_entity={oversized_entity} entity_complete={entity_complete}",
-                project_id=self.project_id,
-                entity_id=entity_id,
-                existing_chunks_count=existing_chunks_count,
-                stale_chunks_count=stale_chunks_count,
-                orphan_chunks_count=orphan_chunks_count,
-                chunks_skipped=skipped_chunks_count,
-                embedding_jobs_count=len(embedding_jobs),
-                pending_jobs_total=shard_plan.pending_jobs_total,
-                shard_index=shard_plan.shard_index,
-                shard_count=shard_plan.shard_count,
-                remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
-                oversized_entity=shard_plan.oversized_entity,
-                entity_complete=shard_plan.entity_complete,
-            )
 
         prepare_seconds = time.perf_counter() - sync_start
         return _PreparedEntityVectorSync(

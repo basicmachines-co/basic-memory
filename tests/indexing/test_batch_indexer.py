@@ -15,6 +15,7 @@ from basic_memory.indexing import (
     IndexFrontmatterWriteResult,
     IndexInputFile,
 )
+from basic_memory.services.exceptions import SyncFatalError
 
 
 class _TestFileWriter:
@@ -470,3 +471,81 @@ async def test_batch_indexer_assigns_unique_permalinks_for_batch_local_conflicts
     assert len(entities) == 2
     permalinks = [entity.permalink for entity in entities if entity.permalink]
     assert len(set(permalinks)) == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter_delimiters(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    app_config.disable_permalinks = True
+    app_config.ensure_frontmatter_on_sync = False
+
+    path = "notes/malformed.md"
+    malformed_content = dedent(
+        """
+        ---
+        this is not valid frontmatter
+        # Malformed Frontmatter
+
+        The parser should still index this file.
+        """
+    ).strip()
+    await _create_file(project_config.home / path, malformed_content)
+
+    files = {path: await _load_input(file_service, path)}
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        files,
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert len(result.indexed) == 1
+    assert result.indexed[0].markdown_content == malformed_content
+
+    entity = await entity_repository.get_by_file_path(path)
+    assert entity is not None
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_re_raises_fatal_sync_errors(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+):
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    async def fatal_worker(path: str) -> str:
+        raise SyncFatalError(f"fatal batch failure for {path}")
+
+    with pytest.raises(SyncFatalError, match="fatal batch failure"):
+        await batch_indexer._run_bounded(
+            ["notes/fatal.md"],
+            limit=1,
+            worker=fatal_worker,
+        )

@@ -590,7 +590,6 @@ class SearchRepositoryBase(ABC):
         if shard_plan.pending_jobs_total == 0:
             return
 
-        scheduled_jobs_count = shard_plan.pending_jobs_total - shard_plan.remaining_jobs_after_shard
         if shard_plan.oversized_entity:
             logger.warning(
                 "Vector sync oversized entity detected: project_id={project_id} "
@@ -602,23 +601,6 @@ class SearchRepositoryBase(ABC):
                 shard_size=OVERSIZED_ENTITY_VECTOR_SHARD_SIZE,
                 shard_count=shard_plan.shard_count,
             )
-
-        logger.info(
-            "Vector sync shard planned: project_id={project_id} entity_id={entity_id} "
-            "pending_jobs_total={pending_jobs_total} scheduled_jobs_count={scheduled_jobs_count} "
-            "shard_index={shard_index} shard_count={shard_count} "
-            "remaining_jobs_after_shard={remaining_jobs_after_shard} "
-            "oversized_entity={oversized_entity} entity_complete={entity_complete}",
-            project_id=self.project_id,
-            entity_id=entity_id,
-            pending_jobs_total=shard_plan.pending_jobs_total,
-            scheduled_jobs_count=scheduled_jobs_count,
-            shard_index=shard_plan.shard_index,
-            shard_count=shard_plan.shard_count,
-            remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
-            oversized_entity=shard_plan.oversized_entity,
-            entity_complete=shard_plan.entity_complete,
-        )
 
     # --- Text splitting ---
 
@@ -1044,12 +1026,6 @@ class SearchRepositoryBase(ABC):
         """Prepare chunk mutations and embedding jobs for one entity."""
         sync_start = time.perf_counter()
 
-        logger.info(
-            "Vector sync start: project_id={project_id} entity_id={entity_id}",
-            project_id=self.project_id,
-            entity_id=entity_id,
-        )
-
         async with db.scoped_session(self.session_maker) as session:
             await self._prepare_vector_session(session)
 
@@ -1080,15 +1056,6 @@ class SearchRepositoryBase(ABC):
 
             # No search_index rows → delete all chunk/embedding data for this entity.
             if not rows:
-                logger.info(
-                    "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
-                    "source_rows_count={source_rows_count} "
-                    "built_chunk_records_count={built_chunk_records_count}",
-                    project_id=self.project_id,
-                    entity_id=entity_id,
-                    source_rows_count=source_rows_count,
-                    built_chunk_records_count=built_chunk_records_count,
-                )
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
                 prepare_seconds = time.perf_counter() - sync_start
@@ -1104,15 +1071,6 @@ class SearchRepositoryBase(ABC):
             built_chunk_records_count = len(chunk_records)
             current_entity_fingerprint = self._build_entity_fingerprint(chunk_records)
             current_embedding_model = self._embedding_model_key()
-            logger.info(
-                "Vector sync source prepared: project_id={project_id} entity_id={entity_id} "
-                "source_rows_count={source_rows_count} "
-                "built_chunk_records_count={built_chunk_records_count}",
-                project_id=self.project_id,
-                entity_id=entity_id,
-                source_rows_count=source_rows_count,
-                built_chunk_records_count=built_chunk_records_count,
-            )
             if not chunk_records:
                 await self._delete_entity_chunks(session, entity_id)
                 await session.commit()
@@ -1178,16 +1136,6 @@ class SearchRepositoryBase(ABC):
                 )
             )
             if skip_unchanged_entity:
-                logger.info(
-                    "Vector sync skipped unchanged entity: project_id={project_id} "
-                    "entity_id={entity_id} chunks_skipped={chunks_skipped} "
-                    "entity_fingerprint={entity_fingerprint} embedding_model={embedding_model}",
-                    project_id=self.project_id,
-                    entity_id=entity_id,
-                    chunks_skipped=built_chunk_records_count,
-                    entity_fingerprint=current_entity_fingerprint,
-                    embedding_model=current_embedding_model,
-                )
                 prepare_seconds = time.perf_counter() - sync_start
                 return _PreparedEntityVectorSync(
                     entity_id=entity_id,
@@ -1305,31 +1253,6 @@ class SearchRepositoryBase(ABC):
                 )
                 row_id = int(inserted.scalar_one())
                 embedding_jobs.append((row_id, record["chunk_text"]))
-
-            logger.info(
-                "Vector sync diff complete: project_id={project_id} entity_id={entity_id} "
-                "existing_chunks_count={existing_chunks_count} "
-                "stale_chunks_count={stale_chunks_count} "
-                "orphan_chunks_count={orphan_chunks_count} "
-                "chunks_skipped={chunks_skipped} "
-                "embedding_jobs_count={embedding_jobs_count} "
-                "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
-                "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard} "
-                "oversized_entity={oversized_entity} entity_complete={entity_complete}",
-                project_id=self.project_id,
-                entity_id=entity_id,
-                existing_chunks_count=existing_chunks_count,
-                stale_chunks_count=stale_chunks_count,
-                orphan_chunks_count=orphan_chunks_count,
-                chunks_skipped=skipped_chunks_count,
-                embedding_jobs_count=len(embedding_jobs),
-                pending_jobs_total=shard_plan.pending_jobs_total,
-                shard_index=shard_plan.shard_index,
-                shard_count=shard_plan.shard_count,
-                remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
-                oversized_entity=shard_plan.oversized_entity,
-                entity_complete=shard_plan.entity_complete,
-            )
             await session.commit()
 
         prepare_seconds = time.perf_counter() - sync_start
@@ -1364,15 +1287,6 @@ class SearchRepositoryBase(ABC):
         texts = [job.chunk_text for job in flush_jobs]
         embeddings = await self._embedding_provider.embed_documents(texts)
         embed_seconds = time.perf_counter() - embed_start
-        embed_rate = (len(flush_jobs) / embed_seconds) if embed_seconds > 0 else 0.0
-        logger.info(
-            "Vector batch embed flush: project_id={project_id} chunk_count={chunk_count} "
-            "embed_seconds={embed_seconds:.3f} embed_rate_chunks_per_second={embed_rate:.2f}",
-            project_id=self.project_id,
-            chunk_count=len(flush_jobs),
-            embed_seconds=embed_seconds,
-            embed_rate=embed_rate,
-        )
         if len(embeddings) != len(flush_jobs):
             raise RuntimeError("Embedding provider returned an unexpected number of vectors.")
 
@@ -1383,15 +1297,6 @@ class SearchRepositoryBase(ABC):
             await self._write_embeddings(session, write_jobs, embeddings)
             await session.commit()
         write_seconds = time.perf_counter() - write_start
-        write_rate = (len(flush_jobs) / write_seconds) if write_seconds > 0 else 0.0
-        logger.info(
-            "Vector batch write flush: project_id={project_id} row_count={row_count} "
-            "write_seconds={write_seconds:.3f} write_rate_rows_per_second={write_rate:.2f}",
-            project_id=self.project_id,
-            row_count=len(flush_jobs),
-            write_seconds=write_seconds,
-            write_rate=write_rate,
-        )
 
         flush_size = len(flush_jobs)
         entity_job_counts: dict[int, int] = {}
@@ -1485,35 +1390,6 @@ class SearchRepositoryBase(ABC):
         remaining_jobs_after_shard: int,
     ) -> None:
         """Log completion and slow-entity warnings with a consistent format."""
-        logger.info(
-            "Vector sync complete: project_id={project_id} entity_id={entity_id} "
-            "total_seconds={total_seconds:.3f} prepare_seconds={prepare_seconds:.3f} "
-            "queue_wait_seconds={queue_wait_seconds:.3f} embed_seconds={embed_seconds:.3f} "
-            "write_seconds={write_seconds:.3f} source_rows_count={source_rows_count} "
-            "chunks_total={chunks_total} chunks_skipped={chunks_skipped} "
-            "embedding_jobs_count={embedding_jobs_count} entity_skipped={entity_skipped} "
-            "entity_complete={entity_complete} oversized_entity={oversized_entity} "
-            "pending_jobs_total={pending_jobs_total} shard_index={shard_index} "
-            "shard_count={shard_count} remaining_jobs_after_shard={remaining_jobs_after_shard}",
-            project_id=self.project_id,
-            entity_id=entity_id,
-            total_seconds=total_seconds,
-            prepare_seconds=prepare_seconds,
-            queue_wait_seconds=queue_wait_seconds,
-            embed_seconds=embed_seconds,
-            write_seconds=write_seconds,
-            source_rows_count=source_rows_count,
-            chunks_total=chunks_total,
-            chunks_skipped=chunks_skipped,
-            embedding_jobs_count=embedding_jobs_count,
-            entity_skipped=entity_skipped,
-            entity_complete=entity_complete,
-            oversized_entity=oversized_entity,
-            pending_jobs_total=pending_jobs_total,
-            shard_index=shard_index,
-            shard_count=shard_count,
-            remaining_jobs_after_shard=remaining_jobs_after_shard,
-        )
         if total_seconds > 10:
             logger.warning(
                 "Vector sync slow entity: project_id={project_id} entity_id={entity_id} "
@@ -1719,22 +1595,6 @@ class SearchRepositoryBase(ABC):
                 return
 
             total_ms = (time.perf_counter() - query_start) * 1000
-            logger.info(
-                "Semantic query timing: project_id={project_id} retrieval_mode={retrieval_mode} "
-                "query_length={query_length} candidate_limit={candidate_limit} "
-                "vector_row_count={vector_row_count} embed_ms={embed_ms:.2f} "
-                "vector_query_ms={vector_query_ms:.2f} hydrate_ms={hydrate_ms:.2f} "
-                "total_ms={total_ms:.2f}",
-                project_id=self.project_id,
-                retrieval_mode="vector",
-                query_length=len(query_text),
-                candidate_limit=candidate_limit,
-                vector_row_count=vector_row_count,
-                embed_ms=embed_ms,
-                vector_query_ms=vector_query_ms,
-                hydrate_ms=hydrate_ms,
-                total_ms=total_ms,
-            )
             if total_ms > 2000:
                 logger.warning(
                     "[SEMANTIC_SLOW_QUERY] Semantic query timing: project_id={project_id} "
@@ -2073,22 +1933,6 @@ class SearchRepositoryBase(ABC):
             output.append(replace(row, score=fused_score))
         fusion_ms = (time.perf_counter() - fusion_start) * 1000
         total_ms = (time.perf_counter() - query_start) * 1000
-        logger.info(
-            "Semantic query timing: project_id={project_id} retrieval_mode={retrieval_mode} "
-            "query_length={query_length} candidate_limit={candidate_limit} "
-            "fts_count={fts_count} vector_count={vector_count} fts_ms={fts_ms:.2f} "
-            "vector_ms={vector_ms:.2f} fusion_ms={fusion_ms:.2f} total_ms={total_ms:.2f}",
-            project_id=self.project_id,
-            retrieval_mode="hybrid",
-            query_length=len(query_text),
-            candidate_limit=candidate_limit,
-            fts_count=len(fts_results),
-            vector_count=len(vector_results),
-            fts_ms=fts_ms,
-            vector_ms=vector_ms,
-            fusion_ms=fusion_ms,
-            total_ms=total_ms,
-        )
         if total_ms > 2500:
             logger.warning(
                 "[SEMANTIC_SLOW_QUERY] Semantic query timing: project_id={project_id} "

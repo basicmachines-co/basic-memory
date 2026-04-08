@@ -52,7 +52,7 @@ def build_index_batches(
         current_paths.append(path)
         current_bytes += file_bytes
 
-        if len(current_paths) >= max_files or current_bytes >= max_bytes:
+        if len(current_paths) >= max_files or current_bytes == max_bytes:
             batches.append(IndexBatch(paths=current_paths, total_bytes=current_bytes))
             current_paths = []
             current_bytes = 0

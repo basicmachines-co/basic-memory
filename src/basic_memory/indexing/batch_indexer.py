@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.file_utils import compute_checksum, has_frontmatter, remove_frontmatter
+from basic_memory.file_utils import compute_checksum, has_frontmatter
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.indexing.models import (
     IndexedEntity,
@@ -21,10 +20,10 @@ from basic_memory.indexing.models import (
     IndexFrontmatterUpdate,
     IndexingBatchResult,
     IndexInputFile,
-    IndexProgress,
 )
 from basic_memory.models import Entity, Relation
 from basic_memory.services import EntityService
+from basic_memory.services.exceptions import SyncFatalError
 from basic_memory.services.search_service import SearchService
 from basic_memory.repository import EntityRepository, RelationRepository
 
@@ -76,7 +75,7 @@ class BatchIndexer:
         *,
         max_concurrent: int,
         parse_max_concurrent: int | None = None,
-        progress_callback: Callable[[IndexProgress], Awaitable[None]] | None = None,
+        existing_permalink_by_path: dict[str, str | None] | None = None,
     ) -> IndexingBatchResult:
         """Index one batch of loaded files with bounded concurrency."""
         if max_concurrent <= 0:
@@ -84,20 +83,9 @@ class BatchIndexer:
 
         ordered_paths = sorted(files)
         if not ordered_paths:
-            result = IndexingBatchResult()
-            if progress_callback is not None:
-                await progress_callback(
-                    IndexProgress(
-                        files_total=0,
-                        files_processed=0,
-                        batches_total=0,
-                        batches_completed=0,
-                    )
-                )
-            return result
+            return IndexingBatchResult()
 
         parse_limit = parse_max_concurrent or max_concurrent
-        batch_start = time.monotonic()
         error_by_path: dict[str, str] = {}
 
         markdown_paths = [path for path in ordered_paths if self._is_markdown(files[path])]
@@ -111,7 +99,8 @@ class BatchIndexer:
         error_by_path.update(parse_errors)
 
         prepared_markdown, normalization_errors = await self._normalize_markdown_batch(
-            prepared_markdown
+            prepared_markdown,
+            existing_permalink_by_path=existing_permalink_by_path,
         )
         error_by_path.update(normalization_errors)
 
@@ -171,21 +160,6 @@ class BatchIndexer:
 
         search_indexed = len(indexed_entities)
 
-        if progress_callback is not None:
-            elapsed_seconds = max(time.monotonic() - batch_start, 0.001)
-            files_per_minute = len(ordered_paths) / elapsed_seconds * 60
-            await progress_callback(
-                IndexProgress(
-                    files_total=len(ordered_paths),
-                    files_processed=len(ordered_paths),
-                    batches_total=1,
-                    batches_completed=1,
-                    current_batch_bytes=sum(max(files[path].size, 0) for path in ordered_paths),
-                    files_per_minute=files_per_minute,
-                    eta_seconds=0.0,
-                )
-            )
-
         return IndexingBatchResult(
             indexed=indexed_entities,
             errors=[(path, error_by_path[path]) for path in ordered_paths if path in error_by_path],
@@ -221,12 +195,21 @@ class BatchIndexer:
     async def _normalize_markdown_batch(
         self,
         prepared_markdown: dict[str, _PreparedMarkdownFile],
+        *,
+        existing_permalink_by_path: dict[str, str | None] | None = None,
     ) -> tuple[dict[str, _PreparedMarkdownFile], dict[str, str]]:
         if not prepared_markdown:
             return {}, {}
 
+        if existing_permalink_by_path is None:
+            existing_permalink_by_path = {
+                path: permalink
+                for path, permalink in (
+                    await self.entity_repository.get_file_path_to_permalink_map()
+                ).items()
+            }
+
         batch_paths = set(prepared_markdown)
-        existing_permalink_by_path = await self.entity_repository.get_file_path_to_permalink_map()
         reserved_permalinks = {
             permalink
             for path, permalink in existing_permalink_by_path.items()
@@ -242,6 +225,7 @@ class BatchIndexer:
                     prepared_markdown[path],
                     reserved_permalinks,
                 )
+                existing_permalink_by_path[path] = normalized[path].markdown.frontmatter.permalink
             except Exception as exc:
                 errors[path] = str(exc)
                 logger.warning("Batch markdown normalization failed", path=path, error=str(exc))
@@ -357,13 +341,18 @@ class BatchIndexer:
             entity_id=updated.id,
             checksum=prepared.final_checksum,
             content_type=prepared.file.content_type,
-            search_content=remove_frontmatter(prepared.content),
+            search_content=(
+                prepared.markdown.content
+                if prepared.markdown.content is not None
+                else prepared.content
+            ),
             markdown_content=prepared.content,
         )
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
         existing = await self.entity_repository.get_by_file_path(file.path, load_relations=False)
+        is_new_entity = existing is None
 
         if existing is None:
             await self.entity_service.resolve_permalink(file.path, skip_conflict_check=True)
@@ -408,7 +397,7 @@ class BatchIndexer:
 
         updated = await self.entity_repository.update(
             entity_id,
-            self._entity_metadata_updates(file, checksum, include_created_at=existing is None),
+            self._entity_metadata_updates(file, checksum, include_created_at=is_new_entity),
         )
         if updated is None:
             raise ValueError(f"Failed to update file entity metadata for {file.path}")
@@ -430,11 +419,15 @@ class BatchIndexer:
         *,
         max_concurrent: int,
     ) -> tuple[int, int]:
-        unresolved_relations: list[Relation] = []
-        for entity_id in entity_ids:
-            unresolved_relations.extend(
-                await self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+        unresolved_relation_lists = await asyncio.gather(
+            *(
+                self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+                for entity_id in entity_ids
             )
+        )
+        unresolved_relations = [
+            relation for relation_list in unresolved_relation_lists for relation in relation_list
+        ]
 
         if not unresolved_relations:
             return 0, 0
@@ -475,11 +468,13 @@ class BatchIndexer:
             *(resolve_relation(relation) for relation in unresolved_relations)
         )
 
-        remaining_unresolved = 0
-        for entity_id in entity_ids:
-            remaining_unresolved += len(
-                await self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+        remaining_relation_lists = await asyncio.gather(
+            *(
+                self.relation_repository.find_unresolved_relations_for_entity(entity_id)
+                for entity_id in entity_ids
             )
+        )
+        remaining_unresolved = sum(len(relations) for relations in remaining_relation_lists)
 
         return sum(resolved_counts), remaining_unresolved
 
@@ -552,6 +547,8 @@ class BatchIndexer:
                 try:
                     results[path] = await worker(path)
                 except Exception as exc:
+                    if isinstance(exc, SyncFatalError) or isinstance(exc.__cause__, SyncFatalError):
+                        raise
                     errors[path] = str(exc)
                     logger.warning("Batch indexing failed", path=path, error=str(exc))
 

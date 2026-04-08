@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from basic_memory import telemetry
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.file_utils import has_frontmatter
+from basic_memory.file_utils import compute_checksum, has_frontmatter
 from basic_memory.indexing import BatchIndexer, IndexFileMetadata, IndexInputFile, IndexProgress
 from basic_memory.indexing.batching import build_index_batches
 from basic_memory.indexing.models import (
@@ -135,6 +135,8 @@ class _FileServiceIndexWriter(IndexFileWriter):
     async def write_frontmatter(
         self, update: IndexFrontmatterUpdate
     ) -> IndexFrontmatterWriteResult:
+        # Why: IndexFrontmatterWriteResult lives in indexing/models.py so the indexing
+        # layer does not need to import FileService. This adapter keeps that boundary intact.
         result = await self.file_service.update_frontmatter_with_result(
             update.path, update.metadata
         )
@@ -504,6 +506,22 @@ class SyncService:
         )
 
         indexed_entities: list[IndexedEntity] = []
+        shared_permalink_by_path: dict[str, str | None] | None = None
+        if any(
+            metadata.content_type == "text/markdown"
+            or (
+                metadata.content_type is None
+                and Path(metadata.path).suffix.lower() in {".md", ".markdown"}
+            )
+            for metadata in metadata_by_path.values()
+        ):
+            shared_permalink_by_path = {
+                path: permalink
+                for path, permalink in (
+                    await self.entity_repository.get_file_path_to_permalink_map()
+                ).items()
+            }
+
         for batch in batches:
             loaded_files, load_errors = await self._load_index_batch_files(
                 batch.paths, metadata_by_path
@@ -516,6 +534,7 @@ class SyncService:
                     loaded_files,
                     max_concurrent=self.app_config.index_entity_max_concurrent,
                     parse_max_concurrent=self.app_config.index_parse_max_concurrent,
+                    existing_permalink_by_path=shared_permalink_by_path,
                 )
                 indexed_entities.extend(batch_result.indexed)
 
@@ -597,10 +616,11 @@ class SyncService:
                 metadata = metadata_by_path[path]
                 try:
                     content = await self.file_service.read_file_bytes(path)
+                    loaded_checksum = await compute_checksum(content)
                     files[path] = IndexInputFile(
                         path=metadata.path,
                         size=metadata.size,
-                        checksum=metadata.checksum,
+                        checksum=loaded_checksum,
                         content_type=metadata.content_type,
                         last_modified=metadata.last_modified,
                         created_at=metadata.created_at,

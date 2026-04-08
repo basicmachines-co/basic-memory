@@ -308,6 +308,10 @@ class FileService:
                 )
                 return content
 
+        except FileNotFoundError:
+            # Preserve FileNotFoundError so callers (e.g. sync) can treat it as deletion.
+            logger.warning("File not found", operation="read_file_bytes", path=str(full_path))
+            raise
         except Exception as e:
             logger.exception("File read error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to read file: {e}")
