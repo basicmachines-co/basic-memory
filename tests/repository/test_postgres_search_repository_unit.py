@@ -6,6 +6,7 @@ are difficult to reach in integration tests.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -166,6 +167,43 @@ class TestEnsureVectorTablesGuard:
         repo._vector_tables_initialized = True
         # Should return immediately without touching DB
         await repo._ensure_vector_tables()
+        assert repo._vector_tables_initialized is True
+
+
+class TestEnsureVectorTablesSchemaBootstrapping:
+    """Guard the runtime setup path against inline schema migration drift."""
+
+    @pytest.mark.asyncio
+    async def test_initialization_never_alters_chunk_table_schema(self, monkeypatch):
+        repo = _make_repo(
+            semantic_enabled=True,
+            embedding_provider=StubEmbeddingProvider(),
+        )
+        session = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_scoped_session(session_maker):
+            yield session
+
+        monkeypatch.setattr(
+            "basic_memory.repository.postgres_search_repository.db.scoped_session",
+            fake_scoped_session,
+        )
+        monkeypatch.setattr(repo, "_get_existing_embedding_dims", AsyncMock(return_value=None))
+
+        await repo._ensure_vector_tables()
+
+        executed_sql = [str(call.args[0]) for call in session.execute.await_args_list]
+
+        assert any(
+            "CREATE TABLE IF NOT EXISTS search_vector_chunks" in sql for sql in executed_sql
+        )
+        assert any(
+            "CREATE TABLE IF NOT EXISTS search_vector_embeddings" in sql
+            for sql in executed_sql
+        )
+        assert not any("ALTER TABLE search_vector_chunks" in sql for sql in executed_sql)
+        session.commit.assert_awaited_once()
         assert repo._vector_tables_initialized is True
 
 

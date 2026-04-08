@@ -292,6 +292,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     ) from exc
 
                 # --- Chunks table (dimension-independent, may already exist via migration) ---
+                # Trigger: fresh Postgres projects may not have vector chunk tables yet.
+                # Why: runtime can bootstrap missing tables, but schema evolution must stay
+                # in Alembic to avoid concurrent ALTER TABLE deadlocks during indexing.
+                # Outcome: new installs create the current schema; upgrades rely on migration.
                 await session.execute(
                     text(
                         """
@@ -315,47 +319,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         """
                         CREATE INDEX IF NOT EXISTS idx_search_vector_chunks_project_entity
                         ON search_vector_chunks (project_id, entity_id)
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ADD COLUMN IF NOT EXISTS entity_fingerprint TEXT
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ADD COLUMN IF NOT EXISTS embedding_model TEXT
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        UPDATE search_vector_chunks
-                        SET entity_fingerprint = COALESCE(entity_fingerprint, ''),
-                            embedding_model = COALESCE(embedding_model, '')
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ALTER COLUMN entity_fingerprint SET NOT NULL
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ALTER COLUMN embedding_model SET NOT NULL
                         """
                     )
                 )
