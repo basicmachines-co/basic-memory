@@ -34,6 +34,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self._client: Any | None = None
         self._client_lock = asyncio.Lock()
 
+    def runtime_log_attrs(self) -> dict[str, int]:
+        """Return the request fan-out knobs that shape API embedding batches."""
+        return {
+            "provider_batch_size": self.batch_size,
+            "request_concurrency": self.request_concurrency,
+        }
+
     async def _get_client(self) -> Any:
         if self._client is not None:
             return self._client

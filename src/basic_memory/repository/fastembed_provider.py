@@ -24,6 +24,15 @@ class FastEmbedEmbeddingProvider(EmbeddingProvider):
     def _effective_parallel(self) -> int | None:
         return self.parallel if self.parallel is not None and self.parallel > 1 else None
 
+    def runtime_log_attrs(self) -> dict[str, int | str | None]:
+        """Return the resolved runtime knobs that shape FastEmbed throughput."""
+        return {
+            "provider_batch_size": self.batch_size,
+            "threads": self.threads,
+            "configured_parallel": self.parallel,
+            "effective_parallel": self._effective_parallel(),
+        }
+
     def __init__(
         self,
         model_name: str = "bge-small-en-v1.5",

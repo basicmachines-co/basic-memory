@@ -1,6 +1,6 @@
 """Embedding provider protocol for pluggable semantic backends."""
 
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class EmbeddingProvider(Protocol):
@@ -15,4 +15,8 @@ class EmbeddingProvider(Protocol):
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of document chunks."""
+        ...
+
+    def runtime_log_attrs(self) -> dict[str, Any]:
+        """Return provider-specific runtime settings suitable for startup logs."""
         ...

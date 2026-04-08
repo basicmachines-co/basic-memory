@@ -37,6 +37,7 @@ SMALL_NOTE_CONTENT_LIMIT = 2000
 HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
 BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = 256
+_SQLITE_MAX_PREPARE_WINDOW = 8
 
 
 @dataclass
@@ -800,7 +801,9 @@ class SearchRepositoryBase(ABC):
         batch_start = time.perf_counter()
         backend_name = type(self).__name__.removesuffix("SearchRepository").lower()
 
-        self._log_vector_sync_runtime_settings(backend_name=backend_name, entities_total=total_entities)
+        self._log_vector_sync_runtime_settings(
+            backend_name=backend_name, entities_total=total_entities
+        )
         logger.info(
             "Vector batch sync start: project_id={project_id} entities_total={entities_total} "
             "sync_batch_size={sync_batch_size} prepare_window_size={prepare_window_size}",
@@ -1006,102 +1009,104 @@ class SearchRepositoryBase(ABC):
                     for failed_entity_id in affected_entity_ids:
                         emit_progress(failed_entity_id)
 
-        # Trigger: this should never happen after all flushes succeed.
-        # Why: remaining jobs mean runtime tracking drifted from queued jobs.
-        # Outcome: fail-safe marks these entities as failed to avoid false positives.
-        if entity_runtime:
-            orphan_runtime_entities = sorted(entity_runtime.keys())
-            failed_entity_ids.update(orphan_runtime_entities)
-            synced_entity_ids.difference_update(orphan_runtime_entities)
-            deferred_entity_ids.difference_update(orphan_runtime_entities)
-            logger.warning(
-                "Vector batch sync left unfinished entities after flushes: "
-                "project_id={project_id} unfinished_entities={unfinished_entities}",
+            # Trigger: this should never happen after all flushes succeed.
+            # Why: remaining jobs mean runtime tracking drifted from queued jobs.
+            # Outcome: fail-safe marks these entities as failed to avoid false positives.
+            if entity_runtime:
+                orphan_runtime_entities = sorted(entity_runtime.keys())
+                failed_entity_ids.update(orphan_runtime_entities)
+                synced_entity_ids.difference_update(orphan_runtime_entities)
+                deferred_entity_ids.difference_update(orphan_runtime_entities)
+                logger.warning(
+                    "Vector batch sync left unfinished entities after flushes: "
+                    "project_id={project_id} unfinished_entities={unfinished_entities}",
+                    project_id=self.project_id,
+                    unfinished_entities=orphan_runtime_entities,
+                )
+                for failed_entity_id in orphan_runtime_entities:
+                    emit_progress(failed_entity_id)
+
+            # Keep result counters aligned with successful/failed terminal states.
+            synced_entity_ids.difference_update(failed_entity_ids)
+            deferred_entity_ids.difference_update(failed_entity_ids)
+            deferred_entity_ids.difference_update(synced_entity_ids)
+            result.failed_entity_ids = sorted(failed_entity_ids)
+            result.entities_failed = len(result.failed_entity_ids)
+            result.entities_deferred = len(deferred_entity_ids)
+            result.entities_synced = len(synced_entity_ids)
+
+            logger.info(
+                "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
+                "entities_synced={entities_synced} entities_failed={entities_failed} "
+                "entities_deferred={entities_deferred} "
+                "entities_skipped={entities_skipped} chunks_total={chunks_total} "
+                "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
+                "prepare_seconds_total={prepare_seconds_total:.3f} "
+                "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
+                "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
                 project_id=self.project_id,
-                unfinished_entities=orphan_runtime_entities,
+                entities_total=result.entities_total,
+                entities_synced=result.entities_synced,
+                entities_failed=result.entities_failed,
+                entities_deferred=result.entities_deferred,
+                entities_skipped=result.entities_skipped,
+                chunks_total=result.chunks_total,
+                chunks_skipped=result.chunks_skipped,
+                embedding_jobs_total=result.embedding_jobs_total,
+                prepare_seconds_total=result.prepare_seconds_total,
+                queue_wait_seconds_total=result.queue_wait_seconds_total,
+                embed_seconds_total=result.embed_seconds_total,
+                write_seconds_total=result.write_seconds_total,
             )
-            for failed_entity_id in orphan_runtime_entities:
-                emit_progress(failed_entity_id)
-
-        # Keep result counters aligned with successful/failed terminal states.
-        synced_entity_ids.difference_update(failed_entity_ids)
-        deferred_entity_ids.difference_update(failed_entity_ids)
-        deferred_entity_ids.difference_update(synced_entity_ids)
-        result.failed_entity_ids = sorted(failed_entity_ids)
-        result.entities_failed = len(result.failed_entity_ids)
-        result.entities_deferred = len(deferred_entity_ids)
-        result.entities_synced = len(synced_entity_ids)
-
-        logger.info(
-            "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
-            "entities_synced={entities_synced} entities_failed={entities_failed} "
-            "entities_deferred={entities_deferred} "
-            "entities_skipped={entities_skipped} chunks_total={chunks_total} "
-            "chunks_skipped={chunks_skipped} embedding_jobs_total={embedding_jobs_total} "
-            "prepare_seconds_total={prepare_seconds_total:.3f} "
-            "queue_wait_seconds_total={queue_wait_seconds_total:.3f} "
-            "embed_seconds_total={embed_seconds_total:.3f} write_seconds_total={write_seconds_total:.3f}",
-            project_id=self.project_id,
-            entities_total=result.entities_total,
-            entities_synced=result.entities_synced,
-            entities_failed=result.entities_failed,
-            entities_deferred=result.entities_deferred,
-            entities_skipped=result.entities_skipped,
-            chunks_total=result.chunks_total,
-            chunks_skipped=result.chunks_skipped,
-            embedding_jobs_total=result.embedding_jobs_total,
-            prepare_seconds_total=result.prepare_seconds_total,
-            queue_wait_seconds_total=result.queue_wait_seconds_total,
-            embed_seconds_total=result.embed_seconds_total,
-            write_seconds_total=result.write_seconds_total,
-        )
-        batch_total_seconds = time.perf_counter() - batch_start
-        metric_attrs = {
-            "backend": backend_name,
-            "skip_only_batch": result.embedding_jobs_total == 0,
-        }
-        telemetry.record_histogram(
-            "vector_sync_batch_total_seconds",
-            batch_total_seconds,
-            unit="s",
-            **metric_attrs,
-        )
-        telemetry.add_counter("vector_sync_entities_total", result.entities_total, **metric_attrs)
-        telemetry.add_counter(
-            "vector_sync_entities_skipped",
-            result.entities_skipped,
-            **metric_attrs,
-        )
-        telemetry.add_counter(
-            "vector_sync_entities_deferred",
-            result.entities_deferred,
-            **metric_attrs,
-        )
-        telemetry.add_counter(
-            "vector_sync_embedding_jobs_total",
-            result.embedding_jobs_total,
-            **metric_attrs,
-        )
-        telemetry.add_counter("vector_sync_chunks_total", result.chunks_total, **metric_attrs)
-        telemetry.add_counter(
-            "vector_sync_chunks_skipped",
-            result.chunks_skipped,
-            **metric_attrs,
-        )
-        if batch_span is not None:
-            batch_span.set_attributes(
-                {
-                    "backend": backend_name,
-                    "entities_synced": result.entities_synced,
-                    "entities_failed": result.entities_failed,
-                    "entities_deferred": result.entities_deferred,
-                    "entities_skipped": result.entities_skipped,
-                    "embedding_jobs_total": result.embedding_jobs_total,
-                    "chunks_total": result.chunks_total,
-                    "chunks_skipped": result.chunks_skipped,
-                    "batch_total_seconds": batch_total_seconds,
-                }
+            batch_total_seconds = time.perf_counter() - batch_start
+            metric_attrs = {
+                "backend": backend_name,
+                "skip_only_batch": result.embedding_jobs_total == 0,
+            }
+            telemetry.record_histogram(
+                "vector_sync_batch_total_seconds",
+                batch_total_seconds,
+                unit="s",
+                **metric_attrs,
             )
+            telemetry.add_counter(
+                "vector_sync_entities_total", result.entities_total, **metric_attrs
+            )
+            telemetry.add_counter(
+                "vector_sync_entities_skipped",
+                result.entities_skipped,
+                **metric_attrs,
+            )
+            telemetry.add_counter(
+                "vector_sync_entities_deferred",
+                result.entities_deferred,
+                **metric_attrs,
+            )
+            telemetry.add_counter(
+                "vector_sync_embedding_jobs_total",
+                result.embedding_jobs_total,
+                **metric_attrs,
+            )
+            telemetry.add_counter("vector_sync_chunks_total", result.chunks_total, **metric_attrs)
+            telemetry.add_counter(
+                "vector_sync_chunks_skipped",
+                result.chunks_skipped,
+                **metric_attrs,
+            )
+            if batch_span is not None:
+                batch_span.set_attributes(
+                    {
+                        "backend": backend_name,
+                        "entities_synced": result.entities_synced,
+                        "entities_failed": result.entities_failed,
+                        "entities_deferred": result.entities_deferred,
+                        "entities_skipped": result.entities_skipped,
+                        "embedding_jobs_total": result.embedding_jobs_total,
+                        "chunks_total": result.chunks_total,
+                        "chunks_skipped": result.chunks_skipped,
+                        "batch_total_seconds": batch_total_seconds,
+                    }
+                )
 
         return result
 
@@ -1113,7 +1118,10 @@ class SearchRepositoryBase(ABC):
         # explode to the full embed batch size creates unnecessary write contention.
         # Outcome: local backends get a small bounded window, while Postgres keeps
         # its explicit higher concurrency override.
-        return max(1, min(self._semantic_embedding_sync_batch_size, 8))
+        return max(
+            1,
+            min(self._semantic_embedding_sync_batch_size, _SQLITE_MAX_PREPARE_WINDOW),
+        )
 
     @asynccontextmanager
     async def _prepare_entity_write_scope(self):
@@ -1223,14 +1231,18 @@ class SearchRepositoryBase(ABC):
                     session, entity_ids
                 )
         except Exception as exc:
+            # Trigger: the shared read pass failed before we had entity-level diffs.
+            # Why: once the window-level read session breaks, we cannot safely
+            # distinguish one entity from another inside that window.
+            # Outcome: every entity in the window gets the same failure object.
             return [exc for _ in entity_ids]
 
         # Trigger: prepare now does one shared read pass per window instead of
         # paying the same select/join round-trips per entity.
         # Why: both SQLite and Postgres were still burning wall clock in read-side
         # fingerprint/orphan checks even when every entity ended up skipped.
-        # Outcome: we batch the reads once, then fan back out over entities while
-        # preserving input order in the gathered results.
+        # Outcome: we batch the reads once, close that shared read session, and
+        # then fan back out over entities while preserving input order.
         prepared_window = await asyncio.gather(
             *(
                 self._prepare_entity_vector_jobs_prefetched(
@@ -1264,7 +1276,8 @@ class SearchRepositoryBase(ABC):
         prepare_start = sync_start
         source_rows_count = len(source_rows)
 
-        if not source_rows:
+        async def _delete_entity_chunks_and_finish() -> _PreparedEntityVectorSync:
+            """Delete derived rows and return the empty prepare result."""
             async with self._prepare_entity_write_scope():
                 async with db.scoped_session(self.session_maker) as session:
                     await self._prepare_vector_session(session)
@@ -1279,22 +1292,13 @@ class SearchRepositoryBase(ABC):
                 prepare_seconds=prepare_seconds,
             )
 
+        if not source_rows:
+            return await _delete_entity_chunks_and_finish()
+
         chunk_records = self._build_chunk_records(source_rows)
         built_chunk_records_count = len(chunk_records)
         if not chunk_records:
-            async with self._prepare_entity_write_scope():
-                async with db.scoped_session(self.session_maker) as session:
-                    await self._prepare_vector_session(session)
-                    await self._delete_entity_chunks(session, entity_id)
-                    await session.commit()
-            prepare_seconds = time.perf_counter() - prepare_start
-            return _PreparedEntityVectorSync(
-                entity_id=entity_id,
-                sync_start=sync_start,
-                source_rows_count=source_rows_count,
-                embedding_jobs=[],
-                prepare_seconds=prepare_seconds,
-            )
+            return await _delete_entity_chunks_and_finish()
 
         current_entity_fingerprint = self._build_entity_fingerprint(chunk_records)
         current_embedding_model = self._embedding_model_key()
@@ -1607,27 +1611,25 @@ class SearchRepositoryBase(ABC):
         """
         assert self._embedding_provider is not None
 
-        from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
-
         provider = self._embedding_provider
-        if isinstance(provider, FastEmbedEmbeddingProvider):
+        runtime_attrs = (
+            provider.runtime_log_attrs() if hasattr(provider, "runtime_log_attrs") else {}
+        )
+        if runtime_attrs:
             logger.info(
                 "Vector batch runtime settings: project_id={project_id} backend={backend} "
                 "entities_total={entities_total} provider={provider} model_name={model_name} "
-                "dimensions={dimensions} provider_batch_size={provider_batch_size} "
-                "sync_batch_size={sync_batch_size} threads={threads} "
-                "configured_parallel={configured_parallel} effective_parallel={effective_parallel}",
+                "dimensions={dimensions} sync_batch_size={sync_batch_size} "
+                "{runtime_attrs}",
                 project_id=self.project_id,
                 backend=backend_name,
                 entities_total=entities_total,
                 provider=type(provider).__name__,
                 model_name=provider.model_name,
                 dimensions=provider.dimensions,
-                provider_batch_size=provider.batch_size,
                 sync_batch_size=self._semantic_embedding_sync_batch_size,
-                threads=provider.threads,
-                configured_parallel=provider.parallel,
-                effective_parallel=provider._effective_parallel(),
+                runtime_attrs=" ".join(f"{key}={value}" for key, value in runtime_attrs.items()),
+                **runtime_attrs,
             )
             return
 

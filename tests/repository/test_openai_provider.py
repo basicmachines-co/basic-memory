@@ -265,6 +265,28 @@ def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():
     assert provider.parallel == 2
 
 
+def test_fastembed_provider_reports_runtime_log_attrs():
+    """FastEmbed should expose the resolved runtime knobs for batch startup logs."""
+    provider = FastEmbedEmbeddingProvider(batch_size=128, threads=4, parallel=2)
+
+    assert provider.runtime_log_attrs() == {
+        "provider_batch_size": 128,
+        "threads": 4,
+        "configured_parallel": 2,
+        "effective_parallel": 2,
+    }
+
+
+def test_openai_provider_reports_runtime_log_attrs():
+    """OpenAI provider should expose API batch fan-out settings for startup logs."""
+    provider = OpenAIEmbeddingProvider(batch_size=32, request_concurrency=6)
+
+    assert provider.runtime_log_attrs() == {
+        "provider_batch_size": 32,
+        "request_concurrency": 6,
+    }
+
+
 def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_budget(monkeypatch):
     """Unset FastEmbed runtime knobs should resolve from available CPU budget."""
     monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 8)

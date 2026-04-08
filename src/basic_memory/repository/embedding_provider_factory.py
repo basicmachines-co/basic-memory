@@ -19,6 +19,7 @@ type ProviderCacheKey = tuple[
 
 _EMBEDDING_PROVIDER_CACHE: dict[ProviderCacheKey, EmbeddingProvider] = {}
 _EMBEDDING_PROVIDER_CACHE_LOCK = Lock()
+_FASTEMBED_MAX_THREADS = 8
 
 
 def _available_cpu_count() -> int | None:
@@ -55,7 +56,7 @@ def _resolve_fastembed_runtime_knobs(
     if available_cpus <= 2:
         return available_cpus, 1
 
-    threads = min(8, max(2, available_cpus - 2))
+    threads = min(_FASTEMBED_MAX_THREADS, max(2, available_cpus - 2))
     return threads, 1
 
 
