@@ -26,7 +26,7 @@ class EmbeddingProgress:
     """Typed CLI progress payload for embedding backfills."""
 
     entity_id: int
-    index: int
+    completed: int
     total: int
 
 
@@ -147,20 +147,30 @@ def reindex(
         False, "--embeddings", "-e", help="Rebuild vector embeddings (requires semantic search)"
     ),
     search: bool = typer.Option(False, "--search", "-s", help="Rebuild full-text search index"),
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Force a full filesystem scan and file reindex instead of the default incremental scan",
+    ),
     project: str = typer.Option(
         None, "--project", "-p", help="Reindex a specific project (default: all)"
     ),
 ):  # pragma: no cover
     """Rebuild search indexes and/or vector embeddings without dropping the database.
 
-    By default rebuilds everything (search + embeddings if semantic is enabled).
-    Use --search or --embeddings to rebuild only one.
+    By default runs incremental search + embeddings (if semantic search is enabled).
+    Use --full to bypass incremental scan optimization, rebuild all file-backed search rows,
+    and re-embed all eligible notes.
+    Use --search or --embeddings to rebuild only one side.
 
     Examples:
-        bm reindex                  # Rebuild everything
+        bm reindex                  # Incremental search + embeddings
+        bm reindex --full           # Full search + full re-embed
         bm reindex --embeddings     # Only rebuild vector embeddings
         bm reindex --search         # Only rebuild FTS index
-        bm reindex -p claw          # Reindex only the 'claw' project
+        bm reindex --full --search  # Full search only
+        bm reindex --full --embeddings  # Full re-embed only
+        bm reindex -p claw --full   # Full reindex for only the 'claw' project
     """
     # If neither flag is set, do both
     if not embeddings and not search:
@@ -179,10 +189,19 @@ def reindex(
         if not search:
             raise typer.Exit(0)
 
-    run_with_cleanup(_reindex(app_config, search=search, embeddings=embeddings, project=project))
+    run_with_cleanup(
+        _reindex(app_config, search=search, embeddings=embeddings, full=full, project=project)
+    )
 
 
-async def _reindex(app_config, search: bool, embeddings: bool, project: str | None):
+async def _reindex(
+    app_config,
+    *,
+    search: bool,
+    embeddings: bool,
+    full: bool,
+    project: str | None,
+):
     """Run reindex operations."""
     from basic_memory.repository import EntityRepository
     from basic_memory.repository.search_repository import create_search_repository
@@ -220,6 +239,10 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
             console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
 
             if search:
+                search_mode_label = "full scan" if full else "incremental scan"
+                console.print(
+                    f"  Rebuilding full-text search index ([cyan]{search_mode_label}[/cyan])..."
+                )
                 sync_service = await get_sync_service(proj)
                 sync_dir = Path(proj.path)
                 with Progress(
@@ -244,6 +267,8 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
                     await sync_service.sync(
                         sync_dir,
                         project_name=proj.name,
+                        force_full=full,
+                        sync_embeddings=False,
                         progress_callback=on_index_progress,
                     )
                     progress.update(task, completed=progress.tasks[task].total or 1)
@@ -251,7 +276,10 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
                 console.print("  [green]✓[/green] Full-text search index rebuilt")
 
             if embeddings:
-                console.print("  Building vector embeddings...")
+                embedding_mode_label = "full rebuild" if full else "incremental sync"
+                console.print(
+                    f"  Building vector embeddings ([cyan]{embedding_mode_label}[/cyan])..."
+                )
                 entity_repository = EntityRepository(session_maker, project_id=proj.id)
                 search_repository = create_search_repository(
                     session_maker, project_id=proj.id, app_config=app_config
@@ -274,16 +302,23 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
                     def on_progress(entity_id, index, total):
                         embedding_progress = EmbeddingProgress(
                             entity_id=entity_id,
-                            index=index,
+                            completed=index,
                             total=total,
                         )
+                        # Trigger: repository progress now reports terminal entity completion.
+                        # Why: operators need to see finished embedding work rather than
+                        # entities merely entering prepare.
+                        # Outcome: the CLI bar advances steadily with real completed work.
                         progress.update(
                             task,
                             total=embedding_progress.total,
-                            completed=embedding_progress.index,
+                            completed=embedding_progress.completed,
                         )
 
-                    stats = await search_service.reindex_vectors(progress_callback=on_progress)
+                    stats = await search_service.reindex_vectors(
+                        progress_callback=on_progress,
+                        force_full=full,
+                    )
                     progress.update(task, completed=stats["total_entities"])
 
                 console.print(

@@ -56,7 +56,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             self._app_config.semantic_embedding_sync_batch_size
         )
         self._embedding_provider = embedding_provider
-        self._sqlite_vec_lock = asyncio.Lock()
+        self._sqlite_vec_load_lock = asyncio.Lock()
+        self._sqlite_prepare_write_lock = asyncio.Lock()
         self._vector_tables_initialized = False
         self._vector_dimensions = 384
 
@@ -357,7 +358,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 "pip install -U basic-memory"
             ) from exc
 
-        async with self._sqlite_vec_lock:
+        # Trigger: sqlite-vec must be loaded on each SQLite connection before
+        # vec tables and functions are visible.
+        # Why: extension loading is connection-local, so we need one narrow
+        # critical section to avoid racing two coroutines on the same step.
+        # Outcome: connection setup stays serialized without blocking unrelated
+        # prepare work behind the write-side lock.
+        async with self._sqlite_vec_load_lock:
             try:
                 await session.execute(text("SELECT vec_version()"))
                 return
@@ -558,6 +565,76 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             stale_params,
         )
 
+    async def delete_entity_vector_rows(self, entity_id: int) -> None:
+        """Delete one entity's vec rows on a sqlite-vec-enabled connection."""
+        await self._ensure_vector_tables()
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._ensure_sqlite_vec_loaded(session)
+
+            # Constraint: sqlite-vec virtual tables are only visible after vec0 is
+            # loaded on this exact connection.
+            # Why: generic repository sessions can reach search_vector_chunks but still
+            #      fail with "no such module: vec0" when touching embeddings.
+            # Outcome: service-level cleanup routes vec-table deletes through this helper.
+            await self._delete_entity_chunks(session, entity_id)
+            await session.commit()
+
+    async def delete_project_vector_rows(self) -> None:
+        """Delete all vector rows for this project on a sqlite-vec-enabled connection."""
+        await self._ensure_vector_tables()
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._ensure_sqlite_vec_loaded(session)
+
+            # Constraint: sqlite-vec stores embeddings separately with no cascade delete.
+            # Why: full rebuild must clear embeddings before chunk rows or stale vectors remain.
+            # Outcome: the next sync recreates the project's derived vectors from scratch.
+            await session.execute(
+                text(
+                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                    "SELECT id FROM search_vector_chunks WHERE project_id = :project_id)"
+                ),
+                {"project_id": self.project_id},
+            )
+            await session.execute(
+                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                {"project_id": self.project_id},
+            )
+            await session.commit()
+
+    async def delete_stale_vector_rows(self) -> None:
+        """Delete vector rows whose source entities no longer exist."""
+        await self._ensure_vector_tables()
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._ensure_sqlite_vec_loaded(session)
+
+            stale_entity_filter = (
+                "entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)"
+            )
+            params = {"project_id": self.project_id}
+
+            # Trigger: deleted entities left behind derived vector rows.
+            # Why: sqlite-vec does not provide cascade cleanup from our chunk table.
+            # Outcome: stale vector state disappears before coverage stats or reindex runs.
+            await session.execute(
+                text(
+                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
+                    "SELECT id FROM search_vector_chunks "
+                    f"WHERE project_id = :project_id AND {stale_entity_filter})"
+                ),
+                params,
+            )
+            await session.execute(
+                text(
+                    "DELETE FROM search_vector_chunks "
+                    f"WHERE project_id = :project_id AND {stale_entity_filter}"
+                ),
+                params,
+            )
+            await session.commit()
+
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert L2 distance to cosine similarity for normalized embeddings.
 
@@ -569,7 +646,12 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     @asynccontextmanager
     async def _prepare_entity_write_scope(self):
         """SQLite keeps the shared read window, but funnels prepare writes through one lock."""
-        async with self._sqlite_vec_lock:
+        # Trigger: the shared prepare window fans out per entity after batched reads.
+        # Why: SQLite still benefits from shared reads, but write transactions do
+        # not get meaningfully faster when we open many at once.
+        # Outcome: one entity at a time mutates chunk rows, while vec extension
+        # loading uses its own separate lock and cannot deadlock this path.
+        async with self._sqlite_prepare_write_lock:
             yield
 
     def _prepare_window_existing_rows_sql(self, placeholders: str) -> str:

@@ -104,6 +104,7 @@ class SyncReport:
     deleted: Set[str] = field(default_factory=set)
     moves: Dict[str, str] = field(default_factory=dict)  # old_path -> new_path
     checksums: Dict[str, str] = field(default_factory=dict)  # path -> checksum
+    scanned_paths: Set[str] = field(default_factory=set)
     skipped_files: List[SkippedFile] = field(default_factory=list)
 
     @property
@@ -292,6 +293,7 @@ class SyncService:
         directory: Path,
         project_name: Optional[str] = None,
         force_full: bool = False,
+        sync_embeddings: bool = True,
         progress_callback: Callable[[IndexProgress], Awaitable[None]] | None = None,
     ) -> SyncReport:
         """Sync all files with database and update scan watermark.
@@ -300,6 +302,7 @@ class SyncService:
             directory: Directory to sync
             project_name: Optional project name
             force_full: If True, force a full scan bypassing watermark optimization
+            sync_embeddings: If True, generate vectors for entities indexed during this sync
             progress_callback: Optional callback for typed indexing progress updates
         """
 
@@ -348,7 +351,16 @@ class SyncService:
                 for path in report.deleted:
                     await self.handle_delete(path)
 
-                changed_paths = sorted(report.new | report.modified)
+                # Trigger: the caller requested a full reindex pass through the sync path.
+                # Why: cloud-style "full" semantics should rebuild every current file-backed
+                #      search row, not only the files that differ from the last watermark.
+                # Outcome: progress reflects the whole project and unchanged files are
+                #          re-indexed without inflating the change report itself.
+                changed_paths = (
+                    sorted(report.scanned_paths)
+                    if force_full
+                    else sorted(report.new | report.modified)
+                )
                 indexed_entities, skipped_files = await self._index_changed_files(
                     changed_paths,
                     report.checksums,
@@ -357,9 +369,12 @@ class SyncService:
                 report.skipped_files.extend(skipped_files)
                 synced_entity_ids = [indexed.entity_id for indexed in indexed_entities]
 
-            # Only resolve relations if there were actual changes
-            # If no files changed, no new unresolved relations could have been created
-            if report.total > 0:
+            # Trigger: either the filesystem diff found changes, or the caller forced a
+            # full reindex and we just reprocessed the current files.
+            # Why: relation resolution should follow the file-processing work that just ran,
+            #      not only the lightweight diff summary.
+            # Outcome: full reindex can heal relation state even when the diff report is empty.
+            if report.total > 0 or (force_full and indexed_entities):
                 with telemetry.scope(
                     "sync.project.resolve_relations", relation_scope="all_pending"
                 ):
@@ -369,7 +384,7 @@ class SyncService:
 
             # Batch-generate vector embeddings for all synced entities
             synced_entity_ids = list(dict.fromkeys(synced_entity_ids))
-            if synced_entity_ids and self.app_config.semantic_search_enabled:
+            if synced_entity_ids and sync_embeddings and self.app_config.semantic_search_enabled:
                 try:
                     with telemetry.scope(
                         "sync.project.sync_embeddings",
@@ -906,6 +921,7 @@ class SyncService:
 
             # Store checksums for files that need syncing
             report.checksums = changed_checksums
+            report.scanned_paths = scanned_paths
 
             scan_duration_ms = int((time.time() - scan_start_time) * 1000)
 

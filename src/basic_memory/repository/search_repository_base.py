@@ -814,6 +814,22 @@ class SearchRepositoryBase(ABC):
         failed_entity_ids: set[int] = set()
         deferred_entity_ids: set[int] = set()
         synced_entity_ids: set[int] = set()
+        completed_entities = 0
+
+        def emit_progress(entity_id: int) -> None:
+            """Report terminal entity progress to callers such as the CLI.
+
+            Trigger: an entity reaches a terminal state in this sync run.
+            Why: operators need progress based on completed work, not the moment
+            an entity merely enters prepare.
+            Outcome: the progress bar advances when an entity is done for this
+            run, whether it synced, skipped, deferred, or failed.
+            """
+            nonlocal completed_entities
+            if progress_callback is None:
+                return
+            completed_entities += 1
+            progress_callback(entity_id, completed_entities, total_entities)
 
         prepare_window_size = self._vector_prepare_window_size()
         with telemetry.started_span(
@@ -825,13 +841,6 @@ class SearchRepositoryBase(ABC):
         ) as batch_span:
             for window_start in range(0, total_entities, prepare_window_size):
                 window_entity_ids = entity_ids[window_start : window_start + prepare_window_size]
-
-                if progress_callback is not None:
-                    # Trigger: prepare runs in bounded windows instead of strict one-by-one order.
-                    # Why: callbacks still need deterministic per-entity positions before the window starts.
-                    # Outcome: progress advances in prepare_window_size bursts.
-                    for offset, entity_id in enumerate(window_entity_ids, start=window_start):
-                        progress_callback(entity_id, offset, total_entities)
 
                 prepared_window = await self._prepare_entity_vector_jobs_window(window_entity_ids)
 
@@ -847,6 +856,7 @@ class SearchRepositoryBase(ABC):
                             entity_id=entity_id,
                             error=str(prepared),
                         )
+                        emit_progress(entity_id)
                         continue
 
                     embedding_jobs_count = len(prepared.embedding_jobs)
@@ -886,6 +896,7 @@ class SearchRepositoryBase(ABC):
                             shard_count=prepared.shard_count,
                             remaining_jobs_after_shard=prepared.remaining_jobs_after_shard,
                         )
+                        emit_progress(entity_id)
                         continue
 
                     entity_runtime[entity_id] = _EntitySyncRuntime(
@@ -933,6 +944,7 @@ class SearchRepositoryBase(ABC):
                                 entity_runtime=entity_runtime,
                                 synced_entity_ids=synced_entity_ids,
                                 deferred_entity_ids=deferred_entity_ids,
+                                progress_callback=emit_progress,
                             )
                         except Exception as exc:
                             if not continue_on_error:
@@ -952,6 +964,8 @@ class SearchRepositoryBase(ABC):
                                 chunk_count=len(flush_jobs),
                                 error=str(exc),
                             )
+                            for failed_entity_id in affected_entity_ids:
+                                emit_progress(failed_entity_id)
 
             if pending_jobs:
                 flush_jobs = list(pending_jobs)
@@ -968,6 +982,7 @@ class SearchRepositoryBase(ABC):
                         entity_runtime=entity_runtime,
                         synced_entity_ids=synced_entity_ids,
                         deferred_entity_ids=deferred_entity_ids,
+                        progress_callback=emit_progress,
                     )
                 except Exception as exc:
                     if not continue_on_error:
@@ -987,6 +1002,8 @@ class SearchRepositoryBase(ABC):
                         chunk_count=len(flush_jobs),
                         error=str(exc),
                     )
+                    for failed_entity_id in affected_entity_ids:
+                        emit_progress(failed_entity_id)
 
         # Trigger: this should never happen after all flushes succeed.
         # Why: remaining jobs mean runtime tracking drifted from queued jobs.
@@ -1002,6 +1019,8 @@ class SearchRepositoryBase(ABC):
                 project_id=self.project_id,
                 unfinished_entities=orphan_runtime_entities,
             )
+            for failed_entity_id in orphan_runtime_entities:
+                emit_progress(failed_entity_id)
 
         # Keep result counters aligned with successful/failed terminal states.
         synced_entity_ids.difference_update(failed_entity_ids)
@@ -1527,6 +1546,7 @@ class SearchRepositoryBase(ABC):
         entity_runtime: dict[int, _EntitySyncRuntime],
         synced_entity_ids: set[int],
         deferred_entity_ids: set[int],
+        progress_callback: Callable[[int], None] | None = None,
     ) -> float:
         """Finalize completed entities and return cumulative queue wait seconds."""
         queue_wait_seconds_total = 0.0
@@ -1570,6 +1590,8 @@ class SearchRepositoryBase(ABC):
                 remaining_jobs_after_shard=runtime.remaining_jobs_after_shard,
             )
             entity_runtime.pop(entity_id, None)
+            if progress_callback is not None:
+                progress_callback(entity_id)
 
         return queue_wait_seconds_total
 

@@ -379,6 +379,50 @@ async def test_sync_entity_vectors_batch_skip_only_has_zero_queue_wait(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_progress_tracks_terminal_entities(monkeypatch):
+    """Progress callback should advance on terminal entity completion, not prepare entry."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+    repo._semantic_embedding_sync_batch_size = 2
+
+    prepared_by_entity = {
+        1: _PreparedEntityVectorSync(1, 1.0, 1, []),
+        2: _PreparedEntityVectorSync(2, 2.0, 1, [(102, "chunk-2")]),
+        3: _PreparedEntityVectorSync(3, 3.0, 1, [(103, "chunk-3")]),
+    }
+    progress_events: list[tuple[int, int, int]] = []
+
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [prepared_by_entity[entity_id] for entity_id in entity_ids]
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        for job in flush_jobs:
+            runtime = entity_runtime[job.entity_id]
+            runtime.remaining_jobs -= 1
+            if runtime.remaining_jobs <= 0:
+                synced_entity_ids.add(job.entity_id)
+        return (0.1, 0.2)
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+
+    result = await repo.sync_entity_vectors_batch(
+        [1, 2, 3],
+        progress_callback=lambda entity_id, completed, total: progress_events.append(
+            (entity_id, completed, total)
+        ),
+    )
+
+    assert result.entities_synced == 3
+    assert progress_events == [
+        (1, 1, 3),
+        (2, 2, 3),
+        (3, 3, 3),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
     """Batch sync should continue after per-entity and per-flush failures."""
     repo = _ConcreteRepo()

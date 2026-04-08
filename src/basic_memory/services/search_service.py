@@ -521,7 +521,9 @@ class SearchService:
             chunks_total=sum(result.chunks_total for result in repository_results),
             chunks_skipped=sum(result.chunks_skipped for result in repository_results),
             embedding_jobs_total=sum(result.embedding_jobs_total for result in repository_results),
-            prepare_seconds_total=sum(result.prepare_seconds_total for result in repository_results),
+            prepare_seconds_total=sum(
+                result.prepare_seconds_total for result in repository_results
+            ),
             queue_wait_seconds_total=sum(
                 result.queue_wait_seconds_total for result in repository_results
             ),
@@ -530,11 +532,14 @@ class SearchService:
         )
         return batch_result
 
-    async def reindex_vectors(self, progress_callback=None) -> dict:
+    async def reindex_vectors(self, progress_callback=None, force_full: bool = False) -> dict:
         """Rebuild vector embeddings for all entities.
 
         Args:
-            progress_callback: Optional callable(entity_id, index, total) for progress reporting.
+            progress_callback: Optional callable(entity_id, completed, total) for progress
+                reporting when an entity reaches a terminal state in this run.
+            force_full: When True, clear this project's derived vectors first so every
+                eligible entity re-embeds from scratch.
 
         Returns:
             dict with stats: total_entities, embedded, skipped, errors
@@ -545,6 +550,8 @@ class SearchService:
         # Clean up stale rows in search_index and search_vector_chunks
         # that reference entity_ids no longer in the entity table
         await self._purge_stale_search_rows()
+        if force_full:
+            await self._clear_project_vectors_for_full_reindex()
 
         batch_result = await self.sync_entity_vectors_batch(
             entity_ids,
@@ -561,6 +568,31 @@ class SearchService:
             logger.warning(f"Failed to embed entity {failed_entity_id}")
 
         return stats
+
+    async def _clear_project_vectors_for_full_reindex(self) -> None:
+        """Remove this project's derived vectors so a full reindex re-embeds everything.
+
+        Trigger: the operator asked for a full embedding rebuild rather than the
+        default incremental vector sync.
+        Why: the repository sync path intentionally skips unchanged entities, so
+        we need to clear the derived vector state first to force fresh embeddings.
+        Outcome: the next batch sync recreates every eligible entity's vectors.
+        """
+        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+
+        project_id = self.repository.project_id
+        params = {"project_id": project_id}
+
+        # Constraint: sqlite-vec stores embeddings in a separate rowid table with
+        # no cascade delete, so embeddings must be removed before chunk rows.
+        if isinstance(self.repository, SQLiteSearchRepository):
+            await self.repository.delete_project_vector_rows()
+        else:
+            await self.repository.execute_query(
+                text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                params,
+            )
+        logger.info("Cleared project vectors for full reindex", project_id=project_id)
 
     async def _purge_stale_search_rows(self) -> None:
         """Remove rows from search_index and search_vector_chunks for deleted entities.
@@ -588,23 +620,16 @@ class SearchService:
 
         # SQLite vec has no CASCADE — must delete embeddings before chunks
         if isinstance(self.repository, SQLiteSearchRepository):
+            await self.repository.delete_stale_vector_rows()
+        else:
+            # Postgres CASCADE handles embedding deletion automatically
             await self.repository.execute_query(
                 text(
-                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                    "SELECT id FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND {stale_entity_filter})"
+                    f"DELETE FROM search_vector_chunks "
+                    f"WHERE project_id = :project_id AND {stale_entity_filter}"
                 ),
                 params,
             )
-
-        # Postgres CASCADE handles embedding deletion automatically
-        await self.repository.execute_query(
-            text(
-                f"DELETE FROM search_vector_chunks "
-                f"WHERE project_id = :project_id AND {stale_entity_filter}"
-            ),
-            params,
-        )
 
         logger.info("Purged stale search rows for deleted entities", project_id=project_id)
 
@@ -640,27 +665,23 @@ class SearchService:
         # Trigger: semantic indexing is disabled for this repository instance.
         # Why: repositories only create vector tables when semantic search is enabled.
         # Outcome: skip cleanup because there are no active derived vector rows to maintain.
-        if isinstance(self.repository, SearchRepositoryBase) and not self.repository._semantic_enabled:
+        if (
+            isinstance(self.repository, SearchRepositoryBase)
+            and not self.repository._semantic_enabled
+        ):
             return
 
         params = {"project_id": self.repository.project_id, "entity_id": entity_id}
         if isinstance(self.repository, SQLiteSearchRepository):
+            await self.repository.delete_entity_vector_rows(entity_id)
+        else:
             await self.repository.execute_query(
                 text(
-                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                    "SELECT id FROM search_vector_chunks "
-                    "WHERE project_id = :project_id AND entity_id = :entity_id)"
+                    "DELETE FROM search_vector_chunks "
+                    "WHERE project_id = :project_id AND entity_id = :entity_id"
                 ),
                 params,
             )
-
-        await self.repository.execute_query(
-            text(
-                "DELETE FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND entity_id = :entity_id"
-            ),
-            params,
-        )
 
     async def index_entity_file(
         self,

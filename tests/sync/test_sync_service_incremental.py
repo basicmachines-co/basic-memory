@@ -18,6 +18,7 @@ from textwrap import dedent
 import pytest
 
 from basic_memory.config import ProjectConfig
+from basic_memory.indexing.models import IndexingBatchResult
 from basic_memory.sync.sync_service import SyncService
 
 
@@ -206,6 +207,32 @@ async def test_force_full_bypasses_watermark_optimization(
     )
     assert project.last_scan_timestamp is not None
     assert project.last_scan_timestamp > initial_timestamp
+
+
+@pytest.mark.asyncio
+async def test_force_full_reindexes_unchanged_files(
+    sync_service: SyncService, project_config: ProjectConfig, monkeypatch
+):
+    """Test that force_full rewrites search rows even when the diff report is empty."""
+    project_dir = project_config.home
+    await create_test_file(project_dir / "file1.md", "# File 1\nOriginal")
+
+    # First sync establishes the watermark and initial search rows.
+    await sync_service.sync(project_dir)
+    await sleep_past_watermark()
+
+    indexed_batches: list[list[str]] = []
+
+    async def _stub_index_files(loaded_files, **kwargs):
+        indexed_batches.append(sorted(loaded_files))
+        return IndexingBatchResult()
+
+    monkeypatch.setattr(sync_service.batch_indexer, "index_files", _stub_index_files)
+
+    report = await sync_service.sync(project_dir, force_full=True, sync_embeddings=False)
+
+    assert report.total == 0
+    assert indexed_batches == [["file1.md"]]
 
 
 # ==============================================================================

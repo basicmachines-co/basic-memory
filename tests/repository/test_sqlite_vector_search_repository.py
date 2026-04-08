@@ -319,7 +319,7 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     @asynccontextmanager
     async def _track_write_scope():
         nonlocal active_write_scopes, max_active_write_scopes
-        async with repo._sqlite_vec_lock:
+        async with repo._sqlite_prepare_write_lock:
             active_write_scopes += 1
             max_active_write_scopes = max(max_active_write_scopes, active_write_scopes)
             try:
@@ -359,6 +359,68 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
     assert fetched_windows == [[1, 2]]
     assert [result.entity_id for result in prepared] == [1, 2]
     assert max_active_write_scopes == 1
+
+
+@pytest.mark.asyncio
+async def test_sqlite_prepare_window_does_not_deadlock_when_vec_loading_inside_write_scope(
+    monkeypatch,
+):
+    """SQLite should keep vec loading and prepare writes on separate locks."""
+    repo = _make_sqlite_repo_for_unit_tests()
+
+    async def _stub_fetch_source_rows(session, entity_ids: list[int]):
+        return {entity_id: [object()] for entity_id in entity_ids}
+
+    async def _stub_fetch_existing_rows(session, entity_ids: list[int]):
+        return {entity_id: [] for entity_id in entity_ids}
+
+    def _stub_build_chunk_records(source_rows):
+        return [
+            {
+                "chunk_key": "entity:1:0",
+                "chunk_text": "chunk text",
+                "source_hash": "hash",
+            }
+        ]
+
+    async def _stub_prepare_vector_session(session):
+        # Trigger: SQLite prepare writes call _prepare_vector_session() after
+        # entering the write scope.
+        # Why: vec loading still needs a lock, but reusing the write lock here
+        # would deadlock before the first entity completes.
+        # Outcome: this regression test proves the two concerns stay separate.
+        async with repo._sqlite_vec_load_lock:
+            await asyncio.sleep(0)
+
+    async def _stub_upsert(
+        session,
+        *,
+        entity_id: int,
+        scheduled_records,
+        existing_by_key,
+        entity_fingerprint: str,
+        embedding_model: str,
+    ):
+        return [(entity_id * 100, scheduled_records[0]["chunk_text"])]
+
+    @asynccontextmanager
+    async def fake_scoped_session(session_maker):
+        yield AsyncMock()
+
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository_base.db.scoped_session",
+        fake_scoped_session,
+    )
+    monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
+    monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
+    monkeypatch.setattr(repo, "_prepare_vector_session", _stub_prepare_vector_session)
+    monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
+
+    prepared = await asyncio.wait_for(repo._prepare_entity_vector_jobs_window([1]), timeout=1.0)
+
+    assert len(prepared) == 1
+    assert prepared[0].entity_id == 1
 
 
 @pytest.mark.asyncio

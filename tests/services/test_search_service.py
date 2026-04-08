@@ -1203,7 +1203,7 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
         assert entity_ids == created_entity_ids
         if progress_callback:
             for i, entity_id in enumerate(entity_ids):
-                progress_callback(entity_id, i, len(entity_ids))
+                progress_callback(entity_id, i + 1, len(entity_ids))
         return VectorSyncBatchResult(
             entities_total=len(entity_ids),
             entities_synced=len(entity_ids),
@@ -1236,7 +1236,7 @@ async def test_reindex_vectors(search_service, session_maker, test_project, monk
     assert len(progress_calls) == stats["total_entities"]
     # Progress indices should be sequential
     for i, (_, index, total) in enumerate(progress_calls):
-        assert index == i
+        assert index == i + 1
         assert total == stats["total_entities"]
 
 

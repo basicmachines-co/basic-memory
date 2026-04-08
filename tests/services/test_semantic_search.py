@@ -111,20 +111,18 @@ async def test_semantic_vector_sync_skips_embed_opt_out_and_clears_vectors(
         AsyncMock(return_value=SimpleNamespace(id=42, entity_metadata={"embed": False})),
     )
     sync_vectors = AsyncMock()
-    execute_query = AsyncMock()
+    delete_entity_vectors = AsyncMock()
     monkeypatch.setattr(repository, "sync_entity_vectors", sync_vectors)
-    monkeypatch.setattr(repository, "execute_query", execute_query)
+    monkeypatch.setattr(repository, "delete_entity_vector_rows", delete_entity_vectors)
 
     await search_service.sync_entity_vectors(42)
 
     sync_vectors.assert_not_awaited()
-    assert execute_query.await_count == 2
+    delete_entity_vectors.assert_awaited_once_with(42)
 
 
 @pytest.mark.asyncio
-async def test_semantic_vector_sync_resumes_when_embed_opt_out_removed(
-    search_service, monkeypatch
-):
+async def test_semantic_vector_sync_resumes_when_embed_opt_out_removed(search_service, monkeypatch):
     """Removing the opt-out should restore normal embedding sync."""
     repository = _sqlite_repo(search_service)
     repository._semantic_enabled = True
@@ -170,9 +168,9 @@ async def test_semantic_vector_sync_batch_skips_embed_opt_out_and_reports_skips(
             entities_failed=0,
         )
     )
-    execute_query = AsyncMock()
+    delete_entity_vectors = AsyncMock()
     monkeypatch.setattr(repository, "sync_entity_vectors_batch", sync_batch)
-    monkeypatch.setattr(repository, "execute_query", execute_query)
+    monkeypatch.setattr(repository, "delete_entity_vector_rows", delete_entity_vectors)
 
     result = await search_service.sync_entity_vectors_batch([41, 42])
 
@@ -181,7 +179,7 @@ async def test_semantic_vector_sync_batch_skips_embed_opt_out_and_reports_skips(
     assert result.entities_total == 2
     assert result.entities_synced == 1
     assert result.entities_skipped == 1
-    assert execute_query.await_count == 2
+    delete_entity_vectors.assert_awaited_once_with(41)
 
 
 @pytest.mark.asyncio
@@ -257,6 +255,50 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
+    search_service, monkeypatch
+):
+    """Force-full vector reindex should clear derived vectors before batch sync."""
+    repository = _sqlite_repo(search_service)
+    repository._semantic_enabled = True
+
+    monkeypatch.setattr(
+        search_service.entity_repository,
+        "find_all",
+        AsyncMock(
+            return_value=[
+                SimpleNamespace(id=41, entity_metadata={}),
+                SimpleNamespace(id=42, entity_metadata={}),
+            ]
+        ),
+    )
+    purge_stale_rows = AsyncMock()
+    delete_project_vectors = AsyncMock()
+    sync_batch = AsyncMock(
+        return_value=VectorSyncBatchResult(
+            entities_total=2,
+            entities_synced=2,
+            entities_failed=0,
+        )
+    )
+    monkeypatch.setattr(search_service, "_purge_stale_search_rows", purge_stale_rows)
+    monkeypatch.setattr(repository, "delete_project_vector_rows", delete_project_vectors)
+    monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_batch)
+
+    stats = await search_service.reindex_vectors(force_full=True)
+
+    purge_stale_rows.assert_awaited_once()
+    delete_project_vectors.assert_awaited_once()
+    sync_batch.assert_awaited_once_with([41, 42], progress_callback=None)
+    assert stats == {
+        "total_entities": 2,
+        "embedded": 2,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, monkeypatch):
     """Deleted entity IDs should still flow through repository cleanup instead of being dropped."""
     repository = _sqlite_repo(search_service)
@@ -291,7 +333,9 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
     called_entity_ids = {tuple(call.args[0]) for call in sync_batch.await_args_list}
     assert called_entity_ids == {(41,), (42,)}
     progress_callback_calls = [
-        call for call in sync_batch.await_args_list if call.kwargs.get("progress_callback") is not None
+        call
+        for call in sync_batch.await_args_list
+        if call.kwargs.get("progress_callback") is not None
     ]
     assert len(progress_callback_calls) == 1
     assert progress_callback_calls[0].args[0] == [42]
