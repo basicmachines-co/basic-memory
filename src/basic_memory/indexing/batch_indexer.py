@@ -13,7 +13,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.file_utils import compute_checksum, has_frontmatter
+from basic_memory.file_utils import compute_checksum, has_frontmatter, remove_frontmatter
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.indexing.models import (
     IndexedEntity,
@@ -47,6 +47,7 @@ class _PreparedEntity:
     checksum: str
     content_type: str | None
     search_content: str | None
+    markdown_content: str | None = None
 
 
 class BatchIndexer:
@@ -253,6 +254,7 @@ class BatchIndexer:
         reserved_permalinks: set[str],
     ) -> _PreparedMarkdownFile:
         final_checksum = prepared.final_checksum
+        final_content = prepared.content
         final_permalink = await self._resolve_batch_permalink(prepared, reserved_permalinks)
 
         # Trigger: markdown file has no frontmatter and sync enforcement is enabled.
@@ -264,9 +266,11 @@ class BatchIndexer:
                 "type": prepared.markdown.frontmatter.type,
                 "permalink": final_permalink,
             }
-            final_checksum = await self.file_writer.write_frontmatter(
+            write_result = await self.file_writer.write_frontmatter(
                 IndexFrontmatterUpdate(path=prepared.file.path, metadata=frontmatter_updates)
             )
+            final_checksum = write_result.checksum
+            final_content = write_result.content
             prepared.markdown.frontmatter.metadata.update(frontmatter_updates)
 
         # Trigger: existing markdown frontmatter may lack the canonical permalink.
@@ -278,16 +282,18 @@ class BatchIndexer:
             and final_permalink != prepared.markdown.frontmatter.permalink
         ):
             prepared.markdown.frontmatter.metadata["permalink"] = final_permalink
-            final_checksum = await self.file_writer.write_frontmatter(
+            write_result = await self.file_writer.write_frontmatter(
                 IndexFrontmatterUpdate(
                     path=prepared.file.path,
                     metadata={"permalink": final_permalink},
                 )
             )
+            final_checksum = write_result.checksum
+            final_content = write_result.content
 
         return _PreparedMarkdownFile(
             file=prepared.file,
-            content=prepared.content,
+            content=final_content,
             final_checksum=final_checksum,
             markdown=prepared.markdown,
             file_contains_frontmatter=prepared.file_contains_frontmatter,
@@ -351,7 +357,8 @@ class BatchIndexer:
             entity_id=updated.id,
             checksum=prepared.final_checksum,
             content_type=prepared.file.content_type,
-            search_content=prepared.markdown.content,
+            search_content=remove_frontmatter(prepared.content),
+            markdown_content=prepared.content,
         )
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
@@ -412,6 +419,7 @@ class BatchIndexer:
             checksum=checksum,
             content_type=file.content_type,
             search_content=None,
+            markdown_content=None,
         )
 
     # --- Relations ---
@@ -487,6 +495,7 @@ class BatchIndexer:
             permalink=entity.permalink,
             checksum=prepared.checksum,
             content_type=prepared.content_type,
+            markdown_content=prepared.markdown_content,
         )
 
     # --- Helpers ---

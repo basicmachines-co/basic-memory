@@ -9,7 +9,12 @@ from textwrap import dedent
 import pytest
 from sqlalchemy import text
 
-from basic_memory.indexing import BatchIndexer, IndexFrontmatterUpdate, IndexInputFile
+from basic_memory.indexing import (
+    BatchIndexer,
+    IndexFrontmatterUpdate,
+    IndexFrontmatterWriteResult,
+    IndexInputFile,
+)
 
 
 class _TestFileWriter:
@@ -18,8 +23,13 @@ class _TestFileWriter:
     def __init__(self, file_service) -> None:
         self.file_service = file_service
 
-    async def write_frontmatter(self, update: IndexFrontmatterUpdate) -> str:
-        return await self.file_service.update_frontmatter(update.path, update.metadata)
+    async def write_frontmatter(
+        self, update: IndexFrontmatterUpdate
+    ) -> IndexFrontmatterWriteResult:
+        result = await self.file_service.update_frontmatter_with_result(
+            update.path, update.metadata
+        )
+        return IndexFrontmatterWriteResult(checksum=result.checksum, content=result.content)
 
 
 async def _create_file(path: Path, content: str | bytes) -> None:
@@ -215,6 +225,51 @@ async def test_batch_indexer_creates_entities_with_parallel_path(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_returns_original_markdown_content_when_no_frontmatter_rewrite(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    app_config.disable_permalinks = True
+
+    path = "notes/original.md"
+    original_content = dedent(
+        """
+        ---
+        title: Original
+        type: note
+        ---
+        # Original
+        """
+    ).strip()
+    await _create_file(project_config.home / path, original_content)
+
+    files = {path: await _load_input(file_service, path)}
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        files,
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert len(result.indexed) == 1
+    assert result.indexed[0].markdown_content == original_content
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_indexes_non_markdown_files(
     app_config,
     entity_service,
@@ -249,6 +304,7 @@ async def test_batch_indexer_indexes_non_markdown_files(
     )
 
     assert {indexed.path for indexed in result.indexed} == {pdf_path, image_path}
+    assert all(indexed.markdown_content is None for indexed in result.indexed)
 
     pdf_entity = await entity_repository.get_by_file_path(pdf_path)
     image_entity = await entity_repository.get_by_file_path(image_path)
@@ -377,6 +433,11 @@ async def test_batch_indexer_assigns_unique_permalinks_for_batch_local_conflicts
         path_one: await _load_input(file_service, path_one),
         path_two: await _load_input(file_service, path_two),
     }
+    original_contents = {
+        path: file.content.decode("utf-8")
+        for path, file in files.items()
+        if file.content is not None
+    }
     batch_indexer = _make_batch_indexer(
         app_config,
         entity_service,
@@ -393,6 +454,17 @@ async def test_batch_indexer_assigns_unique_permalinks_for_batch_local_conflicts
     )
 
     assert result.errors == []
+    indexed_by_path = {indexed.path: indexed for indexed in result.indexed}
+    assert indexed_by_path[path_one].markdown_content is not None
+    assert indexed_by_path[path_two].markdown_content is not None
+    assert indexed_by_path[path_one].markdown_content != original_contents[path_one]
+    assert indexed_by_path[path_two].markdown_content != original_contents[path_two]
+    assert indexed_by_path[path_one].markdown_content == await file_service.read_file_content(
+        path_one
+    )
+    assert indexed_by_path[path_two].markdown_content == await file_service.read_file_content(
+        path_two
+    )
 
     entities = await entity_repository.find_all()
     assert len(entities) == 2

@@ -56,6 +56,14 @@ class IndexFrontmatterUpdate:
 
 
 @dataclass(slots=True)
+class IndexFrontmatterWriteResult:
+    """Typed result for a frontmatter write performed during indexing."""
+
+    checksum: str
+    content: str
+
+
+@dataclass(slots=True)
 class IndexedEntity:
     """Stable output describing one file that finished indexing successfully."""
 
@@ -64,6 +72,7 @@ class IndexedEntity:
     permalink: str | None
     checksum: str
     content_type: str | None = None
+    markdown_content: str | None = None
 
 
 @dataclass(slots=True)
@@ -80,4 +89,6 @@ class IndexingBatchResult:
 class IndexFileWriter(Protocol):
     """Narrow protocol for frontmatter writes during indexing."""
 
-    async def write_frontmatter(self, update: IndexFrontmatterUpdate) -> str: ...
+    async def write_frontmatter(
+        self, update: IndexFrontmatterUpdate
+    ) -> IndexFrontmatterWriteResult: ...

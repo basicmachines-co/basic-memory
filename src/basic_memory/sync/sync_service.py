@@ -21,7 +21,12 @@ from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import has_frontmatter
 from basic_memory.indexing import BatchIndexer, IndexFileMetadata, IndexInputFile, IndexProgress
 from basic_memory.indexing.batching import build_index_batches
-from basic_memory.indexing.models import IndexedEntity, IndexFileWriter, IndexFrontmatterUpdate
+from basic_memory.indexing.models import (
+    IndexedEntity,
+    IndexFileWriter,
+    IndexFrontmatterUpdate,
+    IndexFrontmatterWriteResult,
+)
 from basic_memory.ignore_utils import load_bmignore_patterns, should_ignore_path
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.models import Entity, Project
@@ -127,8 +132,13 @@ class _FileServiceIndexWriter(IndexFileWriter):
     def __init__(self, file_service: FileService) -> None:
         self.file_service = file_service
 
-    async def write_frontmatter(self, update: IndexFrontmatterUpdate) -> str:
-        return await self.file_service.update_frontmatter(update.path, update.metadata)
+    async def write_frontmatter(
+        self, update: IndexFrontmatterUpdate
+    ) -> IndexFrontmatterWriteResult:
+        result = await self.file_service.update_frontmatter_with_result(
+            update.path, update.metadata
+        )
+        return IndexFrontmatterWriteResult(checksum=result.checksum, content=result.content)
 
 
 class SyncService:

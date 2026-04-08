@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import mimetypes
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
@@ -23,6 +24,14 @@ from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.utils import FilePath
 from loguru import logger
+
+
+@dataclass(slots=True)
+class FrontmatterUpdateResult:
+    """Final content emitted by a frontmatter rewrite without a follow-up reread."""
+
+    checksum: str
+    content: str
 
 
 class FileService:
@@ -401,12 +410,14 @@ class FileService:
             )
             raise FileOperationError(f"Failed to move file {source} -> {destination}: {e}")
 
-    async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
-        """Update frontmatter fields in a file while preserving all content.
+    async def update_frontmatter_with_result(
+        self, path: FilePath, updates: Dict[str, Any]
+    ) -> FrontmatterUpdateResult:
+        """Update frontmatter and return the exact final written markdown content.
 
         Only modifies the frontmatter section, leaving all content untouched.
         Creates frontmatter section if none exists.
-        Returns checksum of updated file.
+        Returns both checksum and final content so callers do not need a reread.
 
         Uses aiofiles for true async I/O (non-blocking).
 
@@ -415,7 +426,7 @@ class FileService:
             updates: Dict of frontmatter fields to update
 
         Returns:
-            Checksum of updated file
+            Typed result containing checksum and final content
 
         Raises:
             FileOperationError: If file operations fail
@@ -467,7 +478,10 @@ class FileService:
                 if formatted_content is not None:
                     content_for_checksum = formatted_content  # pragma: no cover
 
-            return await file_utils.compute_checksum(content_for_checksum)
+            return FrontmatterUpdateResult(
+                checksum=await file_utils.compute_checksum(content_for_checksum),
+                content=content_for_checksum,
+            )
 
         except Exception as e:  # pragma: no cover
             # Only log real errors (not YAML parsing, which is handled above)
@@ -478,6 +492,11 @@ class FileService:
                     error=str(e),
                 )
             raise FileOperationError(f"Failed to update frontmatter: {e}")
+
+    async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:
+        """Update frontmatter fields in a file while preserving all content."""
+        result = await self.update_frontmatter_with_result(path, updates)
+        return result.checksum
 
     async def compute_checksum(self, path: FilePath) -> str:
         """Compute checksum for a file using true async I/O.
