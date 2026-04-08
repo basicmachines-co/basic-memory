@@ -26,14 +26,16 @@ def _available_cpu_count() -> int | None:
     process_cpu_count = getattr(os, "process_cpu_count", None)
     if callable(process_cpu_count):
         cpu_count = process_cpu_count()
-        if cpu_count is not None and cpu_count > 0:
+        if isinstance(cpu_count, int) and cpu_count > 0:
             return cpu_count
 
     cpu_count = os.cpu_count()
     return cpu_count if cpu_count is not None and cpu_count > 0 else None
 
 
-def _resolve_fastembed_runtime_knobs(app_config: BasicMemoryConfig) -> tuple[int | None, int | None]:
+def _resolve_fastembed_runtime_knobs(
+    app_config: BasicMemoryConfig,
+) -> tuple[int | None, int | None]:
     """Resolve FastEmbed threads/parallel from explicit config or CPU-aware defaults."""
     configured_threads = app_config.semantic_embedding_threads
     configured_parallel = app_config.semantic_embedding_parallel
@@ -45,15 +47,15 @@ def _resolve_fastembed_runtime_knobs(app_config: BasicMemoryConfig) -> tuple[int
         return None, None
 
     # Trigger: local laptops and cloud workers expose different CPU budgets.
-    # Why: FastEmbed throughput wants enough ONNX threads to use the machine,
-    # but the multiprocessing-style ``parallel`` fan-out can add a lot of
-    # overhead for this workload and make full rebuilds slower instead of faster.
-    # Outcome: when config leaves the knobs unset, each process uses a bounded
-    # thread count and keeps FastEmbed on the simpler single-process path.
+    # Why: full rebuilds got faster when FastEmbed used most, but not all, of
+    # the available CPUs. Leaving a little headroom avoids starving the rest of
+    # the pipeline while still giving ONNX enough threads to stay busy.
+    # Outcome: when config leaves the knobs unset, each process reserves a small
+    # CPU cushion and keeps FastEmbed on the simpler single-process path.
     if available_cpus <= 2:
         return available_cpus, 1
 
-    threads = min(8, available_cpus)
+    threads = min(8, max(2, available_cpus - 2))
     return threads, 1
 
 

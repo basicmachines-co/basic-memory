@@ -283,6 +283,28 @@ def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_
     provider = create_embedding_provider(config)
 
     assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.threads == 6
+    assert provider.parallel == 1
+
+
+def test_embedding_provider_factory_auto_tuning_caps_large_cpu_budgets(monkeypatch):
+    """Large workers should still leave some headroom and stop at the thread cap."""
+    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 16)
+    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 16)
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
     assert provider.threads == 8
     assert provider.parallel == 1
 

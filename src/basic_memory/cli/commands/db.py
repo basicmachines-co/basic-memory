@@ -273,7 +273,7 @@ async def _reindex(
                     )
                     progress.update(task, completed=progress.tasks[task].total or 1)
 
-                console.print("  [green]✓[/green] Full-text search index rebuilt")
+                console.print("  [green]done[/green] Full-text search index rebuilt")
 
             if embeddings:
                 embedding_mode_label = "full rebuild" if full else "incremental sync"
@@ -322,7 +322,7 @@ async def _reindex(
                     progress.update(task, completed=stats["total_entities"])
 
                 console.print(
-                    f"  [green]✓[/green] Embeddings complete: "
+                    f"  [green]done[/green] Embeddings complete: "
                     f"{stats['embedded']} entities embedded, "
                     f"{stats['skipped']} skipped, "
                     f"{stats['errors']} errors"
