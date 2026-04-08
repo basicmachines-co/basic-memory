@@ -318,47 +318,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         """
                     )
                 )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ADD COLUMN IF NOT EXISTS entity_fingerprint TEXT
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ADD COLUMN IF NOT EXISTS embedding_model TEXT
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        UPDATE search_vector_chunks
-                        SET entity_fingerprint = COALESCE(entity_fingerprint, ''),
-                            embedding_model = COALESCE(embedding_model, '')
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ALTER COLUMN entity_fingerprint SET NOT NULL
-                        """
-                    )
-                )
-                await session.execute(
-                    text(
-                        """
-                        ALTER TABLE search_vector_chunks
-                        ALTER COLUMN embedding_model SET NOT NULL
-                        """
-                    )
-                )
 
                 # --- Embeddings table (dimension-dependent, created at runtime) ---
                 # Trigger: provider dimensions may differ from what was previously deployed.
