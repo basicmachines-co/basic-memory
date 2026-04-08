@@ -626,8 +626,6 @@ class SyncService:
                         created_at=metadata.created_at,
                         content=content,
                     )
-                except FileNotFoundError:
-                    await self.handle_delete(path)
                 except FileOperationError as exc:
                     # Trigger: FileService wraps binary read failures in FileOperationError.
                     # Why: the service contract should stay consistent for direct callers.

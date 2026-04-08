@@ -1,5 +1,6 @@
 """Service for search operations."""
 
+import asyncio
 import ast
 import re
 from datetime import datetime
@@ -462,8 +463,10 @@ class SearchService:
                 and not self._entity_embeddings_enabled(entity)
             )
         ]
-        for entity_id in opted_out_ids:
-            await self._clear_entity_vectors(entity_id)
+        if opted_out_ids:
+            await asyncio.gather(
+                *(self._clear_entity_vectors(entity_id) for entity_id in opted_out_ids)
+            )
 
         eligible_entity_ids = [
             entity_id
@@ -502,7 +505,7 @@ class SearchService:
         # that reference entity_ids no longer in the entity table
         await self._purge_stale_search_rows()
 
-        batch_result = await self.repository.sync_entity_vectors_batch(
+        batch_result = await self.sync_entity_vectors_batch(
             entity_ids,
             progress_callback=progress_callback,
         )

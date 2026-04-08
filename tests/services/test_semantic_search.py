@@ -217,3 +217,40 @@ async def test_embed_opt_out_note_still_participates_in_fts(
     )
 
     assert any(result.entity_id == entity.id for result in results)
+
+
+@pytest.mark.asyncio
+async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatch):
+    """Full vector reindex should route through the service-level opt-out filter."""
+    monkeypatch.setattr(
+        search_service.entity_repository,
+        "find_all",
+        AsyncMock(
+            return_value=[
+                SimpleNamespace(id=41, entity_metadata={"embed": False}),
+                SimpleNamespace(id=42, entity_metadata={}),
+            ]
+        ),
+    )
+    purge_stale_rows = AsyncMock()
+    sync_batch = AsyncMock(
+        return_value=VectorSyncBatchResult(
+            entities_total=2,
+            entities_synced=1,
+            entities_failed=0,
+            entities_skipped=1,
+        )
+    )
+    monkeypatch.setattr(search_service, "_purge_stale_search_rows", purge_stale_rows)
+    monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_batch)
+
+    stats = await search_service.reindex_vectors()
+
+    purge_stale_rows.assert_awaited_once()
+    sync_batch.assert_awaited_once_with([41, 42], progress_callback=None)
+    assert stats == {
+        "total_entities": 2,
+        "embedded": 1,
+        "skipped": 1,
+        "errors": 0,
+    }
