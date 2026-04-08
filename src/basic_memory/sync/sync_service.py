@@ -39,7 +39,7 @@ from basic_memory.repository import (
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.services import EntityService, FileService
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
-from basic_memory.services.exceptions import SyncFatalError
+from basic_memory.services.exceptions import FileOperationError, SyncFatalError
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 
@@ -628,6 +628,14 @@ class SyncService:
                     )
                 except FileNotFoundError:
                     await self.handle_delete(path)
+                except FileOperationError as exc:
+                    # Trigger: FileService wraps binary read failures in FileOperationError.
+                    # Why: the service contract should stay consistent for direct callers.
+                    # Outcome: sync still treats wrapped missing-file reads as deletions.
+                    if isinstance(exc.__cause__, FileNotFoundError):
+                        await self.handle_delete(path)
+                    else:
+                        errors[path] = str(exc)
                 except Exception as exc:
                     errors[path] = str(exc)
 
