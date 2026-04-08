@@ -455,6 +455,7 @@ class SearchService:
         entities_by_id = {
             entity.id: entity for entity in await self.entity_repository.find_by_ids(entity_ids)
         }
+        unknown_ids = [entity_id for entity_id in entity_ids if entity_id not in entities_by_id]
         opted_out_ids = [
             entity_id
             for entity_id in entity_ids
@@ -468,12 +469,27 @@ class SearchService:
                 *(self._clear_entity_vectors(entity_id) for entity_id in opted_out_ids)
             )
 
+        repository_results: list[VectorSyncBatchResult] = []
+        if unknown_ids:
+            # Trigger: a caller passes entity IDs that were deleted after the batch was built.
+            # Why: repository sync still owns stale chunk cleanup for IDs with no source rows.
+            # Outcome: deleted entities do not silently keep orphaned vector rows forever.
+            repository_results.append(await self.repository.sync_entity_vectors_batch(unknown_ids))
+
         eligible_entity_ids = [
             entity_id
             for entity_id in entity_ids
             if entity_id in entities_by_id and entity_id not in opted_out_ids
         ]
-        if not eligible_entity_ids:
+        if eligible_entity_ids:
+            repository_results.append(
+                await self.repository.sync_entity_vectors_batch(
+                    eligible_entity_ids,
+                    progress_callback=progress_callback,
+                )
+            )
+
+        if not repository_results:
             return VectorSyncBatchResult(
                 entities_total=len(entity_ids),
                 entities_synced=0,
@@ -481,12 +497,29 @@ class SearchService:
                 entities_skipped=len(opted_out_ids),
             )
 
-        batch_result = await self.repository.sync_entity_vectors_batch(
-            eligible_entity_ids,
-            progress_callback=progress_callback,
+        batch_result = VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=sum(result.entities_synced for result in repository_results),
+            entities_failed=sum(result.entities_failed for result in repository_results),
+            entities_deferred=sum(result.entities_deferred for result in repository_results),
+            entities_skipped=(
+                len(opted_out_ids) + sum(result.entities_skipped for result in repository_results)
+            ),
+            failed_entity_ids=[
+                failed_entity_id
+                for result in repository_results
+                for failed_entity_id in result.failed_entity_ids
+            ],
+            chunks_total=sum(result.chunks_total for result in repository_results),
+            chunks_skipped=sum(result.chunks_skipped for result in repository_results),
+            embedding_jobs_total=sum(result.embedding_jobs_total for result in repository_results),
+            prepare_seconds_total=sum(result.prepare_seconds_total for result in repository_results),
+            queue_wait_seconds_total=sum(
+                result.queue_wait_seconds_total for result in repository_results
+            ),
+            embed_seconds_total=sum(result.embed_seconds_total for result in repository_results),
+            write_seconds_total=sum(result.write_seconds_total for result in repository_results),
         )
-        batch_result.entities_total = len(entity_ids)
-        batch_result.entities_skipped += len(opted_out_ids)
         return batch_result
 
     async def reindex_vectors(self, progress_callback=None) -> dict:

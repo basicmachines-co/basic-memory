@@ -254,3 +254,41 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
         "skipped": 1,
         "errors": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, monkeypatch):
+    """Deleted entity IDs should still flow through repository cleanup instead of being dropped."""
+    repository = _sqlite_repo(search_service)
+    repository._semantic_enabled = True
+
+    monkeypatch.setattr(
+        search_service.entity_repository,
+        "find_by_ids",
+        AsyncMock(return_value=[SimpleNamespace(id=42, entity_metadata={})]),
+    )
+    sync_batch = AsyncMock(
+        side_effect=[
+            VectorSyncBatchResult(
+                entities_total=1,
+                entities_synced=1,
+                entities_failed=0,
+            ),
+            VectorSyncBatchResult(
+                entities_total=1,
+                entities_synced=1,
+                entities_failed=0,
+            ),
+        ]
+    )
+    monkeypatch.setattr(repository, "sync_entity_vectors_batch", sync_batch)
+
+    result = await search_service.sync_entity_vectors_batch([41, 42])
+
+    assert sync_batch.await_count == 2
+    assert sync_batch.await_args_list[0].args[0] == [41]
+    assert sync_batch.await_args_list[1].args[0] == [42]
+    assert result.entities_total == 2
+    assert result.entities_synced == 2
+    assert result.entities_failed == 0
+    assert result.entities_skipped == 0
