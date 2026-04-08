@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import basic_memory.repository.search_repository_base as search_repository_base_module
+from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.search_repository_base import (
     MAX_VECTOR_CHUNK_CHARS,
     SearchRepositoryBase,
@@ -702,3 +703,52 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
     assert histogram_names.count("vector_sync_write_seconds") == 2
     assert histogram_names.count("vector_sync_batch_total_seconds") == 1
     assert [name for name, _, _ in counter_calls].count("vector_sync_entities_total") == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_logs_resolved_fastembed_runtime_settings(monkeypatch):
+    """Batch start should log the resolved FastEmbed knobs that shape this run."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = FastEmbedEmbeddingProvider(
+        batch_size=128,
+        dimensions=384,
+        threads=4,
+        parallel=2,
+    )
+
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [
+            _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=0.0,
+                source_rows_count=1,
+                embedding_jobs=[],
+                entity_skipped=True,
+            )
+            for entity_id in entity_ids
+        ]
+
+    info_calls: list[tuple[str, dict]] = []
+
+    def _capture_info(message: str, **kwargs):
+        info_calls.append((message, kwargs))
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
+    monkeypatch.setattr(search_repository_base_module.logger, "info", _capture_info)
+
+    result = await repo.sync_entity_vectors_batch([1])
+
+    assert result.entities_synced == 1
+    runtime_logs = [
+        kwargs
+        for message, kwargs in info_calls
+        if message.startswith("Vector batch runtime settings:")
+    ]
+    assert len(runtime_logs) == 1
+    assert runtime_logs[0]["model_name"] == "bge-small-en-v1.5"
+    assert runtime_logs[0]["provider_batch_size"] == 128
+    assert runtime_logs[0]["sync_batch_size"] == 64
+    assert runtime_logs[0]["threads"] == 4
+    assert runtime_logs[0]["configured_parallel"] == 2
+    assert runtime_logs[0]["effective_parallel"] == 2

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from basic_memory.config import BasicMemoryConfig
+import basic_memory.repository.embedding_provider_factory as embedding_provider_factory_module
 from basic_memory.repository.embedding_provider_factory import (
     create_embedding_provider,
     reset_embedding_provider_cache,
@@ -264,6 +265,52 @@ def test_embedding_provider_factory_forwards_fastembed_runtime_knobs():
     assert provider.parallel == 2
 
 
+def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_budget(monkeypatch):
+    """Unset FastEmbed runtime knobs should resolve from available CPU budget."""
+    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 8)
+    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 8)
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.threads == 8
+    assert provider.parallel == 1
+
+
+def test_embedding_provider_factory_auto_tuning_stays_conservative_on_small_cpu_budget(
+    monkeypatch,
+):
+    """Small workers should not get an oversized FastEmbed runtime footprint."""
+    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 2)
+    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 2)
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.threads == 2
+    assert provider.parallel == 1
+
+
 def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
     """Factory should reuse the same provider instance for identical config values."""
     config_a = BasicMemoryConfig(
@@ -281,6 +328,36 @@ def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
         semantic_search_enabled=True,
         semantic_embedding_provider="fastembed",
         semantic_embedding_threads=2,
+    )
+
+    provider_a = create_embedding_provider(config_a)
+    provider_b = create_embedding_provider(config_b)
+
+    assert provider_a is provider_b
+
+
+def test_embedding_provider_factory_reuses_auto_tuned_provider_for_same_cpu_budget(monkeypatch):
+    """Auto-tuned FastEmbed providers should still reuse the process cache."""
+    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 8)
+    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 8)
+
+    config_a = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+    config_b = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
     )
 
     provider_a = create_embedding_provider(config_a)

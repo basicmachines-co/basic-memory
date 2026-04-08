@@ -800,6 +800,7 @@ class SearchRepositoryBase(ABC):
         batch_start = time.perf_counter()
         backend_name = type(self).__name__.removesuffix("SearchRepository").lower()
 
+        self._log_vector_sync_runtime_settings(backend_name=backend_name, entities_total=total_entities)
         logger.info(
             "Vector batch sync start: project_id={project_id} entities_total={entities_total} "
             "sync_batch_size={sync_batch_size} prepare_window_size={prepare_window_size}",
@@ -1594,6 +1595,51 @@ class SearchRepositoryBase(ABC):
                 progress_callback(entity_id)
 
         return queue_wait_seconds_total
+
+    def _log_vector_sync_runtime_settings(self, *, backend_name: str, entities_total: int) -> None:
+        """Log the resolved embedding runtime knobs before the first prepare window.
+
+        Trigger: a vector sync batch is about to start real work.
+        Why: operators need one place to confirm the provider/runtime settings that
+        this run will actually use, especially when threads/parallel are auto-tuned.
+        Outcome: the log shows the resolved values once per batch without changing
+        the hot-path control flow or adding more telemetry structure.
+        """
+        assert self._embedding_provider is not None
+
+        from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
+
+        provider = self._embedding_provider
+        if isinstance(provider, FastEmbedEmbeddingProvider):
+            logger.info(
+                "Vector batch runtime settings: project_id={project_id} backend={backend} "
+                "entities_total={entities_total} provider={provider} model_name={model_name} "
+                "dimensions={dimensions} provider_batch_size={provider_batch_size} "
+                "sync_batch_size={sync_batch_size} threads={threads} "
+                "configured_parallel={configured_parallel} effective_parallel={effective_parallel}",
+                project_id=self.project_id,
+                backend=backend_name,
+                entities_total=entities_total,
+                provider=type(provider).__name__,
+                model_name=provider.model_name,
+                dimensions=provider.dimensions,
+                provider_batch_size=provider.batch_size,
+                sync_batch_size=self._semantic_embedding_sync_batch_size,
+                threads=provider.threads,
+                configured_parallel=provider.parallel,
+                effective_parallel=provider._effective_parallel(),
+            )
+            return
+
+        logger.info(
+            "Vector batch runtime settings: project_id={project_id} backend={backend} "
+            "entities_total={entities_total} provider={provider} sync_batch_size={sync_batch_size}",
+            project_id=self.project_id,
+            backend=backend_name,
+            entities_total=entities_total,
+            provider=type(provider).__name__,
+            sync_batch_size=self._semantic_embedding_sync_batch_size,
+        )
 
     def _log_vector_sync_complete(
         self,
