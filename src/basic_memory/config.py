@@ -193,6 +193,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Batch size for embedding generation.",
         gt=0,
     )
+    semantic_embedding_request_concurrency: int = Field(
+        default=4,
+        description="Maximum number of concurrent provider requests for batched embedding generation when the active provider supports request-level concurrency.",
+        gt=0,
+    )
     semantic_embedding_sync_batch_size: int = Field(
         default=64,
         description="Batch size for vector sync orchestration flushes.",
@@ -284,6 +289,31 @@ class BasicMemoryConfig(BaseSettings):
     sync_max_concurrent_files: int = Field(
         default=10,
         description="Maximum number of files to process concurrently during sync. Limits memory usage on large projects (2000+ files). Lower values reduce memory consumption.",
+        gt=0,
+    )
+    index_batch_size: int = Field(
+        default=32,
+        description="Maximum number of changed files to load into one indexing batch.",
+        gt=0,
+    )
+    index_batch_max_bytes: int = Field(
+        default=8 * 1024 * 1024,
+        description="Maximum total bytes to load into one indexing batch. Large files still run as single-file batches.",
+        gt=0,
+    )
+    index_parse_max_concurrent: int = Field(
+        default=8,
+        description="Maximum number of markdown parse tasks to run concurrently inside one indexing batch.",
+        gt=0,
+    )
+    index_entity_max_concurrent: int = Field(
+        default=4,
+        description="Maximum number of entity create/update tasks to run concurrently inside one indexing batch.",
+        gt=0,
+    )
+    index_metadata_update_max_concurrent: int = Field(
+        default=4,
+        description="Maximum number of metadata/search refresh tasks to run concurrently inside one indexing batch.",
         gt=0,
     )
 

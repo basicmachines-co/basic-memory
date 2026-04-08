@@ -5,7 +5,16 @@ from threading import Lock
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 
-type ProviderCacheKey = tuple[str, str, int | None, int, str | None, int | None, int | None]
+type ProviderCacheKey = tuple[
+    str,
+    str,
+    int | None,
+    int,
+    int,
+    str | None,
+    int | None,
+    int | None,
+]
 
 _EMBEDDING_PROVIDER_CACHE: dict[ProviderCacheKey, EmbeddingProvider] = {}
 _EMBEDDING_PROVIDER_CACHE_LOCK = Lock()
@@ -18,6 +27,7 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
         app_config.semantic_embedding_model,
         app_config.semantic_embedding_dimensions,
         app_config.semantic_embedding_batch_size,
+        app_config.semantic_embedding_request_concurrency,
         app_config.semantic_embedding_cache_dir,
         app_config.semantic_embedding_threads,
         app_config.semantic_embedding_parallel,
@@ -73,6 +83,7 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         provider = OpenAIEmbeddingProvider(
             model_name=model_name,
             batch_size=app_config.semantic_embedding_batch_size,
+            request_concurrency=app_config.semantic_embedding_request_concurrency,
             **extra_kwargs,
         )
     else:

@@ -1,5 +1,6 @@
 """Tests for OpenAIEmbeddingProvider and embedding provider factory."""
 
+import asyncio
 import builtins
 import sys
 from types import SimpleNamespace
@@ -38,6 +39,34 @@ class _StubAsyncOpenAI:
         self.timeout = timeout
         self.embeddings = _StubEmbeddingsApi()
         _StubAsyncOpenAI.init_count += 1
+
+
+class _ConcurrentEmbeddingsApi:
+    def __init__(self):
+        self.calls: list[tuple[str, list[str]]] = []
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    async def create(self, *, model: str, input: list[str]):
+        self.calls.append((model, input))
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(0.05)
+            vectors = []
+            for index, value in enumerate(input):
+                base = float(len(value))
+                vectors.append(
+                    SimpleNamespace(index=index, embedding=[base, base + 1.0, base + 2.0])
+                )
+            return SimpleNamespace(data=vectors)
+        finally:
+            self.in_flight -= 1
+
+
+class _MalformedEmbeddingsApi:
+    async def create(self, *, model: str, input: list[str]):
+        return SimpleNamespace(data=[SimpleNamespace(index=0, embedding=[1.0, 2.0, 3.0])])
 
 
 @pytest.fixture(autouse=True)
@@ -260,6 +289,57 @@ def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
     assert provider_a is provider_b
 
 
+@pytest.mark.asyncio
+async def test_openai_provider_runs_batches_concurrently_and_preserves_output_order(monkeypatch):
+    """Concurrent request fan-out should keep batch order stable."""
+
+    shared_api = _ConcurrentEmbeddingsApi()
+
+    class _ConcurrentAsyncOpenAI:
+        def __init__(self, *, api_key: str, base_url=None, timeout=30.0):
+            self.embeddings = shared_api
+
+    module = type(sys)("openai")
+    module.AsyncOpenAI = _ConcurrentAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    provider = OpenAIEmbeddingProvider(
+        model_name="text-embedding-3-small",
+        batch_size=2,
+        request_concurrency=2,
+        dimensions=3,
+    )
+
+    vectors = await provider.embed_documents(["a", "bbbb", "ccc", "dd"])
+
+    assert shared_api.max_in_flight >= 2
+    assert vectors == [
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [3.0, 4.0, 5.0],
+        [2.0, 3.0, 4.0],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_fails_fast_on_malformed_concurrent_batch(monkeypatch):
+    """Missing batch indexes should still raise even when requests run concurrently."""
+
+    class _MalformedAsyncOpenAI:
+        def __init__(self, *, api_key: str, base_url=None, timeout=30.0):
+            self.embeddings = _MalformedEmbeddingsApi()
+
+    module = type(sys)("openai")
+    module.AsyncOpenAI = _MalformedAsyncOpenAI
+    monkeypatch.setitem(sys.modules, "openai", module)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    provider = OpenAIEmbeddingProvider(batch_size=2, request_concurrency=2, dimensions=3)
+    with pytest.raises(RuntimeError, match="missing expected vector index"):
+        await provider.embed_documents(["one", "two", "three", "four"])
+
+
 def test_embedding_provider_factory_creates_new_provider_for_different_cache_key():
     """Factory should create distinct providers when cache key fields differ."""
     config_a = BasicMemoryConfig(
@@ -283,6 +363,22 @@ def test_embedding_provider_factory_creates_new_provider_for_different_cache_key
     provider_b = create_embedding_provider(config_b)
 
     assert provider_a is not provider_b
+
+
+def test_embedding_provider_factory_forwards_openai_request_concurrency():
+    """Factory should forward provider request concurrency for API-backed batching."""
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="openai",
+        semantic_embedding_request_concurrency=6,
+    )
+
+    provider = create_embedding_provider(config)
+    assert isinstance(provider, OpenAIEmbeddingProvider)
+    assert provider.request_concurrency == 6
 
 
 def test_embedding_provider_factory_reset_clears_cache():

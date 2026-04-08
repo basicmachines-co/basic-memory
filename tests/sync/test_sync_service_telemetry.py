@@ -49,14 +49,11 @@ async def test_sync_emits_phase_spans(sync_service, project_config, monkeypatch)
     async def fake_handle_delete(path):
         return None
 
-    async def fake_sync_file(path, new=True):
-        return None, None
-
-    async def fake_should_skip_file(path):
-        return False
+    async def fake_index_changed_files(changed_paths, checksums_by_path, progress_callback=None):
+        return [], []
 
     async def fake_resolve_relations(entity_id=None):
-        return None
+        return set()
 
     async def fake_quick_count_files(directory):
         return 3
@@ -72,8 +69,7 @@ async def test_sync_emits_phase_spans(sync_service, project_config, monkeypatch)
     monkeypatch.setattr(sync_service, "scan", fake_scan)
     monkeypatch.setattr(sync_service, "handle_move", fake_handle_move)
     monkeypatch.setattr(sync_service, "handle_delete", fake_handle_delete)
-    monkeypatch.setattr(sync_service, "sync_file", fake_sync_file)
-    monkeypatch.setattr(sync_service, "_should_skip_file", fake_should_skip_file)
+    monkeypatch.setattr(sync_service, "_index_changed_files", fake_index_changed_files)
     monkeypatch.setattr(sync_service, "resolve_relations", fake_resolve_relations)
     monkeypatch.setattr(sync_service, "_quick_count_files", fake_quick_count_files)
     monkeypatch.setattr(sync_service.project_repository, "find_by_id", fake_find_by_id)

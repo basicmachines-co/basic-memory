@@ -1,5 +1,6 @@
 """Database management commands."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import typer
@@ -12,11 +13,45 @@ from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.indexing import IndexProgress
 from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import reconcile_projects_with_config
 from basic_memory.sync.sync_service import get_sync_service
 
 console = Console()
+
+
+@dataclass(slots=True)
+class EmbeddingProgress:
+    """Typed CLI progress payload for embedding backfills."""
+
+    entity_id: int
+    index: int
+    total: int
+
+
+def _format_eta(seconds: float | None) -> str:
+    """Render a compact ETA string for CLI progress descriptions."""
+    if seconds is None:
+        return "--:--"
+
+    whole_seconds = max(int(seconds), 0)
+    minutes, remaining_seconds = divmod(whole_seconds, 60)
+    hours, remaining_minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{remaining_minutes:02d}:{remaining_seconds:02d}"
+    return f"{remaining_minutes:02d}:{remaining_seconds:02d}"
+
+
+def _format_index_progress(progress: IndexProgress) -> str:
+    """Render typed index progress as a compact Rich task description."""
+    files_per_minute = int(progress.files_per_minute) if progress.files_per_minute else 0
+    return (
+        "  Indexing files... "
+        f"{progress.files_processed}/{progress.files_total} files | "
+        f"{progress.batches_completed}/{progress.batches_total} batches | "
+        f"{files_per_minute}/min | ETA {_format_eta(progress.eta_seconds)}"
+    )
 
 
 async def _reindex_projects(app_config):
@@ -185,10 +220,34 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
             console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
 
             if search:
-                console.print("  Rebuilding full-text search index...")
                 sync_service = await get_sync_service(proj)
                 sync_dir = Path(proj.path)
-                await sync_service.sync(sync_dir, project_name=proj.name)
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    TaskProgressColumn(),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task("  Indexing files... scanning changes", total=1)
+
+                    async def on_index_progress(update: IndexProgress) -> None:
+                        total = update.files_total or 1
+                        completed = update.files_processed if update.files_total else 1
+                        progress.update(
+                            task,
+                            description=_format_index_progress(update),
+                            total=total,
+                            completed=min(completed, total),
+                        )
+
+                    await sync_service.sync(
+                        sync_dir,
+                        project_name=proj.name,
+                        progress_callback=on_index_progress,
+                    )
+                    progress.update(task, completed=progress.tasks[task].total or 1)
+
                 console.print("  [green]✓[/green] Full-text search index rebuilt")
 
             if embeddings:
@@ -213,7 +272,16 @@ async def _reindex(app_config, search: bool, embeddings: bool, project: str | No
                     task = progress.add_task("  Embedding entities...", total=None)
 
                     def on_progress(entity_id, index, total):
-                        progress.update(task, total=total, completed=index)
+                        embedding_progress = EmbeddingProgress(
+                            entity_id=entity_id,
+                            index=index,
+                            total=total,
+                        )
+                        progress.update(
+                            task,
+                            total=embedding_progress.total,
+                            completed=embedding_progress.index,
+                        )
 
                     stats = await search_service.reindex_vectors(progress_callback=on_progress)
                     progress.update(task, completed=stats["total_entities"])
