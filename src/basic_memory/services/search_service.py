@@ -469,25 +469,31 @@ class SearchService:
                 *(self._clear_entity_vectors(entity_id) for entity_id in opted_out_ids)
             )
 
-        repository_results: list[VectorSyncBatchResult] = []
-        if unknown_ids:
-            # Trigger: a caller passes entity IDs that were deleted after the batch was built.
-            # Why: repository sync still owns stale chunk cleanup for IDs with no source rows.
-            # Outcome: deleted entities do not silently keep orphaned vector rows forever.
-            repository_results.append(await self.repository.sync_entity_vectors_batch(unknown_ids))
-
         eligible_entity_ids = [
             entity_id
             for entity_id in entity_ids
             if entity_id in entities_by_id and entity_id not in opted_out_ids
         ]
-        if eligible_entity_ids:
-            repository_results.append(
-                await self.repository.sync_entity_vectors_batch(
-                    eligible_entity_ids,
-                    progress_callback=progress_callback,
-                )
+
+        cleanup_task = (
+            self.repository.sync_entity_vectors_batch(unknown_ids) if unknown_ids else None
+        )
+        eligible_task = (
+            self.repository.sync_entity_vectors_batch(
+                eligible_entity_ids,
+                progress_callback=progress_callback,
             )
+            if eligible_entity_ids
+            else None
+        )
+        repository_results = [
+            result
+            for result in await asyncio.gather(
+                cleanup_task if cleanup_task is not None else asyncio.sleep(0, result=None),
+                eligible_task if eligible_task is not None else asyncio.sleep(0, result=None),
+            )
+            if result is not None
+        ]
 
         if not repository_results:
             return VectorSyncBatchResult(
@@ -503,7 +509,9 @@ class SearchService:
             entities_failed=sum(result.entities_failed for result in repository_results),
             entities_deferred=sum(result.entities_deferred for result in repository_results),
             entities_skipped=(
-                len(opted_out_ids) + sum(result.entities_skipped for result in repository_results)
+                len(opted_out_ids)
+                + sum(result.entities_skipped for result in repository_results)
+                - len(unknown_ids)
             ),
             failed_entity_ids=[
                 failed_entity_id

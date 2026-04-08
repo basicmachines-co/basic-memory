@@ -273,6 +273,7 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
                 entities_total=1,
                 entities_synced=1,
                 entities_failed=0,
+                entities_skipped=1,
             ),
             VectorSyncBatchResult(
                 entities_total=1,
@@ -282,12 +283,19 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
         ]
     )
     monkeypatch.setattr(repository, "sync_entity_vectors_batch", sync_batch)
+    progress_callback = AsyncMock()
 
-    result = await search_service.sync_entity_vectors_batch([41, 42])
+    result = await search_service.sync_entity_vectors_batch([41, 42], progress_callback)
 
     assert sync_batch.await_count == 2
-    assert sync_batch.await_args_list[0].args[0] == [41]
-    assert sync_batch.await_args_list[1].args[0] == [42]
+    called_entity_ids = {tuple(call.args[0]) for call in sync_batch.await_args_list}
+    assert called_entity_ids == {(41,), (42,)}
+    progress_callback_calls = [
+        call for call in sync_batch.await_args_list if call.kwargs.get("progress_callback") is not None
+    ]
+    assert len(progress_callback_calls) == 1
+    assert progress_callback_calls[0].args[0] == [42]
+    assert progress_callback_calls[0].kwargs["progress_callback"] is progress_callback
     assert result.entities_total == 2
     assert result.entities_synced == 2
     assert result.entities_failed == 0
