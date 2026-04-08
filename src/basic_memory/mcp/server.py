@@ -2,7 +2,6 @@
 Basic Memory FastMCP server.
 """
 
-import asyncio
 import time
 from contextlib import asynccontextmanager
 
@@ -13,12 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from basic_memory import db
 from basic_memory.cli.auth import CLIAuth
-from basic_memory.config import BasicMemoryConfig
-from basic_memory.db import (
-    scoped_session,
-    _needs_semantic_embedding_backfill,
-    _run_semantic_embedding_backfill,
-)
+from basic_memory.db import scoped_session
 from basic_memory.mcp.container import McpContainer, set_container
 from basic_memory.services.initialization import initialize_app
 from basic_memory import telemetry
@@ -43,7 +37,7 @@ async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession])
         elif embedding_count == 0:
             logger.warning(
                 f"Semantic embeddings: EMPTY — {entity_count} entities have no embeddings. "
-                "Backfill running in background..."
+                "Run 'bm reindex --embeddings' to build them."
             )
         else:
             logger.info(
@@ -52,20 +46,6 @@ async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession])
             )
     except Exception as exc:
         logger.debug(f"Could not check embedding status at startup: {exc}")
-
-
-async def _background_embedding_backfill(
-    config: BasicMemoryConfig,
-    session_maker: async_sessionmaker[AsyncSession],
-) -> None:
-    """Run semantic embedding backfill in the background without blocking startup."""
-    try:
-        if await _needs_semantic_embedding_backfill(config, session_maker):
-            logger.info("Background embedding backfill starting...")
-            await _run_semantic_embedding_backfill(config, session_maker)
-            await _log_embedding_status(session_maker)
-    except Exception as exc:
-        logger.error(f"Background embedding backfill failed: {exc}")
 
 
 @asynccontextmanager
@@ -133,14 +113,8 @@ async def lifespan(app: FastMCP):
         await initialize_app(container.config)
 
         # Log embedding status so it's easy to spot in the logs
-        backfill_task: asyncio.Task | None = None  # type: ignore[type-arg]
         if config.semantic_search_enabled and db._session_maker is not None:
             await _log_embedding_status(db._session_maker)
-            # Launch backfill in background so MCP server is ready immediately
-            backfill_task = asyncio.create_task(
-                _background_embedding_backfill(config, db._session_maker),
-                name="embedding-backfill",
-            )
 
         # Create and start sync coordinator (lifecycle centralized in coordinator)
         sync_coordinator = container.create_sync_coordinator()
@@ -156,14 +130,6 @@ async def lifespan(app: FastMCP):
             mode=container.mode.name.lower(),
         ):
             logger.debug("Shutting down Basic Memory MCP server")
-
-            # Cancel embedding backfill if still running
-            if backfill_task is not None and not backfill_task.done():
-                backfill_task.cancel()
-                try:
-                    await backfill_task
-                except asyncio.CancelledError:
-                    logger.info("Background embedding backfill cancelled during shutdown")
 
             await sync_coordinator.stop()
 

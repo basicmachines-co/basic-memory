@@ -44,101 +44,6 @@ _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
 
-async def _needs_semantic_embedding_backfill(
-    app_config: BasicMemoryConfig,
-    session_maker: async_sessionmaker[AsyncSession],
-) -> bool:
-    """Check if entities exist but vector embeddings are empty.
-
-    This is the reliable way to detect that embeddings need to be generated,
-    regardless of how migrations were applied (fresh DB, upgrade, reset, etc.).
-    """
-    if not app_config.semantic_search_enabled:
-        return False
-
-    try:
-        async with scoped_session(session_maker) as session:
-            entity_count = (
-                await session.execute(text("SELECT COUNT(*) FROM entity"))
-            ).scalar() or 0
-            if entity_count == 0:
-                return False
-
-            # Check if vector chunks table exists and is empty
-            embedding_count = (
-                await session.execute(text("SELECT COUNT(*) FROM search_vector_chunks"))
-            ).scalar() or 0
-
-            return embedding_count == 0
-    except Exception as exc:
-        # Table might not exist yet (pre-migration)
-        logger.debug(f"Could not check embedding status: {exc}")
-        return False
-
-
-async def _run_semantic_embedding_backfill(
-    app_config: BasicMemoryConfig,
-    session_maker: async_sessionmaker[AsyncSession],
-) -> None:
-    """Backfill semantic embeddings for all active projects/entities."""
-    if not app_config.semantic_search_enabled:
-        logger.info("Skipping automatic semantic embedding backfill: semantic search is disabled.")
-        return
-
-    async with scoped_session(session_maker) as session:
-        project_result = await session.execute(
-            text("SELECT id, name FROM project WHERE is_active = :is_active ORDER BY id"),
-            {"is_active": True},
-        )
-        projects = [(int(row[0]), str(row[1])) for row in project_result.fetchall()]
-
-    if not projects:
-        logger.info("Skipping automatic semantic embedding backfill: no active projects found.")
-        return
-
-    repository_class = (
-        PostgresSearchRepository
-        if app_config.database_backend == DatabaseBackend.POSTGRES
-        else SQLiteSearchRepository
-    )
-
-    total_entities = 0
-    for project_id, project_name in projects:
-        async with scoped_session(session_maker) as session:
-            entity_result = await session.execute(
-                text("SELECT id FROM entity WHERE project_id = :project_id ORDER BY id"),
-                {"project_id": project_id},
-            )
-            entity_ids = [int(row[0]) for row in entity_result.fetchall()]
-
-        if not entity_ids:
-            continue
-
-        total_entities += len(entity_ids)
-        logger.info(
-            "Automatic semantic embedding backfill: "
-            f"project={project_name}, entities={len(entity_ids)}"
-        )
-
-        search_repository = repository_class(
-            session_maker,
-            project_id=project_id,
-            app_config=app_config,
-        )
-        batch_result = await search_repository.sync_entity_vectors_batch(entity_ids)
-        if batch_result.entities_failed > 0:
-            logger.warning(
-                "Automatic semantic embedding backfill encountered entity failures: "
-                f"project={project_name}, failed={batch_result.entities_failed}, "
-                f"failed_entity_ids={batch_result.failed_entity_ids}"
-            )
-
-    logger.info(
-        "Automatic semantic embedding backfill complete: "
-        f"projects={len(projects)}, entities={total_entities}"
-    )
-
-
 class DatabaseType(Enum):
     """Types of supported databases."""
 
@@ -521,14 +426,6 @@ async def run_migrations(
         else:
             await SQLiteSearchRepository(session_maker, 1).init_search_index()
 
-        # Check if backfill is needed — actual backfill runs in background
-        # from the MCP server lifespan to avoid blocking startup.
-        if await _needs_semantic_embedding_backfill(app_config, session_maker):
-            logger.info(
-                "Semantic embeddings missing — backfill will run in background after startup"
-            )
-        else:
-            logger.info("Semantic embeddings: up to date")
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")
         raise
