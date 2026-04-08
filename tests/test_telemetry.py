@@ -13,6 +13,20 @@ from basic_memory.config import init_api_logging, init_cli_logging, init_mcp_log
 class FakeLogfire:
     """Small fake Logfire surface for bootstrap testing."""
 
+    class FakeCounter:
+        def __init__(self, calls: list[tuple[float, dict | None]]) -> None:
+            self.calls = calls
+
+        def add(self, amount: float, *, attributes=None) -> None:
+            self.calls.append((amount, attributes))
+
+    class FakeHistogram:
+        def __init__(self, calls: list[tuple[float, dict | None]]) -> None:
+            self.calls = calls
+
+        def record(self, amount: float, *, attributes=None) -> None:
+            self.calls.append((amount, attributes))
+
     class CodeSource:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -21,6 +35,8 @@ class FakeLogfire:
         self.fail_on_send_to_logfire = fail_on_send_to_logfire
         self.configure_calls: list[dict] = []
         self.span_calls: list[tuple[str, dict]] = []
+        self.counter_calls: dict[str, list[tuple[float, dict | None]]] = {}
+        self.histogram_calls: dict[str, list[tuple[float, dict | None]]] = {}
 
     def configure(self, **kwargs) -> None:
         self.configure_calls.append(kwargs)
@@ -29,6 +45,14 @@ class FakeLogfire:
 
     def loguru_handler(self) -> dict:
         return {"sink": "fake-logfire", "level": "INFO"}
+
+    def metric_counter(self, name: str, *, unit: str = "", description: str = ""):
+        self.counter_calls.setdefault(name, [])
+        return self.FakeCounter(self.counter_calls[name])
+
+    def metric_histogram(self, name: str, *, unit: str = "", description: str = ""):
+        self.histogram_calls.setdefault(name, [])
+        return self.FakeHistogram(self.histogram_calls[name])
 
     @contextmanager
     def span(self, name: str, **attrs):
@@ -173,6 +197,38 @@ def test_started_span_exposes_mutable_logfire_handle(monkeypatch) -> None:
                 "outcome": "success",
             },
         )
+    ]
+
+
+def test_metrics_record_when_telemetry_enabled(monkeypatch) -> None:
+    fake_logfire = FakeLogfire()
+    telemetry.reset_telemetry_state()
+    monkeypatch.setattr(telemetry, "_load_logfire", lambda: fake_logfire)
+    telemetry.configure_telemetry(
+        "basic-memory-cli",
+        environment="dev",
+        enable_logfire=True,
+    )
+
+    telemetry.record_histogram(
+        "vector_sync_prepare_seconds",
+        1.25,
+        unit="s",
+        backend="sqlite",
+        skip_only_batch=True,
+    )
+    telemetry.add_counter(
+        "vector_sync_entities_skipped",
+        2,
+        backend="sqlite",
+        skip_only_batch=True,
+    )
+
+    assert fake_logfire.histogram_calls["vector_sync_prepare_seconds"] == [
+        (1.25, {"backend": "sqlite", "skip_only_batch": True})
+    ]
+    assert fake_logfire.counter_calls["vector_sync_entities_skipped"] == [
+        (2, {"backend": "sqlite", "skip_only_batch": True})
     ]
 
 

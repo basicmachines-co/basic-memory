@@ -40,6 +40,7 @@ class TelemetryState:
 
 _STATE = TelemetryState()
 _LOGFIRE_HANDLER: dict[str, Any] | None = None
+_METRICS: dict[tuple[str, str, str, str], Any] = {}
 
 
 def reset_telemetry_state() -> None:
@@ -55,6 +56,7 @@ def reset_telemetry_state() -> None:
     _STATE.send_to_logfire = False
     _STATE.warnings.clear()
     _LOGFIRE_HANDLER = None
+    _METRICS.clear()
 
 
 def _filter_attributes(attrs: dict[str, Any]) -> dict[str, Any]:
@@ -136,6 +138,58 @@ def pop_telemetry_warnings() -> list[str]:
     return warnings
 
 
+def _get_metric(metric_type: str, name: str, *, unit: str, description: str) -> Any | None:
+    """Create or reuse a Logfire metric instrument when telemetry is enabled."""
+    logfire = _load_logfire()
+    if logfire is None or not _STATE.configured:  # pragma: no cover
+        return None  # pragma: no cover
+
+    metric_key = (metric_type, name, unit, description)
+    cached_metric = _METRICS.get(metric_key)
+    if cached_metric is not None:
+        return cached_metric
+
+    if metric_type == "counter":
+        metric = logfire.metric_counter(name, unit=unit, description=description)
+    elif metric_type == "histogram":
+        metric = logfire.metric_histogram(name, unit=unit, description=description)
+    else:  # pragma: no cover
+        raise ValueError(f"Unsupported metric type: {metric_type}")  # pragma: no cover
+
+    _METRICS[metric_key] = metric
+    return metric
+
+
+def add_counter(
+    name: str,
+    amount: int | float,
+    *,
+    unit: str = "1",
+    description: str = "",
+    **attrs: Any,
+) -> None:
+    """Record a counter increment when telemetry is enabled."""
+    metric = _get_metric("counter", name, unit=unit, description=description)
+    if metric is None:
+        return
+    metric.add(amount, attributes=_filter_attributes(attrs))
+
+
+def record_histogram(
+    name: str,
+    amount: int | float,
+    *,
+    unit: str = "",
+    description: str = "",
+    **attrs: Any,
+) -> None:
+    """Record one histogram sample when telemetry is enabled."""
+    metric = _get_metric("histogram", name, unit=unit, description=description)
+    if metric is None:
+        return
+    metric.record(amount, attributes=_filter_attributes(attrs))
+
+
 @contextmanager
 def contextualize(**attrs: Any) -> Iterator[None]:
     """Apply filtered telemetry attributes to Loguru calls in this scope."""
@@ -176,11 +230,13 @@ def started_span(name: str, **attrs: Any) -> Iterator[Any | None]:
 
 
 __all__ = [
+    "add_counter",
     "contextualize",
     "configure_telemetry",
     "get_logfire_handler",
     "operation",
     "pop_telemetry_warnings",
+    "record_histogram",
     "reset_telemetry_state",
     "scope",
     "span",

@@ -1,12 +1,15 @@
 """SQLite sqlite-vec search repository tests."""
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -81,6 +84,27 @@ def _enable_semantic(
     search_repository._embedding_provider = embedding_provider or StubEmbeddingProvider()
     search_repository._vector_dimensions = search_repository._embedding_provider.dimensions
     search_repository._vector_tables_initialized = False
+
+
+def _make_sqlite_repo_for_unit_tests() -> SQLiteSearchRepository:
+    """Build a SQLite repository without touching a real sqlite-vec install."""
+    session_maker = MagicMock()
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.SQLITE,
+        semantic_search_enabled=True,
+        semantic_embedding_sync_batch_size=8,
+    )
+    repo = SQLiteSearchRepository(
+        session_maker,
+        project_id=1,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    )
+    repo._vector_tables_initialized = True
+    return repo
 
 
 @pytest.mark.asyncio
@@ -239,6 +263,7 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
     assert unchanged_result.entities_synced == 1
     assert unchanged_result.entities_skipped == 1
     assert unchanged_result.embedding_jobs_total == 0
+    assert unchanged_result.queue_wait_seconds_total == pytest.approx(0.0, abs=0.01)
     assert unchanged_result.chunks_skipped == unchanged_result.chunks_total
 
     await search_repository.index_item(
@@ -264,6 +289,76 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
     assert model_changed_result.entities_skipped == 0
     assert model_changed_result.chunks_skipped == 0
     assert model_changed_result.embedding_jobs_total == model_changed_result.chunks_total
+
+
+@pytest.mark.asyncio
+async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scope(monkeypatch):
+    """SQLite should batch read-side prepare work but serialize write-side mutations."""
+    repo = _make_sqlite_repo_for_unit_tests()
+
+    fetched_windows: list[list[int]] = []
+    active_write_scopes = 0
+    max_active_write_scopes = 0
+
+    async def _stub_fetch_source_rows(session, entity_ids: list[int]):
+        fetched_windows.append(list(entity_ids))
+        return {entity_id: [object()] for entity_id in entity_ids}
+
+    async def _stub_fetch_existing_rows(session, entity_ids: list[int]):
+        return {entity_id: [] for entity_id in entity_ids}
+
+    def _stub_build_chunk_records(source_rows):
+        return [
+            {
+                "chunk_key": "entity:1:0",
+                "chunk_text": "chunk text",
+                "source_hash": "hash",
+            }
+        ]
+
+    @asynccontextmanager
+    async def _track_write_scope():
+        nonlocal active_write_scopes, max_active_write_scopes
+        async with repo._sqlite_vec_lock:
+            active_write_scopes += 1
+            max_active_write_scopes = max(max_active_write_scopes, active_write_scopes)
+            try:
+                yield
+            finally:
+                active_write_scopes -= 1
+
+    async def _stub_upsert(
+        session,
+        *,
+        entity_id: int,
+        scheduled_records,
+        existing_by_key,
+        entity_fingerprint: str,
+        embedding_model: str,
+    ):
+        await asyncio.sleep(0)
+        return [(entity_id * 100, scheduled_records[0]["chunk_text"])]
+
+    @asynccontextmanager
+    async def fake_scoped_session(session_maker):
+        yield AsyncMock()
+
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository_base.db.scoped_session",
+        fake_scoped_session,
+    )
+    monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
+    monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
+    monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(repo, "_build_chunk_records", _stub_build_chunk_records)
+    monkeypatch.setattr(repo, "_prepare_entity_write_scope", _track_write_scope)
+    monkeypatch.setattr(repo, "_upsert_scheduled_chunk_records", _stub_upsert)
+
+    prepared = await repo._prepare_entity_vector_jobs_window([1, 2])
+
+    assert fetched_windows == [[1, 2]]
+    assert [result.entity_id for result in prepared] == [1, 2]
+    assert max_active_write_scopes == 1
 
 
 @pytest.mark.asyncio

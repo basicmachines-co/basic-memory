@@ -195,12 +195,9 @@ class TestEnsureVectorTablesSchemaBootstrapping:
 
         executed_sql = [str(call.args[0]) for call in session.execute.await_args_list]
 
+        assert any("CREATE TABLE IF NOT EXISTS search_vector_chunks" in sql for sql in executed_sql)
         assert any(
-            "CREATE TABLE IF NOT EXISTS search_vector_chunks" in sql for sql in executed_sql
-        )
-        assert any(
-            "CREATE TABLE IF NOT EXISTS search_vector_embeddings" in sql
-            for sql in executed_sql
+            "CREATE TABLE IF NOT EXISTS search_vector_embeddings" in sql for sql in executed_sql
         )
         assert not any("ALTER TABLE search_vector_chunks" in sql for sql in executed_sql)
         session.commit.assert_awaited_once()
@@ -287,11 +284,11 @@ class TestWriteEmbeddings:
         assert params["embedding_dims_1"] == 4
 
 
-class TestBatchPrepareConcurrency:
-    """Cover the Postgres-specific concurrent prepare window."""
+class TestBatchPrepareWindow:
+    """Cover the shared batched prepare window used by Postgres."""
 
     @pytest.mark.asyncio
-    async def test_sync_entity_vectors_batch_prepares_entities_concurrently(self, monkeypatch):
+    async def test_sync_entity_vectors_batch_uses_shared_prepare_window(self, monkeypatch):
         repo = _make_repo(
             semantic_enabled=True,
             embedding_provider=StubEmbeddingProvider(),
@@ -300,30 +297,65 @@ class TestBatchPrepareConcurrency:
         repo._semantic_embedding_sync_batch_size = 8
         repo._vector_tables_initialized = True
 
+        fetched_windows: list[list[int]] = []
+        prepared_windows: list[list[int]] = []
         active_prepares = 0
         max_active_prepares = 0
 
-        async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
+        async def _stub_fetch_source_rows(session, entity_ids: list[int]):
+            fetched_windows.append(list(entity_ids))
+            return {entity_id: [object()] for entity_id in entity_ids}
+
+        async def _stub_fetch_existing_rows(session, entity_ids: list[int]):
+            return {entity_id: [] for entity_id in entity_ids}
+
+        async def _stub_prepare_prefetched(
+            *,
+            entity_id: int,
+            source_rows,
+            existing_rows,
+        ) -> _PreparedEntityVectorSync:
             nonlocal active_prepares, max_active_prepares
+            assert len(source_rows) == 1
+            assert existing_rows == []
             active_prepares += 1
             max_active_prepares = max(max_active_prepares, active_prepares)
             await asyncio.sleep(0)
             active_prepares -= 1
+            prepared_windows.append([entity_id])
             return _PreparedEntityVectorSync(
                 entity_id=entity_id,
                 sync_start=float(entity_id),
                 source_rows_count=1,
                 embedding_jobs=[],
+                entity_skipped=True,
+                chunks_total=1,
+                chunks_skipped=1,
+                prepare_seconds=0.1,
             )
 
+        @asynccontextmanager
+        async def fake_scoped_session(session_maker):
+            yield AsyncMock()
+
         monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
-        monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+        monkeypatch.setattr(
+            "basic_memory.repository.search_repository_base.db.scoped_session",
+            fake_scoped_session,
+        )
+        monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
+        monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+        monkeypatch.setattr(
+            repo, "_prepare_entity_vector_jobs_prefetched", _stub_prepare_prefetched
+        )
 
         result = await repo.sync_entity_vectors_batch([1, 2, 3, 4])
 
         assert result.entities_total == 4
         assert result.entities_synced == 4
         assert result.entities_failed == 0
+        assert fetched_windows == [[1, 2], [3, 4]]
+        assert prepared_windows == [[1], [2], [3], [4]]
         assert max_active_prepares == 2
 
 
@@ -337,14 +369,17 @@ async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
     repo._semantic_embedding_sync_batch_size = 2
     repo._vector_tables_initialized = True
 
-    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
-        return _PreparedEntityVectorSync(
-            entity_id=entity_id,
-            sync_start=0.0,
-            source_rows_count=1,
-            embedding_jobs=[(200 + entity_id, f"chunk-{entity_id}")],
-            prepare_seconds=1.0,
-        )
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [
+            _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=0.0,
+                source_rows_count=1,
+                embedding_jobs=[(200 + entity_id, f"chunk-{entity_id}")],
+                prepare_seconds=1.0,
+            )
+            for entity_id in entity_ids
+        ]
 
     async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
         for job in flush_jobs:
@@ -364,10 +399,10 @@ async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
     def _capture_log(**kwargs):
         completion_records.append(kwargs)
 
-    perf_counter_values = iter([4.0, 5.0])
+    perf_counter_values = iter([0.0, 4.0, 5.0, 6.0])
 
     monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
-    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
     monkeypatch.setattr(repo, "_log_vector_sync_complete", _capture_log)
     monkeypatch.setattr(
@@ -401,33 +436,41 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
     repo._semantic_embedding_sync_batch_size = 8
     repo._vector_tables_initialized = True
 
-    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
-        if entity_id == 1:
-            return _PreparedEntityVectorSync(
-                entity_id=entity_id,
-                sync_start=0.0,
-                source_rows_count=1,
-                embedding_jobs=[(201, "chunk-1a"), (202, "chunk-1b")],
-                chunks_total=5,
-                pending_jobs_total=5,
-                entity_complete=False,
-                oversized_entity=True,
-                shard_index=1,
-                shard_count=3,
-                remaining_jobs_after_shard=3,
+    async def _stub_prepare_window(entity_ids: list[int]):
+        prepared: list[_PreparedEntityVectorSync] = []
+        for entity_id in entity_ids:
+            if entity_id == 1:
+                prepared.append(
+                    _PreparedEntityVectorSync(
+                        entity_id=entity_id,
+                        sync_start=0.0,
+                        source_rows_count=1,
+                        embedding_jobs=[(201, "chunk-1a"), (202, "chunk-1b")],
+                        chunks_total=5,
+                        pending_jobs_total=5,
+                        entity_complete=False,
+                        oversized_entity=True,
+                        shard_index=1,
+                        shard_count=3,
+                        remaining_jobs_after_shard=3,
+                    )
+                )
+                continue
+            prepared.append(
+                _PreparedEntityVectorSync(
+                    entity_id=entity_id,
+                    sync_start=0.0,
+                    source_rows_count=1,
+                    embedding_jobs=[(301, "chunk-2a")],
+                    chunks_total=1,
+                    pending_jobs_total=1,
+                    entity_complete=True,
+                    shard_index=1,
+                    shard_count=1,
+                    remaining_jobs_after_shard=0,
+                )
             )
-        return _PreparedEntityVectorSync(
-            entity_id=entity_id,
-            sync_start=0.0,
-            source_rows_count=1,
-            embedding_jobs=[(301, "chunk-2a")],
-            chunks_total=1,
-            pending_jobs_total=1,
-            entity_complete=True,
-            shard_index=1,
-            shard_count=1,
-            remaining_jobs_after_shard=0,
-        )
+        return prepared
 
     async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
         for job in flush_jobs:
@@ -443,7 +486,7 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
         completion_records.append(kwargs)
 
     monkeypatch.setattr(repo, "_ensure_vector_tables", AsyncMock())
-    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
     monkeypatch.setattr(repo, "_log_vector_sync_complete", _capture_log)
 

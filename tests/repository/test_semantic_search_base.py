@@ -4,7 +4,10 @@ Covers: _compose_row_source_text, _split_text_into_chunks, _build_chunk_records,
 _search_hybrid entity_id fusion key, and SemanticSearchDisabledError in SQLite.
 """
 
+import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -312,8 +315,8 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
     }
     flush_sizes: list[int] = []
 
-    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
-        return prepared_by_entity[entity_id]
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [prepared_by_entity[entity_id] for entity_id in entity_ids]
 
     async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
         flush_sizes.append(len(flush_jobs))
@@ -325,7 +328,7 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
                 entity_runtime.pop(job.entity_id, None)
         return (0.1, 0.2)
 
-    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
 
     result = await repo.sync_entity_vectors_batch([1, 2, 3])
@@ -343,6 +346,39 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_skip_only_has_zero_queue_wait(monkeypatch):
+    """Skip-only batches should not accumulate synthetic queue wait."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [
+            _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=float(entity_id),
+                source_rows_count=1,
+                embedding_jobs=[],
+                chunks_total=2,
+                chunks_skipped=2,
+                entity_skipped=True,
+                prepare_seconds=0.25,
+            )
+            for entity_id in entity_ids
+        ]
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
+
+    result = await repo.sync_entity_vectors_batch([1, 2])
+
+    assert result.entities_total == 2
+    assert result.entities_synced == 2
+    assert result.entities_skipped == 2
+    assert result.embedding_jobs_total == 0
+    assert result.queue_wait_seconds_total == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
 async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
     """Batch sync should continue after per-entity and per-flush failures."""
     repo = _ConcreteRepo()
@@ -350,12 +386,18 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
     repo._embedding_provider = object()
     repo._semantic_embedding_sync_batch_size = 1
 
-    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
-        if entity_id == 2:
-            raise RuntimeError("prepare failed")
-        return _PreparedEntityVectorSync(
-            entity_id, float(entity_id), 1, [(100 + entity_id, "chunk")]
-        )
+    async def _stub_prepare_window(entity_ids: list[int]):
+        prepared = []
+        for entity_id in entity_ids:
+            if entity_id == 2:
+                prepared.append(RuntimeError("prepare failed"))
+                continue
+            prepared.append(
+                _PreparedEntityVectorSync(
+                    entity_id, float(entity_id), 1, [(100 + entity_id, "chunk")]
+                )
+            )
+        return prepared
 
     async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
         entity_id = flush_jobs[0].entity_id
@@ -367,7 +409,7 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
         entity_runtime.pop(entity_id, None)
         return (0.05, 0.05)
 
-    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
 
     result = await repo.sync_entity_vectors_batch([1, 2, 3])
@@ -379,6 +421,71 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_only_attributes_queue_wait_to_flushed_entities(
+    monkeypatch,
+):
+    """Mixed batches should only charge queue wait to entities that entered flush work."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+    repo._semantic_embedding_sync_batch_size = 2
+
+    async def _stub_prepare_window(entity_ids: list[int]):
+        prepared: list[_PreparedEntityVectorSync] = []
+        for entity_id in entity_ids:
+            if entity_id == 1:
+                prepared.append(
+                    _PreparedEntityVectorSync(
+                        entity_id=1,
+                        sync_start=0.0,
+                        source_rows_count=1,
+                        embedding_jobs=[],
+                        chunks_total=2,
+                        chunks_skipped=2,
+                        entity_skipped=True,
+                        prepare_seconds=0.5,
+                    )
+                )
+                continue
+            prepared.append(
+                _PreparedEntityVectorSync(
+                    entity_id=2,
+                    sync_start=0.0,
+                    source_rows_count=1,
+                    embedding_jobs=[(102, "chunk-2")],
+                    prepare_seconds=1.0,
+                )
+            )
+        return prepared
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        runtime = entity_runtime[2]
+        runtime.embed_seconds = 1.0
+        runtime.write_seconds = 0.5
+        runtime.remaining_jobs = 0
+        synced_entity_ids.add(2)
+        return (1.0, 0.5)
+
+    perf_counter_values = iter([0.0, 2.0, 4.0, 5.0])
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+    monkeypatch.setattr(
+        search_repository_base_module.time,
+        "perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    result = await repo.sync_entity_vectors_batch([1, 2])
+
+    assert result.entities_total == 2
+    assert result.entities_synced == 2
+    assert result.entities_skipped == 1
+    assert result.embedding_jobs_total == 1
+    assert result.queue_wait_seconds_total == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
 async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(monkeypatch):
     """Queue wait should be reported separately from prepare/embed/write timings."""
     repo = _ConcreteRepo()
@@ -386,14 +493,17 @@ async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(m
     repo._embedding_provider = object()
     repo._semantic_embedding_sync_batch_size = 2
 
-    async def _stub_prepare(entity_id: int) -> _PreparedEntityVectorSync:
-        return _PreparedEntityVectorSync(
-            entity_id=entity_id,
-            sync_start=0.0,
-            source_rows_count=1,
-            embedding_jobs=[(100 + entity_id, f"chunk-{entity_id}")],
-            prepare_seconds=1.0,
-        )
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [
+            _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=0.0,
+                source_rows_count=1,
+                embedding_jobs=[(100 + entity_id, f"chunk-{entity_id}")],
+                prepare_seconds=1.0,
+            )
+            for entity_id in entity_ids
+        ]
 
     async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
         assert len(flush_jobs) == 2
@@ -414,9 +524,9 @@ async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(m
     def _capture_log(**kwargs):
         logged_completion.append(kwargs)
 
-    perf_counter_values = iter([4.0, 5.0])
+    perf_counter_values = iter([0.0, 4.0, 5.0, 6.0])
 
-    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs", _stub_prepare)
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
     monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
     monkeypatch.setattr(repo, "_log_vector_sync_complete", _capture_log)
     monkeypatch.setattr(
@@ -438,3 +548,113 @@ async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(m
     for record in logged_completion:
         assert record["prepare_seconds"] == pytest.approx(1.0)
         assert record["queue_wait_seconds"] == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
+async def test_prepare_window_uses_entity_local_timing_after_shared_reads(monkeypatch):
+    """Per-entity prepare timing should start when that entity work actually begins."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+
+    async def _stub_fetch_source_rows(session, entity_ids: list[int]):
+        search_repository_base_module.time.perf_counter()
+        return {entity_id: [] for entity_id in entity_ids}
+
+    async def _stub_fetch_existing_rows(session, entity_ids: list[int]):
+        search_repository_base_module.time.perf_counter()
+        return {entity_id: [] for entity_id in entity_ids}
+
+    @asynccontextmanager
+    async def fake_scoped_session(session_maker):
+        yield AsyncMock()
+
+    @asynccontextmanager
+    async def _yielding_write_scope():
+        await asyncio.sleep(0)
+        yield
+
+    perf_counter_values = iter([0.0, 5.0, 10.0, 11.0, 12.0, 13.0])
+
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository_base.db.scoped_session",
+        fake_scoped_session,
+    )
+    monkeypatch.setattr(repo, "_fetch_prepare_window_source_rows", _stub_fetch_source_rows)
+    monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
+    monkeypatch.setattr(repo, "_prepare_entity_write_scope", _yielding_write_scope)
+    monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
+    monkeypatch.setattr(repo, "_delete_entity_chunks", AsyncMock())
+    monkeypatch.setattr(
+        search_repository_base_module.time,
+        "perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    prepared = await repo._prepare_entity_vector_jobs_window([1, 2])
+
+    assert [result.sync_start for result in prepared] == [10.0, 11.0]
+    assert [result.prepare_seconds for result in prepared] == [2.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(monkeypatch):
+    """Entity timing histograms should emit one sample per finalized entity."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._embedding_provider = object()
+    repo._semantic_embedding_sync_batch_size = 2
+
+    async def _stub_prepare_window(entity_ids: list[int]):
+        return [
+            _PreparedEntityVectorSync(
+                entity_id=entity_id,
+                sync_start=0.0,
+                source_rows_count=1,
+                embedding_jobs=[(100 + entity_id, f"chunk-{entity_id}")],
+                prepare_seconds=1.0,
+            )
+            for entity_id in entity_ids
+        ]
+
+    async def _stub_flush(flush_jobs, entity_runtime, synced_entity_ids):
+        for job in flush_jobs:
+            runtime = entity_runtime[job.entity_id]
+            runtime.embed_seconds = 1.0
+            runtime.write_seconds = 0.5
+            runtime.remaining_jobs = 0
+            synced_entity_ids.add(job.entity_id)
+        return (2.0, 1.0)
+
+    histogram_calls: list[tuple[str, float, dict]] = []
+    counter_calls: list[tuple[str, float, dict]] = []
+    perf_counter_values = iter([0.0, 3.0, 4.5, 6.0])
+
+    monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
+    monkeypatch.setattr(repo, "_flush_embedding_jobs", _stub_flush)
+    monkeypatch.setattr(
+        search_repository_base_module.telemetry,
+        "record_histogram",
+        lambda name, amount, **attrs: histogram_calls.append((name, amount, attrs)),
+    )
+    monkeypatch.setattr(
+        search_repository_base_module.telemetry,
+        "add_counter",
+        lambda name, amount, **attrs: counter_calls.append((name, amount, attrs)),
+    )
+    monkeypatch.setattr(
+        search_repository_base_module.time,
+        "perf_counter",
+        lambda: next(perf_counter_values),
+    )
+
+    result = await repo.sync_entity_vectors_batch([1, 2])
+
+    assert result.entities_synced == 2
+    histogram_names = [name for name, _, _ in histogram_calls]
+    assert histogram_names.count("vector_sync_prepare_seconds") == 2
+    assert histogram_names.count("vector_sync_queue_wait_seconds") == 2
+    assert histogram_names.count("vector_sync_embed_seconds") == 2
+    assert histogram_names.count("vector_sync_write_seconds") == 2
+    assert histogram_names.count("vector_sync_batch_total_seconds") == 1
+    assert [name for name, _, _ in counter_calls].count("vector_sync_entities_total") == 1

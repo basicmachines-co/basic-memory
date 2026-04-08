@@ -521,6 +521,7 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
     assert unchanged_result.entities_synced == 1
     assert unchanged_result.entities_skipped == 1
     assert unchanged_result.embedding_jobs_total == 0
+    assert unchanged_result.queue_wait_seconds_total == pytest.approx(0.0, abs=0.01)
     assert unchanged_result.chunks_skipped == unchanged_result.chunks_total
 
     await repo.index_item(

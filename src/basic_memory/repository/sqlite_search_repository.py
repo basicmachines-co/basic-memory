@@ -1,11 +1,11 @@
 """SQLite FTS5-based search repository implementation."""
 
+import asyncio
 import json
 import re
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
-
-import asyncio
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError as SAOperationalError
@@ -566,13 +566,21 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         """
         return max(0.0, 1.0 - (distance * distance) / 2.0)
 
-    def _orphan_detection_sql(self) -> str:
-        """SQLite sqlite-vec uses rowid-based embedding table."""
+    @asynccontextmanager
+    async def _prepare_entity_write_scope(self):
+        """SQLite keeps the shared read window, but funnels prepare writes through one lock."""
+        async with self._sqlite_vec_lock:
+            yield
+
+    def _prepare_window_existing_rows_sql(self, placeholders: str) -> str:
+        """SQLite sqlite-vec stores embeddings by rowid rather than chunk_id."""
         return (
-            "SELECT c.id FROM search_vector_chunks c "
+            "SELECT c.entity_id, c.id, c.chunk_key, c.source_hash, c.entity_fingerprint, "
+            "c.embedding_model, (e.rowid IS NOT NULL) AS has_embedding "
+            "FROM search_vector_chunks c "
             "LEFT JOIN search_vector_embeddings e ON e.rowid = c.id "
-            "WHERE c.project_id = :project_id AND c.entity_id = :entity_id "
-            "AND e.rowid IS NULL"
+            f"WHERE c.project_id = :project_id AND c.entity_id IN ({placeholders}) "
+            "ORDER BY c.entity_id ASC, c.chunk_key ASC"
         )
 
     # ------------------------------------------------------------------

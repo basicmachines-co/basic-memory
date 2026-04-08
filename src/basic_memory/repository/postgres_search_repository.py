@@ -3,9 +3,8 @@
 import asyncio
 import json
 import re
-import time
 from datetime import datetime
-from typing import List, Optional, cast
+from typing import List, Optional
 
 from loguru import logger
 from sqlalchemy import text
@@ -18,7 +17,7 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
-    _PreparedEntityVectorSync,
+    VectorChunkState,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -458,247 +457,70 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """Use a bounded config-driven prepare window for Postgres vector sync."""
         return self._semantic_postgres_prepare_concurrency
 
-    async def _prepare_entity_vector_jobs_window(
-        self, entity_ids: list[int]
-    ) -> list[_PreparedEntityVectorSync | BaseException]:
-        """Prepare one Postgres window concurrently to hide DB round-trip latency."""
-        prepared_window = await asyncio.gather(
-            *(self._prepare_entity_vector_jobs(entity_id) for entity_id in entity_ids),
-            return_exceptions=True,
+    async def _upsert_scheduled_chunk_records(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        scheduled_records: list[dict[str, str]],
+        existing_by_key: dict[str, VectorChunkState],
+        entity_fingerprint: str,
+        embedding_model: str,
+    ) -> list[tuple[int, str]]:
+        """Use Postgres UPSERT to rewrite only the scheduled chunk rows."""
+        if not scheduled_records:
+            return []
+
+        upsert_params: dict[str, object] = {
+            "project_id": self.project_id,
+            "entity_id": entity_id,
+        }
+        upsert_values: list[str] = []
+        # The SQL template is built from integer enumerate() indices only.
+        # No user-controlled text is interpolated into the statement.
+        for index, record in enumerate(scheduled_records):
+            upsert_params[f"chunk_key_{index}"] = record["chunk_key"]
+            upsert_params[f"chunk_text_{index}"] = record["chunk_text"]
+            upsert_params[f"source_hash_{index}"] = record["source_hash"]
+            upsert_params[f"entity_fingerprint_{index}"] = entity_fingerprint
+            upsert_params[f"embedding_model_{index}"] = embedding_model
+            upsert_values.append(
+                "("
+                ":entity_id, :project_id, "
+                f":chunk_key_{index}, :chunk_text_{index}, :source_hash_{index}, "
+                f":entity_fingerprint_{index}, :embedding_model_{index}, NOW()"
+                ")"
+            )
+
+        upsert_result = await session.execute(
+            text(f"""
+                INSERT INTO search_vector_chunks (
+                    entity_id,
+                    project_id,
+                    chunk_key,
+                    chunk_text,
+                    source_hash,
+                    entity_fingerprint,
+                    embedding_model,
+                    updated_at
+                ) VALUES {", ".join(upsert_values)}
+                ON CONFLICT (project_id, entity_id, chunk_key) DO UPDATE SET
+                    chunk_text = EXCLUDED.chunk_text,
+                    source_hash = EXCLUDED.source_hash,
+                    entity_fingerprint = EXCLUDED.entity_fingerprint,
+                    embedding_model = EXCLUDED.embedding_model,
+                    updated_at = NOW()
+                RETURNING id, chunk_key
+            """),
+            upsert_params,
         )
+        upserted_ids_by_key = {
+            str(row["chunk_key"]): int(row["id"]) for row in upsert_result.mappings().all()
+        }
         return [
-            cast(_PreparedEntityVectorSync | BaseException, prepared)
-            for prepared in prepared_window
+            (upserted_ids_by_key[record["chunk_key"]], record["chunk_text"])
+            for record in scheduled_records
         ]
-
-    async def _prepare_entity_vector_jobs(self, entity_id: int) -> _PreparedEntityVectorSync:
-        """Prepare chunk mutations with Postgres-specific bulk upserts."""
-        sync_start = time.perf_counter()
-
-        async with db.scoped_session(self.session_maker) as session:
-            await self._prepare_vector_session(session)
-
-            row_result = await session.execute(
-                text(
-                    "SELECT id, type, title, permalink, content_stems, content_snippet, "
-                    "category, relation_type "
-                    "FROM search_index "
-                    "WHERE entity_id = :entity_id AND project_id = :project_id "
-                    "ORDER BY "
-                    "CASE type "
-                    "WHEN :entity_type THEN 0 "
-                    "WHEN :observation_type THEN 1 "
-                    "WHEN :relation_type_type THEN 2 "
-                    "ELSE 3 END, id ASC"
-                ),
-                {
-                    "entity_id": entity_id,
-                    "project_id": self.project_id,
-                    "entity_type": SearchItemType.ENTITY.value,
-                    "observation_type": SearchItemType.OBSERVATION.value,
-                    "relation_type_type": SearchItemType.RELATION.value,
-                },
-            )
-            rows = row_result.fetchall()
-            source_rows_count = len(rows)
-
-            if not rows:
-                await self._delete_entity_chunks(session, entity_id)
-                await session.commit()
-                prepare_seconds = time.perf_counter() - sync_start
-                return _PreparedEntityVectorSync(
-                    entity_id=entity_id,
-                    sync_start=sync_start,
-                    source_rows_count=source_rows_count,
-                    embedding_jobs=[],
-                    prepare_seconds=prepare_seconds,
-                )
-
-            chunk_records = self._build_chunk_records(rows)
-            built_chunk_records_count = len(chunk_records)
-            current_entity_fingerprint = self._build_entity_fingerprint(chunk_records)
-            current_embedding_model = self._embedding_model_key()
-            if not chunk_records:
-                await self._delete_entity_chunks(session, entity_id)
-                await session.commit()
-                prepare_seconds = time.perf_counter() - sync_start
-                return _PreparedEntityVectorSync(
-                    entity_id=entity_id,
-                    sync_start=sync_start,
-                    source_rows_count=source_rows_count,
-                    embedding_jobs=[],
-                    prepare_seconds=prepare_seconds,
-                )
-
-            existing_rows_result = await session.execute(
-                text(
-                    "SELECT c.id, c.chunk_key, c.source_hash, c.entity_fingerprint, "
-                    "c.embedding_model, "
-                    "(e.chunk_id IS NOT NULL) AS has_embedding "
-                    "FROM search_vector_chunks c "
-                    "LEFT JOIN search_vector_embeddings e ON e.chunk_id = c.id "
-                    "WHERE c.project_id = :project_id AND c.entity_id = :entity_id"
-                ),
-                {"project_id": self.project_id, "entity_id": entity_id},
-            )
-            existing_rows = existing_rows_result.mappings().all()
-            existing_by_key = {str(row["chunk_key"]): row for row in existing_rows}
-            existing_chunks_count = len(existing_by_key)
-            incoming_chunk_keys = {record["chunk_key"] for record in chunk_records}
-
-            stale_ids = [
-                int(row["id"])
-                for chunk_key, row in existing_by_key.items()
-                if chunk_key not in incoming_chunk_keys
-            ]
-            stale_chunks_count = len(stale_ids)
-            if stale_ids:
-                await self._delete_stale_chunks(session, stale_ids, entity_id)
-
-            orphan_ids = {int(row["id"]) for row in existing_rows if not bool(row["has_embedding"])}
-            orphan_chunks_count = len(orphan_ids)
-
-            skip_unchanged_entity = (
-                existing_chunks_count == built_chunk_records_count
-                and stale_chunks_count == 0
-                and orphan_chunks_count == 0
-                and existing_chunks_count > 0
-                and all(
-                    row["entity_fingerprint"] == current_entity_fingerprint
-                    and row["embedding_model"] == current_embedding_model
-                    for row in existing_rows
-                )
-            )
-            if skip_unchanged_entity:
-                prepare_seconds = time.perf_counter() - sync_start
-                return _PreparedEntityVectorSync(
-                    entity_id=entity_id,
-                    sync_start=sync_start,
-                    source_rows_count=source_rows_count,
-                    embedding_jobs=[],
-                    chunks_total=built_chunk_records_count,
-                    chunks_skipped=built_chunk_records_count,
-                    entity_skipped=True,
-                    prepare_seconds=prepare_seconds,
-                )
-
-            pending_records: list[dict[str, str]] = []
-            skipped_chunks_count = 0
-
-            for record in chunk_records:
-                current = existing_by_key.get(record["chunk_key"])
-                if current is None:
-                    pending_records.append(record)
-                    continue
-
-                row_id = int(current["id"])
-                is_orphan = row_id in orphan_ids
-                same_source_hash = current["source_hash"] == record["source_hash"]
-                same_entity_fingerprint = (
-                    current["entity_fingerprint"] == current_entity_fingerprint
-                )
-                same_embedding_model = current["embedding_model"] == current_embedding_model
-
-                if same_source_hash and not is_orphan and same_embedding_model:
-                    if not same_entity_fingerprint:
-                        await session.execute(
-                            text(
-                                "UPDATE search_vector_chunks "
-                                "SET entity_fingerprint = :entity_fingerprint, "
-                                "embedding_model = :embedding_model, "
-                                "updated_at = NOW() "
-                                "WHERE id = :id"
-                            ),
-                            {
-                                "id": row_id,
-                                "entity_fingerprint": current_entity_fingerprint,
-                                "embedding_model": current_embedding_model,
-                            },
-                        )
-                    skipped_chunks_count += 1
-                    continue
-
-                pending_records.append(record)
-
-            shard_plan = self._plan_entity_vector_shard(pending_records)
-            self._log_vector_shard_plan(entity_id=entity_id, shard_plan=shard_plan)
-
-            scheduled_records = [
-                record
-                for record in sorted(pending_records, key=lambda record: record["chunk_key"])
-                if record["chunk_key"] in shard_plan.scheduled_chunk_keys
-            ]
-
-            embedding_jobs: list[tuple[int, str]] = []
-            upsert_records = list(scheduled_records)
-
-            if upsert_records:
-                upsert_params: dict[str, object] = {
-                    "project_id": self.project_id,
-                    "entity_id": entity_id,
-                }
-                upsert_values: list[str] = []
-                # The SQL template is built from integer enumerate() indices only.
-                # No user-controlled text is interpolated into the statement.
-                for index, record in enumerate(upsert_records):
-                    upsert_params[f"chunk_key_{index}"] = record["chunk_key"]
-                    upsert_params[f"chunk_text_{index}"] = record["chunk_text"]
-                    upsert_params[f"source_hash_{index}"] = record["source_hash"]
-                    upsert_params[f"entity_fingerprint_{index}"] = current_entity_fingerprint
-                    upsert_params[f"embedding_model_{index}"] = current_embedding_model
-                    upsert_values.append(
-                        "("
-                        ":entity_id, :project_id, "
-                        f":chunk_key_{index}, :chunk_text_{index}, :source_hash_{index}, "
-                        f":entity_fingerprint_{index}, :embedding_model_{index}, NOW()"
-                        ")"
-                    )
-
-                upsert_result = await session.execute(
-                    text(f"""
-                        INSERT INTO search_vector_chunks (
-                            entity_id,
-                            project_id,
-                            chunk_key,
-                            chunk_text,
-                            source_hash,
-                            entity_fingerprint,
-                            embedding_model,
-                            updated_at
-                        ) VALUES {", ".join(upsert_values)}
-                        ON CONFLICT (project_id, entity_id, chunk_key) DO UPDATE SET
-                            chunk_text = EXCLUDED.chunk_text,
-                            source_hash = EXCLUDED.source_hash,
-                            entity_fingerprint = EXCLUDED.entity_fingerprint,
-                            embedding_model = EXCLUDED.embedding_model,
-                            updated_at = NOW()
-                        RETURNING id, chunk_key
-                    """),
-                    upsert_params,
-                )
-                upserted_ids_by_key = {
-                    str(row["chunk_key"]): int(row["id"]) for row in upsert_result.mappings().all()
-                }
-                for record in upsert_records:
-                    row_id = upserted_ids_by_key[record["chunk_key"]]
-                    embedding_jobs.append((row_id, record["chunk_text"]))
-
-        prepare_seconds = time.perf_counter() - sync_start
-        return _PreparedEntityVectorSync(
-            entity_id=entity_id,
-            sync_start=sync_start,
-            source_rows_count=source_rows_count,
-            embedding_jobs=embedding_jobs,
-            chunks_total=built_chunk_records_count,
-            chunks_skipped=skipped_chunks_count,
-            entity_complete=shard_plan.entity_complete,
-            oversized_entity=shard_plan.oversized_entity,
-            pending_jobs_total=shard_plan.pending_jobs_total,
-            shard_index=shard_plan.shard_index,
-            shard_count=shard_plan.shard_count,
-            remaining_jobs_after_shard=shard_plan.remaining_jobs_after_shard,
-            prepare_seconds=prepare_seconds,
-        )
 
     async def _write_embeddings(
         self,
