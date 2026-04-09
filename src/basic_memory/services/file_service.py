@@ -350,7 +350,13 @@ class FileService:
                 async with aiofiles.open(full_path, mode="r", encoding="utf-8") as f:
                     content = await f.read()
 
-                checksum = await file_utils.compute_checksum(content)
+                # Trigger: text-mode reads normalize line endings on Windows, so the
+                #          decoded string can differ from the bytes we just wrote.
+                # Why: write_file/update_frontmatter now return the checksum of the
+                #      persisted file, and read_file should report the same authority.
+                # Outcome: callers get human-readable content plus the checksum for the
+                #          exact bytes stored on disk.
+                checksum = await self.compute_checksum(full_path)
 
                 logger.debug(
                     "File read completed",

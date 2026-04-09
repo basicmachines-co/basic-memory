@@ -265,9 +265,15 @@ async def test_batch_indexer_returns_original_markdown_content_when_no_frontmatt
         parse_max_concurrent=1,
     )
 
+    # Trigger: Windows persists CRLF for text writes even when the test literal uses LF.
+    # Why: this assertion cares about "no rewrite happened", not about forcing one newline
+    #      convention across platforms.
+    # Outcome: compare against the exact markdown text stored on disk for this file.
+    persisted_content = (project_config.home / path).read_text()
+
     assert result.errors == []
     assert len(result.indexed) == 1
-    assert result.indexed[0].markdown_content == original_content
+    assert result.indexed[0].markdown_content == persisted_content
 
 
 @pytest.mark.asyncio
@@ -514,9 +520,15 @@ async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter
         parse_max_concurrent=1,
     )
 
+    # Trigger: malformed frontmatter should pass through without normalization.
+    # Why: Windows can still surface that unchanged file with CRLF line endings.
+    # Outcome: compare the indexed markdown to the persisted file content, not the LF
+    #          test literal used to create it.
+    persisted_content = (project_config.home / path).read_text()
+
     assert result.errors == []
     assert len(result.indexed) == 1
-    assert result.indexed[0].markdown_content == malformed_content
+    assert result.indexed[0].markdown_content == persisted_content
 
     entity = await entity_repository.get_by_file_path(path)
     assert entity is not None
