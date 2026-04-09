@@ -188,8 +188,14 @@ class BasicMemoryConfig(BaseSettings):
         default=None,
         description="Embedding vector dimensions. Auto-detected from provider if not set (384 for FastEmbed, 1536 for OpenAI).",
     )
+    # Trigger: full local rebuilds spend most of their time waiting behind shared
+    # embed flushes, not constructing vectors themselves.
+    # Why: smaller FastEmbed batches cut queue wait far more than they increase
+    # write overhead on real-world projects, which makes full reindex materially faster.
+    # Outcome: default to the smaller local/cloud-safe batch size we benchmarked as
+    # the current best end-to-end setting in the shared vector sync pipeline.
     semantic_embedding_batch_size: int = Field(
-        default=64,
+        default=2,
         description="Batch size for embedding generation.",
         gt=0,
     )
@@ -199,7 +205,7 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
     semantic_embedding_sync_batch_size: int = Field(
-        default=64,
+        default=2,
         description="Batch size for vector sync orchestration flushes.",
         gt=0,
     )
