@@ -208,15 +208,20 @@ class FileService:
 
                 await file_utils.write_file_atomic(full_path, content)
 
-                final_content = content
                 if self.app_config:
                     formatted_content = await file_utils.format_file(
                         full_path, self.app_config, is_markdown=self.is_markdown(path)
                     )
                     if formatted_content is not None:
-                        final_content = formatted_content  # pragma: no cover
+                        pass  # pragma: no cover
 
-                checksum = await file_utils.compute_checksum(final_content)
+                # Trigger: formatters and platform-specific text writers can change the
+                # persisted bytes even when the logical content string is the same.
+                # Why: sync and move detection compare against on-disk checksums, not
+                #      the pre-write Python string.
+                # Outcome: return the checksum of the actual stored file so callers do
+                #          not record a hash that immediately disagrees with the file.
+                checksum = await self.compute_checksum(full_path)
                 logger.debug(f"File write completed path={full_path}, {checksum=}")
                 return checksum
 
@@ -478,8 +483,12 @@ class FileService:
                 if formatted_content is not None:
                     content_for_checksum = formatted_content  # pragma: no cover
 
+            # Trigger: frontmatter normalization may persist bytes that differ from the
+            # in-memory string because of formatter output or platform newline handling.
+            # Why: follow-up scans and checksum-based move detection read raw bytes from disk.
+            # Outcome: the returned checksum always matches the file that was just written.
             return FrontmatterUpdateResult(
-                checksum=await file_utils.compute_checksum(content_for_checksum),
+                checksum=await self.compute_checksum(full_path),
                 content=content_for_checksum,
             )
 
