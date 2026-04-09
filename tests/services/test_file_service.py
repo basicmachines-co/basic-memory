@@ -169,15 +169,16 @@ async def test_write_unicode_content(tmp_path: Path, file_service: FileService):
 
 
 @pytest.mark.asyncio
-async def test_update_frontmatter_checksum_matches_persisted_bytes(
+async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
     tmp_path: Path, file_service: FileService, monkeypatch
 ):
-    """Frontmatter writes should hash the stored file, not the pre-write string."""
+    """Windows-style CRLF writes should hash the stored file, not the pre-write string."""
     test_path = tmp_path / "note.md"
     test_path.write_text("# Note\nBody\n", encoding="utf-8")
 
     async def fake_write_file_atomic(path: Path, content: str) -> None:
-        # Trigger: simulate a writer that persists CRLF bytes like Windows text mode.
+        # Trigger: simulate Windows text-mode persistence, where logical LF strings
+        #          land on disk as CRLF bytes.
         # Why: the regression happened when the stored bytes diverged from the LF string
         #      used to build the checksum.
         # Outcome: this test proves FileService returns the checksum for the stored file.
