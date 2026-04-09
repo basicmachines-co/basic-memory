@@ -114,12 +114,8 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     temp_path = path_obj.with_suffix(".tmp")
 
     try:
-        # Trigger: Basic Memory writes markdown and metadata from normalized Python strings.
-        # Why: Windows text mode would translate "\n" into "\r\n", which makes the
-        #      persisted bytes diverge from the in-memory content we index and hash.
-        # Outcome: force LF on every platform so file bytes, checksums, and move detection
-        #          stay deterministic across local and CI environments.
-        async with aiofiles.open(temp_path, mode="w", encoding="utf-8", newline="\n") as f:
+        # Use aiofiles for non-blocking write
+        async with aiofiles.open(temp_path, mode="w", encoding="utf-8") as f:
             await f.write(content)
 
         # Atomic rename (this is fast, doesn't need async)
@@ -172,7 +168,7 @@ async def format_markdown_builtin(path: Path) -> Optional[str]:
 
         # Only write if content changed
         if formatted_content != content:
-            async with aiofiles.open(path, mode="w", encoding="utf-8", newline="\n") as f:
+            async with aiofiles.open(path, mode="w", encoding="utf-8") as f:
                 await f.write(formatted_content)
 
         logger.debug(
