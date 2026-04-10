@@ -488,6 +488,12 @@ def test_format_cloud_index_status_error_prefers_cloud_api_detail():
         == "HTTP 503: nested"
     )
     assert (
+        project_cmd._format_cloud_index_status_error(
+            CloudAPIError("fail", status_code=503, detail={"detail": {"detail": "nested-detail"}})
+        )
+        == "HTTP 503: nested-detail"
+    )
+    assert (
         project_cmd._format_cloud_index_status_error(CloudAPIError("fail", status_code=503))
         == "HTTP 503"
     )

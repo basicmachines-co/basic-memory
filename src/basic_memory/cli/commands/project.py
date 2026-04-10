@@ -160,7 +160,7 @@ def _format_cloud_index_status_error(error: Exception) -> str:
     """Convert cloud lookup failures into concise user-facing text."""
     if isinstance(error, CloudAPIError):
         detail_message: str | None = None
-        detail = error.detail.get("detail") if isinstance(error.detail, dict) else None
+        detail = error.detail.get("detail")
         if isinstance(detail, str):
             detail_message = detail
         elif isinstance(detail, dict):
