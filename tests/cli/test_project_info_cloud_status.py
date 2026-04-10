@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.cloud.api_client import CloudAPIError
-from basic_memory.schemas.cloud import CloudProjectIndexStatus
+from basic_memory.schemas.cloud import CloudProjectIndexStatus, WorkspaceInfo
 from basic_memory.schemas.project_info import (
     ActivityMetrics,
     EmbeddingStatus,
@@ -416,6 +416,40 @@ def test_resolve_cloud_status_workspace_id_requires_credentials(write_config):
         project_cmd._resolve_cloud_status_workspace_id("demo")
 
 
+@pytest.mark.asyncio
+async def test_resolve_cloud_status_workspace_id_async_auto_discovers_single_workspace(
+    write_config, monkeypatch
+):
+    """Async cloud status lookup should auto-select a single available workspace."""
+    write_config(
+        {
+            "env": "dev",
+            "projects": {"demo": {"path": "/tmp/demo", "mode": "cloud"}},
+            "default_project": "demo",
+            "cloud_api_key": "bmc_test_key_123",
+        }
+    )
+
+    async def fake_get_available_workspaces():
+        return [
+            WorkspaceInfo(
+                tenant_id="11111111-1111-1111-1111-111111111111",
+                workspace_type="personal",
+                name="Personal",
+                role="owner",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.project_context.get_available_workspaces",
+        fake_get_available_workspaces,
+    )
+
+    workspace_id = await project_cmd._resolve_cloud_status_workspace_id_async("demo")
+
+    assert workspace_id == "11111111-1111-1111-1111-111111111111"
+
+
 def test_match_cloud_index_status_project_prefers_exact_then_permalink():
     """Project matching should use exact names first, then a unique permalink match."""
     exact = _cloud_index_status(project_name="Demo Project")
@@ -472,10 +506,11 @@ async def test_fetch_cloud_project_index_status_returns_matching_project(write_c
         }
     )
 
+    async def fake_resolve_workspace(_project_name: str) -> str:
+        return "11111111-1111-1111-1111-111111111111"
+
     monkeypatch.setattr(
-        project_cmd,
-        "_resolve_cloud_status_workspace_id",
-        lambda _project_name: "11111111-1111-1111-1111-111111111111",
+        project_cmd, "_resolve_cloud_status_workspace_id_async", fake_resolve_workspace
     )
 
     async def fake_make_api_request(**kwargs):
@@ -518,7 +553,12 @@ async def test_fetch_cloud_project_index_status_handles_exit_and_missing_project
         }
     )
 
-    monkeypatch.setattr(project_cmd, "_resolve_cloud_status_workspace_id", lambda _name: "tenant-1")
+    async def fake_resolve_workspace(_project_name: str) -> str:
+        return "tenant-1"
+
+    monkeypatch.setattr(
+        project_cmd, "_resolve_cloud_status_workspace_id_async", fake_resolve_workspace
+    )
 
     async def fake_make_api_request_exit(**_kwargs):
         raise typer.Exit(1)
@@ -561,7 +601,12 @@ async def test_fetch_cloud_project_index_status_preserves_successful_exit_and_te
         }
     )
 
-    monkeypatch.setattr(project_cmd, "_resolve_cloud_status_workspace_id", lambda _name: "tenant-1")
+    async def fake_resolve_workspace(_project_name: str) -> str:
+        return "tenant-1"
+
+    monkeypatch.setattr(
+        project_cmd, "_resolve_cloud_status_workspace_id_async", fake_resolve_workspace
+    )
 
     async def fake_make_api_request_success_exit(**_kwargs):
         raise typer.Exit(0)

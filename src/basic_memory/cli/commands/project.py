@@ -104,6 +104,36 @@ def _resolve_cloud_status_workspace_id(project_name: str) -> str:
     )
 
 
+async def _resolve_cloud_status_workspace_id_async(project_name: str) -> str:
+    """Resolve the tenant/workspace for cloud index status lookup in async contexts."""
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    if not _has_cloud_credentials(config):
+        raise RuntimeError(
+            "Cloud credentials not found. Run `bm cloud api-key save <key>` or `bm cloud login` first."
+        )
+
+    configured_name, _ = config_manager.get_project(project_name)
+    effective_name = configured_name or project_name
+
+    workspace_id = resolve_configured_workspace(config=config, project_name=effective_name)
+    if workspace_id is not None:
+        return workspace_id
+
+    from basic_memory.mcp.project_context import get_available_workspaces
+
+    workspaces = await get_available_workspaces()
+    if len(workspaces) == 1:
+        return workspaces[0].tenant_id
+
+    raise RuntimeError(
+        f"Cloud workspace could not be resolved for project '{effective_name}'. "
+        "Set a project workspace with `bm project set-cloud --workspace ...` or configure a "
+        "default workspace with `bm cloud workspace set-default ...`."
+    )
+
+
 def _match_cloud_index_status_project(
     project_name: str, projects: list[CloudProjectIndexStatus]
 ) -> CloudProjectIndexStatus | None:
@@ -149,7 +179,7 @@ def _format_cloud_index_status_error(error: Exception) -> str:
 
 async def _fetch_cloud_project_index_status(project_name: str) -> CloudProjectIndexStatus:
     """Fetch cloud index freshness for one project from the admin tenant endpoint."""
-    workspace_id = _resolve_cloud_status_workspace_id(project_name)
+    workspace_id = await _resolve_cloud_status_workspace_id_async(project_name)
     host_url = ConfigManager().config.cloud_host.rstrip("/")
 
     try:
