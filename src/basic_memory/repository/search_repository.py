@@ -70,6 +70,10 @@ class SearchRepository(Protocol):
         """Sync semantic vector chunks for an entity."""
         ...
 
+    async def delete_entity_vector_rows(self, entity_id: int) -> None:
+        """Delete semantic vector chunks and embeddings for one entity."""
+        ...
+
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],

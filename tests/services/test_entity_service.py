@@ -6,8 +6,10 @@ from textwrap import dedent
 
 import pytest
 import yaml
+from sqlalchemy import text
 
-from basic_memory.config import ProjectConfig, BasicMemoryConfig
+from basic_memory import db
+from basic_memory.config import ProjectConfig, BasicMemoryConfig, DatabaseBackend
 from basic_memory.markdown import EntityParser
 from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import EntityRepository
@@ -17,6 +19,98 @@ from basic_memory.services.entity_service import EntityService
 from basic_memory.services.exceptions import EntityCreationError, EntityNotFoundError
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import generate_permalink
+
+
+class _DeleteTestEmbeddingProvider:
+    """Deterministic embedding provider for entity delete cleanup tests."""
+
+    model_name = "delete-test"
+    dimensions = 4
+
+    async def embed_query(self, text: str) -> list[float]:
+        return self._vectorize(text)
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._vectorize(text) for text in texts]
+
+    @staticmethod
+    def _vectorize(text: str) -> list[float]:
+        normalized = text.lower()
+        if "semantic" in normalized:
+            return [1.0, 0.0, 0.0, 0.0]
+        if "cleanup" in normalized:
+            return [0.0, 1.0, 0.0, 0.0]
+        return [0.0, 0.0, 1.0, 0.0]
+
+
+async def _count_entity_search_state(
+    session_maker,
+    app_config: BasicMemoryConfig,
+    project_id: int,
+    entity_id: int,
+) -> tuple[int, int, int]:
+    """Return counts for all derived search rows tied to one entity."""
+    embedding_join = (
+        "e.chunk_id = c.id"
+        if app_config.database_backend == DatabaseBackend.POSTGRES
+        else "e.rowid = c.id"
+    )
+    params = {"project_id": project_id, "entity_id": entity_id}
+
+    async with db.scoped_session(session_maker) as session:
+        search_index_rows = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_index "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            params,
+        )
+        vector_chunk_rows = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            params,
+        )
+        vector_embedding_rows = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_vector_embeddings e "
+                "JOIN search_vector_chunks c ON "
+                f"{embedding_join} "
+                "WHERE c.project_id = :project_id AND c.entity_id = :entity_id"
+            ),
+            params,
+        )
+
+    return (
+        int(search_index_rows.scalar_one()),
+        int(vector_chunk_rows.scalar_one()),
+        int(vector_embedding_rows.scalar_one()),
+    )
+
+
+@pytest.fixture
+def entity_service_with_search(
+    entity_repository: EntityRepository,
+    observation_repository,
+    relation_repository,
+    entity_parser: EntityParser,
+    file_service: FileService,
+    link_resolver,
+    search_service: SearchService,
+    app_config: BasicMemoryConfig,
+) -> EntityService:
+    """Create EntityService with a real attached search service."""
+    return EntityService(
+        entity_parser=entity_parser,
+        entity_repository=entity_repository,
+        observation_repository=observation_repository,
+        relation_repository=relation_repository,
+        file_service=file_service,
+        link_resolver=link_resolver,
+        search_service=search_service,
+        app_config=app_config,
+    )
 
 
 @pytest.mark.asyncio
@@ -225,6 +319,61 @@ async def test_delete_entity_by_id(entity_service: EntityService):
     assert result is True
     with pytest.raises(EntityNotFoundError):
         await entity_service.get_by_permalink(entity_data.permalink)
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_removes_search_and_vector_state(
+    entity_service_with_search: EntityService,
+    search_service: SearchService,
+    session_maker,
+    app_config: BasicMemoryConfig,
+):
+    """Deleting an entity should clear all of its full-text and semantic search state."""
+    if app_config.database_backend == DatabaseBackend.SQLITE:
+        pytest.importorskip("sqlite_vec")
+
+    repository = search_service.repository
+    repository._semantic_enabled = True
+    repository._embedding_provider = _DeleteTestEmbeddingProvider()
+    repository._vector_dimensions = repository._embedding_provider.dimensions
+    repository._vector_tables_initialized = False
+    await search_service.init_search_index()
+
+    entity = await entity_service_with_search.create_entity(
+        EntitySchema(
+            title="Semantic Delete Target",
+            directory="test",
+            note_type="note",
+            content=dedent("""
+                # Semantic Delete Target
+
+                - [note] Semantic cleanup should remove every derived row
+                - references [[Cleanup Target]]
+                """).strip(),
+        )
+    )
+
+    await search_service.index_entity(entity)
+    await search_service.sync_entity_vectors(entity.id)
+
+    search_rows, chunk_rows, embedding_rows = await _count_entity_search_state(
+        session_maker,
+        app_config,
+        search_service.repository.project_id,
+        entity.id,
+    )
+    assert search_rows >= 3
+    assert chunk_rows > 0
+    assert embedding_rows > 0
+
+    assert await entity_service_with_search.delete_entity(entity.id) is True
+
+    assert await _count_entity_search_state(
+        session_maker,
+        app_config,
+        search_service.repository.project_id,
+        entity.id,
+    ) == (0, 0, 0)
 
 
 @pytest.mark.asyncio

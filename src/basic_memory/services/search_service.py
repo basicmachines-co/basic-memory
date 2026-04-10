@@ -660,7 +660,6 @@ class SearchService:
     async def _clear_entity_vectors(self, entity_id: int) -> None:
         """Delete derived vector rows for one entity."""
         from basic_memory.repository.search_repository_base import SearchRepositoryBase
-        from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 
         # Trigger: semantic indexing is disabled for this repository instance.
         # Why: repositories only create vector tables when semantic search is enabled.
@@ -671,17 +670,7 @@ class SearchService:
         ):
             return
 
-        params = {"project_id": self.repository.project_id, "entity_id": entity_id}
-        if isinstance(self.repository, SQLiteSearchRepository):
-            await self.repository.delete_entity_vector_rows(entity_id)
-        else:
-            await self.repository.execute_query(
-                text(
-                    "DELETE FROM search_vector_chunks "
-                    "WHERE project_id = :project_id AND entity_id = :entity_id"
-                ),
-                params,
-            )
+        await self.repository.delete_entity_vector_rows(entity_id)
 
     async def index_entity_file(
         self,
@@ -889,7 +878,7 @@ class SearchService:
         await self.repository.delete_by_entity_id(entity_id)
 
     async def handle_delete(self, entity: Entity):
-        """Handle complete entity deletion from search index including observations and relations.
+        """Handle complete entity deletion from search and semantic index state.
 
         This replicates the logic from sync_service.handle_delete() to properly clean up
         all search index entries for an entity and its related data.
@@ -916,3 +905,8 @@ class SearchService:
                 await self.delete_by_permalink(permalink)
             else:
                 await self.delete_by_entity_id(entity.id)
+
+        # Trigger: entity deletion removes the source rows for this note.
+        # Why: semantic chunks/embeddings are stored separately from search_index rows.
+        # Outcome: deleting an entity clears both full-text and vector-derived search state.
+        await self._clear_entity_vectors(entity.id)

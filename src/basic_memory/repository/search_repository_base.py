@@ -454,6 +454,15 @@ class SearchRepositoryBase(ABC):
             logger.debug(f"Query executed successfully in {elapsed_time:.2f}s.")
             return result
 
+    async def delete_entity_vector_rows(self, entity_id: int) -> None:
+        """Delete one entity's derived vector rows using the backend's cleanup path."""
+        await self._ensure_vector_tables()
+
+        async with db.scoped_session(self.session_maker) as session:
+            await self._prepare_vector_session(session)
+            await self._delete_entity_chunks(session, entity_id)
+            await session.commit()
+
     # ------------------------------------------------------------------
     # Shared semantic search: guard, text processing, chunking
     # ------------------------------------------------------------------

@@ -1,7 +1,6 @@
 """Tests for cloud sync and bisync command behavior."""
 
 import importlib
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -20,11 +19,10 @@ runner = CliRunner()
         ["cloud", "bisync", "--name", "research"],
     ],
 )
-def test_cloud_sync_commands_use_incremental_db_sync(monkeypatch, argv, config_manager):
-    """Cloud sync commands should not force a full database re-index after file sync."""
+def test_cloud_sync_commands_skip_explicit_cloud_project_sync(monkeypatch, argv, config_manager):
+    """Cloud sync commands should not trigger an extra explicit cloud project sync."""
     project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
-    seen: dict[str, object] = {}
     config = config_manager.load_config()
     config.set_project_mode("research", ProjectMode.CLOUD)
     config_manager.save_config(config)
@@ -50,30 +48,10 @@ def test_cloud_sync_commands_use_incremental_db_sync(monkeypatch, argv, config_m
     monkeypatch.setattr(project_sync_command, "project_sync", lambda *args, **kwargs: True)
     monkeypatch.setattr(project_sync_command, "project_bisync", lambda *args, **kwargs: True)
 
-    @asynccontextmanager
-    async def fake_get_client(*, project_name=None, workspace=None):
-        seen["project_name"] = project_name
-        seen["workspace"] = workspace
-        yield object()
-
-    class FakeProjectClient:
-        def __init__(self, _client):
-            pass
-
-        async def sync(self, external_id: str, force_full: bool = False):
-            seen["external_id"] = external_id
-            seen["force_full"] = force_full
-            return {"message": "queued"}
-
-    monkeypatch.setattr(project_sync_command, "get_client", fake_get_client)
-    monkeypatch.setattr(project_sync_command, "ProjectClient", FakeProjectClient)
-
     result = runner.invoke(app, argv)
 
     assert result.exit_code == 0, result.output
-    assert seen["project_name"] == "research"
-    assert seen["external_id"] == "external-project-id"
-    assert seen["force_full"] is False
+    assert "Database sync initiated" not in result.output
 
 
 def test_cloud_bisync_fails_fast_when_sync_entry_disappears(monkeypatch, config_manager):

@@ -124,22 +124,6 @@ def sync_project_command(
 
         if success:
             console.print(f"[green]{name} synced successfully[/green]")
-
-            # Trigger database sync if not a dry run
-            if not dry_run:
-
-                async def _trigger_db_sync():
-                    async with get_client(project_name=name) as client:
-                        return await ProjectClient(client).sync(
-                            project_data.external_id, force_full=False
-                        )
-
-                try:
-                    with force_routing(cloud=True):
-                        result = run_with_cleanup(_trigger_db_sync())
-                    console.print(f"[dim]Database sync initiated: {result.get('message')}[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
         else:
             console.print(f"[red]{name} sync failed[/red]")
             raise typer.Exit(1)
@@ -202,22 +186,6 @@ def bisync_project_command(
             sync_entry.last_sync = datetime.now()
             sync_entry.bisync_initialized = True
             ConfigManager().save_config(config)
-
-            # Trigger database sync if not a dry run
-            if not dry_run:
-
-                async def _trigger_db_sync():
-                    async with get_client(project_name=name) as client:
-                        return await ProjectClient(client).sync(
-                            project_data.external_id, force_full=False
-                        )
-
-                try:
-                    with force_routing(cloud=True):
-                        result = run_with_cleanup(_trigger_db_sync())
-                    console.print(f"[dim]Database sync initiated: {result.get('message')}[/dim]")
-                except Exception as e:
-                    console.print(f"[yellow]Warning: Could not trigger database sync: {e}[/yellow]")
         else:
             console.print(f"[red]{name} bisync failed[/red]")
             raise typer.Exit(1)

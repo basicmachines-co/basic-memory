@@ -196,4 +196,3 @@ async def test_initialize_app_no_precedence_warning_when_not_conflicting(
         "ensure_frontmatter_on_sync=True overrides disable_permalinks=True" in message
         for message in warnings
     )
-
