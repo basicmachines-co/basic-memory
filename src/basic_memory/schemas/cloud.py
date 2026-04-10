@@ -81,3 +81,53 @@ class WorkspaceListResponse(BaseModel):
     current_workspace_id: str | None = Field(
         default=None, description="Current workspace tenant ID when available"
     )
+
+
+class CloudProjectIndexStatus(BaseModel):
+    """Index freshness summary for one cloud project."""
+
+    project_name: str = Field(..., description="Project name")
+    project_id: int = Field(..., description="Project database identifier")
+    last_scan_timestamp: float | None = Field(
+        default=None, description="Last scan timestamp from project metadata"
+    )
+    last_file_count: int | None = Field(default=None, description="Last observed file count")
+    current_file_count: int = Field(..., description="Current markdown file count")
+    total_entities: int = Field(..., description="Current markdown entity count")
+    total_note_content_rows: int = Field(..., description="Rows present in note_content")
+    note_content_synced: int = Field(..., description="Files fully materialized into note_content")
+    note_content_pending: int = Field(..., description="Pending note_content rows")
+    note_content_failed: int = Field(..., description="Failed note_content rows")
+    note_content_external_changes: int = Field(
+        ..., description="Rows flagged with external file changes"
+    )
+    total_indexed_entities: int = Field(..., description="Files represented in search_index")
+    embedding_opt_out_entities: int = Field(..., description="Files opted out of vector embeddings")
+    embeddable_indexed_entities: int = Field(
+        ..., description="Indexed files eligible for vector embeddings"
+    )
+    total_entities_with_chunks: int = Field(..., description="Embeddable files with vector chunks")
+    total_chunks: int = Field(..., description="Vector chunk row count")
+    total_embeddings: int = Field(..., description="Vector embedding row count")
+    orphaned_chunks: int = Field(..., description="Chunks missing embeddings")
+    vector_tables_exist: bool = Field(..., description="Whether vector tables exist")
+    materialization_current: bool = Field(
+        ..., description="Whether note content matches the current file set"
+    )
+    search_current: bool = Field(..., description="Whether search coverage is current")
+    embeddings_current: bool = Field(..., description="Whether embedding coverage is current")
+    project_current: bool = Field(..., description="Whether all freshness checks are current")
+    reindex_recommended: bool = Field(..., description="Whether a reindex is recommended")
+    reindex_reason: str | None = Field(default=None, description="Reason a reindex is recommended")
+
+
+class CloudTenantIndexStatusResponse(BaseModel):
+    """Index freshness summary for all projects in one cloud tenant."""
+
+    tenant_id: str = Field(..., description="Workspace tenant identifier")
+    fly_app_name: str = Field(..., description="Cloud tenant application identifier")
+    email: str | None = Field(default=None, description="Owner email when available")
+    projects: list[CloudProjectIndexStatus] = Field(
+        default_factory=list, description="Per-project freshness summaries"
+    )
+    error: str | None = Field(default=None, description="Tenant-level lookup error")

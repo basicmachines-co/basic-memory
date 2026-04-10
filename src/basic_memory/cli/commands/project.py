@@ -14,6 +14,7 @@ from rich.text import Text
 
 from basic_memory.cli.app import app
 from basic_memory.cli.auth import CLIAuth
+from basic_memory.cli.commands.cloud.api_client import CloudAPIError, make_api_request
 from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
 from basic_memory.cli.commands.cloud.project_sync import (
     _has_cloud_credentials,
@@ -26,9 +27,13 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
 from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import ConfigManager, ProjectEntry, ProjectMode
-from basic_memory.mcp.async_client import get_client
+from basic_memory.mcp.async_client import get_client, resolve_configured_workspace
 from basic_memory.mcp.clients import ProjectClient
-from basic_memory.schemas.cloud import ProjectVisibility
+from basic_memory.schemas.cloud import (
+    CloudProjectIndexStatus,
+    CloudTenantIndexStatusResponse,
+    ProjectVisibility,
+)
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink, normalize_project_path
 
@@ -56,6 +61,181 @@ def make_bar(value: int, max_value: int, width: int = 40) -> Text:
     bar.append("█" * filled, style="cyan")
     bar.append("░" * (width - filled), style="dim")
     return bar
+
+
+def _uses_cloud_project_info_route(project_name: str, *, local: bool, cloud: bool) -> bool:
+    """Return whether project info should attempt cloud augmentation."""
+    if local:
+        return False
+    if cloud:
+        return True
+
+    config_manager = ConfigManager()
+    resolved_name, _ = config_manager.get_project(project_name)
+    effective_name = resolved_name or project_name
+    return config_manager.config.get_project_mode(effective_name) == ProjectMode.CLOUD
+
+
+def _resolve_cloud_status_workspace_id(project_name: str) -> str:
+    """Resolve the tenant/workspace for cloud index status lookup."""
+    config_manager = ConfigManager()
+    config = config_manager.config
+
+    if not _has_cloud_credentials(config):
+        raise RuntimeError(
+            "Cloud credentials not found. Run `bm cloud api-key save <key>` or `bm cloud login` first."
+        )
+
+    configured_name, _ = config_manager.get_project(project_name)
+    effective_name = configured_name or project_name
+
+    workspace_id = resolve_configured_workspace(config=config, project_name=effective_name)
+    if workspace_id is not None:
+        return workspace_id
+
+    workspace_id = _resolve_workspace_id(config, None)
+    if workspace_id is not None:
+        return workspace_id
+
+    raise RuntimeError(
+        f"Cloud workspace could not be resolved for project '{effective_name}'. "
+        "Set a project workspace with `bm project set-cloud --workspace ...` or configure a "
+        "default workspace with `bm cloud workspace set-default ...`."
+    )
+
+
+def _match_cloud_index_status_project(
+    project_name: str, projects: list[CloudProjectIndexStatus]
+) -> CloudProjectIndexStatus | None:
+    """Match the requested project against the tenant index-status payload."""
+    exact_match = next(
+        (project for project in projects if project.project_name == project_name), None
+    )
+    if exact_match is not None:
+        return exact_match
+
+    project_permalink = generate_permalink(project_name)
+    permalink_matches = [
+        project
+        for project in projects
+        if generate_permalink(project.project_name) == project_permalink
+    ]
+    if len(permalink_matches) == 1:
+        return permalink_matches[0]
+
+    return None
+
+
+def _format_cloud_index_status_error(error: Exception) -> str:
+    """Convert cloud lookup failures into concise user-facing text."""
+    if isinstance(error, CloudAPIError):
+        detail_message: str | None = None
+        detail = error.detail.get("detail") if isinstance(error.detail, dict) else None
+        if isinstance(detail, str):
+            detail_message = detail
+        elif isinstance(detail, dict):
+            if isinstance(detail.get("message"), str):
+                detail_message = detail["message"]
+            elif isinstance(detail.get("detail"), str):
+                detail_message = detail["detail"]
+
+        if error.status_code and detail_message:
+            return f"HTTP {error.status_code}: {detail_message}"
+        if error.status_code:
+            return f"HTTP {error.status_code}"
+
+    return str(error)
+
+
+async def _fetch_cloud_project_index_status(project_name: str) -> CloudProjectIndexStatus:
+    """Fetch cloud index freshness for one project from the admin tenant endpoint."""
+    workspace_id = _resolve_cloud_status_workspace_id(project_name)
+    host_url = ConfigManager().config.cloud_host.rstrip("/")
+
+    try:
+        response = await make_api_request(
+            method="GET",
+            url=f"{host_url}/admin/tenants/{workspace_id}/index-status",
+        )
+    except typer.Exit as exc:
+        if exc.exit_code not in (None, 0):
+            raise RuntimeError(
+                "Cloud credentials not found. Run `bm cloud api-key save <key>` or "
+                "`bm cloud login` first."
+            ) from exc
+        raise
+
+    tenant_status = CloudTenantIndexStatusResponse.model_validate(response.json())
+    if tenant_status.error:
+        raise RuntimeError(tenant_status.error)
+
+    project_status = _match_cloud_index_status_project(project_name, tenant_status.projects)
+    if project_status is None:
+        raise RuntimeError(
+            f"Project '{project_name}' was not found in workspace index status "
+            f"for tenant '{workspace_id}'."
+        )
+
+    return project_status
+
+
+def _load_cloud_project_index_status(
+    project_name: str,
+) -> tuple[CloudProjectIndexStatus | None, str | None]:
+    """Best-effort wrapper around the cloud index freshness lookup."""
+    try:
+        return run_with_cleanup(_fetch_cloud_project_index_status(project_name)), None
+    except Exception as exc:
+        return None, _format_cloud_index_status_error(exc)
+
+
+def _build_cloud_index_status_section(
+    cloud_index_status: CloudProjectIndexStatus | None,
+    cloud_index_status_error: str | None,
+) -> Table | None:
+    """Render the optional Cloud Index Status block for rich project info."""
+    if cloud_index_status is None and cloud_index_status_error is None:
+        return None
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column("property", style="cyan")
+    table.add_column("value", style="green")
+
+    table.add_row("[bold]Cloud Index Status[/bold]", "")
+
+    if cloud_index_status_error is not None:
+        table.add_row("[yellow]●[/yellow] Warning", f"[yellow]{cloud_index_status_error}[/yellow]")
+        return table
+
+    if cloud_index_status is None:
+        return table
+
+    table.add_row("Files", str(cloud_index_status.current_file_count))
+    table.add_row(
+        "Note content",
+        f"{cloud_index_status.note_content_synced}/{cloud_index_status.current_file_count}",
+    )
+    table.add_row(
+        "Search",
+        f"{cloud_index_status.total_indexed_entities}/{cloud_index_status.current_file_count}",
+    )
+    table.add_row("Embeddable", str(cloud_index_status.embeddable_indexed_entities))
+    table.add_row(
+        "Vectorized",
+        (
+            f"{cloud_index_status.total_entities_with_chunks}/"
+            f"{cloud_index_status.embeddable_indexed_entities}"
+        ),
+    )
+
+    if cloud_index_status.reindex_recommended:
+        table.add_row("[yellow]●[/yellow] Status", "[yellow]Reindex recommended[/yellow]")
+        if cloud_index_status.reindex_reason:
+            table.add_row("Reason", f"[yellow]{cloud_index_status.reindex_reason}[/yellow]")
+    else:
+        table.add_row("[green]●[/green] Status", "[green]Up to date[/green]")
+
+    return table
 
 
 def _normalize_project_visibility(visibility: str | None) -> ProjectVisibility:
@@ -856,9 +1036,20 @@ def display_project_info(
         with force_routing(local=local, cloud=cloud):
             info = run_with_cleanup(get_project_info(name))
 
+        cloud_index_status: CloudProjectIndexStatus | None = None
+        cloud_index_status_error: str | None = None
+        if _uses_cloud_project_info_route(info.project_name, local=local, cloud=cloud):
+            cloud_index_status, cloud_index_status_error = _load_cloud_project_index_status(
+                info.project_name
+            )
+
         if json_output:
-            # Convert to JSON and print
-            print(json.dumps(info.model_dump(), indent=2, default=str))
+            output = info.model_dump()
+            output["cloud_index_status"] = (
+                cloud_index_status.model_dump() if cloud_index_status is not None else None
+            )
+            output["cloud_index_status_error"] = cloud_index_status_error
+            print(json.dumps(output, indent=2, default=str))
         else:
             # --- Left column: Knowledge Graph stats ---
             left = Table.grid(padding=(0, 2))
@@ -916,6 +1107,10 @@ def display_project_info(
             columns = Table.grid(padding=(0, 4), expand=False)
             columns.add_row(left, right)
 
+            cloud_section = _build_cloud_index_status_section(
+                cloud_index_status, cloud_index_status_error
+            )
+
             # --- Note Types bar chart (top 5 by count) ---
             bars_section = None
             if info.statistics.note_types:
@@ -954,6 +1149,8 @@ def display_project_info(
 
             # --- Assemble dashboard ---
             parts: list = [columns, ""]
+            if cloud_section is not None:
+                parts.extend([cloud_section, ""])
             if bars_section:
                 parts.extend([bars_section, ""])
             parts.append(footer)
