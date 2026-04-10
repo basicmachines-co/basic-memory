@@ -565,21 +565,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             stale_params,
         )
 
-    async def delete_entity_vector_rows(self, entity_id: int) -> None:
-        """Delete one entity's vec rows on a sqlite-vec-enabled connection."""
-        await self._ensure_vector_tables()
-
-        async with db.scoped_session(self.session_maker) as session:
-            await self._ensure_sqlite_vec_loaded(session)
-
-            # Constraint: sqlite-vec virtual tables are only visible after vec0 is
-            # loaded on this exact connection.
-            # Why: generic repository sessions can reach search_vector_chunks but still
-            #      fail with "no such module: vec0" when touching embeddings.
-            # Outcome: service-level cleanup routes vec-table deletes through this helper.
-            await self._delete_entity_chunks(session, entity_id)
-            await session.commit()
-
     async def delete_project_vector_rows(self) -> None:
         """Delete all vector rows for this project on a sqlite-vec-enabled connection."""
         await self._ensure_vector_tables()
