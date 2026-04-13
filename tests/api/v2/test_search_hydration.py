@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
@@ -23,9 +22,9 @@ def _make_entity(id: int, permalink: str) -> SimpleNamespace:
     return SimpleNamespace(id=id, permalink=permalink)
 
 
-def _make_row(*, type: str, id: int, **kwargs: Any) -> SearchIndexRow:
+def _make_row(*, type: str, id: int, **kwargs) -> SearchIndexRow:
     now = datetime.now(timezone.utc)
-    defaults: dict[str, Any] = dict(
+    defaults = dict(
         project_id=1,
         file_path=f"notes/{id}.md",
         created_at=now,

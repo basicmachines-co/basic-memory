@@ -7,13 +7,12 @@ results are available.
 """
 
 import json
-from typing import Any
 
 import pytest
 from fastmcp import Client
 
 
-def _json_content(tool_result) -> Any:
+def _json_content(tool_result) -> dict | list:
     """Parse a FastMCP tool result content block into JSON."""
     assert len(tool_result.content) == 1
     assert tool_result.content[0].type == "text"

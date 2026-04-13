@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, cast
 
 import pytest
 
@@ -34,15 +33,11 @@ class _Repo:
         return self.projects_return or []
 
 
-def _watch_service(config: BasicMemoryConfig, repo: _Repo) -> WatchService:
-    return WatchService(config, cast(Any, repo), quiet=True)
-
-
 @pytest.mark.asyncio
 async def test_schedule_restart_uses_config_interval(monkeypatch):
     config = BasicMemoryConfig(watch_project_reload_interval=2)
     repo = _Repo()
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     stop_event = asyncio.Event()
     slept: list[int] = []
@@ -63,12 +58,12 @@ async def test_schedule_restart_uses_config_interval(monkeypatch):
 async def test_watch_projects_cycle_handles_empty_project_list(monkeypatch):
     config = BasicMemoryConfig()
     repo = _Repo()
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     stop_event = asyncio.Event()
     stop_event.set()
 
-    captured: dict[str, Any] = {"args": None, "kwargs": None}
+    captured = {"args": None, "kwargs": None}
 
     async def awatch_stub(*args, **kwargs):
         captured["args"] = args
@@ -81,20 +76,18 @@ async def test_watch_projects_cycle_handles_empty_project_list(monkeypatch):
 
     await watch_service._watch_projects_cycle([], stop_event)
 
-    kwargs = captured["kwargs"]
-    assert isinstance(kwargs, dict)
     assert captured["args"] == ()
-    assert kwargs["debounce"] == config.sync_delay
-    assert kwargs["watch_filter"] == watch_service.filter_changes
-    assert kwargs["recursive"] is True
-    assert kwargs["stop_event"] is stop_event
+    assert captured["kwargs"]["debounce"] == config.sync_delay
+    assert captured["kwargs"]["watch_filter"] == watch_service.filter_changes
+    assert captured["kwargs"]["recursive"] is True
+    assert captured["kwargs"]["stop_event"] is stop_event
 
 
 @pytest.mark.asyncio
 async def test_run_handles_no_projects(monkeypatch):
     config = BasicMemoryConfig()
     repo = _Repo(projects_return=[])
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     slept: list[int] = []
 
@@ -127,7 +120,7 @@ async def test_run_reloads_projects_each_cycle(monkeypatch, tmp_path):
             ],
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     cycle_count = 0
 
@@ -166,7 +159,7 @@ async def test_run_filters_cloud_only_projects_each_cycle(monkeypatch, tmp_path)
             Project(id=2, name="cloud-only", path="cloud-slug", permalink="cloud-only"),
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     seen_project_names: list[list[str]] = []
 
@@ -207,7 +200,7 @@ async def test_run_keeps_cloud_projects_with_local_bisync(monkeypatch, tmp_path)
             ),
         ]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     seen_project_names: list[list[str]] = []
 
@@ -233,7 +226,7 @@ async def test_run_continues_after_cycle_error(monkeypatch, tmp_path):
     repo = _Repo(
         projects_return=[Project(id=1, name="test", path=str(tmp_path / "test"), permalink="test")]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     call_count = 0
     slept: list[int] = []
@@ -268,7 +261,7 @@ async def test_timer_task_cancelled_properly(monkeypatch, tmp_path):
     repo = _Repo(
         projects_return=[Project(id=1, name="test", path=str(tmp_path / "test"), permalink="test")]
     )
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     created_tasks: list[asyncio.Task] = []
     real_create_task = asyncio.create_task
@@ -319,7 +312,7 @@ async def test_new_project_addition_scenario(monkeypatch, tmp_path):
     ]
 
     repo = _Repo(projects_side_effect=[initial_projects, initial_projects, updated_projects])
-    watch_service = _watch_service(config, repo)
+    watch_service = WatchService(config, repo, quiet=True)
 
     cycle_count = 0
     project_lists_used: list[list[Project]] = []

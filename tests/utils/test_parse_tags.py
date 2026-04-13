@@ -1,6 +1,6 @@
 """Tests for parse_tags utility function."""
 
-from typing import Any, List, Union, cast
+from typing import List, Union
 
 import pytest
 
@@ -51,7 +51,7 @@ def test_parse_tags_special_case() -> None:
         def __str__(self) -> str:
             return "tag1,tag2"
 
-    result = parse_tags(cast(Any, TagObject()))
+    result = parse_tags(TagObject())  # pyright: ignore [reportArgumentType]
     assert result == ["tag1", "tag2"]
 
 

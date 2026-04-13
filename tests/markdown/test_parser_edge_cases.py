@@ -41,7 +41,6 @@ async def test_unicode_content(tmp_path):
 
     assert "测试" in entity.frontmatter.metadata["tags"]
     assert "chinese" not in entity.frontmatter.metadata["tags"]
-    assert entity.content is not None
     assert "🧪" in entity.content
 
     # Verify Unicode in observations
@@ -192,7 +191,6 @@ async def test_null_bytes_stripped(tmp_path):
         content=content,
     )
 
-    assert entity.content is not None
     assert "\x00" not in entity.content
     assert "Some content" in entity.content
     assert "with nulls" in entity.content

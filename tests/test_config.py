@@ -3,7 +3,6 @@
 import tempfile
 import pytest
 from datetime import datetime
-from typing import Any, cast
 
 from basic_memory.config import (
     BasicMemoryConfig,
@@ -12,10 +11,6 @@ from basic_memory.config import (
     ProjectMode,
 )
 from pathlib import Path
-
-
-def _migrate_legacy_projects(data: dict[str, Any]) -> dict[str, Any]:
-    return cast(dict[str, Any], cast(Any, BasicMemoryConfig.migrate_legacy_projects)(data))
 
 
 class TestBasicMemoryConfig:
@@ -1351,7 +1346,7 @@ class TestLocalSyncPathMigration:
                 }
             }
         }
-        result = _migrate_legacy_projects(data)
+        result = BasicMemoryConfig.migrate_legacy_projects(data)
         assert result["projects"]["specs"]["path"] == "/Users/test/Documents/specs"
 
     def test_migrate_does_not_overwrite_absolute_path(self):
@@ -1365,7 +1360,7 @@ class TestLocalSyncPathMigration:
                 }
             }
         }
-        result = _migrate_legacy_projects(data)
+        result = BasicMemoryConfig.migrate_legacy_projects(data)
         assert result["projects"]["specs"]["path"] == "/Users/test/Documents/specs"
 
     def test_migrate_skips_entries_without_local_sync_path(self):
@@ -1378,7 +1373,7 @@ class TestLocalSyncPathMigration:
                 }
             }
         }
-        result = _migrate_legacy_projects(data)
+        result = BasicMemoryConfig.migrate_legacy_projects(data)
         assert result["projects"]["cloud-only"]["path"] == "cloud-only"
 
     def test_migrate_handles_mixed_projects(self, tmp_path):
@@ -1396,7 +1391,7 @@ class TestLocalSyncPathMigration:
                 },
             }
         }
-        result = _migrate_legacy_projects(data)
+        result = BasicMemoryConfig.migrate_legacy_projects(data)
         assert result["projects"]["local-proj"]["path"] == local_path
         assert result["projects"]["cloud-only"]["path"] == "cloud-only"
         assert result["projects"]["cloud-bisync"]["path"] == bisync_path

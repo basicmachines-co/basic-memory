@@ -263,10 +263,7 @@ def test_cloud_promo_command_off_sets_opt_out(monkeypatch):
     assert result.exit_code == 0
     assert "Cloud promo messages disabled" in result.stdout
     assert len(instances) == 1
-    manager = instances[0]
-    assert isinstance(manager, _StubConfigManager)
-    assert manager.saved_config is not None
-    assert manager.saved_config.cloud_promo_opt_out is True
+    assert instances[0].saved_config.cloud_promo_opt_out is True
 
 
 def test_cloud_promo_command_on_clears_opt_out(monkeypatch):
@@ -297,10 +294,7 @@ def test_cloud_promo_command_on_clears_opt_out(monkeypatch):
     assert result.exit_code == 0
     assert "Cloud promo messages enabled" in result.stdout
     assert len(instances) == 1
-    manager = instances[0]
-    assert isinstance(manager, _StubConfigManager)
-    assert manager.saved_config is not None
-    assert manager.saved_config.cloud_promo_opt_out is False
+    assert instances[0].saved_config.cloud_promo_opt_out is False
 
 
 # --- _is_interactive_session tests ---

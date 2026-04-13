@@ -4,7 +4,6 @@ import random
 import string
 import sys
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -56,7 +55,7 @@ async def test_compute_checksum_error():
     """Test checksum error handling."""
     with pytest.raises(FileError):
         # Try to hash an object that can't be encoded
-        await compute_checksum(cast(Any, object()))
+        await compute_checksum(object())  # pyright: ignore [reportArgumentType]
 
 
 @pytest.mark.asyncio

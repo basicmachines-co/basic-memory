@@ -1,6 +1,6 @@
 """Tests for the MCP server implementation using FastAPI TestClient."""
 
-from typing import Any, AsyncGenerator, cast
+from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -16,7 +16,7 @@ from basic_memory.mcp.server import mcp as mcp_server
 
 @pytest.fixture(scope="function")
 def mcp() -> FastMCP:
-    return cast(Any, mcp_server)
+    return mcp_server  # pyright: ignore [reportReturnType]
 
 
 @pytest.fixture(scope="function")

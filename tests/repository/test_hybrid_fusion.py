@@ -7,16 +7,11 @@ Verifies that the fusion formula (max + FUSION_BONUS * min):
 """
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Optional, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from basic_memory.repository.embedding_provider import EmbeddingProvider
-from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import FUSION_BONUS, SearchRepositoryBase
-from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 @dataclass
@@ -35,6 +30,7 @@ class FakeRow:
     to_id: int | None = None
     relation_type: str | None = None
     entity_id: int | None = None
+    content_snippet: str | None = None
     category: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -50,7 +46,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         self._semantic_vector_k = 100
         self._semantic_min_similarity = 0.0
         # _search_hybrid calls _assert_semantic_available which checks this
-        self._embedding_provider = _fake_embedding_provider()
+        self._embedding_provider = type("EP", (), {"dimensions": 384})()
         self._vector_dimensions = 384
         self._vector_tables_initialized = True
         self.session_maker = None
@@ -62,21 +58,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     def _prepare_search_term(self, term, is_prefix=True):
         return term  # pragma: no cover
 
-    async def search(
-        self,
-        search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
-        title: Optional[str] = None,
-        note_types: Optional[list[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[list[SearchItemType]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        limit: int = 10,
-        offset: int = 0,
-    ) -> list[SearchIndexRow]:
+    async def search(self, **kwargs):
         return []  # pragma: no cover
 
     async def _ensure_vector_tables(self):
@@ -101,24 +83,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         return 1.0 / (1.0 + max(distance, 0.0))  # pragma: no cover
 
 
-def _fake_embedding_provider() -> EmbeddingProvider:
-    return cast(
-        EmbeddingProvider,
-        type(
-            "EP",
-            (),
-            {
-                "model_name": "fake",
-                "dimensions": 384,
-                "embed_query": AsyncMock(return_value=[0.0] * 384),
-                "embed_documents": AsyncMock(return_value=[]),
-                "runtime_log_attrs": lambda self: {},
-            },
-        )(),
-    )
-
-
-HYBRID_KWARGS: dict[str, Any] = dict(
+HYBRID_KWARGS = dict(
     search_text="test",
     permalink=None,
     permalink_match=None,

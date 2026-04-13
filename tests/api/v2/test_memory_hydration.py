@@ -8,12 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
 from basic_memory.api.v2.utils import to_graph_context
-from basic_memory.schemas.memory import EntitySummary, ObservationSummary, RelationSummary
 from basic_memory.schemas.search import SearchItemType
 from basic_memory.services.context_service import (
     ContextMetadata,
@@ -30,9 +28,9 @@ def _make_entity(id: int, title: str, external_id: str) -> SimpleNamespace:
     return SimpleNamespace(id=id, title=title, external_id=external_id)
 
 
-def _make_row(*, type: str, id: int, root_id: int, **kwargs: Any) -> ContextResultRow:
+def _make_row(*, type: str, id: int, root_id: int, **kwargs) -> ContextResultRow:
     now = kwargs.pop("created_at", datetime.now(timezone.utc))
-    defaults: dict[str, Any] = dict(
+    defaults = dict(
         title=f"Item {id}",
         permalink=f"notes/{id}",
         file_path=f"notes/{id}.md",
@@ -161,31 +159,20 @@ async def test_to_graph_context_batches_entity_hydration_for_recent_activity():
     assert set(repo.calls[0]) == {1, 2, 3}
 
     first_result = graph.results[0]
-    first_primary = first_result.primary_result
-    assert isinstance(first_primary, EntitySummary)
-    assert first_primary.external_id == "ext-root"
-
-    first_observation = first_result.observations[0]
-    assert isinstance(first_observation, ObservationSummary)
-    assert first_observation.entity_external_id == "ext-root"
-    assert first_observation.title == "Root"
+    assert first_result.primary_result.external_id == "ext-root"
+    assert first_result.observations[0].entity_external_id == "ext-root"
+    assert first_result.observations[0].title == "Root"
 
     relation = first_result.related_results[0]
-    assert isinstance(relation, RelationSummary)
     assert relation.from_entity == "Root"
     assert relation.from_entity_external_id == "ext-root"
     assert relation.to_entity == "Child"
     assert relation.to_entity_external_id == "ext-child"
 
     second_result = graph.results[1]
-    second_primary = second_result.primary_result
-    assert isinstance(second_primary, ObservationSummary)
-    assert second_primary.entity_external_id == "ext-child"
-    assert second_primary.title == "Child"
-
-    peer_result = second_result.related_results[0]
-    assert isinstance(peer_result, EntitySummary)
-    assert peer_result.external_id == "ext-peer"
+    assert second_result.primary_result.entity_external_id == "ext-child"
+    assert second_result.primary_result.title == "Child"
+    assert second_result.related_results[0].external_id == "ext-peer"
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,6 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, cast
 
 import pytest
 
@@ -1784,8 +1783,7 @@ type: note
     await sync_service.sync(project_dir)
 
     # Patch index_entity to raise SemanticDependenciesMissingError
-    search_service_mock = cast(Any, sync_service.search_service)
-    original_index = search_service_mock.index_entity
+    original_index = sync_service.search_service.index_entity
     call_count = 0
 
     async def index_with_semantic_error(entity, **kwargs):
@@ -1793,7 +1791,7 @@ type: note
         call_count += 1
         raise SemanticDependenciesMissingError("sqlite-vec package is missing")
 
-    search_service_mock.index_entity = AsyncMock(side_effect=index_with_semantic_error)
+    sync_service.search_service.index_entity = AsyncMock(side_effect=index_with_semantic_error)
 
     try:
         # Modify the file so it gets re-synced
@@ -1811,4 +1809,4 @@ type: note
         # Verify circuit breaker was NOT triggered (failure not recorded)
         assert "semantic_test.md" not in sync_service._file_failures
     finally:
-        search_service_mock.index_entity = original_index
+        sync_service.search_service.index_entity = original_index

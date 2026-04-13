@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastmcp import Client
@@ -12,7 +11,7 @@ from fastmcp import Client
 from basic_memory.mcp.clients.knowledge import KnowledgeClient
 
 
-def _json_content(tool_result) -> Any:
+def _json_content(tool_result) -> dict | list:
     """Parse a FastMCP tool result content block into JSON."""
     assert len(tool_result.content) == 1
     assert tool_result.content[0].type == "text"

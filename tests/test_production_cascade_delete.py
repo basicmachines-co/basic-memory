@@ -12,15 +12,10 @@ import asyncio
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 
 class ProductionCascadeTest:
@@ -38,34 +33,8 @@ class ProductionCascadeTest:
         # Create backup path
         self.backup_path = self.db_path.with_suffix(".db.backup")
 
-        self.engine: AsyncEngine | None = None
-        self.session_maker: async_sessionmaker[AsyncSession] | None = None
-
-    def _engine(self) -> AsyncEngine:
-        assert self.engine is not None
-        return self.engine
-
-    def _session_maker(self) -> async_sessionmaker[AsyncSession]:
-        assert self.session_maker is not None
-        return self.session_maker
-
-    @staticmethod
-    def _first_int(result: Any) -> int:
-        row = result.fetchone()
-        assert row is not None
-        return int(row[0])
-
-    @staticmethod
-    def _lastrowid(result: Any) -> int:
-        value = result.lastrowid
-        assert isinstance(value, int)
-        return value
-
-    @staticmethod
-    def _rowcount(result: Any) -> int:
-        value = result.rowcount
-        assert isinstance(value, int)
-        return value
+        self.engine = None
+        self.session_maker = None
 
     async def setup(self):
         """Setup database connection."""
@@ -90,21 +59,21 @@ class ProductionCascadeTest:
     async def cleanup(self):
         """Cleanup database connection."""
         if self.engine:
-            await self._engine().dispose()
+            await self.engine.dispose()
 
     async def check_foreign_keys_enabled(self) -> bool:
         """Check if foreign keys are enabled in this session."""
-        async with self._session_maker()() as session:
+        async with self.session_maker() as session:
             # Enable foreign keys like production does
             await session.execute(text("PRAGMA foreign_keys=ON"))
 
             result = await session.execute(text("PRAGMA foreign_keys"))
-            fk_enabled = self._first_int(result)
+            fk_enabled = result.fetchone()[0]
             return bool(fk_enabled)
 
     async def check_schema(self):
         """Check current database schema for foreign key constraints."""
-        async with self._session_maker()() as session:
+        async with self.session_maker() as session:
             await session.execute(text("PRAGMA foreign_keys=ON"))
 
             # Check entity table foreign keys
@@ -127,7 +96,7 @@ class ProductionCascadeTest:
 
     async def create_test_data(self) -> tuple[int, int]:
         """Create test project and entity. Returns (project_id, entity_id)."""
-        async with self._session_maker()() as session:
+        async with self.session_maker() as session:
             await session.execute(text("PRAGMA foreign_keys=ON"))
 
             # Create test project
@@ -150,7 +119,7 @@ class ProductionCascadeTest:
                     "updated_at": now,
                 },
             )
-            project_id = self._lastrowid(result)
+            project_id = result.lastrowid
 
             # Create test entity linked to project
             entity_sql = """
@@ -174,7 +143,7 @@ class ProductionCascadeTest:
                     "updated_at": now,
                 },
             )
-            entity_id = self._lastrowid(result)
+            entity_id = result.lastrowid
 
             await session.commit()
 
@@ -183,19 +152,19 @@ class ProductionCascadeTest:
 
     async def verify_test_data_exists(self, project_id: int, entity_id: int) -> bool:
         """Verify test data exists before deletion."""
-        async with self._session_maker()() as session:
+        async with self.session_maker() as session:
             # Check project exists
             result = await session.execute(
                 text("SELECT COUNT(*) FROM project WHERE id = :project_id"),
                 {"project_id": project_id},
             )
-            project_count = self._first_int(result)
+            project_count = result.fetchone()[0]
 
             # Check entity exists
             result = await session.execute(
                 text("SELECT COUNT(*) FROM entity WHERE id = :entity_id"), {"entity_id": entity_id}
             )
-            entity_count = self._first_int(result)
+            entity_count = result.fetchone()[0]
 
             exists = project_count > 0 and entity_count > 0
             if exists:
@@ -211,7 +180,7 @@ class ProductionCascadeTest:
 
     async def test_cascade_delete(self, project_id: int, entity_id: int) -> bool:
         """Test if deleting project cascades to delete entity."""
-        async with self._session_maker()() as session:
+        async with self.session_maker() as session:
             await session.execute(text("PRAGMA foreign_keys=ON"))
 
             try:
@@ -222,7 +191,7 @@ class ProductionCascadeTest:
                     text("DELETE FROM project WHERE id = :project_id"), {"project_id": project_id}
                 )
 
-                if self._rowcount(result) == 0:
+                if result.rowcount == 0:
                     print("❌ Project deletion failed - no rows affected")
                     return False
 
@@ -234,7 +203,7 @@ class ProductionCascadeTest:
                     text("SELECT COUNT(*) FROM entity WHERE id = :entity_id"),
                     {"entity_id": entity_id},
                 )
-                entity_count = self._first_int(result)
+                entity_count = result.fetchone()[0]
 
                 if entity_count == 0:
                     print("✅ CASCADE DELETE working: Entity was automatically deleted")
@@ -259,7 +228,7 @@ class ProductionCascadeTest:
 
     async def cleanup_test_data(self, project_id: int, entity_id: int):
         """Clean up any remaining test data."""
-        async with self._session_maker()() as session:
+        async with self.session_maker() as session:
             await session.execute(text("PRAGMA foreign_keys=ON"))
 
             try:

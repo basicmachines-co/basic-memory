@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, cast
 
 import httpx
 import pytest
@@ -27,10 +26,6 @@ class _StubAuth:
 
     async def login(self) -> bool:
         return self._login_ok
-
-
-def _auth(auth: _StubAuth) -> Any:
-    return cast(Any, auth)
 
 
 def _make_http_client_factory(handler):
@@ -66,7 +61,7 @@ class TestAPIClientErrorHandling:
             await make_api_request(
                 "GET",
                 "https://test.com/api/endpoint",
-                auth=_auth(auth),
+                auth=auth,
                 http_client_factory=_make_http_client_factory(handler),
             )
 
@@ -93,7 +88,7 @@ class TestAPIClientErrorHandling:
             await make_api_request(
                 "GET",
                 "https://test.com/api/endpoint",
-                auth=_auth(auth),
+                auth=auth,
                 http_client_factory=_make_http_client_factory(handler),
             )
 
@@ -115,7 +110,7 @@ class TestAPIClientErrorHandling:
             await make_api_request(
                 "GET",
                 "https://test.com/api/endpoint",
-                auth=_auth(auth),
+                auth=auth,
                 http_client_factory=_make_http_client_factory(handler),
             )
 

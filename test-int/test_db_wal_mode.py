@@ -8,11 +8,6 @@ import pytest
 from sqlalchemy import text
 
 
-def _first_value(row):
-    assert row is not None
-    return row[0]
-
-
 @pytest.mark.asyncio
 async def test_wal_mode_enabled(engine_factory, db_backend):
     """Test that WAL mode is enabled on filesystem database connections."""
@@ -24,7 +19,7 @@ async def test_wal_mode_enabled(engine_factory, db_backend):
     # Execute a query to verify WAL mode is enabled
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA journal_mode"))
-        journal_mode = _first_value(result.fetchone())
+        journal_mode = result.fetchone()[0]
 
         # WAL mode should be enabled for filesystem databases
         assert journal_mode.upper() == "WAL"
@@ -40,7 +35,7 @@ async def test_busy_timeout_configured(engine_factory, db_backend):
 
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA busy_timeout"))
-        busy_timeout = _first_value(result.fetchone())
+        busy_timeout = result.fetchone()[0]
 
         # Busy timeout should be 10 seconds (10000 milliseconds)
         assert busy_timeout == 10000
@@ -56,7 +51,7 @@ async def test_synchronous_mode_configured(engine_factory, db_backend):
 
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA synchronous"))
-        synchronous = _first_value(result.fetchone())
+        synchronous = result.fetchone()[0]
 
         # Synchronous should be NORMAL (1)
         assert synchronous == 1
@@ -72,7 +67,7 @@ async def test_cache_size_configured(engine_factory, db_backend):
 
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA cache_size"))
-        cache_size = _first_value(result.fetchone())
+        cache_size = result.fetchone()[0]
 
         # Cache size should be -64000 (64MB)
         assert cache_size == -64000
@@ -88,7 +83,7 @@ async def test_temp_store_configured(engine_factory, db_backend):
 
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA temp_store"))
-        temp_store = _first_value(result.fetchone())
+        temp_store = result.fetchone()[0]
 
         # temp_store should be MEMORY (2)
         assert temp_store == 2
@@ -119,7 +114,7 @@ async def test_windows_locking_mode_when_on_windows(tmp_path, monkeypatch, confi
     ):
         async with engine.connect() as conn:
             result = await conn.execute(text("PRAGMA locking_mode"))
-            locking_mode = _first_value(result.fetchone())
+            locking_mode = result.fetchone()[0]
 
             # Locking mode should be NORMAL on Windows
             assert locking_mode.upper() == "NORMAL"

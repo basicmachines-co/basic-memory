@@ -1,6 +1,5 @@
 """Fixtures for V2 API tests."""
 
-from collections.abc import Generator
 from typing import Any, AsyncGenerator
 
 import pytest
@@ -31,7 +30,7 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest.fixture(autouse=True)
-def task_scheduler_spy(app: FastAPI) -> Generator[list[dict[str, Any]], None, None]:
+def task_scheduler_spy(app: FastAPI) -> list[dict[str, Any]]:
     """Capture scheduled task specs without executing them."""
     scheduled: list[dict[str, Any]] = []
 

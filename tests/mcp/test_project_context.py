@@ -6,8 +6,6 @@ test config file and pytest monkeypatch for environment variables.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, cast
-
 import pytest
 
 
@@ -22,10 +20,6 @@ class _ContextState:
 
     async def set_state(self, key: str, value: object, **kwargs) -> None:
         self._state[key] = value
-
-
-def _ctx(context: _ContextState) -> Any:
-    return cast(Any, context)
 
 
 @pytest.mark.asyncio
@@ -192,7 +186,7 @@ async def test_workspace_auto_selects_single_and_caches(monkeypatch):
         fake_get_available_workspaces,
     )
 
-    resolved = await resolve_workspace_parameter(context=_ctx(context))
+    resolved = await resolve_workspace_parameter(context=context)
     assert resolved.tenant_id == only_workspace.tenant_id
     assert await context.get_state("active_workspace") == only_workspace.model_dump()
 
@@ -226,7 +220,7 @@ async def test_workspace_requires_user_choice_when_multiple(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="Multiple workspaces are available"):
-        await resolve_workspace_parameter(context=_ctx(_ContextState()))
+        await resolve_workspace_parameter(context=_ContextState())
 
 
 @pytest.mark.asyncio
@@ -313,7 +307,7 @@ async def test_workspace_uses_cached_workspace_without_fetch(monkeypatch):
         fail_if_called,
     )
 
-    resolved = await resolve_workspace_parameter(context=_ctx(context))
+    resolved = await resolve_workspace_parameter(context=context)
     assert resolved.tenant_id == cached_workspace.tenant_id
 
 
@@ -346,7 +340,7 @@ async def test_resolve_project_parameter_uses_cached_active_project_before_api_d
         fail_if_called,
     )
 
-    resolved = await resolve_project_parameter(project=None, context=_ctx(context))
+    resolved = await resolve_project_parameter(project=None, context=context)
     assert resolved == cached_project.name
 
 
@@ -372,8 +366,8 @@ async def test_resolve_project_parameter_caches_api_default_project_name(
         fake_default_lookup,
     )
 
-    first = await resolve_project_parameter(project=None, context=_ctx(context))
-    second = await resolve_project_parameter(project=None, context=_ctx(context))
+    first = await resolve_project_parameter(project=None, context=context)
+    second = await resolve_project_parameter(project=None, context=context)
 
     assert first == "cloud-default"
     assert second == "cloud-default"
@@ -403,7 +397,7 @@ async def test_get_active_project_uses_cached_project_before_resolution(monkeypa
         fail_if_called,
     )
 
-    resolved = await get_active_project(client=cast(Any, None), context=_ctx(context))
+    resolved = await get_active_project(client=None, context=context)
     assert resolved == cached_project
 
 
@@ -432,9 +426,7 @@ async def test_get_active_project_uses_cached_project_for_explicit_permalink(mon
         fail_if_called,
     )
 
-    resolved = await get_active_project(
-        client=cast(Any, None), project="my-research", context=_ctx(context)
-    )
+    resolved = await get_active_project(client=None, project="my-research", context=context)
     assert resolved == cached_project
 
 
@@ -472,9 +464,9 @@ async def test_resolve_project_and_path_uses_cached_project_for_memory_url_prefi
     )
 
     active_project, resolved_path, is_memory_url = await resolve_project_and_path(
-        client=cast(Any, None),
+        client=None,
         identifier="memory://my-research/notes/roadmap.md",
-        context=_ctx(context),
+        context=context,
     )
 
     assert active_project == cached_project
@@ -717,7 +709,7 @@ class TestGetProjectClientRoutingOrder:
 
         # Set up a factory (simulates what cloud MCP server does)
         @asynccontextmanager
-        async def fake_factory(workspace: Any = None) -> AsyncIterator[Any]:
+        async def fake_factory(workspace=None):
             from httpx import ASGITransport, AsyncClient
             from basic_memory.api.app import app as fastapi_app
 
@@ -741,11 +733,10 @@ class TestGetProjectClientRoutingOrder:
 
         # Patch get_cloud_control_plane_client to fail if called
         @asynccontextmanager
-        async def fail_control_plane() -> AsyncIterator[Any]:  # pragma: no cover
+        async def fail_control_plane():  # pragma: no cover
             raise AssertionError(
                 "get_cloud_control_plane_client must not be called in factory mode"
             )
-            yield
 
         monkeypatch.setattr(
             "basic_memory.mcp.async_client.get_cloud_control_plane_client",

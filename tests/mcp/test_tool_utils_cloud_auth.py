@@ -1,9 +1,7 @@
 """Cloud auth error translation tests for MCP tool HTTP helpers."""
 
-from typing import Any, cast
-
 import pytest
-from httpx import HTTPStatusError, Request
+from httpx import HTTPStatusError
 from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.utils import call_post
@@ -22,8 +20,8 @@ class _MockResponse:
         if self.status_code >= 400:
             raise HTTPStatusError(
                 message=f"HTTP Error {self.status_code}",
-                request=Request("POST", "http://test/v2/projects/"),
-                response=cast(Any, self),
+                request=None,
+                response=self,
             )
 
 
@@ -50,7 +48,7 @@ async def test_call_post_401_with_cloud_key_shows_actionable_remediation(config_
     )
 
     with pytest.raises(ToolError) as exc:
-        await call_post(cast(Any, client), "/v2/projects/", json={"name": "test"})
+        await call_post(client, "/v2/projects/", json={"name": "test"})
 
     message = str(exc.value)
     assert "configured cloud API key was rejected" in message
