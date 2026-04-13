@@ -48,14 +48,12 @@ def _fake_entity(*, external_id: str = "entity-123", file_path: str = "notes/tes
     )
 
 
-def _assert_names_in_order(names: list[str], expected: list[str]) -> None:
-    cursor = 0
-    for expected_name in expected:
-        cursor = names.index(expected_name, cursor) + 1
+def _assert_only_root_span(spans: list[tuple[str, dict]], expected_name: str) -> None:
+    assert [name for name, _ in spans] == [expected_name]
 
 
 @pytest.mark.asyncio
-async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
+async def test_create_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
@@ -104,20 +102,11 @@ async def test_create_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     )
 
     assert result.content == response_content
-    _assert_names_in_order(
-        [name for name, _ in spans],
-        [
-            "api.request.knowledge.create_entity",
-            "api.knowledge.create_entity.write_entity",
-            "api.knowledge.create_entity.search_index",
-            "api.knowledge.create_entity.vector_sync",
-            "api.knowledge.create_entity.read_content",
-        ],
-    )
+    _assert_only_root_span(spans, "api.request.knowledge.create_entity")
 
 
 @pytest.mark.asyncio
-async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
+async def test_update_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
@@ -172,21 +161,11 @@ async def test_update_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     )
 
     assert result.content == response_content
-    _assert_names_in_order(
-        [name for name, _ in spans],
-        [
-            "api.request.knowledge.update_entity",
-            "api.knowledge.update_entity.load_entity",
-            "api.knowledge.update_entity.write_entity",
-            "api.knowledge.update_entity.search_index",
-            "api.knowledge.update_entity.vector_sync",
-            "api.knowledge.update_entity.read_content",
-        ],
-    )
+    _assert_only_root_span(spans, "api.request.knowledge.update_entity")
 
 
 @pytest.mark.asyncio
-async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
+async def test_edit_entity_emits_only_root_span(monkeypatch) -> None:
     spans, fake_span = _capture_spans()
     monkeypatch.setattr(knowledge_router_module.telemetry, "span", fake_span)
 
@@ -233,14 +212,4 @@ async def test_edit_entity_emits_root_and_nested_spans(monkeypatch) -> None:
     )
 
     assert result.content == response_content
-    _assert_names_in_order(
-        [name for name, _ in spans],
-        [
-            "api.request.knowledge.edit_entity",
-            "api.knowledge.edit_entity.load_entity",
-            "api.knowledge.edit_entity.write_entity",
-            "api.knowledge.edit_entity.search_index",
-            "api.knowledge.edit_entity.vector_sync",
-            "api.knowledge.edit_entity.read_content",
-        ],
-    )
+    _assert_only_root_span(spans, "api.request.knowledge.edit_entity")

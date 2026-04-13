@@ -1021,7 +1021,7 @@ class EntityService(BaseService[EntityModel]):
                 target_entity: Optional[Entity] = None
                 if not isinstance(resolved, Exception):
                     # Type narrowing: resolved is Optional[Entity] here, not Exception
-                    target_entity = resolved
+                    target_entity = resolved  # pyright: ignore [reportAssignmentType]
 
                 # if the target is found, store the id
                 target_id = target_entity.id if target_entity else None

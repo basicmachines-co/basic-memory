@@ -62,7 +62,7 @@ class Entity(Base):
     )
 
     # Core identity
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
     # External UUID for API references - stable identifier that won't change
     external_id: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String)
@@ -229,7 +229,7 @@ class Observation(Base):
         Index("ix_observation_category", "category"),  # Add category index
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(Text)
@@ -276,7 +276,7 @@ class Relation(Base):
         Index("ix_relation_to_id", "to_id"),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     from_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     to_id: Mapped[Optional[int]] = mapped_column(
